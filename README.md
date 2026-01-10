@@ -2,15 +2,15 @@
 
 ## Abstract
 
-This repository presents a **self-contained exposition and reference implementation** of a **TF-IDF–based document similarity framework**.  
-The system is formulated through **explicit tokenisation**, **n-gram construction**, **smoothed inverse document frequency (IDF)**, **sparse vector
-embeddings**, and **cosine-similarity–driven ranking**. Throughout, the emphasis is on *mathematical transparency*: every stage of the
+This repository presents a **self-contained exposition and reference implementation** of a **TF-IDF–based document similarity framework**. 
+The system is formulated through **explicit tokenisation**, **n-gram construction**, **smoothed inverse document frequency (IDF)**, **sparse vector 
+embeddings**, and **cosine-similarity–driven ranking**. Throughout, the emphasis is on *mathematical transparency*: every stage of the 
 pipeline is written in a form that makes **operator-level structure**, **algebraic dependencies**, and **perturbation pathways** explicit.
 
-The objective is *not methodological novelty*, but **rigorous exposition**. TF-IDF is treated as a **classical construction** in information
-retrieval, examined here with attention to **document-frequency structure**, **sparse vector geometry**, and **perturbation propagation**.
-By making the underlying algebra **fully explicit**, the repository provides a foundation for analysing **numerical stability**, **conditioning**,
-and **sensitivity to perturbations** in similarity-based models. These considerations are increasingly relevant in **search**,
+The objective is *not methodological novelty*, but **rigorous exposition**. TF-IDF is treated as a **classical construction** in information 
+retrieval, examined here with attention to **document-frequency structure**, **sparse vector geometry**, and **perturbation propagation**. 
+By making the underlying algebra **fully explicit**, the repository provides a foundation for analysing **numerical stability**, **conditioning**, 
+and **sensitivity to perturbations** in similarity-based models. These considerations are increasingly relevant in **search**, 
 **recommendation systems**, and **interpretable machine learning**.
 
 
@@ -55,44 +55,44 @@ neighbourhood structure, or resulting **rankings**.
 
 ## 1.2 Investigative Scope
 
-By retaining access to **intermediate quantities** that are typically abstracted away in higher-level libraries, the repository  
+By retaining access to **intermediate quantities** that are typically abstracted away in higher-level libraries, the repository 
 supports systematic investigation of questions such as:
 
-- the effect of corpus perturbations on **document frequency** and **smoothed IDF values**,  
-- the response of **TF-IDF embeddings** to token-level edits or preprocessing changes,  
-- the **sensitivity of cosine similarity** to perturbations in *sparse, non-negative vectors*,  
-- conditions under which **similarity-based rankings** and **k-NN neighbourhoods** remain invariant under bounded perturbations,  
+- the effect of corpus perturbations on **document frequency** and **smoothed IDF values**, 
+- the response of **TF-IDF embeddings** to token-level edits or preprocessing changes, 
+- the **sensitivity of cosine similarity** to perturbations in *sparse, non-negative vectors*, 
+- conditions under which **similarity-based rankings** and **k-NN neighbourhoods** remain invariant under bounded perturbations, 
 - the influence of **user-profile construction** on personalised similarity and neighbourhood structure.
 
-This level of access connects **formal derivation** with **empirical observation** and makes the framework suitable for studying  
+This level of access connects **formal derivation** with **empirical observation** and makes the framework suitable for studying 
 **conditioning behaviour**, **perturbation propagation**, and **neighbourhood stability** in TF-IDF-based similarity systems.
 
 ---
 
 ## 1.3 Position Within a Broader Mathematical Context
 
-TF-IDF–based similarity lies at the intersection of **information retrieval**, **numerical linear algebra**,  
-**finite-dimensional functional analysis**, and **probabilistic models of text**. The construction provides a  
-concrete setting in which abstract numerical phenomena, such as **sparsity**, **scaling behaviour**,  
+TF-IDF–based similarity lies at the intersection of **information retrieval**, **numerical linear algebra**, 
+**finite-dimensional functional analysis**, and **probabilistic models of text**. The construction provides a 
+concrete setting in which abstract numerical phenomena, such as **sparsity**, **scaling behaviour**, 
 **angular distortion**, and **perturbation amplification**, can be observed and analysed directly.
 
-These issues recur in **high-dimensional feature representations** used in machine learning,  
-**content-based similarity and recommendation systems**, and **retrieval pipelines**, where numerical  
-sensitivity can have practical consequences. Accordingly, this work is positioned as an **expository and  
-exploratory study** of established mathematical objects within a TF-IDF setting, with particular attention  
+These issues recur in **high-dimensional feature representations** used in machine learning, 
+**content-based similarity and recommendation systems**, and **retrieval pipelines**, where numerical 
+sensitivity can have practical consequences. Accordingly, this work is positioned as an **expository and 
+exploratory study** of established mathematical objects within a TF-IDF setting, with particular attention 
 to their **behaviour under perturbation** and their implications for stability and interpretability.
 
 ---
 
 ## 1.4 Intended Use
 
-This repository is **not intended as a production-grade recommendation library**. Instead, it serves as a  
-**reference implementation**, an **exploratory mathematical environment**, and a foundation for *small-scale  
-research investigations* into **TF-IDF representations**, **cosine similarity**, **content-based k-NN ranking**,  
+This repository is **not intended as a production-grade recommendation library**. Instead, it serves as a 
+**reference implementation**, an **exploratory mathematical environment**, and a foundation for *small-scale 
+research investigations* into **TF-IDF representations**, **cosine similarity**, **content-based k-NN ranking**, 
 and **ranking stability**.
 
-The emphasis throughout is on understanding **mathematical behaviour**, particularly **conditioning**,  
-**sensitivity**, and **perturbation effects** in *sparse vector spaces*. These considerations are central to the  
+The emphasis throughout is on understanding **mathematical behaviour**, particularly **conditioning**, 
+**sensitivity**, and **perturbation effects** in *sparse vector spaces*. These considerations are central to the 
 **reliability**, **reproducibility**, and **interpretability** of similarity-based and content-based recommendation models.
 
 ---
@@ -101,8 +101,8 @@ The emphasis throughout is on understanding **mathematical behaviour**, particul
 
 Let  
 𝒟 = { d₁, …, dₙ }  
-be a finite corpus of preprocessed documents, and define N := |𝒟|. Each document dᵢ is a finite sequence of tokens obtained from raw text
-via a fixed preprocessing map (normalisation, stopword removal, lemmatisation, and n-gram generation).  
+be a finite corpus of preprocessed documents, and define N := |𝒟|. Each document dᵢ is a finite sequence of tokens obtained from raw text 
+via a fixed preprocessing map (normalisation, stopword removal, lemmatisation, and n-gram generation). 
 Throughout, **n-grams are treated as atomic tokens**.
 
 All preprocessing operations are assumed to be deterministic and fixed across all perturbation experiments.
@@ -112,16 +112,16 @@ All preprocessing operations are assumed to be deterministic and fixed across al
 ### 2.1 Vocabulary, Document Frequency, and IDF
 
 From the corpus 𝒟, a vocabulary V is constructed by collecting all tokens (including n-grams) that satisfy a minimum document-frequency 
-threshold and, optionally, a maximum-feature constraint. For each token t ∈ V, the document frequency is defined as
+threshold and, optionally, a maximum-feature constraint. For each token t ∈ V, the document frequency is defined as 
 
 df(t) = |{ i : t appears at least once in dᵢ }|.
 
-Let N = |𝒟|. The smoothed inverse document frequency used throughout the implementation is
+Let N = |𝒟|. The smoothed inverse document frequency used throughout the implementation is 
 
 idf(t) = log((1 + N) / (1 + df(t))) + 1.
 
-This choice ensures monotonic decay of idf(t) as df(t) increases.  
-The additive constant ensures strict positivity even in the limiting case df(t) = N.
+This choice ensures monotonic decay of idf(t) as df(t) increases. 
+The additive constant ensures strict positivity even in the limiting case df(t) = N. 
 
 (Here and throughout, log denotes the natural logarithm.)
 
@@ -171,38 +171,38 @@ involving secondary attributes (popularity, rating, engagement, and identifier),
 
 ## 3. Solution Procedure and Implementation Structure
 
-The repository implements the TF-IDF pipeline and associated perturbation-theoretic investigations in a **fully explicit and reproducible** manner.  
-Each stage of the pipeline is designed to expose **intermediate quantities** and **algebraic structure**, rather than to optimise performance or  
+The repository implements the TF-IDF pipeline and associated perturbation-theoretic investigations in a **fully explicit and reproducible** manner. 
+Each stage of the pipeline is designed to expose **intermediate quantities** and **algebraic structure**, rather than to optimise performance or 
 abstract away implementation details.
 
 - **Preprocessing and Corpus Construction**  
-  A fixed, deterministic preprocessing map is applied to raw **text of interest**, including normalisation, tokenisation, stopword removal,  
+  A fixed, deterministic preprocessing map is applied to raw **text of interest**, including normalisation, tokenisation, stopword removal, 
   lemmatisation, and n-gram generation. This yields a reproducible corpus suitable for **controlled perturbation analysis**.
 
 - **TF-IDF Vectorisation**  
-  A pure-Python TF-IDF vectoriser constructs the vocabulary, computes document frequencies and smoothed inverse document frequency (IDF) values,  
-  and embeds documents as vectors in ℝ≥0^|V|. In typical use, these embeddings are sparse due to the size of the vocabulary relative to  
+  A pure-Python TF-IDF vectoriser constructs the vocabulary, computes document frequencies and smoothed inverse document frequency (IDF) values, 
+  and embeds documents as vectors in ℝ≥0^|V|. In typical use, these embeddings are sparse due to the size of the vocabulary relative to 
   document length.
 
 - **Similarity, Ranking, and k-NN Structure**  
-  Cosine similarity is computed between query vectors and corpus vectors, followed by deterministic ranking. In the context of  
-  **content-based k-nearest-neighbour recommendation**, the top-k elements of this ranking define the neighbourhood associated with a query.  
-  Secondary attributes, such as auxiliary metadata or identifiers, are applied via lexicographic tie-breaking, yielding a **total order**  
+  Cosine similarity is computed between query vectors and corpus vectors, followed by deterministic ranking. In the context of 
+  **content-based k-nearest-neighbour recommendation**, the top-k elements of this ranking define the neighbourhood associated with a query. 
+  Secondary attributes, such as auxiliary metadata or identifiers, are applied via lexicographic tie-breaking, yielding a **total order** 
   on candidate items.
 
 - **User-Profile Documents**  
-  User-specific documents are constructed from interactions such as liked, viewed, or favourited items. These user-profile documents are  
-  embedded using the **same vocabulary and IDF mapping as the corpus**, ensuring that all similarity computations take place in a  
+  User-specific documents are constructed from interactions such as liked, viewed, or favourited items. These user-profile documents are 
+  embedded using the **same vocabulary and IDF mapping as the corpus**, ensuring that all similarity computations take place in a 
   common vector space.
 
 - **Perturbation Analysis**  
-  The explicit structure of the implementation supports analytical and empirical study of how small perturbations in documents, corpus  
-  composition, or user interactions propagate through document frequencies, IDF values, TF-IDF embeddings, cosine similarities,  
-  k-NN neighbourhoods, and ranking outcomes. In particular, the framework makes it possible to study **perturbation amplification**  
+  The explicit structure of the implementation supports analytical and empirical study of how small perturbations in documents, corpus 
+  composition, or user interactions propagate through document frequencies, IDF values, TF-IDF embeddings, cosine similarities, 
+  k-NN neighbourhoods, and ranking outcomes. In particular, the framework makes it possible to study **perturbation amplification** 
   effects arising from interactions between sparse geometry, IDF scaling, and angular similarity.
 
-The code is organised to preserve **algebraic clarity** and to expose intermediate quantities at every stage. As such, it is well suited  
-as a basis for further mathematical analysis of **stability**, **sensitivity**, and **perturbation amplification behaviour** in  
+The code is organised to preserve **algebraic clarity** and to expose intermediate quantities at every stage. As such, it is well suited 
+as a basis for further mathematical analysis of **stability**, **sensitivity**, and **perturbation amplification behaviour** in 
 TF-IDF-based similarity systems.
 
 ---
@@ -213,7 +213,7 @@ Let wᵢ denote the TF-IDF vector associated with document dᵢ, and let
 
 sᵢ = cos(q, wᵢ)
 
-denote the similarity score between a query vector q and the i-th document.  
+denote the similarity score between a query vector q and the i-th document. 
 This section introduces quantitative measures for analysing how perturbations propagate and potentially amplify through the TF-IDF pipeline, from corpus-level 
 changes to similarity scores and induced rankings.
 
@@ -304,24 +304,24 @@ stability directly implies stability of the associated k-NN neighbourhoods.
 
 ## 5. Interpretation and Scope
 
-The preceding formulation highlights several structural features of **TF-IDF–based similarity systems** that become especially clear when the pipeline is expressed in  
+The preceding formulation highlights several structural features of **TF-IDF–based similarity systems** that become especially clear when the pipeline is expressed in 
 **operator-level form**:
 
-- **IDF sensitivity is governed by explicit logarithmic dependence** on corpus size and document-frequency counts, as seen in  
-  Δidf(t) = log((1 + N′)/(1 + df′(t))) − log((1 + N)/(1 + df(t))).  
+- **IDF sensitivity is governed by explicit logarithmic dependence** on corpus size and document-frequency counts, as seen in 
+  Δidf(t) = log((1 + N′)/(1 + df′(t))) − log((1 + N)/(1 + df(t))). 
   This makes the stability of IDF directly traceable to perturbations in corpus composition.
 
-- **TF-IDF perturbations decompose cleanly** into *local* (TF), *global* (IDF), and *second-order interaction* terms, providing a transparent mechanism for  
+- **TF-IDF perturbations decompose cleanly** into *local* (TF), *global* (IDF), and *second-order interaction* terms, providing a transparent mechanism for 
   understanding how small edits propagate through the embedding.
 
-- **Cosine similarity admits a geometric interpretation** as the cosine of the angle between *sparse, non-negative vectors*. This framing clarifies how sparsity  
+- **Cosine similarity admits a geometric interpretation** as the cosine of the angle between *sparse, non-negative vectors*. This framing clarifies how sparsity 
   patterns and IDF scaling influence angular distortion under perturbation.
 
-- **Ranking robustness is controlled by score-separation margins**, with explicit sufficient conditions ensuring invariance under bounded perturbations. In the  
+- **Ranking robustness is controlled by score-separation margins**, with explicit sufficient conditions ensuring invariance under bounded perturbations. In the 
   context of **content-based k-nearest-neighbour recommendation**, such ranking stability directly governs the stability of induced neighbourhoods.
 
-The emphasis throughout is on **derivational transparency** rather than algorithmic optimisation. No dimensionality reduction, latent-semantic modelling, or neural  
-embeddings are introduced. The goal is to expose the **algebraic and geometric structure** of the TF-IDF pipeline in a form suitable for  
+The emphasis throughout is on **derivational transparency** rather than algorithmic optimisation. No dimensionality reduction, latent-semantic modelling, or neural 
+embeddings are introduced. The goal is to expose the **algebraic and geometric structure** of the TF-IDF pipeline in a form suitable for 
 **perturbation analysis**, **stability reasoning**, and **controlled experimentation**.
 
 ---
@@ -330,23 +330,23 @@ embeddings are introduced. The goal is to expose the **algebraic and geometric s
 
 Several limitations of the present framework should be noted:
 
-- **High-dimensional sparsity complicates geometric intuition.**  
-  TF-IDF vectors inhabit a large, sparse subset of ℝⁿ, where small changes in support can produce disproportionately large angular effects.  
+- **High-dimensional sparsity complicates geometric intuition.** 
+  TF-IDF vectors inhabit a large, sparse subset of ℝⁿ, where small changes in support can produce disproportionately large angular effects. 
   This can lead to instability in similarity scores and, by extension, in induced k-NN neighbourhoods.
 
 - **Cosine similarity becomes unstable for low-norm vectors.**  
-  When documents are short or contain few in-vocabulary tokens, the denominator ‖u‖₂‖v‖₂ approaches zero, increasing sensitivity to perturbations  
+  When documents are short or contain few in-vocabulary tokens, the denominator ‖u‖₂‖v‖₂ approaches zero, increasing sensitivity to perturbations 
   in both similarity values and ranking outcomes.
 
-- **Smoothed IDF reduces but does not eliminate volatility** associated with rare tokens.  
-  Tokens with very low document frequency remain highly sensitive to corpus perturbations, even under smoothing, and can dominate similarity  
+- **Smoothed IDF reduces but does not eliminate volatility** associated with rare tokens. 
+  Tokens with very low document frequency remain highly sensitive to corpus perturbations, even under smoothing, and can dominate similarity 
   computations in sparse settings.
 
-- **No numerical optimisation techniques are employed.**  
-  The implementation intentionally avoids stabilising transformations, such as sublinear TF scaling or dimensionality reduction, in order to  
+- **No numerical optimisation techniques are employed.** 
+  The implementation intentionally avoids stabilising transformations, such as sublinear TF scaling or dimensionality reduction, in order to 
   preserve **analytical clarity** and direct interpretability of perturbation effects.
 
-Accordingly, the framework is intended for **analytical**, **educational**, and **controlled experimental use**, rather than production  
+Accordingly, the framework is intended for **analytical**, **educational**, and **controlled experimental use**, rather than production 
 deployment or large-scale retrieval tasks.
 
 ---
