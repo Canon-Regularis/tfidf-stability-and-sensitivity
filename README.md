@@ -409,7 +409,7 @@ These online resources provide accessible summaries of standard definitions and 
 ## 8. Authorship
 
 **Implementation and exposition**  
-Matthew Maksymilian Miezaniec
+Matthew Maksymilian Miezaniec  
 Email: matthewmiezaniec1@gmail.com
 
 **Mathematical and theoretical foundations**  
