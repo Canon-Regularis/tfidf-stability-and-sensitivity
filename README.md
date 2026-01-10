@@ -20,19 +20,19 @@ and **sensitivity to perturbations** in similarity-based models. These considera
 
 This project analyses the numerical stability of **TF-IDF–based similarity systems** under small perturbations in data and preprocessing.
 
-TF-IDF (term frequency–inverse document frequency) is a foundational technique in **information retrieval** and **text-based modelling**.  
-It embeds documents into a **high-dimensional vector space** in which similarity is typically measured via **cosine similarity**.  
-Despite its widespread use, the behaviour of TF-IDF under perturbations such as small changes in corpus composition,  
+TF-IDF (term frequency–inverse document frequency) is a foundational technique in **information retrieval** and **text-based modelling**. 
+It embeds documents into a **high-dimensional vector space** in which similarity is typically measured via **cosine similarity**. 
+Despite its widespread use, the behaviour of TF-IDF under perturbations such as small changes in corpus composition, 
 token distributions, or preprocessing rules is rarely examined in a systematic or explicit manner.
 
-This work studies TF-IDF in a controlled setting where documents arise from **text of interest** and similarity scores are used to  
-drive **content-based k-nearest-neighbour (k-NN) recommendation and ranking**. The system is implemented in **pure Python**, with full  
-control over preprocessing, vocabulary construction, IDF computation, vector formation, and ranking. This explicit formulation enables  
-direct investigation of how perturbations propagate through the pipeline and influence similarity scores, neighbourhood structure,  
+This work studies TF-IDF in a controlled setting where documents arise from **text of interest** and similarity scores are used to 
+drive **content-based k-nearest-neighbour (k-NN) recommendation and ranking**. The system is implemented in **pure Python**, with full 
+control over preprocessing, vocabulary construction, IDF computation, vector formation, and ranking. This explicit formulation enables 
+direct investigation of how perturbations propagate through the pipeline and influence similarity scores, neighbourhood structure, 
 and induced rankings.
 
-The central question is one of stability: **how sensitive are TF-IDF weights, cosine similarities, and k-NN rankings to small  
-changes in the underlying data?** This question is fundamental in applications that demand **robustness**, **reproducibility**,  
+The central question is one of stability: **how sensitive are TF-IDF weights, cosine similarities, and k-NN rankings to small 
+changes in the underlying data?** This question is fundamental in applications that demand **robustness**, **reproducibility**, 
 and **interpretability**.
 
 ---
