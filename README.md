@@ -39,16 +39,16 @@ and **interpretability**.
 
 ## 1.1 Purpose and Research Intent
 
-The purpose of this repository is **investigative rather than applicative**. Although TF-IDF is a *classical method*,  
-the aim is to examine the **mathematical structures it induces** and to understand how these structures behave under  
-*controlled variation* of assumptions and parameters, particularly in the context of **content-based similarity** and  
+The purpose of this repository is **investigative rather than applicative**. Although TF-IDF is a *classical method*, 
+the aim is to examine the **mathematical structures it induces** and to understand how these structures behave under 
+*controlled variation* of assumptions and parameters, particularly in the context of **content-based similarity** and 
 **k-nearest-neighbour (k-NN) ranking**.
 
-Rather than treating the similarity pipeline as a *black box*, the implementation explicitly exposes **preprocessing choices**,  
-**n-gram structure**, **document-frequency thresholds**, **IDF scaling**, and **sparse vector geometry**. This level of  
-explicitness enables careful study of **sensitivity** and **stability phenomena** in **TF-IDF embeddings**, **cosine similarity**,  
-and **induced k-NN neighbourhoods**. In particular, it allows investigation of situations in which *small perturbations* in  
-documents, corpus composition, or user-derived profiles lead to **disproportionate changes** in similarity scores,  
+Rather than treating the similarity pipeline as a *black box*, the implementation explicitly exposes **preprocessing choices**, 
+**n-gram structure**, **document-frequency thresholds**, **IDF scaling**, and **sparse vector geometry**. This level of 
+explicitness enables careful study of **sensitivity** and **stability phenomena** in **TF-IDF embeddings**, **cosine similarity**, 
+and **induced k-NN neighbourhoods**. In particular, it allows investigation of situations in which *small perturbations* in 
+documents, corpus composition, or user-derived profiles lead to **disproportionate changes** in similarity scores, 
 neighbourhood structure, or resulting **rankings**.
 
 ---
