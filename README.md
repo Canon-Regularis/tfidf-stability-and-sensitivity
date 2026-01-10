@@ -410,6 +410,7 @@ These online resources provide accessible summaries of standard definitions and 
 
 **Implementation and exposition**  
 Matthew Maksymilian Miezaniec
+Email: matthewmiezaniec1@gmail.com
 
 **Mathematical and theoretical foundations**  
 This work draws on **classical information retrieval methodology**, including TF-IDF weighting and vector-space models  
