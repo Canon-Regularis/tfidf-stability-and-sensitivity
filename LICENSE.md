@@ -10,7 +10,7 @@ This work is licensed under the **Creative Commons Attribution 4.0 International
 - **Adapt** - remix, transform, and build upon the material for any purpose, including commercial use.
 
 ## Under the following terms:
-- **Attribution** — You must give appropriate credit to the author, provide a link to the license, and indicate if changes were made.  
+- **Attribution** - You must give appropriate credit to the author, provide a link to the license, and indicate if changes were made.  
   Attribution must not suggest that the author endorses you or your use of the material.
 
 No additional restrictions apply beyond those stated in the license.
