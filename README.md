@@ -413,24 +413,27 @@ Matthew Maksymilian Miezaniec
 Email: matthewmiezaniec1@gmail.com
 
 **Mathematical and theoretical foundations**  
-This work draws on **classical information retrieval methodology**, including TF-IDF weighting and vector-space models  
-(Salton; Manning et al.), and is supported by established treatments of **numerical stability**, **conditioning**, and  
-**perturbation behaviour** in high-dimensional vector spaces (Higham; Trefethen & Bau).  
+This work draws on **classical information retrieval methodology**, including TF-IDF weighting and vector-space models 
+(Salton; Manning et al.), and is supported by established treatments of **numerical stability**, **conditioning**, and 
+**perturbation behaviour** in high-dimensional vector spaces (Higham; Trefethen & Bau). 
 
-The interpretation of similarity scores in terms of **content-based k-nearest-neighbour ranking and neighbourhood structure**  
-follows classical nearest-neighbour and similarity-search perspectives (Cover & Hart), without introducing learning-based methods.  
+The interpretation of similarity scores in terms of **content-based k-nearest-neighbour ranking and neighbourhood structure** 
+follows classical nearest-neighbour and similarity-search perspectives (Cover & Hart), without introducing learning-based methods. 
 
-Broader contextual connections to feature representations and similarity-based reasoning draw on standard statistical learning  
-references (Hastie, Tibshirani & Friedman; Shalev-Shwartz & Ben-David). Supplementary intuition and terminology are informed by  
+Broader contextual connections to feature representations and similarity-based reasoning draw on standard statistical learning 
+references (Hastie, Tibshirani & Friedman; Shalev-Shwartz & Ben-David). Supplementary intuition and terminology are informed by 
 widely used online references on **TF-IDF**, **cosine similarity**, and **vector-space models**.
 
 ---
 
 ## 9. Acknowledgements
 
-The author thanks colleagues and peers for informal discussions that helped clarify aspects of numerical stability, sparse vector geometry, and similarity-based reasoning. The work also benefited from exposure to standard academic treatments of information retrieval and numerical linear algebra through coursework, independent study, and open-source documentation.
+The author thanks colleagues and peers for informal discussions that helped clarify aspects of numerical stability, sparse 
+vector geometry, and similarity-based reasoning. The work also benefited from exposure to standard academic treatments of 
+information retrieval and numerical linear algebra through coursework, independent study, and open-source documentation.
 
-Any remaining errors or omissions are the responsibility of the author alone. This acknowledgement does not imply endorsement or direct contribution by any individual or institution.
+Any remaining errors or omissions are the responsibility of the author alone. This acknowledgement does not imply endorsement 
+or direct contribution by any individual or institution.
 
 ---
 
