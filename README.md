@@ -2,30 +2,30 @@
 
 ## Abstract
 
-This repository presents a **self-contained implementation and analysis** of a  
-**TF-IDF–based document similarity and ranking system**, written to make the  
+This repository presents a **self-contained implementation and analysis** of a 
+**TF-IDF–based document similarity and ranking system**, written to make the 
 **algebraic structure and perturbation behaviour** of the pipeline explicit.
 
-Documents are embedded using **explicit tokenisation**, **n-gram construction**,  
-**smoothed inverse document frequency (IDF)**, and **sparse TF-IDF vectors**, with  
-similarity measured via **cosine similarity** and rankings induced through a  
+Documents are embedded using **explicit tokenisation**, **n-gram construction**, 
+**smoothed inverse document frequency (IDF)**, and **sparse TF-IDF vectors**, with 
+similarity measured via **cosine similarity** and rankings induced through a 
 deterministic sorting procedure. The implementation exposes intermediate quantities 
 such as document frequencies, IDF weights, vector norms, and similarity scores. These 
-enable direct examination of how corpus structure and similarity geometry relate to ranking  
+enable direct examination of how corpus structure and similarity geometry relate to ranking 
 behaviour under perturbation.
 
-Beyond analysing numerical sensitivity of TF-IDF embeddings and cosine similarity,  
-the repository studies **ranking stability** as a first-class object. Stability is  
-characterised empirically using **score-separation margins**, including boundary  
-margins governing top-k membership and adjacent margins controlling ordering within  
-top-k results. These margins yield explicit, sufficient conditions under which rankings  
+Beyond analysing numerical sensitivity of TF-IDF embeddings and cosine similarity, 
+the repository studies **ranking stability** as a first-class object. Stability is 
+characterised empirically using **score-separation margins**, including boundary 
+margins governing top-k membership and adjacent margins controlling ordering within 
+top-k results. These margins yield explicit, sufficient conditions under which rankings 
 remain invariant under bounded perturbations of similarity scores.
 
-The work further isolates **decision-level discontinuities** introduced by deterministic  
-**tie-breaking rules**, demonstrating that ranking outcomes may change even when cosine  
-similarity scores are equal within numerical tolerance. This separation between  
-**numerical stability of similarity scores** and **stability of induced rankings**  
-highlights structural sources of fragility in similarity-based retrieval and  
+The work further isolates **decision-level discontinuities** introduced by deterministic 
+**tie-breaking rules**, demonstrating that ranking outcomes may change even when cosine 
+similarity scores are equal within numerical tolerance. This separation between 
+**numerical stability of similarity scores** and **stability of induced rankings** 
+highlights structural sources of fragility in similarity-based retrieval and 
 content-based recommendation systems.
 
 ---
@@ -35,57 +35,57 @@ content-based recommendation systems.
 This project examines the numerical stability of **TF-IDF–based similarity and ranking systems** 
 under small perturbations in data and preprocessing.
 
-TF-IDF (term frequency–inverse document frequency) is a foundational technique in  
-**information retrieval** and **text-based modelling**. It represents documents as  
-vectors in a **high-dimensional feature space**, where similarity is typically measured  
-using **cosine similarity**. Despite its widespread use, the behaviour of TF-IDF-based  
-pipelines under perturbations—such as changes in corpus composition, token  
-distributions, or preprocessing rules—is rarely analysed in a systematic and explicit  
+TF-IDF (term frequency–inverse document frequency) is a foundational technique in 
+**information retrieval** and **text-based modelling**. It represents documents as 
+vectors in a **high-dimensional feature space**, where similarity is typically measured 
+using **cosine similarity**. Despite its widespread use, the behaviour of TF-IDF-based 
+pipelines under perturbations - such as changes in corpus composition, token 
+distributions, or preprocessing rules - is rarely analysed in a systematic and explicit 
 manner.
 
-This work studies TF-IDF in a controlled setting where documents arise from  
-**text of interest** and similarity scores are used to induce  
-**content-based k-nearest-neighbour (k-NN) rankings**. The system is implemented in  
-**pure Python**, with explicit control over preprocessing, vocabulary construction,  
-IDF computation, vector formation, and ranking. This explicit formulation enables  
-direct examination of how corpus structure and similarity geometry relate to similarity  
+This work studies TF-IDF in a controlled setting where documents arise from 
+**text of interest** and similarity scores are used to induce 
+**content-based k-nearest-neighbour (k-NN) rankings**. The system is implemented in 
+**pure Python**, with explicit control over preprocessing, vocabulary construction, 
+IDF computation, vector formation, and ranking. This explicit formulation enables 
+direct examination of how corpus structure and similarity geometry relate to similarity 
 scores, neighbourhood structure, and ranking behaviour under perturbation.
 
 The central question is one of stability:  
-**how sensitive are TF-IDF weights, cosine similarities, and induced rankings to small  
-changes in the underlying data?**  
-More specifically, this work addresses two closely related aspects of this question:  
-(i) how **score-separation margins** govern the stability of similarity-based rankings  
-under bounded perturbations, and  
-(ii) how **deterministic tie-breaking rules** introduce discontinuities in ranking  
+**how sensitive are TF-IDF weights, cosine similarities, and induced rankings to small 
+changes in the underlying data?** 
+More specifically, this work addresses two closely related aspects of this question: 
+(i) how **score-separation margins** govern the stability of similarity-based rankings 
+under bounded perturbations, and 
+(ii) how **deterministic tie-breaking rules** introduce discontinuities in ranking 
 outcomes that are independent of numerical error in similarity computation.
 
 ---
 
 ## 1.1 Purpose and Research Intent
 
-The purpose of this repository is **investigative rather than applicative**. Although  
-TF-IDF is a *classical method*, the aim is to examine the **mathematical structures  
-induced by the TF-IDF pipeline** and to understand how these structures behave under  
-controlled variation of assumptions and parameters, particularly in the context of  
+The purpose of this repository is **investigative rather than applicative**. Although 
+TF-IDF is a *classical method*, the aim is to examine the **mathematical structures 
+induced by the TF-IDF pipeline** and to understand how these structures behave under 
+controlled variation of assumptions and parameters, particularly in the context of 
 **content-based similarity** and **k-nearest-neighbour ranking**.
 
-Rather than treating the similarity pipeline as a black box, the implementation  
-explicitly exposes **preprocessing operations**, **n-gram structure**,  
-**document-frequency thresholds**, **IDF scaling**, and **sparse vector geometry**.  
-This level of explicitness supports detailed analysis of **sensitivity** and  
-**stability phenomena** in TF-IDF embeddings, cosine similarity, and induced  
-k-NN neighbourhoods. In particular, it enables investigation of situations in which  
-small perturbations in documents, corpus composition, or user-derived profiles lead  
-to **disproportionate changes** in similarity scores, neighbourhood structure, or  
+Rather than treating the similarity pipeline as a black box, the implementation 
+explicitly exposes **preprocessing operations**, **n-gram structure**, 
+**document-frequency thresholds**, **IDF scaling**, and **sparse vector geometry**. 
+This level of explicitness supports detailed analysis of **sensitivity** and 
+**stability phenomena** in TF-IDF embeddings, cosine similarity, and induced 
+k-NN neighbourhoods. In particular, it enables investigation of situations in which 
+small perturbations in documents, corpus composition, or user-derived profiles lead 
+to **disproportionate changes** in similarity scores, neighbourhood structure, or 
 ranking outcomes.
 
-In addition to numerical sensitivity at the level of embeddings and similarity scores,  
-the repository treats **ranking stability as a primary object of analysis**. Stability  
-is operationalised using **empirical score-separation margin distributions**, which  
-quantify the tolerance of ranking outcomes to bounded perturbations. Separately, the  
-work isolates **instability arising solely from deterministic tie-breaking rules**,  
-demonstrating how ranking outcomes may change even when similarity scores are equal  
+In addition to numerical sensitivity at the level of embeddings and similarity scores, 
+the repository treats **ranking stability as a primary object of analysis**. Stability 
+is operationalised using **empirical score-separation margin distributions**, which 
+quantify the tolerance of ranking outcomes to bounded perturbations. Separately, the 
+work isolates **instability arising solely from deterministic tie-breaking rules**, 
+demonstrating how ranking outcomes may change even when similarity scores are equal 
 within numerical tolerance.
 
 Empirical investigations in this repository focus primarily on score-level and 
@@ -96,8 +96,8 @@ analysed analytically to characterise their influence on downstream stability.
 
 ## 1.2 Investigative Scope
 
-By retaining access to **intermediate quantities** that are typically abstracted away  
-in higher-level libraries, the repository supports systematic investigation of questions  
+By retaining access to **intermediate quantities** that are typically abstracted away 
+in higher-level libraries, the repository supports systematic investigation of questions 
 including:
 
 - the effect of corpus perturbations on **document frequency** and **smoothed IDF values**,  
@@ -112,50 +112,50 @@ including:
 - **tie-group analysis**, quantifying ranking changes induced by deterministic  
   tie-breaking rules when similarity scores fall within numerical tolerance.
 
-This level of access connects **formal derivation** with **empirical observation** and  
-makes the framework suitable for studying **conditioning behaviour**, **perturbation  
+This level of access connects **formal derivation** with **empirical observation** and 
+makes the framework suitable for studying **conditioning behaviour**, **perturbation 
 effects**, and **ranking stability** in TF-IDF-based similarity systems.
 
 ---
 
 ## 1.3 Position Within a Broader Mathematical Context
 
-TF-IDF–based similarity lies at the intersection of **information retrieval**,  
-**numerical linear algebra**, **finite-dimensional functional analysis**, and  
-**probabilistic models of text**. The construction provides a concrete setting in which  
-abstract numerical phenomena—such as **sparsity**, **scaling behaviour**,  
-**angular distortion**, and **perturbation amplification**—can be observed and  
+TF-IDF–based similarity lies at the intersection of **information retrieval**, 
+**numerical linear algebra**, **finite-dimensional functional analysis**, and 
+**probabilistic models of text**. The construction provides a concrete setting in which 
+abstract numerical phenomena - such as **sparsity**, **scaling behaviour**, 
+**angular distortion**, and **perturbation amplification** - can be observed and 
 analysed directly.
 
-From a decision-theoretic perspective, similarity-based ranking may be viewed as a  
-**piecewise-constant functional of similarity scores**, with **discontinuities induced  
-by secondary ordering and tie-breaking rules**. This perspective clarifies the  
-distinction between numerical stability of the underlying similarity computation and  
+From a decision-theoretic perspective, similarity-based ranking may be viewed as a 
+**piecewise-constant functional of similarity scores**, with **discontinuities induced 
+by secondary ordering and tie-breaking rules**. This perspective clarifies the 
+distinction between numerical stability of the underlying similarity computation and 
 stability of the induced ranking outcomes.
 
-These issues recur in **high-dimensional feature representations** used in machine  
-learning, **content-based similarity and recommendation systems**, and **retrieval  
-pipelines**, where numerical sensitivity and decision discontinuities can have practical  
-consequences. Accordingly, this work is positioned as an **expository and exploratory  
-study** of established mathematical constructions within a TF-IDF setting, with  
-particular attention to their behaviour under perturbation and their implications for  
+These issues recur in **high-dimensional feature representations** used in machine 
+learning, **content-based similarity and recommendation systems**, and **retrieval 
+pipelines**, where numerical sensitivity and decision discontinuities can have practical 
+consequences. Accordingly, this work is positioned as an **expository and exploratory 
+study** of established mathematical constructions within a TF-IDF setting, with 
+particular attention to their behaviour under perturbation and their implications for 
 ranking stability and interpretability.
 
 ---
 
 ## 1.4 Intended Use
 
-This repository is **not intended as a production-grade recommendation library**.  
-Instead, it serves as a **reference implementation**, an **exploratory mathematical  
-environment**, and a foundation for *small-scale research investigations* into  
-TF-IDF representations, cosine similarity, content-based k-NN ranking, and  
+This repository is **not intended as a production-grade recommendation library**. 
+Instead, it serves as a **reference implementation**, an **exploratory mathematical 
+environment**, and a foundation for *small-scale research investigations* into 
+TF-IDF representations, cosine similarity, content-based k-NN ranking, and 
 ranking stability.
 
-The emphasis throughout is on understanding **mathematical behaviour**, particularly  
-**conditioning**, **sensitivity**, and **perturbation effects** in sparse vector spaces,  
-as well as the relationship between numerical similarity computation and downstream  
-ranking decisions. These considerations are central to the **reliability**,  
-**reproducibility**, and **interpretability** of similarity-based and content-based  
+The emphasis throughout is on understanding **mathematical behaviour**, particularly 
+**conditioning**, **sensitivity**, and **perturbation effects** in sparse vector spaces, 
+as well as the relationship between numerical similarity computation and downstream 
+ranking decisions. These considerations are central to the **reliability**, 
+**reproducibility**, and **interpretability** of similarity-based and content-based 
 recommendation models.
 
 ---
@@ -518,7 +518,7 @@ choice of deterministic tie-breaking rules.
 
 This motivates a notion of **tie-break sensitivity**, which can be measured, for example, by:
 
-- an indicator of whether the top-k set differs between π and π_score, and  
+- an indicator of whether the top-k set differs between π and π_score, and 
 - a distance between orderings restricted to tie groups (e.g. inversion count or
   Kendall τ distance).
 
@@ -530,36 +530,36 @@ criteria.
 
 ## 5. Interpretation and Scope
 
-The preceding formulation highlights several structural features of **TF-IDF–based similarity systems** that become especially clear when the pipeline is expressed in  
+The preceding formulation highlights several structural features of **TF-IDF–based similarity systems** that become especially clear when the pipeline is expressed in 
 **operator-level form**:
 
-- **IDF sensitivity is governed by explicit logarithmic dependence** on corpus size and document-frequency counts, as seen in  
-  Δidf(t) = log((1 + N′)/(1 + df′(t))) − log((1 + N)/(1 + df(t))).  
+- **IDF sensitivity is governed by explicit logarithmic dependence** on corpus size and document-frequency counts, as seen in 
+  Δidf(t) = log((1 + N′)/(1 + df′(t))) − log((1 + N)/(1 + df(t))). 
   This makes the stability of IDF directly traceable to perturbations in corpus composition.
 
-- **TF-IDF perturbations admit an explicit decomposition** into *local* (TF), *global* (IDF), and *second-order interaction* terms, providing a transparent mechanism for  
+- **TF-IDF perturbations admit an explicit decomposition** into *local* (TF), *global* (IDF), and *second-order interaction* terms, providing a transparent mechanism for 
   understanding how small edits propagate through the embedding.
 
-- **Cosine similarity admits a geometric interpretation** as the cosine of the angle between *sparse, non-negative vectors*. This framing clarifies how sparsity  
+- **Cosine similarity admits a geometric interpretation** as the cosine of the angle between *sparse, non-negative vectors*. This framing clarifies how sparsity 
   patterns and IDF scaling influence angular distortion under perturbation.
 
-- **Ranking robustness can be characterised in terms of score-separation margins**, with explicit sufficient conditions ensuring invariance under bounded perturbations. In the  
+- **Ranking robustness can be characterised in terms of score-separation margins**, with explicit sufficient conditions ensuring invariance under bounded perturbations. In the 
   context of **content-based k-nearest-neighbour recommendation**, such ranking stability directly governs the stability of induced neighbourhoods.
 
-- **Ranking stability is governed primarily by margin distributions, rather than by aggregate or average score changes alone.**  
-  In particular, the presence of small score-separation margins near decision boundaries dominates stability behaviour, even when aggregate similarity scores are  
+- **Ranking stability is governed primarily by margin distributions, rather than by aggregate or average score changes alone.** 
+  In particular, the presence of small score-separation margins near decision boundaries dominates stability behaviour, even when aggregate similarity scores are 
   numerically well-conditioned.
 
-- **A long tail of near-zero margins can imply rare but extreme fragility.**  
-  While most rankings may be stable under small perturbations, documents near top-k boundaries with vanishing margins can induce abrupt changes in neighbourhood  
+- **A long tail of near-zero margins can imply rare but extreme fragility.** 
+  While most rankings may be stable under small perturbations, documents near top-k boundaries with vanishing margins can induce abrupt changes in neighbourhood 
   structure under otherwise negligible score variation.
 
 - **Deterministic tie-breaking introduces non-perturbative discontinuities.**  
-  Even in the absence of meaningful numerical perturbation (Δs ≈ 0), ranking outcomes may change due solely to secondary ordering rules, underscoring that  
+  Even in the absence of meaningful numerical perturbation (Δs ≈ 0), ranking outcomes may change due solely to secondary ordering rules, underscoring that 
   stability of computed similarities does not guarantee stability of downstream decisions.
 
-The emphasis throughout is on **derivational transparency** rather than algorithmic optimisation. No dimensionality reduction, latent-semantic modelling, or neural  
-embeddings are introduced. The goal is to expose the **algebraic and geometric structure** of the TF-IDF pipeline in a form suitable for  
+The emphasis throughout is on **derivational transparency** rather than algorithmic optimisation. No dimensionality reduction, latent-semantic modelling, or neural 
+embeddings are introduced. The goal is to expose the **algebraic and geometric structure** of the TF-IDF pipeline in a form suitable for 
 **perturbation analysis**, **stability reasoning**, and **controlled experimentation**.
 
 ---
@@ -792,18 +792,20 @@ These online resources provide accessible summaries of standard definitions and 
 Matthew Maksymilian Miezaniec  
 Email: matthewmiezaniec1@gmail.com  
 
-Implementation includes the full TF-IDF similarity pipeline, explicit perturbation analysis tooling, **stability profiling via score-separation margins**, and a **tie-break ablation framework** for isolating decision-level discontinuities in ranking outcomes.
+Implementation includes the full TF-IDF similarity pipeline, explicit perturbation analysis tooling, **stability 
+profiling via score-separation margins**, and a **tie-break ablation framework** for isolating decision-level 
+discontinuities in ranking outcomes.
 
 **Mathematical and theoretical foundations**  
-This work draws on **classical information retrieval methodology**, including TF-IDF weighting and vector-space models  
-(Salton; Manning et al.), and is supported by established treatments of **numerical stability**, **conditioning**, and  
+This work draws on **classical information retrieval methodology**, including TF-IDF weighting and vector-space models 
+(Salton; Manning et al.), and is supported by established treatments of **numerical stability**, **conditioning**, and 
 **perturbation behaviour** in high-dimensional vector spaces (Higham; Trefethen & Bau).
 
-The interpretation of similarity scores in terms of **content-based k-nearest-neighbour ranking and neighbourhood structure**  
+The interpretation of similarity scores in terms of **content-based k-nearest-neighbour ranking and neighbourhood structure** 
 follows classical nearest-neighbour and similarity-search perspectives (Cover & Hart), without introducing learning-based methods.
 
-Broader contextual connections to feature representations and similarity-based reasoning draw on standard statistical learning  
-references (Hastie, Tibshirani & Friedman; Shalev-Shwartz & Ben-David). Supplementary intuition and terminology are informed by  
+Broader contextual connections to feature representations and similarity-based reasoning draw on standard statistical learning 
+references (Hastie, Tibshirani & Friedman; Shalev-Shwartz & Ben-David). Supplementary intuition and terminology are informed by 
 widely used online references on **TF-IDF**, **cosine similarity**, and **vector-space models**.
 
 ---
