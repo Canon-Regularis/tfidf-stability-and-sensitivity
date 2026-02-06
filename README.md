@@ -825,3 +825,13 @@ or direct contribution by any individual or institution.
 
 This repository is provided for analytical, educational, and research‑oriented use.  
 See the accompanying license file for full terms and conditions.
+
+---
+
+## 12. Important Notes
+
+Due to copyright protection behind some of the code, this current repository is being 
+worked on with restricted public visibility. Once complete, this repository will be 
+populated with the complete code (or until the copyright on same code is lifted).
+
+If you're interested in seeing any of the code, please send me an email!
