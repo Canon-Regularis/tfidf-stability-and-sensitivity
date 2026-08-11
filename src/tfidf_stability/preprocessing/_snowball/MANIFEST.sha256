@@ -1,0 +1,6 @@
+# snowballstemmer 3.1.1 (BSD-3-Clause), generated from the upstream .sbl source.
+# Vendored so the reference backend stays dependency-free and byte-pinned.
+
+4b8b17bf3f97d46a1a536c288defe193147b15bd8edb01bbd3f64c57b8b5e2af  among.py
+e60fd08f93826b9c428f038ace77500a68ba594d504cd64b1501a6fab2becbc1  basestemmer.py
+350d71588d33ce8e2dd5084efa48c50cbaec90bec9ac3f7e97623fd640856dea  english_stemmer.py

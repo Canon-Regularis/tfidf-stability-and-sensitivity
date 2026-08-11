@@ -1,0 +1,140 @@
+"""Stopword removal, backed by a frozen and hash-verified word list.
+
+The stopword set determines the vocabulary and therefore every document
+frequency, idf value and score in this repository. It is consequently treated as
+*data with an identity*: a versioned file whose SHA-256 is verified at load and
+recorded in every run manifest, never a library default that can change under us
+between releases.
+
+Removed tokens are replaced by a :data:`~tfidf_stability.preprocessing.tokenise.GAP`
+sentinel rather than deleted, so that n-gram construction cannot bridge the hole
+they leave. See ``docs/spec_addenda.md#g7``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Iterable, Sequence
+from functools import lru_cache
+from pathlib import Path
+from typing import Final
+
+from tfidf_stability.preprocessing.tokenise import GAP
+
+__all__ = ["StopwordSet", "load_stopwords", "remove_stopwords"]
+
+#: Repository-relative location of the frozen assets.
+_ASSET_DIR: Final = Path(__file__).resolve().parents[3] / "data" / "assets"
+
+DEFAULT_STOPWORD_ASSET: Final[str] = "stopwords_en_v1.txt"
+
+
+class StopwordSet:
+    """An immutable, identified set of stopwords.
+
+    The ``digest`` is what makes this reproducible: it goes into the run manifest
+    so that a result can always be traced back to the exact word list that
+    produced it.
+    """
+
+    __slots__ = ("_words", "digest", "name")
+
+    def __init__(self, words: Iterable[str], name: str, digest: str) -> None:
+        self._words = frozenset(words)
+        self.name = name
+        self.digest = digest
+
+    def __contains__(self, token: str) -> bool:
+        return token in self._words
+
+    def __len__(self) -> int:
+        return len(self._words)
+
+    def __iter__(self) -> Iterable[str]:
+        return iter(sorted(self._words))
+
+    def __repr__(self) -> str:
+        return (
+            f"StopwordSet(name={self.name!r}, n={len(self._words)}, digest={self.digest[:12]}...)"
+        )
+
+    def is_stopword(self, token: str) -> bool:
+        """Whether ``token`` is a stopword. Expects an already-normalised token."""
+        return token in self._words
+
+    @classmethod
+    def empty(cls) -> StopwordSet:
+        """The empty set, for configurations that disable stopword removal."""
+        return cls((), name="none", digest=hashlib.sha256(b"").hexdigest())
+
+    @classmethod
+    def from_iterable(cls, words: Iterable[str], name: str = "inline") -> StopwordSet:
+        """Build from an in-memory iterable, digesting the canonical sorted form."""
+        ws = sorted(set(words))
+        payload = ("\n".join(ws) + "\n").encode("utf-8")
+        return cls(ws, name=name, digest=hashlib.sha256(payload).hexdigest())
+
+
+@lru_cache(maxsize=8)
+def load_stopwords(asset: str = DEFAULT_STOPWORD_ASSET) -> StopwordSet:
+    """Load a frozen stopword asset from ``data/assets``.
+
+    The digest is taken over the **raw file bytes**, not the parsed set, so that
+    a change to a comment or to the ordering is still visible in the manifest.
+    Cached because the result is immutable and the file cannot change within a
+    run without invalidating the run's own provenance.
+
+    Args:
+        asset: File name within ``data/assets``.
+
+    Returns:
+        The loaded :class:`StopwordSet`.
+
+    Raises:
+        FileNotFoundError: If the asset is missing.
+    """
+    path = _ASSET_DIR / asset
+    raw = path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+
+    words: list[str] = []
+    for line in raw.decode("utf-8").splitlines():
+        s = line.strip()
+        if s and not s.startswith("#"):
+            words.append(s)
+
+    return StopwordSet(words, name=asset, digest=digest)
+
+
+def remove_stopwords(
+    tokens: Sequence[str],
+    stopwords: StopwordSet,
+    *,
+    insert_gaps: bool = True,
+) -> list[str]:
+    """Remove stopwords, leaving a gap sentinel behind by default.
+
+    Args:
+        tokens: Token stream.
+        stopwords: The set to remove.
+        insert_gaps: When ``True`` (the normative setting) each removed token is
+            replaced by :data:`GAP` so that n-grams cannot span it. When
+            ``False`` tokens are simply dropped, which lets "king of pop" produce
+            the spurious bigram "king pop" -- available only as an ablation.
+
+    Returns:
+        The filtered token stream. Consecutive gaps are collapsed, and leading
+        and trailing gaps are dropped, so the result is canonical: two inputs
+        differing only in stopword runs produce identical output.
+    """
+    out: list[str] = []
+    for t in tokens:
+        if t == GAP or stopwords.is_stopword(t):
+            if insert_gaps and out and out[-1] != GAP:
+                out.append(GAP)
+        else:
+            out.append(t)
+
+    while out and out[-1] == GAP:
+        out.pop()
+    return out
