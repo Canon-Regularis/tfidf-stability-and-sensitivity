@@ -1,0 +1,83 @@
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.installed.cfg
+dist/
+sdist/
+.venv/
+venv/
+env/
+.python-version
+
+# --- Test / type / lint caches ----------------------------------------------
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.gcda
+*.gcno
+*.gcov
+
+# --- CMake / native build ----------------------------------------------------
+build/
+_skbuild/
+CMakeUserPresets.json
+compile_commands.json
+*.o
+*.obj
+*.a
+*.lib
+*.exp
+*.ilk
+*.pdb
+
+# Built extension modules land in the package tree; never commit them.
+src/tfidf_stability/_native/*.pyd
+src/tfidf_stability/_native/*.so
+src/tfidf_stability/_native/*.dylib
+
+# --- Data --------------------------------------------------------------------
+# MovieLens may NOT be redistributed (see data/README.md). Fetched, never committed.
+data/raw/
+data/interim/
+data/processed/
+data/external/
+!data/README.md
+!data/assets/
+!data/lexicon/
+
+# Generated experiment outputs are reproducible from source; keep the tree clean.
+reports/figures/
+reports/*.json
+reports/*.csv
+!reports/text/
+
+# --- LaTeX -------------------------------------------------------------------
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.out
+*.synctex.gz
+*.toc
+reports/text/*.pdf
+
+# --- Notebooks ---------------------------------------------------------------
+.ipynb_checkpoints/
+
+# --- Editors / OS ------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

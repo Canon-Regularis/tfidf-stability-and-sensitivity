@@ -1,0 +1,164 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+# -----------------------------------------------------------------------------
+# Project metadata
+# -----------------------------------------------------------------------------
+[project]
+name = "tfidf-stability"
+version = "0.2.0"
+description = "Numerical stability and perturbation behaviour in TF-IDF-based similarity systems"
+readme = "README.md"
+requires-python = ">=3.11"
+# Code is Apache-2.0; the prose and generated reports remain CC BY 4.0.
+# See LICENSE.md for the split and its rationale.
+license = "Apache-2.0"
+license-files = ["LICENSES/Apache-2.0.txt", "LICENSES/CC-BY-4.0.txt", "LICENSE.md"]
+authors = [{ name = "Matthew Maksymilian Miezaniec", email = "matthewmiezaniec1@gmail.com" }]
+keywords = [
+  "tf-idf", "information-retrieval", "cosine-similarity", "numerical-stability",
+  "perturbation-analysis", "ranking-stability", "reproducibility",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: C++",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Text Processing :: Indexing",
+]
+
+# The `reference` backend is stdlib-only by design -- it is the normative
+# implementation and must be auditable without reading any third-party code.
+# numpy is required only by the native adapter and the analysis layer.
+dependencies = ["numpy>=1.24", "pyyaml>=6.0"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0", "pytest-cov>=5.0", "pytest-benchmark>=4.0",
+  "hypothesis>=6.100", "ruff>=0.6", "mypy>=1.11",
+  "scikit-learn>=1.4",          # external oracle for the differential tests
+  "types-PyYAML",
+]
+viz = ["matplotlib>=3.8", "pandas>=2.0"]
+docs = ["mkdocs-material>=9.5", "mkdocstrings[python]>=0.25"]
+nb = ["jupyter>=1.0", "nbmake>=1.5", "nbformat>=5.10"]
+all = ["tfidf-stability[dev,viz,docs,nb]"]
+
+[project.scripts]
+tfidf-stability = "tfidf_stability.cli.main:main"
+
+[project.urls]
+Repository = "https://github.com/Canon-Regularis/tfidf-stability-and-sensitivity"
+
+# -----------------------------------------------------------------------------
+# Build (scikit-build-core -> CMake -> nanobind)
+# -----------------------------------------------------------------------------
+[tool.scikit-build]
+minimum-version = "0.10"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["src/tfidf_stability"]
+cmake.version = ">=3.20"
+cmake.build-type = "Release"
+sdist.exclude = [".github", "build", "data/raw", "reports/figures"]
+
+# `pip install . -C cmake.define.TFIDF_BUILD_NATIVE=OFF` yields a working
+# reference-only install on machines with no C++ compiler.
+[tool.scikit-build.cmake.define]
+TFIDF_BUILD_NATIVE = "ON"
+TFIDF_BUILD_TESTS = "OFF"
+
+# -----------------------------------------------------------------------------
+# Tooling
+# -----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+  "slow: long-running (excluded from the default PR run)",
+  "native: requires the compiled native backend",
+  "sklearn: requires scikit-learn as an external oracle",
+  "property: Hypothesis property-based test",
+  "differential: asserts reference/native bit-exactness",
+]
+filterwarnings = ["error", "ignore::DeprecationWarning:nbformat.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts", "examples"]
+# Vendored upstream code is verified by SHA-256 against its recorded manifest,
+# not by our style rules. Reformatting it would break that verification.
+extend-exclude = ["src/tfidf_stability/preprocessing/_snowball"]
+
+[tool.ruff.lint]
+select = [
+  "E", "F", "W",      # pycodestyle / pyflakes
+  "I",                # isort
+  "N",                # pep8-naming
+  "UP",               # pyupgrade
+  "B",                # bugbear
+  "C4",               # comprehensions
+  "SIM",              # simplify
+  "RUF",              # ruff-specific
+  "NPY",              # numpy
+  "PL",               # pylint subset
+  "PT",               # pytest style
+]
+ignore = [
+  "PLR0913",  # many arguments: the numerics APIs genuinely need explicit policies
+  "PLR2004",  # magic values: unavoidable in tests asserting exact constants
+  "N806",     # non-lowercase locals: mathematical names (N, V, C, L) mirror the paper
+  "N803",     # ditto for arguments
+  # `class X(str, Enum)` rather than `StrEnum`. Deliberate: these enums are
+  # serialised into YAML configs and run manifests, and the explicit `__str__`
+  # on each makes the serialised form part of the visible contract rather than
+  # an inherited behaviour.
+  "UP042",
+  # Function-level imports. Used in exactly two situations here, both
+  # intentional: breaking an import cycle (geometry <-> cosine, numerics <->
+  # validation) and deferring an optional dev-only dependency (hypothesis).
+  "PLC0415",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR0915"]
+"notebooks/*" = ["E402"]
+# Full-width and zero-width characters appear as *test data* here, because the
+# point of the test is that NFKC folds them.
+"tests/test_preprocessing_determinism.py" = ["RUF001", "PLE2515"]
+# Structural validators read best as a sequence of guard clauses.
+"src/tfidf_stability/vectorisation/sparse.py" = ["PLR0911"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+disallow_any_generics = true
+files = ["src/tfidf_stability"]
+# Same reasoning as the ruff exclusion: the vendored stemmer is generated code
+# whose identity is its hash. Annotating it would invalidate the manifest.
+exclude = ["src/tfidf_stability/preprocessing/_snowball/"]
+
+[[tool.mypy.overrides]]
+module = ["tfidf_stability._native.*"]
+# The compiled module has no stubs until Stage 3 generates them.
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tfidf_stability.preprocessing._snowball.*"]
+ignore_errors = true
+follow_imports = "skip"
+
+[tool.coverage.run]
+branch = true
+source = ["src/tfidf_stability"]
+omit = ["*/_native/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]

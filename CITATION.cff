@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+title: >-
+  Numerical Stability and Perturbation Behaviour in TF-IDF-Based
+  Similarity Systems
+message: If you use this software or its results, please cite it.
+type: software
+authors:
+  - given-names: Matthew Maksymilian
+    family-names: Miezaniec
+    email: matthewmiezaniec1@gmail.com
+    affiliation: King's College London
+repository-code: >-
+  https://github.com/Canon-Regularis/tfidf-stability-and-sensitivity
+abstract: >-
+  A self-contained implementation and analysis of a TF-IDF-based document
+  similarity and ranking system, written to make the algebraic structure and
+  perturbation behaviour of the pipeline explicit. The work treats ranking
+  stability as a first-class object, characterising it through score-separation
+  margin distributions, and isolates decision-level discontinuities introduced
+  by deterministic tie-breaking rules. It comprises a normative pure-Python
+  reference implementation and a bit-identical optimised C++20 evaluator, whose
+  equivalence is enforced by the test suite.
+keywords:
+  - TF-IDF
+  - information retrieval
+  - cosine similarity
+  - numerical stability
+  - perturbation analysis
+  - ranking stability
+  - reproducibility
+license:
+  - Apache-2.0
+  - CC-BY-4.0
+version: 0.1.0
+date-released: '2026-03-01'

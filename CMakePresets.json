@@ -1,0 +1,107 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "TFIDF_BUILD_NATIVE": "ON",
+        "TFIDF_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "mingw",
+      "inherits": "base",
+      "displayName": "MinGW-w64 UCRT (this project's reference Windows toolchain)",
+      "cacheVariables": { "CMAKE_CXX_COMPILER": "g++" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "msvc",
+      "inherits": "base",
+      "displayName": "MSVC (requires the Visual Studio C++ workload)",
+      "cacheVariables": { "CMAKE_CXX_COMPILER": "cl" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "gcc",
+      "inherits": "base",
+      "displayName": "GCC (Linux)",
+      "cacheVariables": { "CMAKE_CXX_COMPILER": "g++" }
+    },
+    {
+      "name": "clang",
+      "inherits": "base",
+      "displayName": "Clang",
+      "cacheVariables": { "CMAKE_CXX_COMPILER": "clang++" }
+    },
+
+    {
+      "name": "debug",
+      "inherits": "base",
+      "displayName": "Unoptimised -- must produce byte-identical results to release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "TFIDF_WERROR": "ON" }
+    },
+    {
+      "name": "asan",
+      "inherits": "base",
+      "displayName": "AddressSanitizer + UndefinedBehaviorSanitizer",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "TFIDF_SANITIZERS": "address;undefined"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "base",
+      "displayName": "ThreadSanitizer (exercises the query-parallel path)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "TFIDF_SANITIZERS": "thread" }
+    },
+    {
+      "name": "fastmath-guard-check",
+      "inherits": "base",
+      "displayName": "Deliberately unsound build -- CI asserts the guards REJECT it",
+      "cacheVariables": { "TFIDF_FAST_MATH": "ON" }
+    },
+    {
+      "name": "bench",
+      "inherits": "base",
+      "displayName": "Benchmarks (arch-tuned; NOT reproducible)",
+      "cacheVariables": {
+        "TFIDF_BUILD_BENCH": "ON",
+        "TFIDF_ARCH_TUNE": "ON",
+        "TFIDF_BUILD_TESTS": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "mingw", "configurePreset": "mingw" },
+    { "name": "msvc", "configurePreset": "msvc" },
+    { "name": "gcc", "configurePreset": "gcc" },
+    { "name": "clang", "configurePreset": "clang" },
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "bench", "configurePreset": "bench" },
+    { "name": "fastmath-guard-check", "configurePreset": "fastmath-guard-check" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    { "name": "mingw", "inherits": "base", "configurePreset": "mingw" },
+    { "name": "msvc", "inherits": "base", "configurePreset": "msvc" },
+    { "name": "gcc", "inherits": "base", "configurePreset": "gcc" },
+    { "name": "clang", "inherits": "base", "configurePreset": "clang" },
+    { "name": "debug", "inherits": "base", "configurePreset": "debug" },
+    { "name": "asan", "inherits": "base", "configurePreset": "asan" }
+  ]
+}

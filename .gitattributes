@@ -1,0 +1,22 @@
+# Normalise line endings so file hashes are platform-independent. This repository
+# asserts byte-identical reproducibility across Linux, macOS and Windows, and CRLF
+# drift would break every content hash in the manifests.
+* text=auto eol=lf
+
+# Binary artefacts must never be line-ending translated.
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.zip   binary
+*.pyd   binary
+*.so    binary
+*.dylib binary
+
+# Fixtures and golden values are hashed byte-for-byte; pin them explicitly.
+tests/fixtures/*.jsonl  text eol=lf
+tests/golden/*.json     text eol=lf
+data/assets/*           text eol=lf
+data/lexicon/*          text eol=lf
+
+# Notebooks diff poorly; mark them so GitHub collapses them in reviews.
+*.ipynb linguist-documentation

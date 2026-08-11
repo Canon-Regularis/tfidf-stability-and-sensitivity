@@ -1,0 +1,13 @@
+# Runtime dependencies.
+#
+# Deliberately minimal. The `reference` backend -- which is the NORMATIVE
+# implementation and defines correctness for this project -- imports nothing
+# outside the standard library, so it can be audited without reading any
+# third-party code. numpy is needed only by the native adapter and the analysis
+# layer; pyyaml only by the config loader.
+#
+# For a reproducible environment use `uv pip sync requirements-dev.txt` against
+# the committed lock, not this file.
+
+numpy>=1.24
+PyYAML>=6.0
