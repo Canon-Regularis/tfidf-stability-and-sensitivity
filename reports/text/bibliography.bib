@@ -1,0 +1,245 @@
+% Bibliography for reports/text/main.tex.
+%
+% The first group is the background the study rests on and matches README
+% section 8. The second is the numerical-standards material the implementation
+% actually depends on -- IEEE-754, correctly-rounded elementary functions and
+% compensated summation -- which the README does not cite but which the
+% correctness argument requires. G13 (the logarithm) and G23 (the measured noise
+% floor) are unintelligible without it.
+
+% ---------------------------------------------------------------------------
+% Classical information retrieval
+% ---------------------------------------------------------------------------
+@book{manning2008introduction,
+  title     = {Introduction to Information Retrieval},
+  author    = {Manning, Christopher D. and Raghavan, Prabhakar and Sch{\"u}tze, Hinrich},
+  year      = {2008},
+  publisher = {Cambridge University Press},
+  address   = {Cambridge},
+  isbn      = {9780521865715}
+}
+
+@article{salton1988term,
+  title   = {Term-weighting approaches in automatic text retrieval},
+  author  = {Salton, Gerard and Buckley, Christopher},
+  journal = {Information Processing \& Management},
+  volume  = {24},
+  number  = {5},
+  pages   = {513--523},
+  year    = {1988},
+  doi     = {10.1016/0306-4573(88)90021-0}
+}
+
+@article{zobel2006inverted,
+  title   = {Inverted files for text search engines},
+  author  = {Zobel, Justin and Moffat, Alistair},
+  journal = {ACM Computing Surveys},
+  volume  = {38},
+  number  = {2},
+  pages   = {6},
+  year    = {2006},
+  doi     = {10.1145/1132956.1132959}
+}
+
+@article{cover1967nearest,
+  title   = {Nearest neighbor pattern classification},
+  author  = {Cover, Thomas M. and Hart, Peter E.},
+  journal = {IEEE Transactions on Information Theory},
+  volume  = {13},
+  number  = {1},
+  pages   = {21--27},
+  year    = {1967},
+  doi     = {10.1109/TIT.1967.1053964}
+}
+
+% ---------------------------------------------------------------------------
+% Numerical linear algebra and stability
+% ---------------------------------------------------------------------------
+@book{higham2002accuracy,
+  title     = {Accuracy and Stability of Numerical Algorithms},
+  author    = {Higham, Nicholas J.},
+  edition   = {2},
+  year      = {2002},
+  publisher = {SIAM},
+  address   = {Philadelphia},
+  doi       = {10.1137/1.9780898718027}
+}
+
+@book{trefethen1997numerical,
+  title     = {Numerical Linear Algebra},
+  author    = {Trefethen, Lloyd N. and Bau, David},
+  year      = {1997},
+  publisher = {SIAM},
+  address   = {Philadelphia},
+  doi       = {10.1137/1.9780898719574}
+}
+
+% ---------------------------------------------------------------------------
+% Sparse geometry, similarity, statistical learning
+% ---------------------------------------------------------------------------
+@book{aggarwal2015data,
+  title     = {Data Mining: The Textbook},
+  author    = {Aggarwal, Charu C.},
+  year      = {2015},
+  publisher = {Springer},
+  doi       = {10.1007/978-3-319-14142-8}
+}
+
+@book{leskovec2020mining,
+  title     = {Mining of Massive Datasets},
+  author    = {Leskovec, Jure and Rajaraman, Anand and Ullman, Jeffrey D.},
+  edition   = {3},
+  year      = {2020},
+  publisher = {Cambridge University Press}
+}
+
+@book{hastie2009elements,
+  title     = {The Elements of Statistical Learning},
+  author    = {Hastie, Trevor and Tibshirani, Robert and Friedman, Jerome},
+  edition   = {2},
+  year      = {2009},
+  publisher = {Springer},
+  doi       = {10.1007/978-0-387-84858-7}
+}
+
+@book{shalevshwartz2014understanding,
+  title     = {Understanding Machine Learning: From Theory to Algorithms},
+  author    = {Shalev-Shwartz, Shai and Ben-David, Shai},
+  year      = {2014},
+  publisher = {Cambridge University Press},
+  doi       = {10.1017/CBO9781107298019}
+}
+
+% ---------------------------------------------------------------------------
+% Numerical standards and algorithms the implementation depends on
+% ---------------------------------------------------------------------------
+% Declared as a techreport rather than a standard: BibTeX's plain style has no
+% "standard" entry type and silently drops it. Note also that BibTeX treats an
+% at-sign as the start of an entry even on a comment line, so entry types must
+% never be named with their sigil in prose here.
+@techreport{ieee754-2019,
+  author      = {{IEEE}},
+  title       = {{IEEE} Standard for Floating-Point Arithmetic},
+  number      = {IEEE Std 754-2019},
+  institution = {IEEE},
+  year        = {2019},
+  doi         = {10.1109/IEEESTD.2019.8766229},
+  note        = {Mandates correctly-rounded +, -, *, / and sqrt; notably does
+                 NOT mandate correct rounding for the elementary functions,
+                 which is the gap addendum G13 addresses}
+}
+
+@article{goldberg1991what,
+  title   = {What every computer scientist should know about floating-point arithmetic},
+  author  = {Goldberg, David},
+  journal = {ACM Computing Surveys},
+  volume  = {23},
+  number  = {1},
+  pages   = {5--48},
+  year    = {1991},
+  doi     = {10.1145/103162.103163}
+}
+
+@article{shewchuk1997adaptive,
+  title   = {Adaptive precision floating-point arithmetic and fast robust geometric predicates},
+  author  = {Shewchuk, Jonathan Richard},
+  journal = {Discrete \& Computational Geometry},
+  volume  = {18},
+  number  = {3},
+  pages   = {305--363},
+  year    = {1997},
+  doi     = {10.1007/PL00009321},
+  note    = {The exact-summation expansion underlying Reduction.EXACT, which is
+             the correctly-rounded reference against which the noise floor of
+             addendum G23 is measured}
+}
+
+@article{neumaier1974rundungsfehler,
+  title   = {Rundungsfehleranalyse einiger Verfahren zur Summation endlicher Summen},
+  author  = {Neumaier, Arnold},
+  journal = {Zeitschrift f{\"u}r Angewandte Mathematik und Mechanik},
+  volume  = {54},
+  number  = {1},
+  pages   = {39--51},
+  year    = {1974},
+  doi     = {10.1002/zamm.19740540106},
+  note    = {The compensated summation of Reduction.NEUMAIER, measured
+             correctly-rounded on every comparison in this study}
+}
+
+@book{muller2018handbook,
+  title     = {Handbook of Floating-Point Arithmetic},
+  author    = {Muller, Jean-Michel and Brunie, Nicolas and de Dinechin, Florent
+               and Jeannerod, Claude-Pierre and Joldes, Mioara and Lef{\`e}vre,
+               Vincent and Melquiond, Guillaume and Revol, Nathalie and Torres, Serge},
+  edition   = {2},
+  year      = {2018},
+  publisher = {Birkh{\"a}user},
+  doi       = {10.1007/978-3-319-76526-6}
+}
+
+% ---------------------------------------------------------------------------
+% Rank comparison
+% ---------------------------------------------------------------------------
+@inproceedings{fagin2003comparing,
+  title     = {Comparing top $k$ lists},
+  author    = {Fagin, Ronald and Kumar, Ravi and Sivakumar, D.},
+  booktitle = {Proceedings of the 14th Annual ACM-SIAM Symposium on Discrete Algorithms},
+  pages     = {28--36},
+  year      = {2003},
+  note      = {The generalised Kendall distance $K^{(p)}$. Established as a
+               near-metric; this study measured triangle-inequality violations
+               at every $p$ tested, so it is used on bias grounds rather than
+               metric grounds (addendum G2)}
+}
+
+@article{kendall1938new,
+  title   = {A new measure of rank correlation},
+  author  = {Kendall, Maurice G.},
+  journal = {Biometrika},
+  volume  = {30},
+  number  = {1/2},
+  pages   = {81--93},
+  year    = {1938},
+  doi     = {10.2307/2332226}
+}
+
+@article{roberts1971homogeneous,
+  title   = {Homogeneous families of semiorders and the theory of probabilistic consistency},
+  author  = {Roberts, Fred S.},
+  journal = {Journal of Mathematical Psychology},
+  volume  = {8},
+  number  = {2},
+  pages   = {248--263},
+  year    = {1971},
+  doi     = {10.1016/0022-2496(71)90017-9},
+  note    = {Indifference graphs and semiorders. The non-transitivity of the
+             within-tau relation is exactly the semiorder phenomenon, and the
+             unit-interval structure is what makes the clique enumeration of
+             addendum G1 linear and provably complete}
+}
+
+% ---------------------------------------------------------------------------
+% Data
+% ---------------------------------------------------------------------------
+@article{harper2015movielens,
+  title   = {The {MovieLens} datasets: History and context},
+  author  = {Harper, F. Maxwell and Konstan, Joseph A.},
+  journal = {ACM Transactions on Interactive Intelligent Systems},
+  volume  = {5},
+  number  = {4},
+  pages   = {19:1--19:19},
+  year    = {2015},
+  doi     = {10.1145/2827872},
+  note    = {Usage licence permits research use but prohibits redistribution}
+}
+
+@misc{porter2002snowball,
+  title  = {Snowball: A language for stemming algorithms},
+  author = {Porter, Martin F.},
+  year   = {2002},
+  note   = {The English (Porter2) stemmer. Vendored from the official generated
+            sources so the Python and C++ backends run implementations generated
+            from one grammar, agreeing by construction rather than by
+            hand-porting}
+}

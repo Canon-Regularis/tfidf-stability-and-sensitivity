@@ -45,9 +45,11 @@ manner.
 
 This work studies TF-IDF in a controlled setting where documents arise from 
 **text of interest** and similarity scores are used to induce 
-**content-based k-nearest-neighbour (k-NN) rankings**. The system is implemented in 
-**pure Python**, with explicit control over preprocessing, vocabulary construction, 
-IDF computation, vector formation, and ranking. This explicit formulation enables 
+**content-based k-nearest-neighbour (k-NN) rankings**. The system is implemented twice: a 
+**normative pure-Python reference** that defines correctness and requires no compiler, and an 
+optimised **C++20 core** required to be bit-identical to it, with agreement enforced by comparing 
+raw bit patterns rather than tolerances. Both give explicit control over preprocessing, vocabulary 
+construction, IDF computation, vector formation, and ranking. This explicit formulation enables 
 direct examination of how corpus structure and similarity geometry relate to similarity 
 scores, neighbourhood structure, and ranking behaviour under perturbation.
 
@@ -166,8 +168,13 @@ Let
 𝒟 = { d₁, …, dₙ }  
 be a finite corpus of preprocessed documents, and define N := |𝒟|. Each document dᵢ is a
 finite sequence of tokens obtained from raw text via a fixed preprocessing map
-(normalisation, stopword removal, lemmatisation, and n-gram generation). Throughout,
+(normalisation, tokenisation, stopword removal, lemmatisation, and n-gram generation). Throughout,
 **n-grams are treated as atomic tokens**.
+
+The normative lemmatiser is the Snowball English (Porter2) **stemmer**; it is referred to as
+lemmatisation throughout for continuity with the surrounding literature, but it performs
+suffix stripping rather than dictionary lemmatisation, and the two differ on a substantial
+fraction of tokens. See `docs/spec_addenda.md`.
 
 All preprocessing operations are assumed to be deterministic and fixed across all
 perturbation experiments.
@@ -225,7 +232,13 @@ cos(u, v) = (u · v) / (‖u‖₂ ‖v‖₂),
 with the convention that the similarity is set to zero if either vector is the zero
 vector. Since all coordinates are non-negative, it follows that
 
-cos(u, v) ∈ [0, 1].
+cos(u, v) ∈ [0, 1]
+
+**in exact arithmetic**. In binary64 the computed value may exceed 1 by a few units in the last
+place, because the dot product, the two norms and the division round independently; this was
+observed in 27% of random trials, with a worst case of 3 ulp. No clamping is applied, in keeping
+with the numerical commitments of section 6. Consumers converting a similarity to an angle must
+therefore clamp at their own call site. See `docs/spec_addenda.md`, G24.
 
 Given a query vector q ∈ ℝ≥0^|V|, embedded using the same vocabulary V and IDF mapping as
 the corpus documents, and a collection of document vectors { wᵢ }, similarity scores
@@ -245,8 +258,15 @@ final ranking is defined via a deterministic sorting operator
 
 where Sort orders documents by decreasing similarity score sᵢ and resolves ties
 lexicographically using the fixed attribute tuple aᵢ (e.g. popularity, rating,
-engagement, identifier). This yields a total ordering (r₁, r₂, …, rₙ), where rⱼ denotes
-the document at rank j.
+engagement), followed by the document **identifier**. The identifier is not an entry of aᵢ
+and is never permutable: it is appended implicitly to every key, and it is what makes the
+order total. This yields a total ordering (r₁, r₂, …, rₙ), where rⱼ denotes the document at
+rank j.
+
+The guarantee is conditional on identifiers being **unique**, which is validated at
+construction rather than assumed; with duplicates the order ceases to be uniquely determined
+and results become dependent on the sorting algorithm. Given uniqueness the key is injective,
+so no two elements compare equal and the sorted output is independent of the input order.
 
 As a consequence, the mapping from similarity scores to rankings is not continuous
 globally; it is locally constant away from tie hyperplanes. 
@@ -273,8 +293,17 @@ For convenience, the corresponding **flip radius** at rank k is defined as
 
 εₖ^flip = mₖ / 2,
 
-representing the largest uniform perturbation magnitude (in score space) under which the
-relative ordering of ranks k and k + 1 is preserved.
+representing the **supremum** of the uniform perturbation magnitudes (in score space) under
+which the relative ordering of ranks k and k + 1 is preserved. The supremum is not attained:
+the guarantee holds for ε < εₖ^flip, and at ε = εₖ^flip exactly the two scores can be driven
+to equality, at which point membership passes to the tie-break. The bound is tight - a
+perturbation of εₖ^flip + δ flips the pair for any δ > 0 - but it is worst-case. Under
+*random* perturbation no flip was observed until roughly 1.1 × εₖ^flip.
+
+Both margins are undefined in edge cases that must be reported rather than coerced: mₖ is
+undefined for k ≥ N, and m_min^top is undefined at k = 1, where the minimum is over an empty
+set. Note also that mₖ and m_min^top constrain **disjoint** sets of gaps, so neither bounds
+the other; guaranteeing set and order membership together requires ε < min(mₖ, m_min^top)/2.
 
 ---
 
@@ -284,7 +313,7 @@ Fix the ranking
 (r₁, r₂, …, rₙ)  
 induced by the deterministic ranking operator π.
 
-To formalise near-ties, fix a numerical tolerance τ > 0. For a given rank position j, the
+To formalise near-ties, fix a numerical tolerance τ ≥ 0. For a given rank position j, the
 associated **tie group** is defined as
 
 G_τ(j) = { i : |sᵢ − score(rⱼ)| ≤ τ }.
@@ -292,9 +321,17 @@ G_τ(j) = { i : |sᵢ − score(rⱼ)| ≤ τ }.
 Here the scores sᵢ are the same similarity scores used to produce the ranking
 (rⱼ)
 
-Documents within a tie group are indistinguishable at the level of similarity scores up
-to numerical tolerance. In such cases, the final ordering within G_τ(j) is determined
-entirely by the deterministic tie-breaking rules embedded in the ranking operator π.
+Documents within a tie group are indistinguishable *from the reference document rⱼ* at the
+level of similarity scores up to numerical tolerance. They are **not** necessarily mutually
+indistinguishable: the relation |sᵢ − sⱼ| ≤ τ is reflexive and symmetric but **not transitive**,
+so G_τ(j) is a ball around score(rⱼ) rather than an equivalence class, and the family of balls
+does not partition the corpus. Three distinct objects are therefore required in practice - the
+ball above, its transitive closure (single linkage), and the maximal mutually-indistinguishable
+sets (complete linkage) - together with the ratio between the last two, which measures how far
+transitive chaining has inflated the reported group. See `docs/spec_addenda.md`, G1.
+
+In all three cases the final ordering within the group is determined entirely by the
+deterministic tie-breaking rules embedded in the ranking operator π.
 
 This construction makes explicit the distinction between **numerical stability of
 similarity scores** and **stability of the induced ranking**, and provides a formal
