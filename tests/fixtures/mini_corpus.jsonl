@@ -1,0 +1,6 @@
+{"doc_id": "d1", "text": "The quick brown fox jumps over the lazy dog", "popularity": 120, "rating_sum2": 9, "rating_count": 2, "engagement": 7}
+{"doc_id": "d2", "text": "A quick brown fox leaps over a lazy dog", "popularity": 120, "rating_sum2": 9, "rating_count": 2, "engagement": 3}
+{"doc_id": "d3", "text": "Numerical stability of sparse matrix computations", "popularity": 45, "rating_sum2": 17, "rating_count": 4, "engagement": 11}
+{"doc_id": "d4", "text": "Numerical stability of sparse matrix computations", "popularity": 45, "rating_sum2": 15, "rating_count": 4, "engagement": 11}
+{"doc_id": "d5", "text": "the of and a", "popularity": 3, "rating_sum2": 2, "rating_count": 1, "engagement": 0}
+{"doc_id": "d6", "text": "Cosine similarity between document vectors", "popularity": 88, "rating_sum2": 7, "rating_count": 2, "engagement": 5}

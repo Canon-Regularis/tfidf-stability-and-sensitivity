@@ -1,0 +1,5 @@
+{"query_id": "q1", "text": "quick brown fox", "note": "matches d1 and d2 strongly; d1 and d2 are near-duplicates"}
+{"query_id": "q2", "text": "numerical stability sparse", "note": "d3 and d4 are exact duplicates, so they tie exactly and only the tie-break separates them"}
+{"query_id": "q3", "text": "the of and a", "note": "all stopwords, so the query embeds to the zero vector: every score is 0 and the ranking is decided entirely by attributes"}
+{"query_id": "q4", "text": "cosine similarity vectors", "note": "matches d6 only"}
+{"query_id": "q5", "text": "quantum chromodynamics", "note": "wholly out of vocabulary; zero query vector by a different route"}
