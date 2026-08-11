@@ -1,0 +1,241 @@
+// Sparse vector and matrix structures.
+//
+// Two invariants make the native backend bit-identical to the Python reference,
+// and both are checked rather than assumed:
+//
+//   1. Indices are strictly ascending within every vector and every row. This
+//      fixes the order in which products are accumulated, and since binary64
+//      addition is not associative, a different order is a different number.
+//
+//   2. Structure-of-arrays layout. A packed {int32, double} struct would be 16
+//      bytes with padding -- 25% waste -- and would engage one prefetch stream
+//      instead of two. Separate index and value arrays are both smaller and
+//      faster to stream.
+#pragma once
+
+#include <tfidf/core/reduction.hpp>
+#include <tfidf/core/types.hpp>
+
+#include <cmath>
+#include <cstddef>
+#include <span>
+#include <vector>
+
+namespace tfidf {
+
+/// A sparse vector: parallel arrays of strictly ascending indices and values.
+///
+/// Non-owning by design. The Python layer owns every buffer, so nothing is
+/// allocated or freed across the language boundary.
+struct SparseView {
+    std::span<const TermId> indices;
+    std::span<const Real> values;
+    TermId dim = 0;
+
+    [[nodiscard]] std::size_t nnz() const noexcept { return indices.size(); }
+    [[nodiscard]] bool empty() const noexcept { return indices.empty(); }
+
+    /// Whether indices are strictly ascending and in range.
+    [[nodiscard]] bool is_canonical() const noexcept {
+        if (indices.size() != values.size()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < indices.size(); ++i) {
+            if (indices[i] < 0 || indices[i] >= dim) {
+                return false;
+            }
+            if (i > 0 && indices[i - 1] >= indices[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Dot product and norm
+// -----------------------------------------------------------------------------
+
+/// Inner product, accumulated in ascending term-identifier order.
+///
+/// A merge over the two ascending index lists. The order of accumulation is
+/// therefore identical to the Python reference's merge, which is what makes the
+/// two agree to the last bit rather than merely to within rounding.
+template <class Policy>
+[[nodiscard]] Real dot_with(const SparseView& u, const SparseView& v) noexcept {
+    Policy acc{};
+    std::size_t i = 0;
+    std::size_t j = 0;
+    const std::size_t nu = u.nnz();
+    const std::size_t nv = v.nnz();
+    while (i < nu && j < nv) {
+        const TermId a = u.indices[i];
+        const TermId b = v.indices[j];
+        if (a == b) {
+            acc.add(u.values[i] * v.values[j]);
+            ++i;
+            ++j;
+        } else if (a < b) {
+            ++i;
+        } else {
+            ++j;
+        }
+    }
+    return acc.value();
+}
+
+[[nodiscard]] inline Real dot(const SparseView& u, const SparseView& v, Reduction p) noexcept {
+    switch (p) {
+        case Reduction::Naive:
+            return dot_with<reduce::Naive>(u, v);
+        case Reduction::Neumaier:
+            return dot_with<reduce::Neumaier>(u, v);
+        case Reduction::Pairwise:
+            return dot_with<reduce::Pairwise>(u, v);
+        case Reduction::Exact:
+            return dot_with<reduce::Exact>(u, v);
+    }
+    return dot_with<reduce::Naive>(u, v);
+}
+
+/// Euclidean norm: sqrt of the sum of squares, in that order.
+///
+/// No hypot-style rescaling. It would be more robust to overflow but would
+/// produce different digits, and README section 6 is explicit that no
+/// stabilising transformations are introduced.
+///
+/// `sqrt` is safe to use freely here because IEEE-754 *mandates* that it be
+/// correctly rounded -- unlike `log`, which is why idf is computed on the
+/// Python side and passed in as data (spec_addenda G13).
+template <class Policy>
+[[nodiscard]] Real l2_norm_with(const SparseView& v) noexcept {
+    Policy acc{};
+    for (const Real x : v.values) {
+        acc.add(x * x);
+    }
+    return std::sqrt(acc.value());
+}
+
+[[nodiscard]] inline Real l2_norm(const SparseView& v, Reduction p) noexcept {
+    switch (p) {
+        case Reduction::Naive:
+            return l2_norm_with<reduce::Naive>(v);
+        case Reduction::Neumaier:
+            return l2_norm_with<reduce::Neumaier>(v);
+        case Reduction::Pairwise:
+            return l2_norm_with<reduce::Pairwise>(v);
+        case Reduction::Exact:
+            return l2_norm_with<reduce::Exact>(v);
+    }
+    return l2_norm_with<reduce::Naive>(v);
+}
+
+// -----------------------------------------------------------------------------
+// Matrices
+// -----------------------------------------------------------------------------
+
+/// Compressed sparse row: one row per document, columns ascending within a row.
+struct CsrView {
+    std::span<const Offset> indptr;   ///< size n_rows + 1
+    std::span<const TermId> indices;  ///< size nnz, ascending within each row
+    std::span<const Real> values;     ///< size nnz
+    DocId n_rows = 0;
+    TermId n_cols = 0;
+
+    [[nodiscard]] Offset nnz() const noexcept { return static_cast<Offset>(values.size()); }
+
+    [[nodiscard]] SparseView row(DocId i) const noexcept {
+        const auto lo = static_cast<std::size_t>(indptr[static_cast<std::size_t>(i)]);
+        const auto hi = static_cast<std::size_t>(indptr[static_cast<std::size_t>(i) + 1]);
+        return SparseView{indices.subspan(lo, hi - lo), values.subspan(lo, hi - lo), n_cols};
+    }
+
+    [[nodiscard]] bool is_canonical() const noexcept {
+        if (indptr.size() != static_cast<std::size_t>(n_rows) + 1) {
+            return false;
+        }
+        if (indptr.front() != 0 || indptr.back() != nnz()) {
+            return false;
+        }
+        if (indices.size() != values.size()) {
+            return false;
+        }
+        for (DocId i = 0; i < n_rows; ++i) {
+            if (!row(i).is_canonical()) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+/// Compressed sparse column -- the inverted index.
+///
+/// Owns its storage, because it is derived rather than supplied. Column `t`
+/// holds the postings list of term `t`: the documents containing it, in
+/// ascending document order.
+struct Csc {
+    std::vector<Offset> colptr;  ///< size n_cols + 1
+    std::vector<DocId> rowidx;   ///< size nnz, ascending within each column
+    std::vector<Real> values;    ///< size nnz
+    DocId n_rows = 0;
+    TermId n_cols = 0;
+
+    [[nodiscard]] std::size_t postings_begin(TermId t) const noexcept {
+        return static_cast<std::size_t>(colptr[static_cast<std::size_t>(t)]);
+    }
+    [[nodiscard]] std::size_t postings_end(TermId t) const noexcept {
+        return static_cast<std::size_t>(colptr[static_cast<std::size_t>(t) + 1]);
+    }
+    [[nodiscard]] std::size_t df(TermId t) const noexcept {
+        return postings_end(t) - postings_begin(t);
+    }
+};
+
+/// Transpose CSR to CSC by counting sort: O(nnz + n_cols), deterministic.
+///
+/// Because the source rows are visited in ascending document order and each
+/// column's entries are appended in that order, every postings list comes out
+/// ascending in document id for free -- no sort, and no dependence on any
+/// tie-breaking within the sort.
+[[nodiscard]] inline Csc transpose(const CsrView& csr) {
+    Csc out;
+    out.n_rows = csr.n_rows;
+    out.n_cols = csr.n_cols;
+    const auto ncols = static_cast<std::size_t>(csr.n_cols);
+    const auto nnz = static_cast<std::size_t>(csr.nnz());
+
+    out.colptr.assign(ncols + 1, 0);
+    for (const TermId t : csr.indices) {
+        ++out.colptr[static_cast<std::size_t>(t) + 1];
+    }
+    for (std::size_t c = 0; c < ncols; ++c) {
+        out.colptr[c + 1] += out.colptr[c];
+    }
+
+    out.rowidx.resize(nnz);
+    out.values.resize(nnz);
+    std::vector<Offset> cursor(out.colptr.begin(), out.colptr.end() - 1);
+    for (DocId d = 0; d < csr.n_rows; ++d) {
+        const auto lo = static_cast<std::size_t>(csr.indptr[static_cast<std::size_t>(d)]);
+        const auto hi = static_cast<std::size_t>(csr.indptr[static_cast<std::size_t>(d) + 1]);
+        for (std::size_t k = lo; k < hi; ++k) {
+            const auto t = static_cast<std::size_t>(csr.indices[k]);
+            const auto pos = static_cast<std::size_t>(cursor[t]++);
+            out.rowidx[pos] = d;
+            out.values[pos] = csr.values[k];
+        }
+    }
+    return out;
+}
+
+/// Per-row L2 norms, computed once and reused across every query.
+[[nodiscard]] inline std::vector<Real> row_norms(const CsrView& csr, Reduction p) {
+    std::vector<Real> out(static_cast<std::size_t>(csr.n_rows));
+    for (DocId i = 0; i < csr.n_rows; ++i) {
+        out[static_cast<std::size_t>(i)] = l2_norm(csr.row(i), p);
+    }
+    return out;
+}
+
+}  // namespace tfidf
