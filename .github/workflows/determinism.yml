@@ -1,0 +1,175 @@
+# The acid test.
+#
+# This repository claims its numbers are bit-reproducible across operating
+# systems, compilers and optimisation levels. No in-process test can check that:
+# a single interpreter cannot tell you what a different libm would have done.
+# This workflow can, and it is the reason `spec_addenda.md#g13` exists.
+#
+# Before the correctly-rounded logarithm, this job would have FAILED. The
+# platform `log` differs from the correctly-rounded value in about 15% of IDF
+# entries, and UCRT, glibc and Apple libm each round differently -- so Linux and
+# Windows produced different weights, different norms and different scores. The
+# fix was to compute IDF once in Python via `decimal.Decimal.ln()` and keep
+# `log` out of the native core entirely, leaving only operations IEEE-754
+# requires to be correctly rounded.
+#
+# If this job ever goes red, a published number has moved. That is the point.
+
+name: determinism
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # --------------------------------------------------------------------------
+  # The reference backend is normative and needs no compiler, so its digest must
+  # agree across every OS and Python version on its own.
+  # --------------------------------------------------------------------------
+  reference:
+    name: reference ${{ matrix.os }} py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compute the pipeline digest
+        id: digest
+        shell: bash
+        run: |
+          python scripts/snapshot.py --verbose
+          echo "value=$(python scripts/snapshot.py)" >> "$GITHUB_OUTPUT"
+      - name: Record it
+        shell: bash
+        run: |
+          mkdir -p digests
+          printf '%s' "${{ steps.digest.outputs.value }}" \
+            > "digests/reference-${{ matrix.os }}-py${{ matrix.python }}.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-reference-${{ matrix.os }}-py${{ matrix.python }}
+          path: digests/
+
+  # --------------------------------------------------------------------------
+  # The native backend, built three ways. -O0 and -O3 exercise completely
+  # different instruction selection and vectorisation, so agreeing at both is a
+  # much stronger statement than agreeing at the default.
+  # --------------------------------------------------------------------------
+  native:
+    name: native ${{ matrix.os }} ${{ matrix.build }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        build: [Debug, Release, RelWithDebInfo]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip nanobind numpy pyyaml
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.build }}
+          -DTFIDF_BUILD_TESTS=ON
+      - uses: seanmiddleditch/gha-setup-ninja@master
+      - name: Build
+        run: cmake --build build
+      - name: Native unit tests
+        run: ctest --test-dir build --output-on-failure
+      # The native backend must not change any number. The digest here is
+      # computed by the reference path, and the differential suite is what
+      # proves the two agree -- so a divergence shows up as a test failure with
+      # a precise location rather than as an opaque hash mismatch.
+      - name: Differential suite (reference vs native, bit-exact)
+        run: |
+          python -m pip install -e . --no-build-isolation
+          python -m pytest tests/ -q -m "differential or native"
+      - name: Compute the pipeline digest
+        id: digest
+        shell: bash
+        run: echo "value=$(python scripts/snapshot.py)" >> "$GITHUB_OUTPUT"
+      - name: Record it
+        shell: bash
+        run: |
+          mkdir -p digests
+          printf '%s' "${{ steps.digest.outputs.value }}" \
+            > "digests/native-${{ matrix.os }}-${{ matrix.build }}.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-native-${{ matrix.os }}-${{ matrix.build }}
+          path: digests/
+
+  # --------------------------------------------------------------------------
+  # The comparison. Every digest from every job must be the same string.
+  # --------------------------------------------------------------------------
+  compare:
+    name: all digests must be identical
+    needs: [reference, native]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: collected
+          pattern: digest-*
+          merge-multiple: true
+      - name: Compare
+        shell: bash
+        run: |
+          echo "Collected digests:"
+          for f in collected/*.txt; do
+            printf '  %-46s %s\n' "$(basename "$f" .txt)" "$(cat "$f")"
+          done
+
+          unique=$(cat collected/*.txt | sort -u | wc -l)
+          if [ "$unique" -ne 1 ]; then
+            echo
+            echo "::error::the pipeline digest is NOT identical across builds"
+            echo "A published number has moved. Run 'python scripts/snapshot.py --verbose'"
+            echo "on the differing platforms to see which stage diverged:"
+            echo "  idf only          -> the logarithm (see spec_addenda G13)"
+            echo "  weights onwards   -> the vectoriser"
+            echo "  scores only       -> the reduction policy or the scoring kernel"
+            exit 1
+          fi
+          echo
+          echo "All $(ls collected/*.txt | wc -l) builds agree: $(head -1 collected/*.txt | head -1)"
+
+  # --------------------------------------------------------------------------
+  # A guard that only matters when it fires: the numeric guard rails must
+  # actually reject an unsound build, or their passing means nothing.
+  # --------------------------------------------------------------------------
+  guards-reject-unsound-builds:
+    name: fast-math must fail to compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: seanmiddleditch/gha-setup-ninja@master
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip nanobind numpy
+      - name: A fast-math build must be refused
+        run: |
+          cmake -S . -B build-fastmath -G Ninja -DTFIDF_FAST_MATH=ON -DTFIDF_BUILD_TESTS=ON
+          if cmake --build build-fastmath 2>build.log; then
+            echo "::error::a fast-math build compiled; the fp_guard.hpp guard is not working"
+            exit 1
+          fi
+          grep -q "ffast-math" build.log \
+            || { echo "::error::the build failed for the wrong reason"; cat build.log; exit 1; }
+          echo "The compile-time guard rejected the build, as intended."

@@ -1,0 +1,80 @@
+# Undefined behaviour and memory safety.
+#
+# Two things here are specific to this project rather than boilerplate.
+#
+# `float-divide-by-zero` is enabled deliberately. A division by a zero vector
+# norm is a real logic error here: README section 2.3 fixes cosine to 0 for a
+# zero vector, and that convention must be applied *before* the division rather
+# than discovered afterwards by producing an Inf.
+#
+# The ranking layer is the reason ASan matters at all. A NaN in a sort key
+# destroys the strict weak ordering, and libstdc++'s final insertion pass then
+# walks off the front of the array -- a genuine out-of-bounds write, not merely
+# a wrong answer. The finiteness guards exist to prevent that; ASan is what
+# proves they do.
+
+name: sanitizers
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  pull_request:
+    paths: ["cpp/**", ".github/workflows/sanitizers.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  asan-ubsan:
+    name: address + undefined
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: seanmiddleditch/gha-setup-ninja@master
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip nanobind numpy pyyaml pytest hypothesis
+      - name: Build with sanitizers
+        run: |
+          cmake -S . -B build-asan -G Ninja             -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DTFIDF_BUILD_TESTS=ON             -DTFIDF_SANITIZERS="address;undefined"
+          cmake --build build-asan
+      - name: Native tests under ASan and UBSan
+        run: ctest --test-dir build-asan --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+
+  thread:
+    name: thread
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: seanmiddleditch/gha-setup-ninja@master
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip nanobind numpy
+      - run: |
+          cmake -S . -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DTFIDF_BUILD_TESTS=ON -DTFIDF_SANITIZERS=thread
+          cmake --build build-tsan
+      - run: ctest --test-dir build-tsan --output-on-failure
+
+  glibcxx-assertions:
+    name: libstdc++ assertions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: seanmiddleditch/gha-setup-ninja@master
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip nanobind numpy
+      - name: Build with hardened libstdc++
+        # Catches an out-of-range container access that ASan can miss when the
+        # access happens to land inside an adjacent live allocation.
+        run: |
+          cmake -S . -B build-assert -G Ninja -DCMAKE_BUILD_TYPE=Debug             -DTFIDF_BUILD_TESTS=ON             -DCMAKE_CXX_FLAGS="-D_GLIBCXX_ASSERTIONS"
+          cmake --build build-assert
+      - run: ctest --test-dir build-assert --output-on-failure

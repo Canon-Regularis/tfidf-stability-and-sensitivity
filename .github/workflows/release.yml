@@ -1,0 +1,128 @@
+# Wheels and a citable archive.
+#
+# Publishing is now straightforward because the code is Apache-2.0. Before the
+# licence split it was not: the repository was CC BY 4.0 throughout, which
+# Creative Commons explicitly advises against for software -- no patent grant,
+# and attribution terms that do not map onto compiled binaries. The prose and
+# generated reports remain CC BY 4.0; see LICENSE.md.
+#
+# Every wheel is verified before release by running the suite against the
+# INSTALLED package rather than the source tree. A wheel that builds but omits
+# a data file -- the stopword list, say, or the vendored stemmer -- would pass
+# every source-tree test and fail for the first person who installed it.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sdist:
+    name: source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # setuptools-scm style version, and a full log
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build --sdist
+      - name: The sdist must build without network access
+        # Every third-party dependency needed at build time is vendored, so this
+        # must succeed offline. If it does not, the hermetic-build claim in
+        # cpp/third_party/ is false.
+        run: |
+          python -m pip download --no-deps --no-binary :all: --dest /tmp/check dist/*.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  wheels:
+    name: wheels ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21
+        env:
+          # The extension is a real CPython module, so wheels are
+          # version-specific. 3.11 is the floor: the code uses `X | Y` unions and
+          # `itertools.pairwise` throughout.
+          CIBW_BUILD: "cp311-* cp312-* cp313-*"
+          CIBW_SKIP: "*-musllinux_i686 *_i686 *-win32"
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          CIBW_BEFORE_BUILD: "pip install nanobind numpy"
+          # Test the INSTALLED wheel, not the checkout.
+          CIBW_TEST_REQUIRES: "pytest hypothesis scikit-learn"
+          CIBW_TEST_COMMAND: >
+            python -c "import tfidf_stability, tfidf_stability._native as n;
+            print(tfidf_stability.__version__, n.native_available())" &&
+            python -m pytest {project}/tests -q -x
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  determinism-gate:
+    name: the release must be reproducible
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip -r requirements-dev.txt
+      - name: A release build must not be fast-math or arch-tuned
+        # The manifest refuses to stamp such a run as reproducible, so shipping
+        # one would ship a binary that cannot produce publishable numbers.
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, "src")
+          from tfidf_stability.persistence.manifest import RunManifest
+          m = RunManifest("release-check")
+          m.require_reproducible()
+          print("build is reproducible:", m.is_reproducible_build)
+          PY
+      - run: python scripts/snapshot.py --verbose
+
+  publish:
+    name: attach to the release
+    needs: [sdist, wheels, determinism-gate]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+      id-token: write               # trusted publishing, no long-lived token
+    environment: release            # requires a manual approval
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: "{sdist,wheels-*}"
+          merge-multiple: true
+      - run: ls -la dist/
+      - name: Attach to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

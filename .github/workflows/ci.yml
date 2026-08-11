@@ -1,0 +1,253 @@
+# The pull-request gate.
+#
+# Shaped by one architectural fact: the pure-Python reference is **normative**
+# and needs no compiler. So the Python suite runs on every OS and every
+# supported interpreter without a toolchain, and the native jobs are additive.
+# A contributor with no C++ compiler can still run and pass the whole normative
+# suite.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip ruff mypy types-PyYAML numpy pyyaml
+      - run: python -m ruff check src tests scripts
+      - run: python -m mypy
+      - name: Vendored assets must match their recorded digests
+        # Same script pre-commit runs, so a contributor sees this locally first.
+        run: python scripts/check_vendored.py
+      - name: The C++ tree must mirror the Python packages
+        run: python scripts/check_layout.py
+
+  reference:
+    name: reference ${{ matrix.os }} py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip -r requirements-dev.txt
+      - name: Test the normative backend
+        # No compiler involved. This is the suite that defines correctness.
+        run: python -m pytest tests/ -q --hypothesis-profile=ci
+        env:
+          HYPOTHESIS_PROFILE: ci
+      - name: PYTHONHASHSEED must not reach any number
+        # Dictionary ordering leaking into the vocabulary would be invisible to
+        # a single-process run, since the seed is fixed at interpreter start-up.
+        run: python -m pytest tests/ -q -k "hash_seed or determinism or reproducib"
+        env:
+          PYTHONHASHSEED: random
+
+  native:
+    name: native ${{ matrix.os }} py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: seanmiddleditch/gha-setup-ninja@master
+      - run: python -m pip install --upgrade pip -r requirements-dev.txt
+      - name: Build the native backend and its tests
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTFIDF_BUILD_TESTS=ON
+          cmake --build build
+      - name: C++ unit tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Install and run the full suite with the native backend present
+        run: |
+          python -m pip install -e . --no-build-isolation
+          python -m pytest tests/ -q
+        env:
+          HYPOTHESIS_PROFILE: ci
+      - name: The extension must be self-contained (Windows)
+        # A MinGW-built .pyd that depends on libwinpthread-1.dll fails to import
+        # with a bare "DLL load failed", because CPython's search path does not
+        # include the GCC runtime. -static is what prevents that.
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pyd=$(find src -name "_tfidf_native*.pyd" | head -1)
+          if command -v objdump >/dev/null && objdump -p "$pyd" | grep -qi "libwinpthread\|libstdc++\|libgcc"; then
+            echo "::error::the extension depends on a GCC runtime DLL"
+            exit 1
+          fi
+
+  cppcheck:
+    name: static analysis (C++)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cppcheck
+      - run: >
+          cppcheck --enable=warning,performance,portability --error-exitcode=1
+          --inline-suppr --std=c++20 --suppress=missingIncludeSystem
+          -I cpp/include cpp/include cpp/tests
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip -r requirements-dev.txt
+      - name: Coverage, with a floor
+        # A coverage number nobody gates on is decoration. The floor is set just
+        # below the current value so it ratchets rather than blocks; raise it
+        # when it is comfortably exceeded, never lower it to make a build pass.
+        run: >
+          python -m pytest tests/ -q --cov --cov-report=term-missing
+          --cov-report=xml --cov-fail-under=85
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+
+  fuzz:
+    name: parser fuzzing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip -r requirements-dev.txt
+      - run: python -m pip install -e . -C cmake.define.TFIDF_BUILD_NATIVE=OFF
+      - name: The .tfsx parser and the tokeniser must never leak an untyped error
+        # This found a real defect on its first run: one byte set to 0x80 inside
+        # the token block leaked a bare UnicodeDecodeError out of the parser.
+        run: python -m pytest tests/test_fuzz_parsers.py -q --hypothesis-profile=ci
+
+  notebooks:
+    name: notebooks execute
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip -r requirements-dev.txt matplotlib
+      - run: python -m pip install -e . -C cmake.define.TFIDF_BUILD_NATIVE=OFF
+      - name: Every notebook must run top to bottom
+        # A notebook that no longer runs is worse than no notebook: it documents
+        # an API that has moved. nbmake executes them as tests; outputs are not
+        # committed, so this is the only thing keeping them honest.
+        run: python -m pytest --nbmake notebooks/ -q
+
+  docs:
+    name: docs links resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Relative links in docs/ must point at files that exist
+        # The implementation notes cross-reference the code heavily. A stale link
+        # is a silent lie about where something lives.
+        run: python scripts/check_docs.py
+
+  cli:
+    name: cli end to end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip -r requirements-dev.txt
+      - name: Build, verify and inspect
+        run: |
+          python -m pip install -e . -C cmake.define.TFIDF_BUILD_NATIVE=OFF
+          tfidf-stability info
+          tfidf-stability build-corpus tests/fixtures/mini_corpus.jsonl -o /tmp/mini.tfsx
+          tfidf-stability verify /tmp/mini.tfsx
+          tfidf-stability inspect /tmp/mini.tfsx d1 > /dev/null
+      - name: A generated dataset must reach a fitted model
+        # The dataset layer is only useful if it feeds the pipeline, and that
+        # join is not covered by unit tests on either side of it.
+        run: |
+          python scripts/build_corpus.py synthetic_tiny -o /tmp/synth.jsonl
+          tfidf-stability build-corpus /tmp/synth.jsonl -o /tmp/synth.tfsx
+          tfidf-stability verify /tmp/synth.tfsx
+      - name: The synthetic corpus must be byte-identical when regenerated
+        # The generator avoids random.choice/sample/shuffle precisely because
+        # they are not stable across CPython versions. This is what would catch
+        # a regression that reintroduced one.
+        shell: bash
+        run: |
+          python scripts/build_corpus.py synthetic_tiny -o /tmp/again.jsonl
+          cmp /tmp/synth.jsonl /tmp/again.jsonl \
+            || { echo "::error::the synthetic generator is not deterministic"; exit 1; }
+      - name: The experiments must run, and section 4.4 must hold
+        # run_stability_profile.py exits non-zero if any perturbation inside the
+        # certified radius flipped the top-k set. That is the theorem being
+        # checked against data on every push, not merely asserted in a docstring.
+        run: |
+          python scripts/run_stability_profile.py --dataset synthetic_tiny -o /tmp/reports
+          python scripts/run_tie_break_ablations.py --dataset synthetic_tiny \
+            --tau 4.8e-13 -o /tmp/reports
+          python scripts/run_similarity.py --dataset synthetic_tiny -o /tmp/reports
+          python scripts/export_intermediates.py --dataset synthetic_tiny -o /tmp/reports
+      - name: Experiment results must be reproducible from their digest
+        # The result digest strips volatile fields, so a rerun on the same data
+        # must produce the same string. If it does not, a published number is
+        # not checkable.
+        shell: bash
+        run: |
+          python scripts/run_stability_profile.py --dataset synthetic_tiny -o /tmp/again
+          a=$(python -c "import json;print(json.load(open('/tmp/reports/stability_profile.json'))['result_digest'])")
+          b=$(python -c "import json;print(json.load(open('/tmp/again/stability_profile.json'))['result_digest'])")
+          [ "$a" = "$b" ] || { echo "::error::experiment result digest is not stable: $a vs $b"; exit 1; }
+          echo "result digest stable: $a"
+      - name: Figures must render headlessly
+        run: |
+          python -m pip install matplotlib
+          python scripts/make_figures.py --reports /tmp/reports
+      - name: MovieLens must not be fetched during CI
+        # No network access here, and none wanted: the archive may not be
+        # redistributed. This asserts the failure is the *documented* one rather
+        # than a stack trace, since that error is a contributor's first contact
+        # with the licence position.
+        run: |
+          python scripts/build_corpus.py movielens_small -o /tmp/ml.jsonl 2>&1 | tee /tmp/ml.log || true
+          grep -q "fetch_data.py" /tmp/ml.log
+      - name: A reference-only install must work without a compiler
+        # `pip install . -C cmake.define.TFIDF_BUILD_NATIVE=OFF` is the
+        # documented escape hatch; if it breaks, the claim that the reference
+        # backend stands alone is false.
+        run: python -c "from tfidf_stability._native import native_available; print('native:', native_available())"
