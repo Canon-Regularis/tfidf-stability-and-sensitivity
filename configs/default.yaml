@@ -1,0 +1,60 @@
+# The normative configuration.
+#
+# Every value here can move a published number, so each is pinned explicitly
+# rather than inherited from a library default, and each is folded into the run
+# manifest's digest. Where the paper leaves a choice open, the spec_addenda entry
+# that resolves it is cited.
+
+preprocessing:
+  unicode_form: NFKC          # G7. NFC would leave compatibility variants apart.
+  lowercase: true             # str.lower(), NOT casefold() -- casefold needs ICU
+                              # to reproduce in C++ and its tailorings vary.
+  token_pattern: '[^\W_]+'    # G7. Hashed into the manifest.
+  min_token_length: 1
+  max_token_length: 64
+  stopword_asset: stopwords_en_v1.txt   # frozen and hash-verified
+  lemmatiser: porter2         # G7. A stemmer, not a lemmatiser -- see the addendum.
+  insert_gaps: true           # G7. n-grams must not span a removed stopword.
+  n_min: 1
+  n_max: 2
+  cross_gaps: false
+
+vocabulary:
+  min_df: 1
+  max_df: null
+  max_features: null
+  max_features_policy: df_desc          # G6 (TFIDF-SPEC-01)
+
+numerics:
+  reduction: naive            # The literal reading of section 2's formulas.
+                              # neumaier / pairwise / exact are instruments for
+                              # the noise-floor study, not for published results.
+  log_impl: correctly_rounded # G13. The platform libm differs in ~15% of idf
+                              # entries, which breaks cross-platform bit-exactness.
+
+ranking:
+  attributes:                 # G8. Directions are pinned; the identifier is
+    - {name: popularity, direction: desc, dtype: int64,     missing_policy: last}
+    - {name: rating,     direction: desc, dtype: ratio_i64, missing_policy: last}
+    - {name: engagement, direction: desc, dtype: int64,     missing_policy: last}
+  pi_priority:     [popularity, rating, engagement]
+  pi_alt_priority: [engagement, rating, popularity]   # G15: the reversal
+  exclude_zero_norm_from_ranking: false               # G3: paper-faithful
+  strict_mode: lenient        # G3. Lenient for sweeps, where k > N is a
+                              # legitimate grid point rather than an error.
+
+evaluation:
+  ks: [5, 10, 20, 50]         # section 7.1
+  # tau has NO default. Section 7.1 makes every tie-break result conditional on
+  # it, and it is derived from the measured noise floor in section 7.0. The
+  # placeholder below is provisional and must be replaced by that measurement.
+  tau_provisional: 1.0e-9
+  tau_sweep: [0.0, 1.0e-15, 1.0e-12, 1.0e-9, 1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4]
+  rho_warn_threshold: 2.0     # G1. The addendum defines rho but names no threshold.
+
+profiles:
+  aggregation: text_concat    # G11. Length-weighted; see the addendum.
+  separate_items: false       # G20 ablation: blocks n-grams spanning item seams.
+  min_interactions: 5         # G10(4)
+  exclude_profile_items: true # G10(3) -- the most consequential choice
+  interaction_min_weight: 4.0 # G10(5) -- what "interacted" means

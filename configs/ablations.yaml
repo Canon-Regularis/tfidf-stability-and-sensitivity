@@ -1,0 +1,47 @@
+# The ablation grid.
+#
+# Each entry varies one pinned decision and holds everything else fixed, so a
+# difference in the result is attributable to that decision alone. Every run
+# writes its own manifest, and the manifests differ only in the varied field.
+
+tie_break_priority:            # G15: section 4.5 does not say which reordering
+  description: All six orderings of the attribute priority. The default pi_alt
+    is the reversal; this sweep shows how much that choice matters.
+  vary: ranking.pi_alt_priority
+  values:
+    - [engagement, rating, popularity]
+    - [rating, popularity, engagement]
+    - [rating, engagement, popularity]
+    - [engagement, popularity, rating]
+    - [popularity, engagement, rating]
+
+tau_sweep:                     # section 7.1: results are conditional on tau
+  description: Required, not optional. Section 7.1 states results are explicitly
+    conditional on tau, which makes the sweep part of the claim.
+  vary: evaluation.tau
+  values: [0.0, 1.0e-15, 1.0e-12, 1.0e-9, 1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4]
+
+profile_aggregation:           # G11 / G21
+  description: text_concat is length-weighted. vector_mean and vector_sum give
+    identical similarities (G21) but different norms, hence different section
+    4.2-4.3 certificates.
+  vary: profiles.aggregation
+  values: [text_concat, vector_mean, vector_sum]
+
+profile_item_exclusion:        # G10(3) -- the most consequential decision
+  description: Leaving the user's remaining items in the candidate set lets them
+    retrieve themselves. Included to quantify how large that artefact is.
+  vary: profiles.exclude_profile_items
+  values: [true, false]
+
+reduction_policy:              # section 7.0: the noise-floor instrument
+  description: The spread between these IS the floating-point noise floor, from
+    which tau is derived. Only `naive` is valid for published results.
+  vary: numerics.reduction
+  values: [naive, neumaier, pairwise, exact]
+
+vocabulary_boundary:           # G6 bonus experiment
+  description: A token at the max_features cut being kept or dropped is itself a
+    decision discontinuity, upstream of scoring.
+  vary: vocabulary.max_features
+  values: [null, 5000, 4999]

@@ -1,0 +1,232 @@
+"""CLI command implementations.
+
+Each command is a thin wrapper over a library function that emits a run
+manifest. That shape is deliberate: the manifest is the reproducibility
+contract, and making it a *side effect of every command* rather than something a
+caller remembers to request means an undocumented result cannot be produced by
+accident.
+
+Commands are stdlib-only (``argparse``, not a framework). The reference backend
+is standard-library only by design, and a CLI dependency would undermine that
+for no benefit at this size.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Any
+
+from tfidf_stability.persistence.manifest import RunManifest, environment_block
+from tfidf_stability.persistence.save_load import load_model, save_model
+from tfidf_stability.preprocessing.pipeline import PreprocessingConfig, PreprocessingPipeline
+from tfidf_stability.utils.hashing import hash_file, short
+from tfidf_stability.utils.io import canonical_json, read_jsonl, write_json
+from tfidf_stability.utils.logging import EventKind, get_logger, log_event
+from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
+
+__all__ = ["cmd_build_corpus", "cmd_info", "cmd_inspect", "cmd_verify", "load_config"]
+
+_LOG = get_logger(__name__)
+
+_REPO = Path(__file__).resolve().parents[3]
+_DEFAULT_CONFIG = _REPO / "configs" / "default.yaml"
+
+
+def load_config(path: Path | str | None = None) -> dict[str, Any]:
+    """Load a configuration, defaulting to the normative one.
+
+    The file's digest travels with the parsed content, so a manifest records
+    *which* config produced a result and not merely its values -- a comment
+    change is then visible too, which matters when the comments carry the
+    spec_addenda citations.
+    """
+    import yaml
+
+    target = Path(path) if path else _DEFAULT_CONFIG
+    parsed: dict[str, Any] = yaml.safe_load(target.read_text(encoding="utf-8"))
+    parsed["_source"] = str(target.name)
+    parsed["_digest"] = hash_file(target, text=True)
+    return parsed
+
+
+def _read_corpus(path: Path) -> tuple[list[str], list[str]]:
+    """Read a JSONL corpus of ``{doc_id, text}`` records."""
+    ids: list[str] = []
+    texts: list[str] = []
+    for record in read_jsonl(path):
+        ids.append(str(record["doc_id"]))
+        texts.append(str(record["text"]))
+    return ids, texts
+
+
+def cmd_build_corpus(args: argparse.Namespace) -> int:
+    """Preprocess a corpus, fit a model, and write it with its manifest."""
+    config = load_config(args.config)
+    pre = config.get("preprocessing", {})
+    pipeline = PreprocessingPipeline(
+        PreprocessingConfig(
+            n_min=int(pre.get("n_min", 1)),
+            n_max=int(pre.get("n_max", 2)),
+            insert_gaps=bool(pre.get("insert_gaps", True)),
+            cross_gaps=bool(pre.get("cross_gaps", False)),
+        )
+    )
+
+    ids, texts = _read_corpus(Path(args.corpus))
+    features = [pipeline.preprocess(t) for t in texts]
+    model = TfidfVectoriser().fit(features, ids)
+
+    log_event(_LOG, EventKind.REDUCTION_POLICY, stage="vectorisation", policy=model.reduction)
+    if model.zero_norm_documents:
+        log_event(
+            _LOG,
+            EventKind.DEGENERATE,
+            case="zero_norm_document",
+            n=len(model.zero_norm_documents),
+            n_documents=model.n_documents,
+        )
+
+    out = Path(args.output)
+    provenance = save_model(model, out)
+
+    manifest = RunManifest(
+        run_kind="build_corpus",
+        config=config,
+        dataset={
+            "path": Path(args.corpus).name,
+            "sha256": hash_file(args.corpus, text=True),
+            "n_documents": len(ids),
+        },
+        preprocessing=pipeline.fingerprint(),
+        model=provenance,
+        parameters={"reduction": str(model.reduction), "log_impl": str(model.idf.log_impl)},
+    )
+    manifest.require_reproducible()
+    manifest.write(out.with_suffix(".manifest.json"))
+
+    # Digests only, never the output path: the path is the caller's choice and
+    # would put a machine-specific value into an otherwise reproducible record.
+    for artefact, sha256 in (
+        ("model", model.digest()),
+        ("vocabulary", model.vocabulary.digest()),
+        ("manifest", manifest.digest()),
+    ):
+        log_event(_LOG, EventKind.DIGEST, artefact=artefact, sha256=sha256)
+
+    print(
+        f"fitted {model.n_documents} documents, |V| = {model.n_features}, nnz = {model.matrix.nnz}"
+    )
+    print(f"  zero-norm documents : {len(model.zero_norm_documents)}")
+    print(f"  model digest        : {short(model.digest(), 16)}")
+    print(f"  manifest digest     : {short(manifest.digest(), 16)}")
+    print(f"  written             : {out}")
+    return 0
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    """Print a document's intermediate quantities (README section 1.2).
+
+    Section 1.2 requires that intermediates stay inspectable rather than being
+    abstracted away; this is the command that honours it from a shell.
+    """
+    model = load_model(args.model)
+    if args.doc_id not in model.doc_ids:
+        print(f"no document {args.doc_id!r}; corpus has {model.n_documents}")
+        return 2
+    print(canonical_json(model.intermediates(model.doc_ids.index(args.doc_id))))
+    return 0
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Re-derive a saved model's digests and compare against its manifest.
+
+    The check the reproducibility claim rests on: it answers "does this file
+    still contain what the manifest says it does?" without needing the original
+    corpus.
+    """
+    model = load_model(args.model)
+    manifest_path = Path(args.model).with_suffix(".manifest.json")
+    if not manifest_path.exists():
+        print(f"no manifest beside {args.model}")
+        return 2
+
+    recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected = recorded.get("model", {})
+    failures = []
+    for key, actual in (
+        ("model_digest", model.digest()),
+        ("vocabulary_digest", model.vocabulary.digest()),
+    ):
+        if key in expected and expected[key] != actual:
+            failures.append(f"  {key}: manifest {expected[key][:16]}... != actual {actual[:16]}...")
+
+    if failures:
+        print("MISMATCH")
+        print("\n".join(failures))
+        return 1
+
+    # A build with fast-math or architecture tuning is not allowed to produce
+    # published numbers, so report what the manifest actually recorded. Absence
+    # of a native block means the pure-Python reference produced this, which is
+    # reproducible by construction.
+    native = recorded.get("environment", {}).get("native")
+    reproducible = True if native is None else bool(native.get("reproducible", False))
+
+    backend = "reference (pure Python)" if native is None else native["compiler_id"]
+    print(f"verified: {model.n_documents} documents, |V| = {model.n_features}")
+    print(f"  model digest    : {short(model.digest(), 16)}")
+    print(f"  backend         : {backend}")
+    print(f"  reproducible    : {reproducible}")
+    return 0 if reproducible else 1
+
+
+def cmd_info(args: argparse.Namespace) -> int:
+    """Report the environment a run would execute in.
+
+    Worth having as its own command: the first question about a surprising
+    number is which build produced it, and this answers that without running an
+    experiment.
+    """
+    payload: dict[str, Any] = {"environment": environment_block()}
+    if args.config:
+        payload["config"] = load_config(args.config)
+    if args.json:
+        print(canonical_json(payload))
+        return 0
+
+    env = payload["environment"]
+    print(f"python     {env['python']} ({env['implementation']})")
+    print(f"platform   {env['platform']}")
+    native = env.get("native")
+    if native is None:
+        print("native     not built -- the pure-Python reference is normative and complete")
+    else:
+        print(
+            f"native     {native['compiler_id']} {native['compiler_ver']} ({native['build_type']})"
+        )
+        print(f"           reproducible = {native['reproducible']}")
+        print(f"           flags = {native['numeric_flags']}")
+    float_env = env["float"]
+    print(
+        f"float      mantissa {float_env['mantissa_dig']} bits, "
+        f"subnormals {'ok' if float_env['subnormals_supported'] else 'FLUSHED'}"
+    )
+    return 0
+
+
+def cmd_schema(args: argparse.Namespace) -> int:
+    """Print the ``.tfsx`` on-disk schema."""
+    from tfidf_stability.persistence.model import describe_schema
+
+    print(canonical_json(describe_schema()))
+    return 0
+
+
+def write_report(path: Path | str, payload: Any, manifest: RunManifest) -> None:
+    """Write a result document and its manifest side by side."""
+    target = Path(path)
+    write_json(target, payload)
+    manifest.results = {**manifest.results, "report_sha256": hash_file(target, text=True)}
+    manifest.write(target.with_suffix(".manifest.json"))

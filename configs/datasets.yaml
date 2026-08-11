@@ -1,0 +1,79 @@
+# Dataset registry.
+#
+# Nothing here is committed to the repository. MovieLens may not be
+# redistributed under its usage licence, so it is fetched on demand and verified
+# against a pinned digest. GroupLens updates ml-latest-small *in place*, so the
+# pin is not optional: a changed digest must fail loudly and be reconciled
+# deliberately, with the resolved value recorded in every manifest.
+#
+# This file is descriptive. The authoritative defaults live in
+# `datasets.synthetic.SyntheticSpec`, and `spec_digest` in each run manifest is
+# what actually identifies a corpus.
+
+synthetic_small:
+  kind: synthetic
+  description: Seeded Zipfian corpus for CI. Redistributable, offline, and
+    carrying both exact duplicates and constructed near-tie twins.
+  spec:
+    seed: 20260811
+    n_docs: 2000
+    vocab_size: 4000
+    # Exactly 1. The weights are then integer divisions and the sampling is
+    # exact; any other value goes through `pow` and therefore through the
+    # platform libm, which spec_addenda G13 shows disagrees across systems.
+    zipf_exponent: 1.0
+    # Uniform, not lognormal. A lognormal length distribution needs `exp`, which
+    # is the same G13 problem -- and length only has to be *varied*, not
+    # distributed in any particular way, for the study's purposes.
+    len_min: 3
+    len_max: 40
+    n_users: 200
+    max_interactions_per_user: 12
+    # Tie exactly, by construction: the tau = 0 case, where only the tie-break
+    # can separate two documents. Section 4.5 and research question A2.
+    n_exact_duplicates: 20
+    # A copy plus one extra token. The extra token's document frequency sets the
+    # separation.
+    n_twin_pairs: 40
+    twin_extra_token_df: [1, 2, 4, 8, 16, 32, 64, 128]
+  # Measured, not assumed -- see spec_addenda G22. A single-token edit is a
+  # 1/(L+1) *relative* perturbation because section 2.2 normalises tf = count/L,
+  # so the twin grid cannot reach below about 1e-3 at these document lengths.
+  # Fine near-ties are located with `find_near_ties`, never constructed.
+  near_tie_range: [1.0e-3, 1.0e-1]
+
+synthetic_tiny:
+  kind: synthetic
+  description: 120 documents. For tests and doctests, where the full synthetic
+    corpus would dominate the runtime of the suite that uses it.
+  spec:
+    n_docs: 120
+    vocab_size: 300
+    n_users: 20
+    n_exact_duplicates: 4
+    n_twin_pairs: 6
+
+movielens_small:
+  kind: movielens
+  description: ml-latest-small -- 610 users, 9742 movies, 100836 ratings.
+  url: https://files.grouplens.org/datasets/movielens/ml-latest-small.zip
+  # Filled by scripts/fetch_data.py on first verified download, then committed.
+  # Held in `datasets.movielens.MOVIELENS_SHA256`, which is what `load` checks.
+  sha256: null
+  licence: >
+    Usage licence permits research use but PROHIBITS redistribution. Never
+    commit this data. See data/README.md.
+  citation: >
+    F. Maxwell Harper and Joseph A. Konstan. 2015. The MovieLens Datasets:
+    History and Context. ACM TiiS 5, 4: 19:1-19:19.
+  text_fields: [title, genres, tags]
+  attributes:
+    popularity: rating_count
+    rating: mean_rating_exact      # G8: stored as (2*sum, count), never a float
+    engagement: tag_count
+  interaction_min_weight: 4.0      # G10(5); inclusive at 4.0
+  # Some films carry no ratings at all, so their mean is genuinely undefined:
+  # has_value = False, sorting last. G8's missing-value path, exercised against
+  # real data rather than a constructed fixture. The count is reported by
+  # scripts/fetch_data.py rather than pinned here, since it is a property of an
+  # archive this repository does not contain.
