@@ -357,8 +357,12 @@ def score(
     index: InvertedIndex,
     doc_norms: Sequence[float],
     policy: Reduction = Reduction.NAIVE,
-    algorithm: ScoringAlgorithm = ScoringAlgorithm.TAAT,
     *,
+    # Keyword-only, because the two traversals are required to agree to the last
+    # bit: which one ran is a performance choice, never a numerical one. Naming
+    # it at the call site keeps that visible, and stops `policy` and `algorithm`
+    # -- adjacent enums that both default -- from being swapped positionally.
+    algorithm: ScoringAlgorithm = ScoringAlgorithm.TAAT,
     query_norm: float | None = None,
     scratch: ScoringScratch | None = None,
 ) -> list[float]:

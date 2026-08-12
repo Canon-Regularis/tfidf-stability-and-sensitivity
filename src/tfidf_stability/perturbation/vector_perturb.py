@@ -89,6 +89,10 @@ def three_term_terms(
     idf_linf: float,
     delta_idf_linf: float,
     observed: float,
+    *,
+    # Keyword-only: the reduction chooses which summation order the two l2 calls
+    # below use, so it is the one argument here that changes the returned bits.
+    # A bare `Reduction.EXACT` trailing five floats would hide that.
     policy: Reduction = Reduction.NAIVE,
 ) -> ThreeTermBound:
     """Assemble section 4.2's bound from its parts."""
