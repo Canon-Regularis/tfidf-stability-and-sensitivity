@@ -553,6 +553,37 @@ real TF-IDF norms are bounded below by `1/sqrt(nnz)` (see [G4](#g4)), which is
 far above the threshold — so this bites only on synthetic inputs, never on the
 corpora this project studies.
 
+### Refinement: scaling moves a vector *across* the threshold
+
+The test fix described above was applied to only half of what needed it, and a
+100k-example search later found the other half.
+
+A scale-invariance test compares `cos(k·u, v)` against `cos(u, v)`. The guard
+excluded the underflow regime for the **scaled** vector alone — but multiplying
+by `k > 1` moves a vector *out* of the regime, so the original `u` can sit below
+the threshold while `k·u` sits above it. Both cosines appear in the assertion, so
+guarding one endpoint is not enough. The falsifying example:
+
+    u = 8.389842684852489e-160     (below 1.49e-154)
+    k = 177795.0
+    k·u = 1.49e-154                (above it)
+
+    cos(k·u, v) = 1.0
+    cos(u,   v) = 0.9999994865255848
+
+They differ by 5e-7 against a 1e-12 tolerance, and the implementation is right in
+both cases — it is exhibiting exactly the instability tabulated above. The
+correct guard excludes the regime for **every vector the assertion touches**, not
+merely the one the test happens to construct.
+
+**Why it stayed hidden.** The three `assume()` calls reject about 41% of
+generated examples (measured: 697 invalid of 1697 at `max_examples=1000`), which
+sits close enough to Hypothesis's `filter_too_much` threshold that the health
+check fired on the CI runner and not locally. The health check was therefore
+masking a real defect: suppressing it — justified, since the filtering is
+deliberate — is what exposed the counterexample. A health check that fires
+intermittently is worth treating as a symptom rather than noise.
+
 ---
 
 ## Errata recorded during implementation

@@ -12,7 +12,7 @@ import math
 import sys
 
 import pytest
-from hypothesis import assume, given
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 from tfidf_stability.similarity.cosine import cosine, cosine_against_corpus, cosine_matrix
@@ -113,6 +113,21 @@ def test_cosine_with_self_is_one_or_zero(a: dict[int, float]) -> None:
 NORM_UNDERFLOW_THRESHOLD = math.sqrt(sys.float_info.min)  # ~1.49e-154
 
 
+# Both suppressions are required, and the second is not redundant: a per-test
+# `settings` REPLACES the profile's `suppress_health_check` rather than adding
+# to it, so naming only `filter_too_much` would silently drop the `too_slow`
+# suppression the ci and nightly profiles set.
+#
+# `filter_too_much` is suppressed because the filtering is the point. The three
+# `assume()` calls below exclude the low-norm regime deliberately -- G18 -- and
+# they reject about 41% of generated examples (measured: 697 invalid of 1697 at
+# max_examples=1000). That sits close enough to Hypothesis's threshold that the
+# check fires or not depending on the machine, the seed and the library version,
+# which is why this passed locally and failed on the runner.
+#
+# This cannot hide a counterexample: the health check only concerns how many
+# examples were rejected before the test ran, never the verdict of one that did.
+@settings(suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow])
 @given(sparse_map, sparse_map, st.floats(min_value=1e-6, max_value=1e6))
 def test_cosine_is_invariant_under_positive_scaling(
     a: dict[int, float], b: dict[int, float], k: float
@@ -134,7 +149,16 @@ def test_cosine_is_invariant_under_positive_scaling(
     assume(l2_norm(u) > 0 and l2_norm(v) > 0)
     scaled = SparseVector(u.indices, tuple(x * k for x in u.values), u.dim)
     assume(math.isfinite(l2_norm(scaled)))
-    assume(min(abs(x) for x in scaled.values if x != 0.0) > NORM_UNDERFLOW_THRESHOLD)
+    # BOTH vectors have to clear the threshold, not just the scaled one. The
+    # assertion compares cos(scaled, v) against cos(u, v), so either side being
+    # in the underflow regime makes them disagree -- and scaling *up* moves a
+    # vector out of it, so guarding only `scaled` lets `u` stay in. Hypothesis
+    # found exactly that: u = 8.39e-160 (below the threshold) with k = 177795
+    # puts scaled at 1.49e-154 (above it), and the two cosines then differ by
+    # 5e-7 against a 1e-12 tolerance. The implementation is right; it is
+    # correctly exhibiting the instability G18 measures.
+    for vector in (u, scaled):
+        assume(min(abs(x) for x in vector.values if x != 0.0) > NORM_UNDERFLOW_THRESHOLD)
     assert cosine(scaled, v) == pytest.approx(cosine(u, v), abs=1e-12)
 
 
