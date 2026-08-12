@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import itertools
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -254,6 +255,44 @@ def _ratio_cmp(a: tuple[int, int], b: tuple[int, int]) -> int:
     return 0
 
 
+def _dense_positions(ordered: Sequence[Any], spec: AttributeSpec) -> dict[Any, int]:
+    """Rank the sorted distinct values by *equivalence class*, not by identity.
+
+    The distinction is only visible for :data:`AttributeDType.RATIO_I64`, and it
+    is the whole point of G8's exact comparison. ``_order_distinct`` deduplicates
+    with ``dict.fromkeys``, which uses tuple equality, so ``(14, 2)`` and
+    ``(21, 3)`` both survive -- yet ``_ratio_cmp`` correctly reports them equal,
+    because 14/2 == 21/3. Numbering the survivors ``enumerate``-style would then
+    hand two documents with the *same* mean rating two *different* ranks.
+
+    That is not a cosmetic ordering quirk. It breaks two stated guarantees at
+    once: the rating component stops tying when G8 says it must, so the
+    tie-break never falls through to engagement; and because ``dict.fromkeys``
+    preserves *insertion* order, which of the two equal representations sorts
+    first depends on the order the records were supplied in -- making the whole
+    ranking depend on corpus order, which section 2.3.1's total-order argument
+    explicitly forbids.
+
+    Ranks are therefore assigned densely: consecutive entries that compare equal
+    share a rank, and the next class takes the next integer.
+    """
+    if not ordered:
+        return {}
+
+    # Only ratios can have two distinct representations of one value. Every
+    # other dtype was deduplicated by `==` under an ordering consistent with its
+    # sort key, so its surviving values are genuinely distinct.
+    ratios = spec.dtype is AttributeDType.RATIO_I64
+
+    positions: dict[Any, int] = {ordered[0]: 0}
+    rank = 0
+    for previous, current in itertools.pairwise(ordered):
+        if not (ratios and _ratio_cmp(previous, current) == 0):
+            rank += 1
+        positions[current] = rank
+    return positions
+
+
 def _build_column(
     spec: AttributeSpec,
     values: Sequence[Any],
@@ -268,8 +307,9 @@ def _build_column(
         check_ratio_fits_int64(present, f"attribute {spec.name!r}")
 
     ordered = _order_distinct(present, spec)
-    n_distinct = len(ordered)
-    position = {v: i for i, v in enumerate(ordered)}
+    position = _dense_positions(ordered, spec)
+    # The number of *classes*, not of representations -- see `_dense_positions`.
+    n_distinct = (max(position.values()) + 1) if position else 0
 
     # Missing sorts last by taking the rank one past every present value, or
     # first by shifting the present values up and taking 0.

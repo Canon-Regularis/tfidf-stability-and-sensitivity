@@ -422,3 +422,66 @@ def test_sorted_scores_desc_is_a_sorted_permutation(scores: list[float]) -> None
     s = sorted_scores_desc(scores)
     assert sorted(s, reverse=True) == list(s)
     assert sorted(s) == sorted(scores)
+
+
+# ---------------------------------------------------------------------------
+# Equal means must share a rank (regression)
+# ---------------------------------------------------------------------------
+def test_equal_means_written_differently_receive_the_same_rank() -> None:
+    """G8's exact comparison has to survive rank-encoding, not just `ratio_less`.
+
+    `_order_distinct` deduplicates with `dict.fromkeys`, which uses tuple
+    equality, so (14, 2) and (21, 3) both survive -- yet they are the same mean,
+    3.5, and `_ratio_cmp` says so. Numbering the survivors positionally gave them
+    two different ranks, which silently un-tied a rating that G8 requires to tie.
+    """
+    table = AttributeTable.from_records(
+        [
+            {"doc_id": "a", "rating_sum2": 14, "rating_count": 2},  # 3.5
+            {"doc_id": "b", "rating_sum2": 21, "rating_count": 3},  # 3.5
+            # rating_sum2 is TWICE the rating sum, so the mean is sum2/(2*count).
+            # 18/(2*2) = 4.5, strictly better than the 3.5 above.
+            {"doc_id": "c", "rating_sum2": 18, "rating_count": 2},
+        ],
+        specs=(AttributeSpec("rating", Direction.DESC, AttributeDType.RATIO_I64),),
+    )
+    ranks = table.column("rating").ranks
+    assert ranks[0] == ranks[1], "14/2 and 21/3 are the same mean and must share a rank"
+    assert ranks[2] < ranks[0], "4.5 outranks 3.5 under DESC"
+
+
+def test_a_rating_tie_falls_through_to_the_next_attribute() -> None:
+    """The consequence of the above: if the rating does not tie, engagement is
+    never consulted, and the wrong document wins."""
+    records = [
+        {"doc_id": "a", "popularity": 1, "rating_sum2": 14, "rating_count": 2, "engagement": 5},
+        {"doc_id": "b", "popularity": 1, "rating_sum2": 21, "rating_count": 3, "engagement": 9},
+    ]
+    table = AttributeTable.from_records(records)
+    order = rank_all_operators([0.5, 0.5], table)["pi"].order
+    assert [records[i]["doc_id"] for i in order] == ["b", "a"], (
+        "scores, popularity and rating all tie, so engagement DESC decides"
+    )
+
+
+def test_the_ranking_does_not_depend_on_the_order_records_were_supplied_in() -> None:
+    """The property section 2.3.1's total-order argument rests on.
+
+    This is the shape the earlier bug actually took: `dict.fromkeys` preserves
+    *insertion* order, so which of two equal representations sorted first
+    depended on the corpus order, and the whole ranking moved with it.
+    """
+    a = {"doc_id": "a", "popularity": 1, "rating_sum2": 14, "rating_count": 2, "engagement": 5}
+    b = {"doc_id": "b", "popularity": 1, "rating_sum2": 21, "rating_count": 3, "engagement": 9}
+
+    forward = [a, b]
+    reverse = [b, a]
+    first = [
+        forward[i]["doc_id"]
+        for i in rank_all_operators([0.5, 0.5], AttributeTable.from_records(forward))["pi"].order
+    ]
+    second = [
+        reverse[i]["doc_id"]
+        for i in rank_all_operators([0.5, 0.5], AttributeTable.from_records(reverse))["pi"].order
+    ]
+    assert first == second, f"ranking depends on record order: {first} vs {second}"
