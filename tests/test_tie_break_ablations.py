@@ -247,3 +247,24 @@ def test_tau_is_never_defaulted() -> None:
 
     signature = inspect.signature(stratify_by_margin)
     assert signature.parameters["tau"].default is inspect.Parameter.empty
+
+
+def test_one_query_is_counted_once_even_when_several_k_clamp_together(
+    mini_attributes: AttributeTable,
+) -> None:
+    """The denominator must be a query count, as the docstring promises.
+
+    `ablate_query` clamps k to the candidate count (G3's lenient mode), so on a
+    6-document corpus k in (10, 20, 50) all become 6 and emit three identical
+    pairs for the *same* query. Counting all three reported n = 3 for a single
+    query -- inflating the denominator of section 7.3's headline statistic.
+    """
+    result = ablate_query([0.5] * 6, mini_attributes, ks=(5, 10, 20, 50), query_id="q0")
+
+    clamped = [
+        p for p in result.pairs if p.baseline == "pi" and p.variant == "pi_score" and p.k == 6
+    ]
+    assert len(clamped) > 1, "the fixture must actually exercise the clamping"
+
+    _, n = disagreement_rate([result], "pi", "pi_score", 6)
+    assert n == 1, f"one query must contribute once, got a denominator of {n}"

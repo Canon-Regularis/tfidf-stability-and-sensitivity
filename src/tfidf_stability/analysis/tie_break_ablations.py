@@ -180,12 +180,25 @@ def disagreement_rate(
     over thirty thousand are not the same claim, and section 7.1 requires the
     query count to be reported.
     """
-    considered = [
-        p
-        for r in results
-        for p in r.pairs
-        if p.baseline == baseline and p.variant == variant and p.k == k
-    ]
+    considered = []
+    for result in results:
+        # At most ONE pair per query. `ablate_query` clamps k to the candidate
+        # count (G3's lenient mode), so several requested k values can collapse
+        # onto the same effective k and emit several identical pairs for a single
+        # query -- on a 7-document corpus, k in (10, 20, 50) all become 7. Taking
+        # them all would count that query three times and report a denominator
+        # this docstring promises is a query count.
+        match = next(
+            (
+                p
+                for p in result.pairs
+                if p.baseline == baseline and p.variant == variant and p.k == k
+            ),
+            None,
+        )
+        if match is not None:
+            considered.append(match)
+
     if not considered:
         return 0.0, 0
     return sum(p.sets_differ for p in considered) / len(considered), len(considered)
