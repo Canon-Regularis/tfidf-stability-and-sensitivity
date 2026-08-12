@@ -9,6 +9,7 @@ the cases where the correct answer is a failure.
 
 from __future__ import annotations
 
+import json
 import math
 
 import pytest
@@ -28,6 +29,7 @@ from tfidf_stability.analysis.summarise import (
 )
 from tfidf_stability.ranking.attributes import AttributeTable
 from tfidf_stability.similarity.cosine import cosine_against_corpus
+from tfidf_stability.utils.io import canonical_json
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
 
 
@@ -266,3 +268,70 @@ def test_the_record_carries_provenance_and_environment() -> None:
     assert record["data_provenance"]["kind"] == "synthetic"
     assert record["environment"]
     assert record["result_digest"] == result.digest()
+
+
+# ---------------------------------------------------------------------------
+# Serialisation: results must be readable by something other than Python
+# ---------------------------------------------------------------------------
+def _strict_loads(text: str):
+    """Parse rejecting NaN/Infinity, the way every non-Python parser does."""
+
+    def reject(token: str):
+        raise ValueError(f"non-standard JSON token {token!r}")
+
+    return json.loads(text, parse_constant=reject)
+
+
+def test_a_non_finite_value_does_not_produce_invalid_json() -> None:
+    """NaN and Infinity are not JSON, and both occur here for good reasons.
+
+    An undefined margin is reported as NaN rather than coerced to a number
+    (G16), and ``g_min`` is infinite when a corpus has no strictly-positive
+    score gap. Python's encoder emits bare ``NaN``/``Infinity`` tokens, which its
+    own loader accepts and every strict parser -- JavaScript, jq, Go, Rust --
+    rejects. Both real experiment result files were unparseable that way.
+    """
+    text = canonical_json({"undefined": math.nan, "unbounded": math.inf, "fine": 1.5})
+    parsed = _strict_loads(text)
+    assert parsed == {"undefined": None, "unbounded": None, "fine": 1.5}
+
+
+def test_non_finite_values_are_sanitised_at_every_depth() -> None:
+    """Nested, because a margin summary is several levels down in a payload."""
+    text = canonical_json({"a": [{"b": [math.nan, {"c": -math.inf}]}]})
+    assert _strict_loads(text) == {"a": [{"b": [None, {"c": None}]}]}
+
+
+def test_a_full_experiment_result_serialises_to_strict_json() -> None:
+    """The end-to-end property: a written result must be machine-readable."""
+    result = ExperimentResult(
+        experiment="e",
+        payload={"margins": summarise_values("m", [math.nan, math.nan]).as_dict()},
+        parameters={"k": 1},
+    )
+    _strict_loads(canonical_json(result.as_dict()))
+
+
+# ---------------------------------------------------------------------------
+# Degenerate tau bands
+# ---------------------------------------------------------------------------
+def test_a_zero_noise_floor_does_not_crash_the_invariance_check() -> None:
+    """`tau_floor` is 0 whenever every reduction policy was exactly
+    correctly-rounded, which is measured behaviour for Neumaier -- not a
+    hypothetical. Taking log10 of it raised ValueError."""
+    scores = [[1.0, 0.5, 0.25]]
+    band = tau_band(_floor(0.0), scores)
+    assert band.tau_floor == 0.0
+    assert verify_band_invariance(band, scores)
+    assert math.isfinite(band.display_tau())
+
+
+def test_an_unbounded_band_never_yields_an_infinite_tau() -> None:
+    """With every score identical there is no positive gap, so `g_min` is
+    infinite. The geometric midpoint would be `inf`, and at `tau = inf` every
+    tie ball swallows the corpus -- an unusable tolerance to hand a caller."""
+    scores = [[0.5, 0.5, 0.5]]
+    band = tau_band(_floor(1e-16), scores)
+    assert math.isinf(band.g_min)
+    assert math.isfinite(band.display_tau())
+    assert band.display_tau() >= band.tau_floor

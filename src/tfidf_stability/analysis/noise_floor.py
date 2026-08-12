@@ -188,9 +188,27 @@ class TauBand:
         must never be treated as one: :attr:`is_invariant` is the claim, and it
         says the specific value is immaterial. It exists so a figure caption can
         name a number without implying the number was fitted.
+
+        Two degenerate bands need care, and both are reachable:
+
+        * ``g_min`` is infinite when the corpus has no strictly-positive gap at
+          all -- every score identical. The geometric midpoint would then be
+          ``inf``, which is not a usable tolerance: at ``tau = inf`` every tie
+          ball swallows the corpus. Since no gap exists to cross, every
+          admissible tau gives the same structure, so the smallest one is
+          returned.
+        * ``tau_floor`` is zero when every reduction policy was exactly
+          correctly-rounded, which does happen -- Neumaier was measured at zero
+          error on this corpus. The geometric midpoint collapses to 0, which is
+          legal (G3 admits ``tau = 0``) but is the exact-tie baseline rather
+          than a midpoint, so half the upper endpoint is returned instead.
         """
         if not self.is_valid:
             return math.nan
+        if math.isinf(self.g_min):
+            return self.tau_floor
+        if self.tau_floor <= 0.0:
+            return self.g_min / 2.0
         return math.sqrt(self.tau_floor * self.g_min)
 
     def as_dict(self) -> dict[str, Any]:
@@ -325,11 +343,24 @@ def verify_band_invariance(
 
     from tfidf_stability.ranking.tie_groups import tie_chains
 
-    lo = math.log10(band.tau_floor)
-    hi = math.log10(band.g_min)
+    # Logarithmic spacing needs a positive, finite band. Both endpoints can be
+    # degenerate: `tau_floor` is 0 when every policy was exactly
+    # correctly-rounded, and `log10(0)` raises; `g_min` is infinite when no
+    # strictly-positive gap exists. Probe the reachable part in those cases
+    # rather than crashing or sampling nothing.
+    upper = band.g_min if math.isfinite(band.g_min) else max(band.tau_floor, 1.0) * 1e6
+    lower = band.tau_floor if band.tau_floor > 0.0 else min(upper, 1.0) * 1e-300
+
+    lo = math.log10(lower)
+    hi = math.log10(upper)
     taus = [10.0 ** (lo + (hi - lo) * i / (probes - 1)) for i in range(probes)]
+    # tau = 0 is admissible whenever the floor is 0, and it is the exact-tie
+    # baseline -- the single most important point to check.
+    if band.tau_floor <= 0.0:
+        taus.append(0.0)
     # The top end must stay strictly inside the band.
-    taus[-1] = math.nextafter(band.g_min, 0.0)
+    if math.isfinite(band.g_min):
+        taus[probes - 1] = math.nextafter(band.g_min, 0.0)
 
     reference: list[tuple[tuple[int, ...], ...]] | None = None
     for tau in taus:

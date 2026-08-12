@@ -16,6 +16,7 @@ Two rules:
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from collections.abc import Iterable, Iterator, Mapping
@@ -50,15 +51,50 @@ VOLATILE_KEYS: frozenset[str] = frozenset(
 )
 
 
+def _json_safe(payload: Any) -> Any:
+    """Replace non-finite floats with ``null``, recursively.
+
+    ``NaN`` and ``Infinity`` are **not** JSON. RFC 8259 admits no token for
+    either, and Python's encoder emits them anyway as a non-standard extension:
+    its own ``json.loads`` reads them back, but a strict parser -- JavaScript's
+    ``JSON.parse``, ``jq``, Go, Rust -- rejects the whole document.
+
+    That mattered here rather than in theory. Both experiment result files
+    contained ``NaN`` (an undefined margin, which G16 requires be reported as
+    undefined rather than coerced to a number) and one also contained
+    ``Infinity`` (``g_min`` when a corpus has no strictly-positive score gap at
+    all). Every published result was therefore unparseable by anything but
+    Python -- in a project whose reproducibility contract is that a reader can
+    load the file and compare a digest.
+
+    ``null`` is the right encoding: in every payload here a non-finite float
+    means *undefined*, and the accompanying ``defined`` flags, ``n_nan`` counts
+    and ``*_hex`` fields preserve the distinction between "undefined", "not
+    applicable" and "infinite" for anyone who needs it.
+    """
+    if isinstance(payload, float):
+        return None if not math.isfinite(payload) else payload
+    if isinstance(payload, dict):
+        return {k: _json_safe(v) for k, v in payload.items()}
+    if isinstance(payload, (list, tuple)):
+        return [_json_safe(v) for v in payload]
+    return payload
+
+
 def canonical_json(payload: Any, *, indent: int | None = 2) -> str:
     """Render JSON canonically: sorted keys, LF endings, UTF-8 literals.
 
     ``indent=None`` gives the compact form used for hashing; the default gives
     the readable form used for files on disk. Both sort keys, so the two differ
     only in whitespace.
+
+    Non-finite floats become ``null`` -- see :func:`_json_safe`. ``allow_nan``
+    is left at its default so that a value slipping past the sanitiser would
+    still be written rather than raising mid-experiment; the sanitiser is the
+    guarantee, and ``test_io`` asserts the output parses strictly.
     """
     text = json.dumps(
-        payload,
+        _json_safe(payload),
         sort_keys=True,
         ensure_ascii=False,
         indent=indent,
