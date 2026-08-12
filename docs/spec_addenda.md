@@ -800,15 +800,57 @@ score vector:
 Smallest strictly-positive gap: **2.0e−08**. 2524 of 3000 documents score above
 zero, so the exact-tie mass is not merely the zero block.
 
-**The shares are configuration-dependent; the empty interval is not.** Repeating
-this with a different corpus size, vocabulary or query moves every row of that
-table by a few percent — an earlier run at a different configuration gave 17.2%
-exact and a smallest positive gap of 1.0e−09. What does *not* move is the middle
-row: no run has ever placed an adjacent pair in (0, 1e−9), and the smallest
-strictly-positive gap has stayed four or more orders of magnitude above 1e−12.
-That invariant is asserted by
-`tests/test_datasets.py::test_the_near_tie_interval_below_tau_is_empty` rather
-than left as a reported observation, because it is the claim §7.4 rests on.
+**The shares are configuration-dependent, and so — it turns out — is the empty
+interval.** Repeating this with a different corpus size, vocabulary or query
+moves every row of that table by a few percent.
+
+An earlier version of this addendum went further and claimed the *middle* row was
+invariant: that no run had ever placed an adjacent pair in (0, 1e−9), and that
+the claim was safe enough to assert as a regression test. **That was an
+over-generalisation from synthetic data, and MovieLens falsifies it.**
+
+### What MovieLens actually shows
+
+Measured on `ml-latest-small` (9742 films, digest `696d65a3…`), 12 leave-one-out
+folds, 114,504 adjacent pairs, under the **normative naive reduction**:
+
+| adjacent gap | count | share |
+| --- | --- | --- |
+| exactly 0 | 3129 | 2.73% |
+| **in (0, τ_floor = 4.44e−16)** | **197** | **0.172%** |
+| smallest strictly-positive gap | **8.67e−19** | — |
+
+The interval is not empty. It contains 197 pairs, and the smallest positive gap
+is nine orders of magnitude below the synthetic corpus's, and three orders
+*below the arithmetic noise floor itself*.
+
+### Why, and why it matters more than the number
+
+Those gaps are not separations. Recomputed under `Reduction.EXACT` the same
+folds give a smallest positive gap of **1.4e−11** — the sub-femto gaps are
+manufactured by naive summation, not present in the data. So the normative
+backend reports pairs of films as *distinctly scored* when the separation is
+smaller than its own error.
+
+That is precisely the situation τ exists to detect, and it means the two
+addenda interact on real data in a way they did not on synthetic:
+
+* G23's band is computed from `g_min` under **exact** arithmetic, and on
+  MovieLens that still gives a valid 4.5-decade band.
+* But the gaps a *consumer* sees come from the **naive** backend, and 0.172% of
+  those fall below `tau_floor`. Judged on those, `g_min < tau_floor` and the
+  band is **empty** — G23's own "this is a finding, not a bug" case.
+
+Which convention is correct is a question for the paper, not for the code, and
+it is not answered here. What is settled is that §7.4's regime cannot be
+described as "the interval is empty, so the near-tie regime is the exact-tie
+regime" on real data. On MovieLens the exact-tie share is 2.7%, not 17–18%, and
+there is a genuine population of sub-noise separations besides.
+
+The regression test
+`tests/test_datasets.py::test_the_near_tie_interval_below_tau_is_empty` remains
+valid — it is scoped to the synthetic generator, where the property does hold —
+but it must not be read as establishing anything about real corpora.
 
 Two consequences the paper should state:
 

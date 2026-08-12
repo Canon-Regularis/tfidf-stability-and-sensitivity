@@ -397,15 +397,22 @@ def test_the_interaction_threshold_is_configurable_and_exact() -> None:
 
 @pytest.mark.slow
 def test_the_near_tie_interval_below_tau_is_empty() -> None:
-    """The load-bearing half of G22, asserted rather than merely reported.
+    """A property of **the synthetic generator**, and of nothing wider.
 
-    Adjacent score gaps land either at exactly zero or well above 1e-9; the
-    interval in between is empty. This is why section 7.4's "near-tie" case is
-    really the *exact*-tie case, and why a fine near-tie has to be searched for
-    in section 5's score-level perturbation model rather than built from text.
+    On a seeded synthetic corpus, adjacent score gaps land either at exactly zero
+    or well above 1e-9, with the interval between them empty. That is worth
+    pinning, because the generator is what the CI experiments run on.
 
-    The *shares* in G22's table move with corpus size, vocabulary and query. This
-    invariant does not, so it is the part worth pinning.
+    **It does not generalise, and an earlier version of G22 wrongly said it did.**
+    Measured on MovieLens under the normative naive reduction: 197 of 114,504
+    adjacent pairs fall in (0, 4.44e-16), and the smallest strictly-positive gap
+    is 8.67e-19 -- below the arithmetic noise floor, never mind 1e-9. Recomputed
+    exactly, those gaps disappear, so they are artefacts of naive summation
+    rather than separations in the data.
+
+    So read this as "the generator produces a clean gap lattice", not as
+    "near-ties do not occur". Section 7.4's regime is genuinely different on real
+    data, and G22 now records both.
     """
     corpus = synthetic.generate(_spec(600, 1200, n_users=40))
     pipeline = PreprocessingPipeline()
