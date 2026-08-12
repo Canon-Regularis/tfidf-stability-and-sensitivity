@@ -226,8 +226,20 @@ was $0$ (any other value falsifies \S4.4, and the runner exits non-zero); roughl
 $60\%$ of \emph{uncertified} perturbations left the top-$k$ unchanged regardless.
 ``Not certified'' must not be read as ``will change''.
 
+% reports/figures/ is gitignored: figures are regenerated from the recorded
+% experiment JSON rather than versioned, so a fresh clone does not have them.
+% Without this guard the report simply fails to build from a clean checkout,
+% which is a poor property for the document that is meant to be the deliverable.
 \begin{figure}[ht]\centering
-\includegraphics[width=0.78\textwidth]{../figures/fig_transition.png}
+\IfFileExists{../figures/fig_transition.png}{%
+  \includegraphics[width=0.78\textwidth]{../figures/fig_transition.png}%
+}{%
+  \fbox{\parbox{0.7\textwidth}{\centering\vspace{1em}%
+  \textbf{Figure not generated.}\\[0.4em]
+  \texttt{python scripts/run\_stability\_profile.py -o reports/}\\
+  \texttt{python scripts/make\_figures.py --reports reports/}%
+  \vspace{1em}}}%
+}
 \caption{The A1 transition. A non-zero point left of the dashed line would
 falsify \S4.4 or the implementation.}
 \end{figure}
