@@ -113,7 +113,7 @@ TEST_CASE("kendall tau: fewer than two elements is 0, not undefined") {
 TEST_CASE("kendall tau: differing sets are refused, not approximated") {
     // The refusal is the point: it is the signal that kendall_fks is the
     // function actually wanted.
-    const auto attempt = [](std::vector<DocId> a, std::vector<DocId> b) {
+    const auto attempt = [](const std::vector<DocId>& a, const std::vector<DocId>& b) {
         static_cast<void>(kendall_tau_distance(a, b));  // discarding a [[nodiscard]] Real
     };
     CHECK_THROWS_AS(attempt({1, 2}, {1, 3}), std::invalid_argument);
