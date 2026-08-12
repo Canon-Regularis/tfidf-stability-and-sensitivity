@@ -34,9 +34,11 @@ jobs:
         # such as filter_too_much -- which the bare exit code does not. It is a
         # diagnostic only: nothing is suppressed, so a genuine counterexample
         # still fails the build.
+        # No -q: it suppresses the statistics section entirely, which made the
+        # first attempt at this instrumentation print nothing at all.
         run: >
           python -m pytest tests/test_perturbation_bounds.py
-          tests/test_cosine_edge_cases.py -q --hypothesis-show-statistics
+          tests/test_cosine_edge_cases.py --hypothesis-show-statistics
         env:
           HYPOTHESIS_PROFILE: nightly
       - name: Hunt for a ranking or tie-group violation
