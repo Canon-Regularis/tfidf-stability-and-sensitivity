@@ -80,7 +80,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install build dependencies
-        run: python -m pip install --upgrade pip nanobind numpy pyyaml
+        # The full dev set, not a hand-picked subset. `pip install -e .
+        # --no-build-isolation` resolves the build backend from THIS
+        # environment, and pyproject's build-system requires scikit-build-core
+        # -- which a nanobind/numpy/pyyaml trio does not provide, so the install
+        # failed and took the differential step with it. pytest and hypothesis
+        # were missing for the same reason. ci.yml already does exactly this;
+        # the two diverging is what let the gap survive.
+        run: python -m pip install --upgrade pip -r requirements-dev.txt
       # Ninja must be on PATH before `cmake -G Ninja` runs. Having the configure
       # step above this one failed every native job on every OS.
       - uses: seanmiddleditch/gha-setup-ninja@master
