@@ -247,6 +247,7 @@ def test_a_local_edit_leaves_untouched_documents_moved_only_globally() -> None:
     before = fit(corpus)
     after = fit(edit_document(corpus, "d0", ["a", "a", "b"])[0])
 
+    asserted = 0
     for doc_id in before.doc_ids:
         if doc_id == "d0":
             continue
@@ -254,6 +255,11 @@ def test_a_local_edit_leaves_untouched_documents_moved_only_globally() -> None:
         if result.bound.observed > 0.0:
             assert result.bound.dominant_term == "global"
             assert result.bound.local == pytest.approx(0.0, abs=1e-12)
+            asserted += 1
+    # Without this the test passes vacuously the moment every non-edited document
+    # happens to see a zero shift -- it would still report success having checked
+    # nothing at all.
+    assert asserted > 0, "no document was actually examined"
 
 
 def test_analyse_vector_shift_refuses_a_document_missing_from_one_side() -> None:
