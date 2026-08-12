@@ -92,7 +92,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - uses: seanmiddleditch/gha-setup-ninja@master
+      # Pinned to a commit, not a tag and certainly not @master. A tag can be
+      # moved; @master cannot be reproduced at all, and it is currently ahead of
+      # the v6 release. An unpinned third-party action also means a CI run is not
+      # a function of this repository's contents -- which is the one thing this
+      # project claims about everything else it does. It has already bitten once:
+      # a determinism run failed when the action's own download step errored.
+      - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: Build the native backend and its tests
         run: |
