@@ -44,7 +44,7 @@ from tfidf_stability.ranking.tie_groups import (
     tie_cliques,
 )
 from tfidf_stability.utils.numerics import same_bits
-from tfidf_stability.utils.validation import StrictMode
+from tfidf_stability.utils.validation import KOutOfRangeError, StrictMode
 
 pytestmark = [
     pytest.mark.native,
@@ -271,3 +271,33 @@ def test_native_ranker_rejects_an_unknown_attribute() -> None:
             np.array([99], dtype=np.int32),
             len(ATTRS),
         )
+
+
+def test_the_two_backends_disagree_only_on_invalid_k_and_only_in_kind() -> None:
+    """Pin the one place the backends part company: ``k = 0``.
+
+    For every *valid* k the two agree bit-for-bit, which the tests above
+    establish. At ``k = 0`` they differ in kind rather than in value: the
+    reference raises ``KOutOfRangeError`` -- ``resolve_k`` rejects a non-positive
+    k in BOTH strict and lenient modes, because zero is a nonsensical rank
+    rather than a degenerate grid point -- while the native margin functions
+    return an undefined margin.
+
+    Nothing in the package passes k = 0, so this is latent. It is pinned here
+    because the asymmetry is exactly the shape that turns into a silent wrong
+    answer if it ever widens: the reference would refuse and the native path
+    would hand back a NaN that serialises to ``null`` in a results file.
+    """
+    scores = np.array([1.0, 0.5, 0.25], dtype=np.float64)
+
+    for native_fn, reference_fn in (
+        (nat.boundary_margin, boundary_margin),
+        (nat.min_adjacent_margin_top, min_adjacent_margin_top),
+    ):
+        value, defined, _ = native_fn(scores, 0)
+        assert math.isnan(value)
+        assert not defined
+
+        for mode in (StrictMode.STRICT, StrictMode.LENIENT):
+            with pytest.raises(KOutOfRangeError):
+                reference_fn([1.0, 0.5, 0.25], 0, mode=mode)
