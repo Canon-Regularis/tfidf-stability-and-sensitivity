@@ -69,10 +69,13 @@ __all__ = [
 #: Canonical source. GroupLens overwrites this URL in place -- hence the pin.
 MOVIELENS_URL = "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip"
 
-#: Pinned digest of the archive these results were computed against. ``None``
-#: until ``scripts/fetch_data.py`` records a verified first download; once set,
-#: a mismatch is an error, never a warning.
-MOVIELENS_SHA256: str | None = None
+#: Pinned digest of the archive these results were computed against. Recorded
+#: from a verified first download on 2026-08-12; a mismatch is an error, never a
+#: warning, because GroupLens replaces this file in place at a stable URL.
+#:
+#: The archive it identifies: 9742 films, 100836 ratings, 610 users, 18 films
+#: with no rating at all.
+MOVIELENS_SHA256: str | None = "696d65a3dfceac7c45750ad32df2c259311949efec81f0f144fdfb91ebc9e436"
 
 #: Rating at or above which an interaction counts as positive (G10 item 5).
 DEFAULT_MIN_WEIGHT = 4.0

@@ -80,11 +80,11 @@ quantised to halves, so `2 × rating` is always an integer and the representatio
 is exact on real data, not merely on constructed fixtures. Comparison is by
 cross-multiplication, so two distinct means can never collide onto one double.
 
-Some films in `movies.csv` appear in no row of `ratings.csv`. Their mean is
+**18 of the 9742 films** appear in no row of `ratings.csv`. Their mean is
 genuinely undefined, so they carry `has_value = False` and sort last — G8's
-missing-value path exercised against real data. `scripts/fetch_data.py` reports
-how many on first download; the figure is not recorded here because this
-repository never holds the archive to verify it against.
+missing-value path exercised against real data rather than a constructed
+fixture. That count was measured against the pinned archive
+(`696d65a3…`) on first download, not taken from upstream documentation.
 
 ## Reproducing a published number
 
