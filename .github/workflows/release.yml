@@ -66,7 +66,20 @@ jobs:
           CIBW_BUILD: "cp311-* cp312-* cp313-*"
           CIBW_SKIP: "*-musllinux_i686 *_i686 *-win32"
           CIBW_ARCHS_MACOS: "x86_64 arm64"
-          CIBW_BEFORE_BUILD: "pip install nanobind numpy"
+          CIBW_BEFORE_BUILD: "pip install nanobind numpy cmake ninja"
+          # Show the compiler invocation and its diagnostics. Without this the
+          # only thing a failed build reports is "pip wheel ... failed with code
+          # 1", which is not enough to act on -- and was not.
+          CIBW_BUILD_VERBOSITY: "1"
+          # manylinux2014 ships GCC 10. This is a C++20 core, and the default
+          # image is the usual reason a C++20 wheel builds everywhere except in
+          # the manylinux container. manylinux_2_28 has GCC 12.
+          CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
+          CIBW_MANYLINUX_AARCH64_IMAGE: "manylinux_2_28"
+          # libc++ needs 10.15 for the C++20 library surface; cibuildwheel
+          # otherwise targets 10.9 on x86_64, where the build fails in the
+          # standard headers rather than in this project's code.
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
           # Test the INSTALLED wheel, not the checkout.
           CIBW_TEST_REQUIRES: "pytest hypothesis scikit-learn"
           CIBW_TEST_COMMAND: >

@@ -28,7 +28,15 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: Hunt for a counterexample to any section 4 bound
-        run: python -m pytest tests/test_perturbation_bounds.py tests/test_cosine_edge_cases.py -q
+        # --hypothesis-show-statistics reports, per test, how many examples were
+        # generated and how many `assume()` rejected. That distinguishes the two
+        # ways this step can fail -- a real falsifying example, or a health check
+        # such as filter_too_much -- which the bare exit code does not. It is a
+        # diagnostic only: nothing is suppressed, so a genuine counterexample
+        # still fails the build.
+        run: >
+          python -m pytest tests/test_perturbation_bounds.py
+          tests/test_cosine_edge_cases.py -q --hypothesis-show-statistics
         env:
           HYPOTHESIS_PROFILE: nightly
       - name: Hunt for a ranking or tie-group violation
