@@ -29,9 +29,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - run: python -m pip install --upgrade pip ruff mypy types-PyYAML numpy pyyaml
-      - run: python -m ruff check src tests scripts
+          # The oldest interpreter we support, deliberately, because [tool.mypy]
+          # sets python_version = "3.11" and the two have to agree. numpy 2.5
+          # requires 3.12 and its stubs use PEP 695 `type` statements, which
+          # mypy refuses to parse while targeting 3.11 -- so on a 3.12 runner
+          # the job type-checks against a numpy no 3.11 user can install, and
+          # dies in numpy's own .pyi. Resolving the dependencies on 3.11 gets
+          # the numpy a 3.11 user actually has.
+          python-version: "3.11"
+      # ruff and mypy are pinned in requirements-dev.txt; see the note there for
+      # why. Installing them by name here would reintroduce exactly the drift
+      # the pins exist to stop.
+      - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+      # examples/ is included deliberately: it is the first thing a reader
+      # runs, so a broken example is a worse failure than a broken internal
+      # module. The documented local gate covers it; CI did not.
+      - run: python -m ruff check src tests scripts examples
+      - run: python -m ruff format --check src tests scripts examples
       - run: python -m mypy
       - name: Vendored assets must match their recorded digests
         # Same script pre-commit runs, so a contributor sees this locally first.
@@ -111,9 +125,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y cppcheck
+      # --check-level=exhaustive is not a loosening: at the default level cppcheck
+      # stops exploring branches and emits an informational note saying so, and that
+      # note alone trips --error-exitcode=1. Doing what the note asks costs about 11s
+      # on this tree and analyses strictly more code than the default would.
       - run: >
           cppcheck --enable=warning,performance,portability --error-exitcode=1
-          --inline-suppr --std=c++20 --suppress=missingIncludeSystem
+          --inline-suppr --std=c++20 --check-level=exhaustive
+          --suppress=missingIncludeSystem
           -I cpp/include cpp/include cpp/tests
 
   coverage:

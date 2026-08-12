@@ -25,8 +25,15 @@ scikit-learn>=1.4
 snowballstemmer>=3.0
 
 # --- static analysis ---------------------------------------------------------
-ruff>=0.6
-mypy>=1.11
+#
+# Exact pins, unlike everything else in this file. A linter floor is not a
+# constraint, it is a promise that every future release will agree with this
+# one -- and they do not: ruff 0.16 stabilised PLR0917, which the tree had
+# never been checked against, so the lint job failed on a commit that changed
+# no Python at all. Bumping these is a deliberate commit that fixes whatever
+# the new release found, not something a rebuild does silently.
+ruff==0.16.2
+mypy==2.3.0
 types-PyYAML
 
 # --- experiments and figures -------------------------------------------------
