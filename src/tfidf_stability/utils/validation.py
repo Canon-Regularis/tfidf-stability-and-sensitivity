@@ -26,6 +26,7 @@ from typing import Final, NoReturn
 __all__ = [
     "AbiVersionMismatchError",
     "ChainInflationWarning",
+    "ConfigError",
     "DataIntegrityError",
     "DuplicateIdentifierError",
     "EmptyCorpusError",
@@ -87,6 +88,17 @@ class EmptyCorpusError(TfidfStabilityError):
 
     ``docs/spec_addenda.md#g3`` calls this "an error on ranking" but names no
     exception class; this is that class (proposed as addendum G17).
+    """
+
+
+class ConfigError(TfidfStabilityError):
+    """A configuration key is unrecognised, or its value is not admissible.
+
+    Unrecognised keys are fatal rather than ignored. Every value in
+    ``configs/default.yaml`` "can move a published number", and the whole file
+    is hashed into the run manifest -- so a key that is recorded but not read
+    makes the manifest claim something the run did not do. A typo in
+    ``n_max`` silently yielding the default is exactly that failure.
     """
 
 

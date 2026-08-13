@@ -15,20 +15,38 @@ from __future__ import annotations
 
 import argparse
 import json
+from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from tfidf_stability.persistence.manifest import RunManifest, environment_block
 from tfidf_stability.persistence.save_load import load_model, save_model
+from tfidf_stability.preprocessing.lemmatise import LemmatiserKind
+from tfidf_stability.preprocessing.normalise import NormalisationConfig
 from tfidf_stability.preprocessing.pipeline import PreprocessingConfig, PreprocessingPipeline
+from tfidf_stability.preprocessing.tokenise import TokenisationConfig
 from tfidf_stability.utils.hashing import hash_file, short
 from tfidf_stability.utils.io import canonical_json, read_jsonl, write_json
 from tfidf_stability.utils.logging import EventKind, get_logger, log_event
+from tfidf_stability.utils.numerics import Reduction
+from tfidf_stability.utils.validation import ConfigError
+from tfidf_stability.vectorisation.idf import LogImpl
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
+from tfidf_stability.vectorisation.vocabulary import MaxFeaturesPolicy, VocabularyConfig
 
-__all__ = ["cmd_build_corpus", "cmd_info", "cmd_inspect", "cmd_verify", "load_config"]
+__all__ = [
+    "cmd_build_corpus",
+    "cmd_info",
+    "cmd_inspect",
+    "cmd_verify",
+    "load_config",
+    "pipeline_from_config",
+    "vectoriser_from_config",
+]
 
 _LOG = get_logger(__name__)
+
+_E = TypeVar("_E", bound=Enum)
 
 _REPO = Path(__file__).resolve().parents[3]
 _DEFAULT_CONFIG = _REPO / "configs" / "default.yaml"
@@ -51,6 +69,129 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
     return parsed
 
 
+# Every key ``configs/default.yaml`` declares, per section. These sets are the
+# contract: a key listed here is honoured, and a key not listed is rejected.
+# The alternative -- reading a handful and ignoring the rest -- is what this
+# replaces, and it made the manifest's ``config`` block a record of what was
+# *on disk* rather than of what was *applied*.
+_PREPROCESSING_KEYS = frozenset(
+    {
+        "unicode_form",
+        "lowercase",
+        "token_pattern",
+        "min_token_length",
+        "max_token_length",
+        "stopword_asset",
+        "lemmatiser",
+        "insert_gaps",
+        "n_min",
+        "n_max",
+        "cross_gaps",
+    }
+)
+_VOCABULARY_KEYS = frozenset({"min_df", "max_df", "max_features", "max_features_policy"})
+_NUMERICS_KEYS = frozenset({"reduction", "log_impl"})
+
+_UNICODE_FORMS = frozenset({"NFC", "NFD", "NFKC", "NFKD"})
+
+# Absent keys must behave exactly as they did before this was wired up, so the
+# fallbacks are read off the dataclasses themselves rather than restated here.
+_NORM_DEFAULTS = NormalisationConfig()
+_TOKEN_DEFAULTS = TokenisationConfig()
+_PRE_DEFAULTS = PreprocessingConfig()
+_VOCAB_DEFAULTS = VocabularyConfig()
+
+
+def _section(config: dict[str, Any], name: str, allowed: frozenset[str]) -> dict[str, Any]:
+    """Return one config section, rejecting any key that would be ignored."""
+    section = config.get(name) or {}
+    if not isinstance(section, dict):
+        raise ConfigError(
+            f"config section {name!r} must be a mapping, got {type(section).__name__}"
+        )
+    unknown = sorted(set(section) - allowed)
+    if unknown:
+        raise ConfigError(
+            f"unrecognised key(s) in config section {name!r}: {', '.join(unknown)}. "
+            f"Known keys: {', '.join(sorted(allowed))}."
+        )
+    return section
+
+
+def _enum(kind: type[_E], value: Any, *, where: str) -> _E:
+    """Convert a config string to an enum member, naming the key when it fails."""
+    try:
+        return kind(value)
+    except ValueError as exc:
+        options = ", ".join(str(member.value) for member in kind)
+        raise ConfigError(f"{where}: {value!r} is not one of {options}") from exc
+
+
+def pipeline_from_config(config: dict[str, Any]) -> PreprocessingPipeline:
+    """Build the preprocessing pipeline the configuration actually describes."""
+    pre = _section(config, "preprocessing", _PREPROCESSING_KEYS)
+
+    form = pre.get("unicode_form", _NORM_DEFAULTS.unicode_form)
+    if form not in _UNICODE_FORMS:
+        known = ", ".join(sorted(_UNICODE_FORMS))
+        raise ConfigError(f"preprocessing.unicode_form: {form!r} is not one of {known}")
+
+    return PreprocessingPipeline(
+        PreprocessingConfig(
+            normalisation=NormalisationConfig(
+                unicode_form=form,
+                lowercase=bool(pre.get("lowercase", _NORM_DEFAULTS.lowercase)),
+            ),
+            tokenisation=TokenisationConfig(
+                pattern=str(pre.get("token_pattern", _TOKEN_DEFAULTS.pattern)),
+                min_token_length=int(pre.get("min_token_length", _TOKEN_DEFAULTS.min_token_length)),
+                max_token_length=int(pre.get("max_token_length", _TOKEN_DEFAULTS.max_token_length)),
+            ),
+            lemmatiser=_enum(
+                LemmatiserKind,
+                pre.get("lemmatiser", _PRE_DEFAULTS.lemmatiser),
+                where="preprocessing.lemmatiser",
+            ),
+            stopword_asset=pre.get("stopword_asset", _PRE_DEFAULTS.stopword_asset),
+            insert_gaps=bool(pre.get("insert_gaps", _PRE_DEFAULTS.insert_gaps)),
+            n_min=int(pre.get("n_min", _PRE_DEFAULTS.n_min)),
+            n_max=int(pre.get("n_max", _PRE_DEFAULTS.n_max)),
+            cross_gaps=bool(pre.get("cross_gaps", _PRE_DEFAULTS.cross_gaps)),
+        )
+    )
+
+
+def vectoriser_from_config(config: dict[str, Any]) -> TfidfVectoriser:
+    """Build the vectoriser the configuration actually describes.
+
+    ``numerics.reduction`` and ``numerics.log_impl`` matter most here: the first
+    decides the summation order every norm uses, and the second is G13's
+    cross-platform bit-exactness switch. Both were previously read from the
+    file, hashed into the manifest, and then dropped on the floor.
+    """
+    vocab = _section(config, "vocabulary", _VOCABULARY_KEYS)
+    numerics = _section(config, "numerics", _NUMERICS_KEYS)
+
+    return TfidfVectoriser(
+        vocabulary_config=VocabularyConfig(
+            min_df=vocab.get("min_df", _VOCAB_DEFAULTS.min_df),
+            max_df=vocab.get("max_df", _VOCAB_DEFAULTS.max_df),
+            max_features=vocab.get("max_features", _VOCAB_DEFAULTS.max_features),
+            max_features_policy=_enum(
+                MaxFeaturesPolicy,
+                vocab.get("max_features_policy", _VOCAB_DEFAULTS.max_features_policy),
+                where="vocabulary.max_features_policy",
+            ),
+        ),
+        log_impl=_enum(
+            LogImpl, numerics.get("log_impl", LogImpl.CORRECTLY_ROUNDED), where="numerics.log_impl"
+        ),
+        reduction=_enum(
+            Reduction, numerics.get("reduction", Reduction.NAIVE), where="numerics.reduction"
+        ),
+    )
+
+
 def _read_corpus(path: Path) -> tuple[list[str], list[str]]:
     """Read a JSONL corpus of ``{doc_id, text}`` records."""
     ids: list[str] = []
@@ -64,19 +205,11 @@ def _read_corpus(path: Path) -> tuple[list[str], list[str]]:
 def cmd_build_corpus(args: argparse.Namespace) -> int:
     """Preprocess a corpus, fit a model, and write it with its manifest."""
     config = load_config(args.config)
-    pre = config.get("preprocessing", {})
-    pipeline = PreprocessingPipeline(
-        PreprocessingConfig(
-            n_min=int(pre.get("n_min", 1)),
-            n_max=int(pre.get("n_max", 2)),
-            insert_gaps=bool(pre.get("insert_gaps", True)),
-            cross_gaps=bool(pre.get("cross_gaps", False)),
-        )
-    )
+    pipeline = pipeline_from_config(config)
 
     ids, texts = _read_corpus(Path(args.corpus))
     features = [pipeline.preprocess(t) for t in texts]
-    model = TfidfVectoriser().fit(features, ids)
+    model = vectoriser_from_config(config).fit(features, ids)
 
     log_event(_LOG, EventKind.REDUCTION_POLICY, stage="vectorisation", policy=model.reduction)
     if model.zero_norm_documents:
