@@ -79,6 +79,18 @@ def tokenise(text: str, config: TokenisationConfig | None = None) -> list[str]:
         Tokens in order of appearance. Length filters are applied here rather
         than downstream so that the length bounds are part of the tokenisation
         contract and get hashed with it.
+
+    A consequence worth stating, because it surprises: a length-filtered run
+    leaves **no gap sentinel**, so an n-gram closes over it. ``"king <66 z's>
+    pop"`` and ``"king pop"`` produce identical features, including the bigram
+    ``king|pop``. That is deliberate and consistent -- an underscore, a comma
+    and any other pattern-excluded run behave the same way, because the pattern
+    and the bounds together define what a token *is*. Only stopword removal
+    inserts a gap (``spec_addenda.md#g7``), and only because it deletes
+    something that was already a token. The collision is reachable in
+    configuration rather than merely in theory: at ``min_token_length: 2``,
+    ``"vitamin c deficiency"`` and ``"vitamin deficiency"`` become the same
+    document.
     """
     cfg = config or _DEFAULT
     lo, hi = cfg.min_token_length, cfg.max_token_length

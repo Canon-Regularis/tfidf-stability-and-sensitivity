@@ -42,6 +42,7 @@ these entries only fill gaps or make an abstract quantity concrete.
 | [G25](#g25)| §7.1 | The query protocol is not interchangeable, and it changes every number |
 | [G26](#g26)| §4.2 | The interaction term never dominates |
 | [G27](#g27)| §4.2 | The bound holds; *testing* it in binary64 needs three preconditions |
+| [G28](#g28)| §7.1 | Profile aggregation joins features, not text, so there are no seams |
 
 ---
 
@@ -732,6 +733,16 @@ preventing n-grams from spanning the seam. That is arguably the better
 construction, but it is not what §7.1 describes, so it is left as an available
 ablation rather than adopted silently.
 
+> **Correction.** The premise above — "n-grams are generated over the
+> *concatenated* stream" — is **not what this repository implements**, so the
+> order-sensitivity it describes does not occur and the ablation it proposes is
+> inert. `build_profile` joins *preprocessed feature streams*, by which point the
+> n-grams already exist and no pass runs over the join. Measured, and recorded in
+> full at [G27's sibling, G28](#g28). The canonicalisation resolved here is still
+> worth keeping — it makes the feature *tuple* reproducible, which the profile
+> digest depends on — but it is not what keeps scores stable, because nothing was
+> destabilising them.
+
 ---
 
 <a id="g21"></a>
@@ -1274,3 +1285,43 @@ than the bound it was slackening.
 **Verification.** The assertion is mutation-tested: dropping any one of the
 three terms, halving the bound, or shaving the global term by 1% each still
 fails the test, so the added tolerance has not made it vacuous.
+
+---
+
+<a id="g28"></a>
+## G28 — Profile aggregation joins features, not text, so there are no seams
+
+**Paper.** §7.1 builds a user profile "by aggregating text from a user's
+interacted items". [G20](#g20) read that as text concatenation and resolved the
+resulting order-sensitivity by canonicalising item order.
+
+**Finding.** The implementation does not concatenate text. `build_profile` takes
+`features_by_doc` — streams that have already been through
+`PreprocessingPipeline.preprocess` — so the n-grams exist *before* aggregation
+and no n-gram pass runs over the joined result. Three claims made in G20 and in
+`build_profile`'s own docstring are therefore false of the code:
+
+| claim | reality |
+|---|---|
+| n-grams are generated over the concatenated stream | no pass runs over the join |
+| item order changes the seam features | order permutes the tuple; the multiset and the embedding are bit-identical |
+| `separate_items` blocks seam n-grams | it inserts a sentinel that is not in the vocabulary and is discarded before it is counted |
+
+Measured on `"quick brown fox"` + `"lazy sleeping dog"`: text aggregation yields
+11 features including the seam bigram `fox|lazi`; this implementation yields the
+10-feature union and nothing spanning the join. The `mini_corpus` fixture hides
+the difference, because its documents happen to abut at boundaries the pipeline
+already breaks — which is why no existing test caught it.
+
+**Resolution — documented, not silently changed.** Switching to genuine text
+aggregation is a research decision rather than a repair: it adds one bigram per
+item boundary, changes every profile's length `L`, and therefore moves **every
+number in §7.1**. The behaviour is left as it is and stated accurately instead,
+in G20, in the docstring, and in `configs/default.yaml`. Three tests in
+`tests/test_profiles_and_loo.py` pin the actual semantics — no seam n-grams,
+order-insensitivity, and `separate_items` inert — so the gap cannot close in the
+wrong direction unnoticed.
+
+**What G20's canonical ordering is still for.** It makes the feature *tuple*
+reproducible, and the profile digest is taken over the tuple. It is not what
+keeps scores stable, because on this construction nothing was destabilising them.

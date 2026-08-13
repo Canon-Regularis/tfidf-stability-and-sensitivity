@@ -54,7 +54,12 @@ evaluation:
 
 profiles:
   aggregation: text_concat    # G11. Length-weighted; see the addendum.
-  separate_items: false       # G20 ablation: blocks n-grams spanning item seams.
+  separate_items: false       # G28. Intended as G20's ablation against n-grams
+                              # spanning item seams, but aggregation joins
+                              # already-expanded feature streams, so no seam
+                              # n-gram exists and this flag changes nothing.
+                              # Kept because it becomes real if aggregation
+                              # ever moves to text.
   min_interactions: 5         # G10(4)
   exclude_profile_items: true # G10(3) -- the most consequential choice
   interaction_min_weight: 4.0 # G10(5) -- what "interacted" means
