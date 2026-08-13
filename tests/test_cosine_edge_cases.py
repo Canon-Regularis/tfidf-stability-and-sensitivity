@@ -264,7 +264,25 @@ def test_corpus_lipschitz_bound_dominates_every_pairwise_constant(mini_model) ->
 # ---------------------------------------------------------------------------
 # Section 4.2 -- the three-term decomposition (spec_addenda G5)
 # ---------------------------------------------------------------------------
-@given(sparse_map, sparse_map, st.floats(1.0, 10.0), st.floats(0.0, 2.0))
+#: Section 4.2 is an algebraic statement about *Euclidean norms*, and below
+#: ``NORM_UNDERFLOW_THRESHOLD`` ``l2_norm`` is not one: the coordinate squares
+#: land in the subnormal range and the result carries only a handful of bits
+#: (G18). Nightly found the tight case ``tf = 0`` at ``1.5e-161``, where the
+#: inequality holds with *equality* in exact arithmetic and the computed sides
+#: then differ by 0.5% -- six significant bits survive the squaring. That is a
+#: fact about the norm, not about the decomposition, and it is what
+#: ``test_cosine_degrades_for_vectors_whose_squares_underflow`` exists to pin
+#: down. Excluding the band here keeps this test about section 4.2.
+above_underflow = st.one_of(
+    st.just(0.0),
+    st.floats(NORM_UNDERFLOW_THRESHOLD, 1e3, allow_nan=False, allow_infinity=False),
+)
+normal_sparse_map = st.dictionaries(
+    st.integers(0, DIM - 1), above_underflow, min_size=0, max_size=DIM
+)
+
+
+@given(normal_sparse_map, normal_sparse_map, st.floats(1.0, 10.0), st.floats(0.0, 2.0))
 def test_three_term_bound_is_never_violated(
     tf_a: dict[int, float],
     tf_b: dict[int, float],
@@ -275,6 +293,13 @@ def test_three_term_bound_is_never_violated(
 
     Constructed on a common index set with idf and idf' both bounded as given,
     which is the setting the inequality is stated in.
+
+    Section 4.2 is a real-arithmetic statement, so checking it in binary64
+    needs three preconditions, each of which the nightly job falsified this
+    test on before they were in place -- see ``docs/spec_addenda.md#g27``:
+    the bound must be computed from the *realised* idf perturbation, all four
+    norms involved must be outside the subnormal-square band, and the slack
+    must be the elementwise rounding of ``w`` rather than a fixed constant.
     """
     tf = sv(tf_a)
     tf_prime = sv(tf_b)
@@ -286,11 +311,28 @@ def test_three_term_bound_is_never_violated(
         },
         DIM,
     )
-    bound = three_term_bound(tf, delta_tf, idf_linf, didf_linf)
+    # Subtraction can re-enter the underflow band the strategy excludes: two
+    # coordinates both above the threshold can differ by far less than it. The
+    # norms the inequality is stated in terms of have to be computable, so
+    # require each to be either exactly zero or faithfully representable.
+    for vec in (tf, tf_prime, delta_tf):
+        norm = l2_norm(vec)
+        assume(norm == 0.0 or norm >= NORM_UNDERFLOW_THRESHOLD)
 
-    # Realise a concrete idf/idf' pair respecting the supplied sup-norms.
+    # Realise a concrete idf/idf' pair respecting the supplied sup-norms. This
+    # has to happen *before* the bound is computed, because the perturbation
+    # that is realised is not always the one that was asked for: when
+    # ``didf_linf`` falls below half an ulp of ``idf_linf``, ``idf_linf +
+    # didf_linf`` steps a whole ulp instead. Nightly found this at 100k
+    # examples -- idf_linf=10, didf_linf=1e-15, ulp(10)=1.78e-15, so the
+    # realised step was 1.78x the request and a bound computed from the
+    # request was compared against an observation of something larger. The
+    # rule is docs/perturbation_notes.md's: assume on the realised delta.
     idf = dict.fromkeys(range(DIM), idf_linf)
     idf_p = dict.fromkeys(range(DIM), idf_linf + didf_linf)
+    didf_realised = max(abs(idf_p[i] - idf[i]) for i in range(DIM))
+    bound = three_term_bound(tf, delta_tf, idf_linf, didf_realised)
+
     w = SparseVector.from_mapping(
         {i: v * idf[i] for i, v in zip(tf.indices, tf.values, strict=True)}, DIM
     )
@@ -298,7 +340,25 @@ def test_three_term_bound_is_never_violated(
         {i: v * idf_p[i] for i, v in zip(tf_prime.indices, tf_prime.values, strict=True)}, DIM
     )
     observed = difference_norm(w, w_p)
-    assert observed <= bound * (1 + 1e-9) + 1e-12
+
+    # ``w' - w`` is a *fourth* norm the comparison rests on, and the one that
+    # underflows most readily: it is smaller than ``tf`` by roughly the size of
+    # the idf perturbation, so ``tf`` can sit comfortably above the threshold
+    # while the difference does not. Nightly found tf = sqrt(DBL_MIN) with
+    # didf = 1e-5, where the difference is ~1.5e-159 and its square is
+    # subnormal even though every input vector is faithful.
+    assume(observed == 0.0 or observed >= NORM_UNDERFLOW_THRESHOLD)
+
+    # Section 4.2 is a statement about real arithmetic, but ``observed`` is
+    # evaluated in binary64: every ``v * idf[i]`` rounds, so each component of
+    # ``w' - w`` carries up to ``u*(|w_i| + |w'_i|)`` of error that the
+    # inequality does not model. The allowance is that quantity, not a magic
+    # constant -- a fixed absolute slack is simultaneously too loose for small
+    # vectors and, at ulp-scale perturbations like the one above, unrelated to
+    # the magnitudes actually in play.
+    u = 2.0**-53
+    rounding = u * (idf_linf + didf_realised) * (l2_norm(tf) + l2_norm(tf_prime))
+    assert observed <= bound * (1 + 1e-9) + rounding
 
 
 # ---------------------------------------------------------------------------
