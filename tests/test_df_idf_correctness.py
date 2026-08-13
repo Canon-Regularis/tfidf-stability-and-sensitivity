@@ -196,7 +196,12 @@ def test_min_df_filters_rare_tokens() -> None:
 
 
 def test_min_df_as_a_proportion_is_resolved_exactly() -> None:
-    """0.1 * 30 is 3.0000000000000004 in binary64; exact arithmetic gives 3."""
+    """``Fraction(0.1) * 30`` exceeds 3 and would ceil to 4, excluding b.
+
+    It is ``limit_denominator`` that snaps 0.1 to one tenth and returns 3, so
+    this test fails if that call is dropped as cosmetic. (A previous version of
+    this docstring said ``0.1 * 30`` is 3.0000000000000004; it is exactly 3.0.)
+    """
     docs = [["a"] for _ in range(27)] + [["a", "b"] for _ in range(3)]
     vocab = build_vocabulary(docs, VocabularyConfig(min_df=0.1))
     assert "b" in vocab, "b has df=3 and the threshold is exactly 3"
@@ -206,6 +211,27 @@ def test_max_df_filters_ubiquitous_tokens() -> None:
     docs = [["a", "b"], ["a", "c"], ["a", "d"]]
     vocab = build_vocabulary(docs, VocabularyConfig(max_df=2))
     assert "a" not in vocab
+
+
+def test_a_proportional_max_df_never_admits_more_than_the_proportion() -> None:
+    """An upper bound must round *down*, unlike ``min_df``.
+
+    Both thresholds once shared one ceiling, which is right for the lower bound
+    and inverts the upper one: at ``p=0.5, n=3`` the cap resolved to 2 and kept
+    a token present in 2 of 3 documents, and at ``p=0.95, n=7`` it resolved to 7
+    and filtered nothing at all.
+    """
+    docs = [["a", "b"], ["a", "c"], ["d"]]
+    vocab = build_vocabulary(docs, VocabularyConfig(max_df=0.5))
+    assert "a" not in vocab, "df 2/3 = 66.7% must not survive a 50% cap"
+    for token in ("b", "c", "d"):
+        assert token in vocab, f"{token} has df 1/3 and must survive"
+
+    # The degenerate end: a cap below 1/n admits nothing, which is the honest
+    # answer rather than silently keeping everything.
+    ubiquitous = [["a", "b"] for _ in range(7)]
+    with pytest.raises(EmptyVocabularyError):
+        build_vocabulary(ubiquitous, VocabularyConfig(max_df=0.95))
 
 
 def test_empty_vocabulary_raises() -> None:

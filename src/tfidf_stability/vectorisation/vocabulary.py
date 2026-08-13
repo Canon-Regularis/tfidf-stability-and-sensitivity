@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
 from itertools import pairwise
+from typing import Literal
 
 from tfidf_stability.utils.validation import EmptyVocabularyError
 
@@ -78,21 +79,40 @@ class VocabularyConfig:
     max_features_policy: MaxFeaturesPolicy = MaxFeaturesPolicy.DF_DESC
 
 
-def _resolve_threshold(value: int | float, n_docs: int, *, name: str) -> int:
+def _resolve_threshold(
+    value: int | float, n_docs: int, *, name: str, bound: Literal["lower", "upper"] = "lower"
+) -> int:
     """Turn an absolute-or-proportional threshold into an absolute document count.
 
-    Proportions are resolved with :func:`~fractions.Fraction`, not floating point.
-    ``0.3 * 10`` is ``2.9999999999999996`` in binary64, so a float ceiling would
-    give 3 where exact arithmetic gives 3 as well -- but ``0.1 * 30`` gives
-    ``3.0000000000000004`` and would ceil to 4. Since this threshold decides
-    vocabulary membership, and vocabulary membership decides every number
-    downstream, it is resolved exactly.
+    Proportions are resolved exactly, because this threshold decides vocabulary
+    membership and vocabulary membership decides every number downstream.
+
+    ``limit_denominator`` is the load-bearing half of that, not a tidy-up.
+    ``Fraction(0.1)`` is the *exact* binary64 value
+    ``3602879701896397/36028797018963968``, a shade above one tenth, so
+    ``Fraction(0.1) * 30`` exceeds 3 and ceils to **4** -- a stricter filter than
+    the ``0.1`` the caller wrote. Snapping to ``1/10`` first gives 3. Remove the
+    ``limit_denominator`` and ``min_df=0.1`` silently changes the vocabulary.
+
+    (An earlier version of this note justified the Fraction by claiming
+    ``0.3 * 10`` is ``2.9999999999999996`` and ``0.1 * 30`` is
+    ``3.0000000000000004``. Both are exactly ``3.0`` in binary64, so the hazard
+    it described does not exist and the one above went unrecorded.)
+
+    The rounding direction depends on which end is being pinned, so it is a
+    parameter rather than shared. ``min_df`` keeps ``df >= p*n`` and rounds
+    **up**; ``max_df`` keeps ``df <= p*n`` and must round **down**. Rounding an
+    upper bound up admits exactly what the caller asked to exclude: at ``p=0.5,
+    n=3`` it keeps a token present in 2 of 3 documents (66.7%), and at
+    ``p=0.95, n=7`` it resolves to 7 and filters nothing at all.
     """
     if isinstance(value, float):
         if not 0.0 < value <= 1.0:
             raise ValueError(f"{name} as a proportion must be in (0, 1], got {value}")
         exact = Fraction(value).limit_denominator(1_000_000) * n_docs
-        return max(1, -(-exact.numerator // exact.denominator))  # ceiling division
+        if bound == "upper":
+            return exact.numerator // exact.denominator  # floor
+        return max(1, -(-exact.numerator // exact.denominator))  # ceiling
     if value < 0:
         raise ValueError(f"{name} must be non-negative, got {value}")
     return int(value)
@@ -209,7 +229,11 @@ def build_vocabulary(
 
     # --- filter by document frequency ---------------------------------------
     min_df = _resolve_threshold(cfg.min_df, n_docs, name="min_df")
-    max_df = n_docs if cfg.max_df is None else _resolve_threshold(cfg.max_df, n_docs, name="max_df")
+    max_df = (
+        n_docs
+        if cfg.max_df is None
+        else _resolve_threshold(cfg.max_df, n_docs, name="max_df", bound="upper")
+    )
     survivors = [t for t, d in df_counter.items() if min_df <= d <= max_df]
 
     # --- apply max_features (TFIDF-SPEC-01, spec_addenda G6) ----------------
