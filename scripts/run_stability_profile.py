@@ -60,10 +60,10 @@ DEFAULT_KS = (1, 5, 10, 20, 50)
 
 def _margin_distributions(
     scores_by_query: list[list[float]], n_documents: int
-) -> tuple[dict[str, dict], dict[str, int]]:
+) -> tuple[dict[str, dict], dict[str, dict[str, int]]]:
     """E1: the distribution of m_k across queries, at each k."""
     dists: dict[str, dict] = {}
-    excluded: dict[str, int] = {}
+    excluded: dict[str, dict[str, int]] = {}
     for k in DEFAULT_KS:
         if k >= n_documents:
             continue
@@ -77,9 +77,21 @@ def _margin_distributions(
 
         # G3: degenerate queries are excluded from margin distributions. Counted
         # and reported, so the exclusion is auditable rather than assumed.
+        #
+        # BOTH lists are counted. The counter used to be
+        # ``len(margins) - len(usable)``, over the boundary margins alone --
+        # which are defined whenever ``k < n``, already guaranteed above, so it
+        # was structurally zero. The exclusions actually happen in the interior
+        # list: G16 leaves ``m_min^top`` undefined at ``k = 1``, where the
+        # minimum is over an empty set. So at k=1 all 40 queries were dropped
+        # from that distribution while the published field read 0 -- precisely
+        # the silent exclusion this comment promises does not happen.
         usable = [m.value for m in margins if m.defined]
         usable_top = [m.value for m in interior if m.defined]
-        excluded[f"k{k}"] = len(margins) - len(usable)
+        excluded[f"k{k}"] = {
+            "m_k": len(margins) - len(usable),
+            "m_min_top": len(interior) - len(usable_top),
+        }
         dists[f"k{k}"] = {
             "m_k": summarise_values(f"m_{k}", usable).as_dict(),
             # Undefined at k = 1, where the minimum is over an empty set (G16).
