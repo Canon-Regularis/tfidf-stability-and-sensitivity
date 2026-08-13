@@ -284,3 +284,30 @@ def test_the_stopword_asset_is_verified_against_its_recorded_digest(tmp_path) ->
         module.load_stopwords.cache_clear()
 
     assert module.load_stopwords().digest == genuine.digest, "the real asset still loads"
+
+
+def test_an_injected_lemmatiser_reaches_the_digest() -> None:
+    """Two pipelines that produce different features must not share an identity.
+
+    ``digest()`` read the config alone, but the constructor accepts a ready-made
+    lemmatiser that bypasses ``config.lemmatiser`` entirely. So
+    ``PreprocessingPipeline(cfg)`` and
+    ``PreprocessingPipeline(cfg, lemmatiser=IdentityLemmatiser())`` -- which turn
+    "running cats" into ``run|cat`` and ``running|cats`` -- were the same string,
+    and a run manifest could not tell them apart. The sibling ``stopwords=``
+    injection was always bound by content, so the omission was an oversight.
+    """
+    from tfidf_stability.preprocessing.lemmatise import LemmatiserKind, make_lemmatiser
+    from tfidf_stability.preprocessing.pipeline import PreprocessingConfig, PreprocessingPipeline
+
+    config = PreprocessingConfig()
+    plain = PreprocessingPipeline(config)
+    injected = PreprocessingPipeline(config, lemmatiser=make_lemmatiser(LemmatiserKind.NONE))
+
+    assert plain.preprocess("running cats") != injected.preprocess("running cats")
+    assert plain.digest() != injected.digest(), "different features, same identity"
+
+    # Injecting the lemmatiser the config already names must NOT move the
+    # digest, or every recorded value in the repository would have churned.
+    agreeing = PreprocessingPipeline(config, lemmatiser=make_lemmatiser(LemmatiserKind.PORTER2))
+    assert agreeing.digest() == plain.digest()

@@ -94,16 +94,28 @@ class PreprocessingConfig:
             "ngram_joiner": JOINER,
         }
 
-    def digest(self, stopword_digest: str | None = None) -> str:
+    def digest(
+        self,
+        stopword_digest: str | None = None,
+        lemmatiser_override: str | None = None,
+    ) -> str:
         """SHA-256 over the canonical config, optionally binding the word list.
 
         Passing ``stopword_digest`` makes the identity cover the *contents* of
         the stopword file, not merely its name -- so editing the asset changes
         the config digest and invalidates cached results, as it must.
+
+        ``lemmatiser_override`` covers the same hole one field along.
+        :class:`PreprocessingPipeline` accepts a ready-made lemmatiser that
+        bypasses :attr:`lemmatiser` entirely, and without this the two pipelines
+        would share an identity while producing different features. Both keys are
+        omitted when absent, so a run with no override digests exactly as before.
         """
         payload = self.to_dict()
         if stopword_digest is not None:
             payload["stopword_digest"] = stopword_digest
+        if lemmatiser_override is not None:
+            payload["lemmatiser_override"] = lemmatiser_override
         blob = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -168,8 +180,22 @@ class PreprocessingPipeline:
         return self._lemmatiser
 
     def digest(self) -> str:
-        """Identity of this exact preprocessing map, for the run manifest."""
-        return self.config.digest(stopword_digest=self._stopwords.digest)
+        """Identity of this exact preprocessing map, for the run manifest.
+
+        The lemmatiser is bound only when an injected one disagrees with the
+        config, which is the sole way the two can differ. Previously the digest
+        read the config alone, so ``PreprocessingPipeline(cfg)`` and
+        ``PreprocessingPipeline(cfg, lemmatiser=IdentityLemmatiser())`` -- which
+        turn "running cats" into ``run|cat`` and ``running|cats`` respectively --
+        were the same string. The sibling ``stopwords=`` injection was always
+        bound by content, so this was an oversight rather than a scoping
+        decision. No current caller injects, so no recorded digest changes.
+        """
+        effective = self._lemmatiser.name
+        override = None if effective == str(self.config.lemmatiser) else effective
+        return self.config.digest(
+            stopword_digest=self._stopwords.digest, lemmatiser_override=override
+        )
 
     def fingerprint(self) -> dict[str, Any]:
         """Full human-readable provenance of the map."""
