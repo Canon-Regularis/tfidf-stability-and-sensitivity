@@ -30,6 +30,8 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import itertools
+import math
 import sys
 from pathlib import Path
 
@@ -59,6 +61,50 @@ from tfidf_stability.utils.numerics import same_bits  # noqa: E402
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser  # noqa: E402
 
 DEFAULT_KS = (1, 5, 10, 20, 50)
+
+
+def _rho_sweep(scores: list[float]) -> dict:
+    """rho(tau) across the whole span, recorded so the discontinuity is checkable.
+
+    ``rho = |largest chain| / |largest clique|`` is **piecewise constant in tau**,
+    and its breakpoints are exactly the observed adjacent gaps: tau can move
+    freely between two gaps without changing which pairs are related, and
+    changing at a gap merges two chains at once. That is why this is sampled on a
+    grid *and* evaluated at the gaps themselves -- a grid alone would land
+    between breakpoints and draw a smooth ramp through a function that has none.
+
+    The sampled points are what ``fig_rho_discontinuity`` plots, as a step, for
+    the same reason: joining them with straight segments would assert
+    intermediate values of rho that the function never takes.
+    """
+    sorted_scores = sorted(scores, reverse=True)
+    gaps = sorted({a - b for a, b in itertools.pairwise(sorted_scores) if a - b > 0.0})
+    if not gaps:
+        return {"taus": [], "rho": [], "n_chains": [], "n_cliques": [], "breakpoints": []}
+
+    # A log grid over the gap span, plus each gap and a hair either side of it,
+    # so every breakpoint is bracketed rather than approached.
+    lo, hi = gaps[0], gaps[-1]
+    decades = math.log10(hi / lo) if hi > lo else 0.0
+    grid = {lo * 10 ** (decades * i / 120) for i in range(121)} if decades else {lo}
+    for gap in gaps:
+        grid.update({math.nextafter(gap, 0.0), gap, math.nextafter(gap, math.inf)})
+
+    taus = sorted(t for t in grid if t > 0.0)
+    rho, n_chains, n_cliques = [], [], []
+    for t in taus:
+        rho.append(chain_inflation_ratio(sorted_scores, t))
+        n_chains.append(len(tie_chains(sorted_scores, t)))
+        n_cliques.append(len(tie_cliques(sorted_scores, t)))
+    return {
+        "taus": taus,
+        "rho": rho,
+        "n_chains": n_chains,
+        "n_cliques": n_cliques,
+        # The gaps are the only places rho can change; recorded so a reader can
+        # check that every step in the plot sits on one.
+        "breakpoints": gaps,
+    }
 
 
 def _case_study(scores: list[float], table: AttributeTable, tau: float, doc_ids: list[str]) -> dict:
@@ -301,6 +347,7 @@ def main() -> int:
     # ---- E4: the section 7.4 case study ----------------------------------
     first = grid.queries[0]
     case = _case_study(list(first.scores), first.table, args.tau, list(first.candidate_ids))
+    rho_sweep = _rho_sweep(list(first.scores))
     _print_case_study(case)
 
     result = ExperimentResult(
@@ -318,6 +365,7 @@ def main() -> int:
             "E3_stratified_by_margin": strata,
             "E3_fks_distance": fks.as_dict(),
             "E3_degenerate_queries_included": True,  # G3: included here, unlike E1
+            "E3_rho_sweep": rho_sweep,
             "E4_case_study": case,
         },
     )
