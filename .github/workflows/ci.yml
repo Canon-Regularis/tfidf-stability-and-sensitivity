@@ -116,10 +116,10 @@ jobs:
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: Build the native backend and its tests
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTFIDF_BUILD_TESTS=ON
-          cmake --build build
+          cmake -S . -B build-tests -G Ninja -DCMAKE_BUILD_TYPE=Release -DTFIDF_BUILD_TESTS=ON
+          cmake --build build-tests
       - name: C++ unit tests
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+        run: ctest --test-dir build-tests --output-on-failure --no-tests=error
       - name: Install the extension
         # -v and the pre-flight dump are here because this step failed on
         # windows-latest with nothing in the log to say why. It had been failing
@@ -135,8 +135,15 @@ jobs:
           python -c "import scikit_build_core, nanobind; print('backend ok')" || true
           cmake --version | head -1
           ninja --version || true
+          # Windows' 260-character path limit is the standard failure mode for
+          # this toolchain. The runner checkout is already deeply nested, and
+          # build/{wheel_tag}/_deps/nanobind-src/include/nanobind/... adds well
+          # over 200 more, so CMake writes paths the API refuses. A short build
+          # directory sidesteps it; POSIX runners keep the pyproject default.
+          EXTRA=""
+          if [ "$RUNNER_OS" = "Windows" ]; then EXTRA="-C build-dir=C:/b"; fi
           echo "--- installing ---"
-          python -m pip install -e . --no-build-isolation -v
+          python -m pip install -e . --no-build-isolation -v $EXTRA
 
       # Ordered before the import check on purpose. This guard is the one that
       # can *explain* an import failure -- a .pyd linked against a GCC runtime

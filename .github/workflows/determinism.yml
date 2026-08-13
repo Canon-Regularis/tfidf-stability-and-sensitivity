@@ -93,13 +93,13 @@ jobs:
       - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
       - name: Configure
         run: >
-          cmake -S . -B build -G Ninja
+          cmake -S . -B build-tests -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build }}
           -DTFIDF_BUILD_TESTS=ON
       - name: Build
-        run: cmake --build build
+        run: cmake --build build-tests
       - name: Native unit tests
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+        run: ctest --test-dir build-tests --output-on-failure --no-tests=error
       # The native backend must not change any number. The digest here is
       # computed by the reference path, and the differential suite is what
       # proves the two agree -- so a divergence shows up as a test failure with
@@ -111,7 +111,14 @@ jobs:
           # on windows-latest and used to do so silently, because the block ran
           # under pwsh (which does not abort mid-block) and the tests that
           # followed skipped rather than failed.
-          python -m pip install -e . --no-build-isolation -v
+          # Windows' 260-character path limit is the standard failure mode for
+          # this toolchain. The runner checkout is already deeply nested, and
+          # build/{wheel_tag}/_deps/nanobind-src/include/nanobind/... adds well
+          # over 200 more, so CMake writes paths the API refuses. A short build
+          # directory sidesteps it; POSIX runners keep the pyproject default.
+          EXTRA=""
+          if [ "$RUNNER_OS" = "Windows" ]; then EXTRA="-C build-dir=C:/b"; fi
+          python -m pip install -e . --no-build-isolation -v $EXTRA
           # The backend must be *importable*, asserted before the suite runs.
           # Every differential test is skipif-guarded on native_available(), and
           # pytest exits 0 when every selected test skips -- measured, "2
