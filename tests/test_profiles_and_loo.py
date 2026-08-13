@@ -33,6 +33,7 @@ from tfidf_stability.profiles.user_profile import (
     profile_norm,
 )
 from tfidf_stability.similarity.cosine import cosine_against_corpus
+from tfidf_stability.utils.numerics import same_bits
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
 
 FEATURES = {
@@ -385,3 +386,76 @@ def test_vector_sum_and_mean_differ_only_in_norm(  # G21
     ratios = [s / mv for s, mv in zip(sum_v.values, mean_v.values, strict=True)]
     assert all(r == pytest.approx(3.0) for r in ratios), "a single positive scalar"
     assert profile_norm(sum_v) == pytest.approx(3.0 * profile_norm(mean_v))
+
+
+# ---------------------------------------------------------------------------
+# What aggregation actually joins (spec_addenda G28)
+# ---------------------------------------------------------------------------
+def test_aggregation_joins_feature_streams_and_so_makes_no_seam_ngrams() -> None:
+    """``build_profile`` concatenates *preprocessed streams*, not text.
+
+    G20 and this function's own docstring both used to say n-grams are generated
+    over the concatenated stream, so item order changes the features produced at
+    the seams. No pass runs over the joined result, so no seam n-gram is ever
+    produced -- and the order-sensitivity that motivated the canonical ordering
+    does not exist either. Pinned so the gap between the spec and the code
+    cannot quietly close in the wrong direction.
+    """
+    from tfidf_stability.preprocessing.pipeline import PreprocessingPipeline
+
+    pipeline = PreprocessingPipeline()
+    a_text, b_text = "quick brown fox", "lazy sleeping dog"
+    by_doc = {"a": pipeline.preprocess(a_text), "b": pipeline.preprocess(b_text)}
+
+    joined = build_profile("u", ["a", "b"], by_doc).features
+    as_text = tuple(pipeline.preprocess(f"{a_text} {b_text}"))
+
+    seam = set(as_text) - set(joined)
+    assert seam, "text aggregation must produce a seam bigram, or this test proves nothing"
+    assert seam.isdisjoint(joined), "the implementation must not produce it"
+    assert len(joined) == len(by_doc["a"]) + len(by_doc["b"]), "a plain union, nothing added"
+
+
+def test_item_order_cannot_move_a_profile_embedding(mini_model) -> None:  # type: ignore[no-untyped-def]
+    """The corollary: reordering permutes the tuple and nothing else."""
+    from tfidf_stability.preprocessing.pipeline import PreprocessingPipeline
+
+    pipeline = PreprocessingPipeline()
+    by_doc = {
+        "a": pipeline.preprocess("quick brown fox"),
+        "b": pipeline.preprocess("lazy sleeping dog"),
+    }
+    forward = build_profile("u", ["a", "b"], by_doc)
+    backward = build_profile("u", ["b", "a"], by_doc)
+
+    assert forward.features != backward.features, "the tuple order does differ"
+    assert sorted(forward.features) == sorted(backward.features), "but only in order"
+
+    one = embed_profile(forward, mini_model)
+    other = embed_profile(backward, mini_model)
+    assert one.indices == other.indices
+    assert all(same_bits(x, y) for x, y in zip(one.values, other.values, strict=True))
+
+
+def test_separate_items_is_inert_while_aggregation_joins_features(mini_model) -> None:  # type: ignore[no-untyped-def]
+    """The advertised G20 ablation cannot block a seam that is never formed."""
+    from tfidf_stability.preprocessing.pipeline import PreprocessingPipeline
+    from tfidf_stability.preprocessing.tokenise import GAP
+
+    pipeline = PreprocessingPipeline()
+    by_doc = {
+        "a": pipeline.preprocess("quick brown fox"),
+        "b": pipeline.preprocess("lazy sleeping dog"),
+    }
+    plain = build_profile("u", ["a", "b"], by_doc, separate_items=False)
+    separated = build_profile("u", ["a", "b"], by_doc, separate_items=True)
+
+    assert GAP in separated.features, "the sentinel is inserted"
+    assert GAP not in plain.features
+    assert len(separated.features) == len(plain.features) + 1
+
+    # ...and is then discarded, so the embedding is untouched.
+    one = embed_profile(plain, mini_model)
+    other = embed_profile(separated, mini_model)
+    assert one.indices == other.indices
+    assert all(same_bits(x, y) for x, y in zip(one.values, other.values, strict=True))

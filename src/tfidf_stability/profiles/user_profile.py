@@ -165,18 +165,37 @@ def build_profile(
     :func:`group_interactions` has already canonicalised into ascending
     identifier byte order (``spec_addenda.md#g20``).
 
-    Args:
-        separate_items: Insert a gap sentinel between consecutive items, so
-            n-grams cannot span the seam between two documents. Off by default,
-            because section 7.1 describes plain text aggregation and adopting
-            this silently would change every published number.
+    What is concatenated is **feature streams, not text**
+    -------------------------------------------------------
+    ``features_by_doc`` holds streams that have already been through
+    :meth:`PreprocessingPipeline.preprocess`, so the n-grams exist before this
+    function sees them and no n-gram pass runs over the joined result. Three
+    consequences follow, and each contradicts something previously written here
+    or in ``spec_addenda.md#g20`` (see ``#g28``):
 
-            It is worth knowing what it fixes. Without it, concatenating
-            ``(a, b)`` and ``(b, a)`` produces different *seam* n-grams and
-            therefore different features -- aggregation is order-sensitive, which
-            is why the order has to be canonicalised in the first place. With
-            it, the profile becomes a pure function of the item *set*, and the
-            canonical ordering becomes belt-and-braces rather than load-bearing.
+    * **No seam n-grams are ever produced.** Text aggregation of
+      ``"quick brown fox"`` and ``"lazy sleeping dog"`` yields the bigram
+      ``fox|lazi``; this function yields the union of the two streams and
+      nothing spanning the join.
+    * **Aggregation is therefore already order-insensitive.** Reordering the
+      items permutes the feature tuple but leaves the multiset, and hence the
+      embedding, bit-identical. G20's canonical ordering remains worth having --
+      it makes the *tuple* reproducible, which the digest depends on -- but it
+      is not what stops scores moving, because nothing was moving them.
+    * **``separate_items`` is inert**, for the same reason.
+
+    Whether to switch to genuine text aggregation is a research decision, not a
+    tidy-up: it would add one bigram per item boundary, change every profile's
+    ``L``, and so move every number in section 7.1.
+
+    Args:
+        separate_items: Insert a gap sentinel between consecutive items. Its
+            intent is to stop n-grams spanning the seam between two documents,
+            but there are no such n-grams to stop (above), and the sentinel is
+            not in the vocabulary, so it is discarded before it reaches a
+            count. Retained rather than removed because it becomes meaningful
+            the moment aggregation moves to text; asserted inert by
+            ``test_separate_items_is_inert_while_aggregation_joins_features``.
 
     Raises:
         KeyError: If an item has no feature stream. Silently skipping it would
