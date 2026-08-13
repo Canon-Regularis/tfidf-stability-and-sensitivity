@@ -119,8 +119,30 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
+          # Both preconditions are asserted rather than assumed. In the previous
+          # form, `command -v objdump >/dev/null && objdump -p "$pyd" | grep -q`
+          # reported success in the two cases that matter most: when no .pyd had
+          # been built at all (find matches nothing, objdump errors on the empty
+          # path, grep matches nothing, step exits 0 announcing the extension is
+          # self-contained), and when objdump was simply absent from the runner,
+          # which short-circuits the condition to false. A guard that cannot run
+          # must say so instead of passing.
           pyd=$(find src -name "_tfidf_native*.pyd" | head -1)
-          if command -v objdump >/dev/null && objdump -p "$pyd" | grep -qi "libwinpthread\|libstdc++\|libgcc"; then
+          [ -n "$pyd" ] || { echo "::error::no _tfidf_native*.pyd was built"; exit 1; }
+          echo "checking $pyd"
+          command -v objdump >/dev/null \
+            || { echo "::error::objdump unavailable; this guard cannot run"; exit 1; }
+          # Must be the import table, not a byte scan of the file. A -static
+          # MinGW build still contains the literal string "libgcc_s_dw2-1.dll"
+          # -- the unwinder's runtime LoadLibrary fallback -- even though it
+          # imports nothing of the sort, so scanning the bytes reports a
+          # self-contained extension as broken. Verified against a real build.
+          deps=$(objdump -p "$pyd" | grep -i "DLL Name:" || true)
+          # Every PE imports something (KERNEL32, pythonXY). No names at all
+          # means the inspection failed, not that the extension is clean.
+          [ -n "$deps" ] || { echo "::error::no DLL imports read from $pyd"; exit 1; }
+          echo "$deps"
+          if echo "$deps" | grep -qi "libwinpthread\|libstdc++\|libgcc"; then
             echo "::error::the extension depends on a GCC runtime DLL"
             exit 1
           fi
