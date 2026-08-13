@@ -27,7 +27,16 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
     -fno-reciprocal-math              # x/y must not become x*(1/y)
     -fno-unsafe-math-optimizations
     -fno-finite-math-only             # NaN/Inf semantics must be honoured
-    -fno-signed-zeros
+    # NOT -fno-signed-zeros. That is a *fast-math sub-option* -- it licenses the
+    # compiler to ignore the sign of zero -- and it sat in this list of
+    # disables for years reading like one of them. Measured: with it,
+    # (-0.0) + 0.0 compiles to -0.0 (bits 8000000000000000); with
+    # -fsigned-zeros it gives +0.0, which is what IEEE 754 requires. This
+    # repository compares every score on its raw bit pattern and
+    # ranking/margins.py reasons explicitly that -0.0 cannot occur, so the
+    # relaxed form is exactly the wrong one. fp_guard.hpp cannot catch it
+    # either: -fno-signed-zeros alone does not define __FAST_MATH__.
+    -fsigned-zeros
     -fexcess-precision=standard       # rule 3
   )
   # x87 carries 80-bit intermediates; SSE2 is exactly binary64. Irrelevant on
