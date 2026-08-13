@@ -52,11 +52,19 @@ data/external/
 !data/assets/
 !data/lexicon/
 
-# Generated experiment outputs are reproducible from source; keep the tree clean.
+# Figures are renderings and stay out of the tree: they are reproducible from the
+# JSON below by `python scripts/make_figures.py`, and matplotlib stamps its own
+# version into every PNG, so committing them would make the bytes depend on the
+# plotting library rather than on the result.
 reports/figures/
-reports/*.json
 reports/*.csv
 !reports/text/
+
+# The experiment JSON *is* committed, deliberately. A figure or a quoted number
+# whose underlying data is absent from the tree is an assertion nobody can check,
+# which is the one thing this repository is built not to be. Each file carries
+# its own result digest and the provenance of the run that produced it, so a
+# reader can regenerate it and compare rather than take it on trust.
 
 # --- LaTeX -------------------------------------------------------------------
 *.aux

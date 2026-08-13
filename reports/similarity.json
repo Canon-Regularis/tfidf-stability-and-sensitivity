@@ -1,0 +1,1036 @@
+{
+  "data_provenance": {
+    "kind": "synthetic",
+    "n_documents": 120,
+    "n_exact_duplicate_pairs": 4,
+    "n_twin_pairs": 6,
+    "redistributable": true,
+    "spec": {
+      "len_max": 40,
+      "len_min": 3,
+      "max_interactions_per_user": 12,
+      "n_docs": 120,
+      "n_exact_duplicates": 4,
+      "n_twin_pairs": 6,
+      "n_users": 20,
+      "seed": 20260811,
+      "twin_extra_token_df": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128
+      ],
+      "vocab_size": 300,
+      "zipf_exponent": 1.0
+    },
+    "spec_digest": "f760dab267bfac16066245fc0aae8fdb3c5859fac7d798f1d7dd4d044e274e8a"
+  },
+  "environment": {
+    "float": {
+      "constant_folding_ok": true,
+      "decimal_default_prec": 28,
+      "epsilon": 2.220446049250313e-16,
+      "mantissa_dig": 53,
+      "max": 1.7976931348623157e+308,
+      "min_normal": 2.2250738585072014e-308,
+      "no_reassociation": true,
+      "rounds": 1,
+      "subnormals_supported": true
+    },
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "native": {
+      "arch_tune": false,
+      "build_type": "Release",
+      "compiler_id": "GNU",
+      "compiler_ver": "13.2.0",
+      "fast_math": false,
+      "git_sha": "82d84156d05b",
+      "numeric_flags": "-ffp-contract=off -fno-fast-math -fno-associative-math -fno-reciprocal-math -fno-unsafe-math-optimizations -fno-finite-math-only -fsigned-zeros -fexcess-precision=standard -mfpmath=sse",
+      "processor": "AMD64",
+      "reproducible": true,
+      "system": "Windows",
+      "version": "0.2.0"
+    },
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.14.3"
+  },
+  "experiment": "similarity",
+  "parameters": {
+    "dataset": "synthetic_tiny",
+    "model_digest": "54edc10f5678866e255283b042dfd10017ac25b4323aea58c627720170ac46e4",
+    "n_queries": 10,
+    "query_length": 6,
+    "reduction": "naive",
+    "top": 10
+  },
+  "payload": {
+    "queries": [
+      {
+        "degenerate": false,
+        "margins": {
+          "k1": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.08993303495201663,
+            "value": 0.17986606990403325
+          },
+          "k10": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.009026533610180576,
+            "value": 0.018053067220361152
+          },
+          "k20": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.00014760658476101196,
+            "value": 0.0002952131695220239
+          },
+          "k5": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0011733231196222604,
+            "value": 0.002346646239244521
+          },
+          "k50": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0039842007274779045,
+            "value": 0.007968401454955809
+          }
+        },
+        "query_id": "q0",
+        "terms": [
+          "w00000",
+          "w00001",
+          "w00006",
+          "w00004",
+          "w00000",
+          "w00000\u001fw00001"
+        ],
+        "top": [
+          {
+            "doc_id": "d000000",
+            "rank": 1,
+            "score": 0.5466192128256118
+          },
+          {
+            "doc_id": "d000038",
+            "rank": 2,
+            "score": 0.3667531429215785
+          },
+          {
+            "doc_id": "d000066",
+            "rank": 3,
+            "score": 0.3344966602639941
+          },
+          {
+            "doc_id": "d000051",
+            "rank": 4,
+            "score": 0.2988704046880429
+          },
+          {
+            "doc_id": "d000059",
+            "rank": 5,
+            "score": 0.2966440488192048
+          },
+          {
+            "doc_id": "d000019",
+            "rank": 6,
+            "score": 0.2942974025799603
+          },
+          {
+            "doc_id": "d000068",
+            "rank": 7,
+            "score": 0.2934460632065058
+          },
+          {
+            "doc_id": "d000049",
+            "rank": 8,
+            "score": 0.28242555035390016
+          },
+          {
+            "doc_id": "d000054",
+            "rank": 9,
+            "score": 0.28037763096535834
+          },
+          {
+            "doc_id": "d000080",
+            "rank": 10,
+            "score": 0.2725408154120048
+          }
+        ]
+      },
+      {
+        "degenerate": false,
+        "margins": {
+          "k1": {
+            "defined": true,
+            "exact_tie": true,
+            "flip_radius": 0.0,
+            "value": 0.0
+          },
+          "k10": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0012654087385593205,
+            "value": 0.002530817477118641
+          },
+          "k20": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0016148361209851608,
+            "value": 0.0032296722419703217
+          },
+          "k5": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0031360944323897133,
+            "value": 0.006272188864779427
+          },
+          "k50": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.00033425097368752765,
+            "value": 0.0006685019473750553
+          }
+        },
+        "query_id": "q1",
+        "terms": [
+          "w00001",
+          "w00057",
+          "w00253",
+          "w00002",
+          "w00000",
+          "w00002"
+        ],
+        "top": [
+          {
+            "doc_id": "dup0003",
+            "rank": 1,
+            "score": 0.2948060977618241
+          },
+          {
+            "doc_id": "d000012",
+            "rank": 2,
+            "score": 0.2948060977618241
+          },
+          {
+            "doc_id": "d000050",
+            "rank": 3,
+            "score": 0.20645138980498418
+          },
+          {
+            "doc_id": "d000004",
+            "rank": 4,
+            "score": 0.19191869652523275
+          },
+          {
+            "doc_id": "d000044",
+            "rank": 5,
+            "score": 0.17284001679744176
+          },
+          {
+            "doc_id": "d000098",
+            "rank": 6,
+            "score": 0.16656782793266234
+          },
+          {
+            "doc_id": "d000013",
+            "rank": 7,
+            "score": 0.16493997886716197
+          },
+          {
+            "doc_id": "d000063",
+            "rank": 8,
+            "score": 0.1528646361795355
+          },
+          {
+            "doc_id": "d000079",
+            "rank": 9,
+            "score": 0.14885683630061394
+          },
+          {
+            "doc_id": "d000094",
+            "rank": 10,
+            "score": 0.14825054698316117
+          }
+        ]
+      },
+      {
+        "degenerate": false,
+        "margins": {
+          "k1": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.07632550894096571,
+            "value": 0.15265101788193142
+          },
+          "k10": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0006181852326617512,
+            "value": 0.0012363704653235025
+          },
+          "k20": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.00020866633187310163,
+            "value": 0.00041733266374620326
+          },
+          "k5": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.00393771645822244,
+            "value": 0.00787543291644488
+          },
+          "k50": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0004803873980398221,
+            "value": 0.0009607747960796442
+          }
+        },
+        "query_id": "q2",
+        "terms": [
+          "w00000",
+          "w00101",
+          "w00001",
+          "w00187",
+          "w00004",
+          "w00014"
+        ],
+        "top": [
+          {
+            "doc_id": "d000024",
+            "rank": 1,
+            "score": 0.31471302447027827
+          },
+          {
+            "doc_id": "d000019",
+            "rank": 2,
+            "score": 0.16206200658834685
+          },
+          {
+            "doc_id": "d000097",
+            "rank": 3,
+            "score": 0.13185833893550472
+          },
+          {
+            "doc_id": "d000066",
+            "rank": 4,
+            "score": 0.12813670149525672
+          },
+          {
+            "doc_id": "d000071",
+            "rank": 5,
+            "score": 0.12806226381540525
+          },
+          {
+            "doc_id": "d000080",
+            "rank": 6,
+            "score": 0.12018683089896037
+          },
+          {
+            "doc_id": "d000000",
+            "rank": 7,
+            "score": 0.11522274527441702
+          },
+          {
+            "doc_id": "d000059",
+            "rank": 8,
+            "score": 0.11383938771016663
+          },
+          {
+            "doc_id": "d000086",
+            "rank": 9,
+            "score": 0.11351424171525064
+          },
+          {
+            "doc_id": "d000047",
+            "rank": 10,
+            "score": 0.11317635213152467
+          }
+        ]
+      },
+      {
+        "degenerate": false,
+        "margins": {
+          "k1": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.1735357886573964,
+            "value": 0.3470715773147928
+          },
+          "k10": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0014000303486534638,
+            "value": 0.0028000606973069275
+          },
+          "k20": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.00015206439046735326,
+            "value": 0.0003041287809347065
+          },
+          "k5": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0017414564290886142,
+            "value": 0.0034829128581772284
+          },
+          "k50": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 3.83610957155299e-05,
+            "value": 7.67221914310598e-05
+          }
+        },
+        "query_id": "q3",
+        "terms": [
+          "w00248",
+          "w00046",
+          "w00001",
+          "w00003",
+          "w00001",
+          "w00244"
+        ],
+        "top": [
+          {
+            "doc_id": "d000036",
+            "rank": 1,
+            "score": 0.5095925641519613
+          },
+          {
+            "doc_id": "d000043",
+            "rank": 2,
+            "score": 0.16252098683716848
+          },
+          {
+            "doc_id": "d000054",
+            "rank": 3,
+            "score": 0.1512341474434362
+          },
+          {
+            "doc_id": "d000042",
+            "rank": 4,
+            "score": 0.12508124728965928
+          },
+          {
+            "doc_id": "d000097",
+            "rank": 5,
+            "score": 0.09927203154699989
+          },
+          {
+            "doc_id": "d000103",
+            "rank": 6,
+            "score": 0.09578911868882266
+          },
+          {
+            "doc_id": "d000008",
+            "rank": 7,
+            "score": 0.09211395179457375
+          },
+          {
+            "doc_id": "d000046",
+            "rank": 8,
+            "score": 0.08790799796554488
+          },
+          {
+            "doc_id": "d000010",
+            "rank": 9,
+            "score": 0.0837868142123788
+          },
+          {
+            "doc_id": "d000064",
+            "rank": 10,
+            "score": 0.07833936847933423
+          }
+        ]
+      },
+      {
+        "degenerate": false,
+        "margins": {
+          "k1": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.11190597192329055,
+            "value": 0.2238119438465811
+          },
+          "k10": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.000299606752244011,
+            "value": 0.000599213504488022
+          },
+          "k20": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0001517012490438452,
+            "value": 0.0003034024980876904
+          },
+          "k5": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.002846388540079771,
+            "value": 0.005692777080159542
+          },
+          "k50": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.00012103599037243881,
+            "value": 0.00024207198074487762
+          }
+        },
+        "query_id": "q4",
+        "terms": [
+          "w00076",
+          "w00194",
+          "w00044",
+          "w00028",
+          "w00000",
+          "w00009"
+        ],
+        "top": [
+          {
+            "doc_id": "d000048",
+            "rank": 1,
+            "score": 0.345656935706033
+          },
+          {
+            "doc_id": "d000049",
+            "rank": 2,
+            "score": 0.1218449918594519
+          },
+          {
+            "doc_id": "d000088",
+            "rank": 3,
+            "score": 0.12045921661274363
+          },
+          {
+            "doc_id": "d000100",
+            "rank": 4,
+            "score": 0.11887662961488164
+          },
+          {
+            "doc_id": "d000058",
+            "rank": 5,
+            "score": 0.10289031196838774
+          },
+          {
+            "doc_id": "d000091",
+            "rank": 6,
+            "score": 0.0971975348882282
+          },
+          {
+            "doc_id": "d000067",
+            "rank": 7,
+            "score": 0.09163258276995151
+          },
+          {
+            "doc_id": "d000076",
+            "rank": 8,
+            "score": 0.09087774147016062
+          },
+          {
+            "doc_id": "dup0001",
+            "rank": 9,
+            "score": 0.08661515171385348
+          },
+          {
+            "doc_id": "d000099",
+            "rank": 10,
+            "score": 0.08661515171385348
+          }
+        ]
+      },
+      {
+        "degenerate": false,
+        "margins": {
+          "k1": {
+            "defined": true,
+            "exact_tie": true,
+            "flip_radius": 0.0,
+            "value": 0.0
+          },
+          "k10": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.009977395003119206,
+            "value": 0.019954790006238413
+          },
+          "k20": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.001007408054730069,
+            "value": 0.002014816109460138
+          },
+          "k5": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.00024209095333491137,
+            "value": 0.00048418190666982275
+          },
+          "k50": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 6.273375490767862e-05,
+            "value": 0.00012546750981535723
+          }
+        },
+        "query_id": "q5",
+        "terms": [
+          "w00024",
+          "w00026",
+          "w00001",
+          "w00169",
+          "w00118",
+          "w00071"
+        ],
+        "top": [
+          {
+            "doc_id": "dup0000",
+            "rank": 1,
+            "score": 0.36831167278214877
+          },
+          {
+            "doc_id": "d000060",
+            "rank": 2,
+            "score": 0.36831167278214877
+          },
+          {
+            "doc_id": "dup0002",
+            "rank": 3,
+            "score": 0.145750426671729
+          },
+          {
+            "doc_id": "d000093",
+            "rank": 4,
+            "score": 0.145750426671729
+          },
+          {
+            "doc_id": "d000031",
+            "rank": 5,
+            "score": 0.13141259030814217
+          },
+          {
+            "doc_id": "d000033",
+            "rank": 6,
+            "score": 0.13092840840147235
+          },
+          {
+            "doc_id": "d000094",
+            "rank": 7,
+            "score": 0.11315675266317045
+          },
+          {
+            "doc_id": "twin0000a",
+            "rank": 8,
+            "score": 0.1124665648895716
+          },
+          {
+            "doc_id": "d000089",
+            "rank": 9,
+            "score": 0.1124665648895716
+          },
+          {
+            "doc_id": "twin0000b",
+            "rank": 10,
+            "score": 0.10862986151714785
+          }
+        ]
+      },
+      {
+        "degenerate": false,
+        "margins": {
+          "k1": {
+            "defined": true,
+            "exact_tie": true,
+            "flip_radius": 0.0,
+            "value": 0.0
+          },
+          "k10": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.006752383727237896,
+            "value": 0.013504767454475791
+          },
+          "k20": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.00013649138856677845,
+            "value": 0.0002729827771335569
+          },
+          "k5": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0020495035079651364,
+            "value": 0.004099007015930273
+          },
+          "k50": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0003320636542311142,
+            "value": 0.0006641273084622284
+          }
+        },
+        "query_id": "q6",
+        "terms": [
+          "w00002",
+          "w00177",
+          "w00001",
+          "w00001",
+          "w00002",
+          "w00014"
+        ],
+        "top": [
+          {
+            "doc_id": "d000072",
+            "rank": 1,
+            "score": 0.26543386859082924
+          },
+          {
+            "doc_id": "twin0002a",
+            "rank": 2,
+            "score": 0.26543386859082924
+          },
+          {
+            "doc_id": "twin0002b",
+            "rank": 3,
+            "score": 0.2583939880823933
+          },
+          {
+            "doc_id": "twin0004a",
+            "rank": 4,
+            "score": 0.20595150589836247
+          },
+          {
+            "doc_id": "d000030",
+            "rank": 5,
+            "score": 0.20595150589836247
+          },
+          {
+            "doc_id": "twin0004b",
+            "rank": 6,
+            "score": 0.2018524988824322
+          },
+          {
+            "doc_id": "d000016",
+            "rank": 7,
+            "score": 0.1959140487433088
+          },
+          {
+            "doc_id": "dup0003",
+            "rank": 8,
+            "score": 0.19117597480074744
+          },
+          {
+            "doc_id": "d000012",
+            "rank": 9,
+            "score": 0.19117597480074744
+          },
+          {
+            "doc_id": "d000004",
+            "rank": 10,
+            "score": 0.18828167035879018
+          }
+        ]
+      },
+      {
+        "degenerate": false,
+        "margins": {
+          "k1": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.07555064561401577,
+            "value": 0.15110129122803154
+          },
+          "k10": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0023497291067913553,
+            "value": 0.004699458213582711
+          },
+          "k20": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 4.6038792417588126e-05,
+            "value": 9.207758483517625e-05
+          },
+          "k5": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.007364134165465358,
+            "value": 0.014728268330930716
+          },
+          "k50": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 2.1106547080401716e-05,
+            "value": 4.221309416080343e-05
+          }
+        },
+        "query_id": "q7",
+        "terms": [
+          "w00049",
+          "w00001",
+          "w00002",
+          "w00001",
+          "w00215",
+          "w00000"
+        ],
+        "top": [
+          {
+            "doc_id": "d000084",
+            "rank": 1,
+            "score": 0.355141931263753
+          },
+          {
+            "doc_id": "d000100",
+            "rank": 2,
+            "score": 0.20404064003572145
+          },
+          {
+            "doc_id": "d000051",
+            "rank": 3,
+            "score": 0.1712948717931239
+          },
+          {
+            "doc_id": "d000087",
+            "rank": 4,
+            "score": 0.15522961699490873
+          },
+          {
+            "doc_id": "d000071",
+            "rank": 5,
+            "score": 0.142345583418554
+          },
+          {
+            "doc_id": "d000049",
+            "rank": 6,
+            "score": 0.12761731508762328
+          },
+          {
+            "doc_id": "d000080",
+            "rank": 7,
+            "score": 0.12689521696413675
+          },
+          {
+            "doc_id": "dup0003",
+            "rank": 8,
+            "score": 0.12172238173477572
+          },
+          {
+            "doc_id": "d000012",
+            "rank": 9,
+            "score": 0.12172238173477572
+          },
+          {
+            "doc_id": "d000098",
+            "rank": 10,
+            "score": 0.12143226947804514
+          }
+        ]
+      },
+      {
+        "degenerate": false,
+        "margins": {
+          "k1": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.06387466003153094,
+            "value": 0.1277493200630619
+          },
+          "k10": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.00125979562862992,
+            "value": 0.00251959125725984
+          },
+          "k20": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0014361905138456782,
+            "value": 0.0028723810276913564
+          },
+          "k5": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.011205254168609145,
+            "value": 0.02241050833721829
+          },
+          "k50": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0003022397606168275,
+            "value": 0.000604479521233655
+          }
+        },
+        "query_id": "q8",
+        "terms": [
+          "w00236",
+          "w00134",
+          "w00004",
+          "w00016",
+          "w00088",
+          "w00005"
+        ],
+        "top": [
+          {
+            "doc_id": "d000096",
+            "rank": 1,
+            "score": 0.3720458946284579
+          },
+          {
+            "doc_id": "d000080",
+            "rank": 2,
+            "score": 0.244296574565396
+          },
+          {
+            "doc_id": "d000062",
+            "rank": 3,
+            "score": 0.1980923559139094
+          },
+          {
+            "doc_id": "d000083",
+            "rank": 4,
+            "score": 0.1569303310165383
+          },
+          {
+            "doc_id": "d000015",
+            "rank": 5,
+            "score": 0.10839871685902912
+          },
+          {
+            "doc_id": "d000045",
+            "rank": 6,
+            "score": 0.08598820852181083
+          },
+          {
+            "doc_id": "d000051",
+            "rank": 7,
+            "score": 0.07858361212670001
+          },
+          {
+            "doc_id": "twin0003a",
+            "rank": 8,
+            "score": 0.07523971910790624
+          },
+          {
+            "doc_id": "d000085",
+            "rank": 9,
+            "score": 0.07523971910790624
+          },
+          {
+            "doc_id": "twin0001a",
+            "rank": 10,
+            "score": 0.07523971910790624
+          }
+        ]
+      },
+      {
+        "degenerate": false,
+        "margins": {
+          "k1": {
+            "defined": true,
+            "exact_tie": true,
+            "flip_radius": 0.0,
+            "value": 0.0
+          },
+          "k10": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.001076307137347382,
+            "value": 0.002152614274694764
+          },
+          "k20": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.00021630748787513157,
+            "value": 0.00043261497575026314
+          },
+          "k5": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.020592413080996477,
+            "value": 0.041184826161992955
+          },
+          "k50": {
+            "defined": true,
+            "exact_tie": false,
+            "flip_radius": 0.0014040868756048895,
+            "value": 0.002808173751209779
+          }
+        },
+        "query_id": "q9",
+        "terms": [
+          "w00000",
+          "w00022",
+          "w00128",
+          "w00270",
+          "w00033",
+          "w00150"
+        ],
+        "top": [
+          {
+            "doc_id": "twin0000a",
+            "rank": 1,
+            "score": 0.3256515388631792
+          },
+          {
+            "doc_id": "d000089",
+            "rank": 2,
+            "score": 0.3256515388631792
+          },
+          {
+            "doc_id": "twin0000b",
+            "rank": 3,
+            "score": 0.3145422073154599
+          },
+          {
+            "doc_id": "d000026",
+            "rank": 4,
+            "score": 0.17117198534353606
+          },
+          {
+            "doc_id": "d000035",
+            "rank": 5,
+            "score": 0.1345148553600828
+          },
+          {
+            "doc_id": "d000054",
+            "rank": 6,
+            "score": 0.09333002919808986
+          },
+          {
+            "doc_id": "d000018",
+            "rank": 7,
+            "score": 0.08701696604260697
+          },
+          {
+            "doc_id": "d000092",
+            "rank": 8,
+            "score": 0.08644697091045521
+          },
+          {
+            "doc_id": "d000072",
+            "rank": 9,
+            "score": 0.08116284556696549
+          },
+          {
+            "doc_id": "twin0002a",
+            "rank": 10,
+            "score": 0.08116284556696549
+          }
+        ]
+      }
+    ]
+  },
+  "result_digest": "530315399bad08a0f2d11af6946a66ebd0e5ec821f17c8ae11f8401740d14bf2"
+}

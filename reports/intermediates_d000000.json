@@ -1,0 +1,86 @@
+{
+  "doc_id": "d000000",
+  "index": 0,
+  "is_zero_norm": false,
+  "log_impl": "correctly_rounded",
+  "model_digest": "54edc10f5678866e255283b042dfd10017ac25b4323aea58c627720170ac46e4",
+  "n_features": 9,
+  "n_terms_in_vocabulary": 8,
+  "norm": 0.8933269316842116,
+  "norm_hex": "0x1.c96225c8707e8p-1",
+  "reduction": "naive",
+  "terms": [
+    {
+      "column": 395,
+      "df": 2,
+      "idf": 4.697178256928631,
+      "idf_hex": "0x1.2c9e918d3f689p+2",
+      "term": "w00006\u001fw00004",
+      "weight": 0.5219086952142924,
+      "weight_hex": "0x1.0b379dd2e307ap-1"
+    },
+    {
+      "column": 123,
+      "df": 6,
+      "idf": 3.849880396541428,
+      "idf_hex": "0x1.ecc8e17e5416cp+1",
+      "term": "w00001\u001fw00006",
+      "weight": 0.4277644885046031,
+      "weight_hex": "0x1.b607e4e211db5p-2"
+    },
+    {
+      "column": 304,
+      "df": 17,
+      "idf": 2.9054187877005764,
+      "idf_hex": "0x1.73e4c3492dd11p+1",
+      "term": "w00004\u001fw00000",
+      "weight": 0.3228243097445085,
+      "weight_hex": "0x1.4a9274b2d3648p-2"
+    },
+    {
+      "column": 2,
+      "df": 28,
+      "idf": 2.4284947156102668,
+      "idf_hex": "0x1.36d8ea3307078p+1",
+      "term": "w00000\u001fw00001",
+      "weight": 0.2698327461789185,
+      "weight_hex": "0x1.144f0910e9cdcp-2"
+    },
+    {
+      "column": 0,
+      "df": 107,
+      "idf": 1.1136593184725214,
+      "idf_hex": "0x1.1d18c6efb9a20p+0",
+      "term": "w00000",
+      "weight": 0.24747984854944918,
+      "weight_hex": "0x1.fad6b6ff82e71p-3"
+    },
+    {
+      "column": 390,
+      "df": 40,
+      "idf": 2.0822184788924334,
+      "idf_hex": "0x1.0a862296fc24ap+1",
+      "term": "w00006",
+      "weight": 0.23135760876582592,
+      "weight_hex": "0x1.d9d2049aa3cf5p-3"
+    },
+    {
+      "column": 303,
+      "df": 64,
+      "idf": 1.621403275701104,
+      "idf_hex": "0x1.9f1448fac375ap+0",
+      "term": "w00004",
+      "weight": 0.1801559195223449,
+      "weight_hex": "0x1.70f596343bf6cp-3"
+    },
+    {
+      "column": 116,
+      "df": 96,
+      "idf": 1.2210795670933583,
+      "idf_hex": "0x1.3898aba67ad4fp+0",
+      "term": "w00001",
+      "weight": 0.13567550745481757,
+      "weight_hex": "0x1.15dd0a5b17d9bp-3"
+    }
+  ]
+}
