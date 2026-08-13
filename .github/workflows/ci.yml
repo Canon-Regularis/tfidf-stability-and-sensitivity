@@ -120,23 +120,14 @@ jobs:
           cmake --build build
       - name: C++ unit tests
         run: ctest --test-dir build --output-on-failure --no-tests=error
-      - name: Install and run the full suite with the native backend present
-        run: |
-          python -m pip install -e . --no-build-isolation
-          # "with the native backend present" is asserted, not hoped for. Every
-          # native test is skipif-guarded on native_available(), and pytest
-          # exits 0 when all of them skip -- so an extension that built but
-          # cannot load would turn this job into a second run of the reference
-          # suite while still reporting the native backend green.
-          python -c "
-          import sys
-          from tfidf_stability._native import native_available, unavailable_reason
-          sys.exit(0 if native_available() else
-                   '::error::native backend not importable: ' + (unavailable_reason() or '?'))
-          "
-          python -m pytest tests/ -q
-        env:
-          HYPOTHESIS_PROFILE: ci
+      - name: Install the extension
+        run: python -m pip install -e . --no-build-isolation
+
+      # Ordered before the import check on purpose. This guard is the one that
+      # can *explain* an import failure -- a .pyd linked against a GCC runtime
+      # DLL fails to load with a bare "DLL load failed" and nothing else. It
+      # used to run after the test step, so when the import check fired the
+      # diagnosis never ran.
       - name: The extension must be self-contained (Windows)
         # A MinGW-built .pyd that depends on libwinpthread-1.dll fails to import
         # with a bare "DLL load failed", because CPython's search path does not
@@ -171,6 +162,43 @@ jobs:
             echo "::error::the extension depends on a GCC runtime DLL"
             exit 1
           fi
+
+      - name: The native backend must be importable
+        # Asserted, not hoped for. Every native test is skipif-guarded on
+        # native_available(), and pytest exits 0 when all of them skip -- so an
+        # extension that builds but cannot load turns this job into a second run
+        # of the reference suite while still reporting the native backend green.
+        #
+        # Diagnostic on failure rather than a bare non-zero: when this fired on
+        # windows-latest there was nothing in the log to say whether the import
+        # failed or the ABI disagreed, which is the whole question.
+        run: |
+          python - <<'PY'
+          import sys, pathlib
+          from tfidf_stability._native import (
+              REQUIRED_ABI, build_info, native_available, unavailable_reason,
+          )
+          if native_available():
+              print(f"native backend importable, ABI {REQUIRED_ABI}")
+              print(build_info())
+              sys.exit(0)
+          print(f"::error::native backend not importable: {unavailable_reason() or 'unknown'}")
+          print(f"expected ABI: {REQUIRED_ABI}")
+          built = sorted(pathlib.Path("src").rglob("_tfidf_native*"))
+          print(f"built artefacts found: {[str(p) for p in built] or 'NONE'}")
+          for p in built:
+              print(f"  {p}  ({p.stat().st_size} bytes)")
+          try:
+              import tfidf_stability._native._tfidf_native  # noqa: F401
+          except Exception as exc:
+              print(f"raw import error: {type(exc).__name__}: {exc}")
+          sys.exit(1)
+          PY
+
+      - name: Run the full suite with the native backend present
+        run: python -m pytest tests/ -q
+        env:
+          HYPOTHESIS_PROFILE: ci
 
   cppcheck:
     name: static analysis (C++)
