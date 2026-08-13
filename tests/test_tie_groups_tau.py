@@ -390,3 +390,22 @@ def test_chain_of_returns_the_unique_containing_chain() -> None:
     assert index.chain_of(3) == (2, 4)
     with pytest.raises(IndexError):
         index.chain_of(99)
+
+
+@pytest.mark.parametrize("bad", [-1e-9, float("nan"), float("-inf")])
+def test_an_inadmissible_tau_is_rejected_by_every_tie_group_object(bad: float) -> None:
+    """NaN slipped through a guard whose own message said non-negative.
+
+    The check was ``if tau < 0.0``, and every comparison with NaN is false. It
+    was not harmless: with ``tau = NaN`` both ``gap > tau`` and ``gap <= tau``
+    are false, so ``tie_chains`` returned a single group covering the corpus
+    while ``tie_cliques`` returned all singletons and ``rho`` reported N --
+    three mutually contradictory answers to the same question, with no error,
+    and ``rho`` at its maximum rather than a refusal.
+    """
+    scores = (1.0, 0.9, 0.5, 0.5, 0.1)
+    for call in (tie_chains, tie_cliques, chain_inflation_ratio):
+        with pytest.raises(ValueError, match="non-negative"):
+            call(scores, bad)
+    with pytest.raises(ValueError, match="non-negative"):
+        tie_ball_interval(scores, 2, bad)

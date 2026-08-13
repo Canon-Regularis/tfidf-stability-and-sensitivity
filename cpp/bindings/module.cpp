@@ -108,6 +108,24 @@ std::span<const double> checked_scores(const F64Array& scores) {
     return span;
 }
 
+/// Reject a tolerance that is negative or NaN.
+///
+/// `!(tau >= 0.0)`, not `tau < 0.0`: every comparison with NaN is false, so the
+/// second form passes NaN through a guard whose message says non-negative.
+///
+/// Applied to all four tie-group entry points. An earlier sweep added the check
+/// to `tie_ball_interval` alone, leaving `tie_chains`, `tie_cliques` and
+/// `chain_inflation_ratio` to accept a negative tau that the normative Python
+/// rejects -- and to answer it, which is worse than refusing: the ratio comes
+/// back as 1.0, its *minimum*, so an invalid tolerance serialises as the
+/// healthiest possible tie structure.
+double checked_tau(double tau) {
+    if (!(tau >= 0.0)) {
+        throw std::invalid_argument("tau must be non-negative");
+    }
+    return tau;
+}
+
 /// Shape of this binding surface, checked against
 /// `tfidf_stability._native.REQUIRED_ABI` on import.
 ///
@@ -472,9 +490,7 @@ NB_MODULE(_tfidf_native, m) {
             if (j < 0 || j >= static_cast<std::int32_t>(sorted_scores.shape(0))) {
                 throw std::out_of_range("rank index out of range");
             }
-            if (tau < 0.0) {
-                throw std::invalid_argument("tau must be non-negative");
-            }
+            checked_tau(tau);
             const auto [lo, hi] =
                 ranking::tie_ball_interval(checked_scores(sorted_scores), j, tau);
             return nb::make_tuple(lo, hi);
@@ -486,7 +502,7 @@ NB_MODULE(_tfidf_native, m) {
         [](const F64Array& sorted_scores, double tau) {
             std::vector<std::int32_t> flat;
             for (const auto& [lo, hi] :
-                 ranking::tie_chains(checked_scores(sorted_scores), tau)) {
+                 ranking::tie_chains(checked_scores(sorted_scores), checked_tau(tau))) {
                 flat.push_back(lo);
                 flat.push_back(hi);
             }
@@ -500,7 +516,7 @@ NB_MODULE(_tfidf_native, m) {
         [](const F64Array& sorted_scores, double tau) {
             std::vector<std::int32_t> flat;
             for (const auto& [lo, hi] :
-                 ranking::tie_cliques(checked_scores(sorted_scores), tau)) {
+                 ranking::tie_cliques(checked_scores(sorted_scores), checked_tau(tau))) {
                 flat.push_back(lo);
                 flat.push_back(hi);
             }
@@ -512,7 +528,7 @@ NB_MODULE(_tfidf_native, m) {
         "chain_inflation_ratio",
         [](const F64Array& sorted_scores, double tau) {
             return ranking::chain_inflation_ratio(checked_scores(sorted_scores),
-                                                  tau);
+                                                  checked_tau(tau));
         },
         nb::arg("sorted_scores"), nb::arg("tau"));
 

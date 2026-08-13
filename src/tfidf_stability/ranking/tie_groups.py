@@ -99,7 +99,14 @@ def tie_ball_interval(sorted_scores: Sequence[float], j: int, tau: float) -> Int
     n = len(sorted_scores)
     if not 0 <= j < n:
         raise IndexError(f"rank index {j} out of range 0..{n - 1}")
-    if tau < 0.0:
+    # `not (tau >= 0.0)`, not `tau < 0.0`: every comparison with NaN is
+    # false, so the second form lets NaN straight through a guard whose
+    # own message says non-negative. It is not harmless -- with tau = NaN
+    # `gap > tau` and `gap <= tau` are both false, so tie_chains returns a
+    # single group covering the corpus while tie_cliques returns all
+    # singletons, and rho reports N. Three mutually contradictory answers
+    # to the same question, with no error raised.
+    if not (tau >= 0.0):
         raise ValueError(f"tau must be non-negative, got {tau}")
 
     centre = sorted_scores[j]
@@ -142,7 +149,14 @@ def tie_chains(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ..
     n = len(sorted_scores)
     if n == 0:
         return ()
-    if tau < 0.0:
+    # `not (tau >= 0.0)`, not `tau < 0.0`: every comparison with NaN is
+    # false, so the second form lets NaN straight through a guard whose
+    # own message says non-negative. It is not harmless -- with tau = NaN
+    # `gap > tau` and `gap <= tau` are both false, so tie_chains returns a
+    # single group covering the corpus while tie_cliques returns all
+    # singletons, and rho reports N. Three mutually contradictory answers
+    # to the same question, with no error raised.
+    if not (tau >= 0.0):
         raise ValueError(f"tau must be non-negative, got {tau}")
 
     out: list[Interval] = []
@@ -181,7 +195,14 @@ def tie_cliques(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, .
     n = len(sorted_scores)
     if n == 0:
         return ()
-    if tau < 0.0:
+    # `not (tau >= 0.0)`, not `tau < 0.0`: every comparison with NaN is
+    # false, so the second form lets NaN straight through a guard whose
+    # own message says non-negative. It is not harmless -- with tau = NaN
+    # `gap > tau` and `gap <= tau` are both false, so tie_chains returns a
+    # single group covering the corpus while tie_cliques returns all
+    # singletons, and rho reports N. Three mutually contradictory answers
+    # to the same question, with no error raised.
+    if not (tau >= 0.0):
         raise ValueError(f"tau must be non-negative, got {tau}")
 
     out: list[Interval] = []
