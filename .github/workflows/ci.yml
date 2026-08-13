@@ -17,6 +17,20 @@ on:
 permissions:
   contents: read
 
+# bash on every runner, including Windows, where the default is pwsh.
+#
+# This is not a style preference. GitHub runs bash with `set -eo pipefail`, so a
+# failed command aborts the step; its pwsh wrapper sets `$ErrorActionPreference`
+# (which governs cmdlets) and then checks only `$LASTEXITCODE` at the *end* of
+# the block, so a native command failing mid-block is ignored. In the `native`
+# job that combines badly with a suite whose native tests are skipif-guarded: a
+# failed `pip install -e .` would leave the extension unimportable, every
+# differential test would skip, pytest would exit 0, and the job would report
+# green having tested nothing. Two multi-line blocks there were exposed.
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -105,10 +119,21 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTFIDF_BUILD_TESTS=ON
           cmake --build build
       - name: C++ unit tests
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --no-tests=error
       - name: Install and run the full suite with the native backend present
         run: |
           python -m pip install -e . --no-build-isolation
+          # "with the native backend present" is asserted, not hoped for. Every
+          # native test is skipif-guarded on native_available(), and pytest
+          # exits 0 when all of them skip -- so an extension that built but
+          # cannot load would turn this job into a second run of the reference
+          # suite while still reporting the native backend green.
+          python -c "
+          import sys
+          from tfidf_stability._native import native_available, unavailable_reason
+          sys.exit(0 if native_available() else
+                   '::error::native backend not importable: ' + (unavailable_reason() or '?'))
+          "
           python -m pytest tests/ -q
         env:
           HYPOTHESIS_PROFILE: ci

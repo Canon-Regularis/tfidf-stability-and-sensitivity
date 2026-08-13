@@ -41,7 +41,13 @@ jobs:
           cmake -S . -B build-asan -G Ninja             -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DTFIDF_BUILD_TESTS=ON             -DTFIDF_SANITIZERS="address;undefined"
           cmake --build build-asan
       - name: Native tests under ASan and UBSan
-        run: ctest --test-dir build-asan --output-on-failure
+        # --no-tests=error is load-bearing, not tidiness. Plain `ctest` prints
+        # "No tests were found!!!" and exits **0**, so a build that registered
+        # nothing -- a renamed target, a dropped add_test, a CMake option that
+        # quietly disabled the suite -- reports a green sanitizer run having
+        # executed zero tests under ASan. Measured: exit 0 without the flag,
+        # exit 8 with it. Applied to every ctest call in this repository.
+        run: ctest --test-dir build-asan --output-on-failure --no-tests=error
         env:
           ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
@@ -59,7 +65,7 @@ jobs:
       - run: |
           cmake -S . -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DTFIDF_BUILD_TESTS=ON -DTFIDF_SANITIZERS=thread
           cmake --build build-tsan
-      - run: ctest --test-dir build-tsan --output-on-failure
+      - run: ctest --test-dir build-tsan --output-on-failure --no-tests=error
 
   glibcxx-assertions:
     name: libstdc++ assertions
@@ -77,4 +83,4 @@ jobs:
         run: |
           cmake -S . -B build-assert -G Ninja -DCMAKE_BUILD_TYPE=Debug             -DTFIDF_BUILD_TESTS=ON             -DCMAKE_CXX_FLAGS="-D_GLIBCXX_ASSERTIONS"
           cmake --build build-assert
-      - run: ctest --test-dir build-assert --output-on-failure
+      - run: ctest --test-dir build-assert --output-on-failure --no-tests=error

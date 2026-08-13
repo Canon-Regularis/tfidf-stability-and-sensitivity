@@ -99,15 +99,43 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Native unit tests
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --no-tests=error
       # The native backend must not change any number. The digest here is
       # computed by the reference path, and the differential suite is what
       # proves the two agree -- so a divergence shows up as a test failure with
       # a precise location rather than as an opaque hash mismatch.
       - name: Differential suite (reference vs native, bit-exact)
+        shell: bash
         run: |
           python -m pip install -e . --no-build-isolation
-          python -m pytest tests/ -q -m "differential or native"
+          # The backend must be *importable*, asserted before the suite runs.
+          # Every differential test is skipif-guarded on native_available(), and
+          # pytest exits 0 when every selected test skips -- measured, "2
+          # skipped", exit 0. So a .pyd that built but failed to load (a missing
+          # runtime DLL is the usual cause, and this job builds on three
+          # platforms) would skip the entire comparison and report the native
+          # backend bit-identical to the reference having compared nothing.
+          python - <<'PY'
+          import sys
+          from tfidf_stability._native import native_available, unavailable_reason
+          if not native_available():
+              sys.exit(f"::error::native backend not importable: {unavailable_reason() or 'unknown'}")
+          print("native backend importable; the differential suite will not skip")
+          PY
+          python -m pytest tests/ -q -m "differential or native" --junitxml=diff.xml
+          # Belt and braces: even with the backend present, a marker rename or a
+          # collection error could select nothing. Require real executions.
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          suite = ET.parse("diff.xml").getroot()
+          suite = suite if suite.tag == "testsuite" else suite[0]
+          total = int(suite.get("tests", 0))
+          skipped = int(suite.get("skipped", 0))
+          ran = total - skipped
+          print(f"differential tests: {total} selected, {skipped} skipped, {ran} executed")
+          if ran < 20:
+              sys.exit(f"::error::only {ran} differential tests executed; expected the full suite")
+          PY
       - name: Compute the pipeline digest
         id: digest
         shell: bash
@@ -144,6 +172,15 @@ jobs:
             printf '  %-46s %s\n' "$(basename "$f" .txt)" "$(cat "$f")"
           done
 
+          # A cross-platform claim needs more than one platform. `unique -ne 1`
+          # is satisfied by a single collected digest, so if every matrix job
+          # but one failed to upload, this would report "all digests identical"
+          # having compared a value with itself.
+          collected=$(ls collected/*.txt | wc -l)
+          if [ "$collected" -lt 6 ]; then
+            echo "::error::only $collected digests collected; expected one per matrix job"
+            exit 1
+          fi
           unique=$(cat collected/*.txt | sort -u | wc -l)
           if [ "$unique" -ne 1 ]; then
             echo

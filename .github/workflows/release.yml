@@ -39,7 +39,14 @@ jobs:
         # must succeed offline. If it does not, the hermetic-build claim in
         # cpp/third_party/ is false.
         run: |
-          python -m pip download --no-deps --no-binary :all: --dest /tmp/check dist/*.tar.gz
+          # --no-index is what makes this a test of the claim. Without it the
+          # step had full network access and pip was free to fetch the build
+          # backend from PyPI, so "must build without network access" was never
+          # actually exercised -- it only checked that the sdist builds *with*
+          # a network. --no-index forbids every index lookup, so anything not
+          # vendored fails here rather than in a user's offline environment.
+          python -m pip download --no-deps --no-binary :all: --no-index \
+            --dest /tmp/check dist/*.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: sdist
