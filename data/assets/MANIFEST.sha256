@@ -1,0 +1,12 @@
+# Frozen first-party assets.
+#
+# Unlike the other manifests in this tree these files are not third-party, so
+# this file is not about licence provenance. It exists because the stopword list
+# decides the vocabulary and therefore every df, idf and score, and because
+# stopwords.py, the asset's own header and configs/default.yaml all state that
+# it is verified at load. Nothing verified it: scripts/check_vendored.py
+# discovers work by rglob("MANIFEST.sha256"), so a directory without one is
+# invisible to it, and a check keyed on finding manifests can never notice a
+# missing one. Adding this file brings data/assets under that gate with no
+# change to the script, and load_stopwords now checks against it.
+acfa780187dd58c25247462c557a2a73cf9f1594b882765531c002f56c653f40  stopwords_en_v1.txt

@@ -245,3 +245,42 @@ def test_map_is_stable_across_processes_and_hash_seeds() -> None:
         )
         outputs.add(res.stdout)
     assert len(outputs) == 1, f"output varied with PYTHONHASHSEED: {outputs}"
+
+
+def test_the_stopword_asset_is_verified_against_its_recorded_digest(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """ "Hash-verified" is asserted in three places; make it true in one.
+
+    ``stopwords.py``'s header, the asset's own header and
+    ``configs/default.yaml`` all say the list is verified at load. Nothing
+    verified it: ``data/assets/MANIFEST.sha256`` did not exist, and
+    ``scripts/check_vendored.py`` discovers work by ``rglob("MANIFEST.sha256")``
+    so a directory without one is invisible to it. Editing a single word
+    silently changed every df, idf and score, and the reproducibility snapshot
+    could not catch it because it compares runs to each other, not to a pinned
+    value.
+    """
+    import shutil
+
+    from tfidf_stability.preprocessing import stopwords as module
+    from tfidf_stability.utils.validation import DataIntegrityError
+
+    genuine = module.load_stopwords()
+    assert genuine.digest == module._recorded_digest(module.DEFAULT_STOPWORD_ASSET)
+
+    shutil.copy(module._MANIFEST, tmp_path / "MANIFEST.sha256")
+    original = (module._ASSET_DIR / module.DEFAULT_STOPWORD_ASSET).read_text(encoding="utf-8")
+    (tmp_path / module.DEFAULT_STOPWORD_ASSET).write_text(
+        original.replace("\nnot\n", "\n"), encoding="utf-8"
+    )
+
+    asset_dir, manifest = module._ASSET_DIR, module._MANIFEST
+    try:
+        module._ASSET_DIR, module._MANIFEST = tmp_path, tmp_path / "MANIFEST.sha256"
+        module.load_stopwords.cache_clear()
+        with pytest.raises(DataIntegrityError, match="recorded digest"):
+            module.load_stopwords()
+    finally:
+        module._ASSET_DIR, module._MANIFEST = asset_dir, manifest
+        module.load_stopwords.cache_clear()
+
+    assert module.load_stopwords().digest == genuine.digest, "the real asset still loads"

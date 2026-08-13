@@ -20,13 +20,29 @@ from pathlib import Path
 from typing import Final
 
 from tfidf_stability.preprocessing.tokenise import GAP
+from tfidf_stability.utils.validation import DataIntegrityError
 
 __all__ = ["StopwordSet", "load_stopwords", "remove_stopwords"]
 
 #: Repository-relative location of the frozen assets.
 _ASSET_DIR: Final = Path(__file__).resolve().parents[3] / "data" / "assets"
 
+#: The recorded digests. Same format ``scripts/check_vendored.py`` parses, so
+#: the asset is covered both at load and by the repository-wide gate.
+_MANIFEST: Final = _ASSET_DIR / "MANIFEST.sha256"
+
 DEFAULT_STOPWORD_ASSET: Final[str] = "stopwords_en_v1.txt"
+
+
+def _recorded_digest(asset: str) -> str:
+    """The digest this asset is supposed to have, from the manifest."""
+    for line in _MANIFEST.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        digest, _, name = line.partition("  ")
+        if name.strip() == asset:
+            return digest.strip()
+    raise DataIntegrityError(f"{asset} has no recorded digest in {_MANIFEST}")
 
 
 class StopwordSet:
@@ -92,10 +108,24 @@ def load_stopwords(asset: str = DEFAULT_STOPWORD_ASSET) -> StopwordSet:
 
     Raises:
         FileNotFoundError: If the asset is missing.
+        DataIntegrityError: If the asset has no recorded digest, or its bytes do
+            not match it. This module's header, the asset's own header and
+            ``configs/default.yaml`` have always said the list is "verified at
+            load"; until ``data/assets/MANIFEST.sha256`` existed, nothing was.
+            Editing one word silently changed every df, idf and score, and the
+            reproducibility snapshot could not catch it because it compares runs
+            against each other rather than against a pinned value.
     """
     path = _ASSET_DIR / asset
     raw = path.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
+
+    recorded = _recorded_digest(asset)
+    if digest != recorded:
+        raise DataIntegrityError(
+            f"{path} does not match its recorded digest: expected {recorded}, got {digest}. "
+            f"The stopword list decides the vocabulary, so this changes every published number."
+        )
 
     words: list[str] = []
     for line in raw.decode("utf-8").splitlines():
