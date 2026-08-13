@@ -107,7 +107,11 @@ jobs:
       - name: Differential suite (reference vs native, bit-exact)
         shell: bash
         run: |
-          python -m pip install -e . --no-build-isolation
+          # -v for the same reason as ci.yml's install step: this command fails
+          # on windows-latest and used to do so silently, because the block ran
+          # under pwsh (which does not abort mid-block) and the tests that
+          # followed skipped rather than failed.
+          python -m pip install -e . --no-build-isolation -v
           # The backend must be *importable*, asserted before the suite runs.
           # Every differential test is skipif-guarded on native_available(), and
           # pytest exits 0 when every selected test skips -- measured, "2
