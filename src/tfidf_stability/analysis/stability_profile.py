@@ -110,11 +110,38 @@ class CertificateAudit:
     uncertified_unchanged: int
     uncertified_changed: int
     n_undefined: int
+    #: Queries excluded because ``m_k`` is exactly zero -- A2's regime. Counted
+    #: rather than silently dropped, so the exclusion this module's header
+    #: promises is visible in the published record.
+    n_exact_tie: int = 0
 
     @property
     def is_sound(self) -> bool:
-        """Whether the certificate ever failed. Must be ``True``."""
+        """Whether the certificate ever failed. Must be ``True``.
+
+        Read with :attr:`is_conclusive`, never alone: this is a statement about
+        the certified cell being empty of failures, and it is vacuously true
+        when that cell is empty of *everything*.
+        """
         return self.certified_changed == 0
+
+    @property
+    def n_certified(self) -> int:
+        """Perturbations that actually fell inside the certified radius."""
+        return self.certified_unchanged + self.certified_changed
+
+    @property
+    def is_conclusive(self) -> bool:
+        """Whether the audit tested section 4.4 at all.
+
+        ``is_sound`` is ``certified_changed == 0``, so an audit that drew no
+        certified perturbation reports the theorem upheld having checked it zero
+        times. That is not hypothetical here: an earlier version of the section
+        4.4 attack reported thousands of "certified perturbations" of which
+        none were inside the radius, and its zero-violation result was vacuous.
+        A soundness claim is only worth reporting alongside the count behind it.
+        """
+        return self.n_certified > 0
 
     @property
     def conservatism(self) -> float:
@@ -129,7 +156,10 @@ class CertificateAudit:
             "uncertified_unchanged": self.uncertified_unchanged,
             "uncertified_changed": self.uncertified_changed,
             "n_undefined": self.n_undefined,
+            "n_exact_tie": self.n_exact_tie,
+            "n_certified": self.n_certified,
             "is_sound": self.is_sound,
+            "is_conclusive": self.is_conclusive,
             "conservatism": self.conservatism,
         }
 
@@ -240,6 +270,7 @@ def certificate_audit(
     rng = random.Random(seed)
     cells = {(True, True): 0, (True, False): 0, (False, True): 0, (False, False): 0}
     n_undefined = 0
+    n_exact_tie = 0
 
     for index, scores in enumerate(score_vectors):
         active = tables[index] if tables is not None else table
@@ -250,6 +281,16 @@ def certificate_audit(
         cert = certified_radius(sorted_scores, k)
         if not cert.defined or math.isnan(cert.set_radius):
             n_undefined += 1
+            continue
+        # An exact tie is A2's regime, and this module's header already says such
+        # queries are excluded and reported separately. The audit was not doing
+        # it, and the omission was not neutral: at m_k = 0 the radius is 0.0, so
+        # eps is 0.0, `perturbed` is `scores` element for element, and `realised
+        # < 0.0` is false while "unchanged" is trivially true. Every trial landed
+        # in (uncertified, unchanged) -- inflating the published conservatism
+        # with cases where nothing was perturbed at all.
+        if cert.set_radius == 0.0:
+            n_exact_tie += 1
             continue
         base = _top_k_set(scores, active, k)
         for _ in range(trials):
@@ -271,4 +312,5 @@ def certificate_audit(
         uncertified_unchanged=cells[(False, True)],
         uncertified_changed=cells[(False, False)],
         n_undefined=n_undefined,
+        n_exact_tie=n_exact_tie,
     )

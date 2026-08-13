@@ -201,12 +201,26 @@ def main() -> int:
         flag = "  <- 4.4 guarantees 0" if point.within_certificate else ""
         print(f"    eps/(m_k/2)={point.ratio:6.2f}  flip rate {point.flip_rate:7.2%}{flag}")
     violations = [p for p in points if p.within_certificate and p.n_flips]
-    print(f"    certificate sound: {audit.is_sound} (0 certified-but-changed required)")
+    print(
+        f"    certificate sound: {audit.is_sound} over {audit.n_certified} certified "
+        f"perturbations (0 certified-but-changed required)"
+    )
     print(f"    conservatism: {audit.conservatism:.1%} of uncertified cases were unchanged")
+    print(f"    excluded from the audit: {audit.n_exact_tie} exact-tie queries (A2's regime)")
 
     if violations or not audit.is_sound:
         print(
             "\n    SECTION 4.4 WAS VIOLATED. This falsifies the theorem or the code.",
+            file=sys.stderr,
+        )
+    elif not audit.is_conclusive:
+        # Soundness is "the certified cell holds no failures", which is also true
+        # when it holds nothing at all. Reporting that as a pass is how a gate
+        # comes to certify a theorem it never exercised.
+        print(
+            "\n    THE AUDIT WAS VACUOUS. No perturbation landed inside the certified\n"
+            "    radius, so section 4.4 was never exercised and its soundness here is\n"
+            "    an empty statement rather than evidence.",
             file=sys.stderr,
         )
 
@@ -246,7 +260,7 @@ def main() -> int:
     destination = args.output / "stability_profile.json"
     write_json(destination, result.as_dict())
     print(f"\nwritten {destination}\nresult digest {result.digest()}")
-    return 0 if audit.is_sound and not violations else 1
+    return 0 if audit.is_sound and audit.is_conclusive and not violations else 1
 
 
 if __name__ == "__main__":
