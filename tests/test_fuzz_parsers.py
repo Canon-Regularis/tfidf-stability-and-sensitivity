@@ -301,3 +301,37 @@ def test_combining_and_precomposed_forms_agree() -> None:
     """
     pipeline = PreprocessingPipeline()
     assert pipeline.preprocess("égal") == pipeline.preprocess("égal")
+
+
+def test_the_block_separator_is_validated_not_merely_skipped(valid_container) -> None:
+    """The container must be a bijection between models and byte strings.
+
+    Both block lengths are fixed by the header, so the separating LF carries no
+    information -- which is exactly why accepting any value for it is a defect
+    rather than a nicety. Before this was checked, all 255 other byte values
+    decoded to a byte-identical model, so 256 distinct files shared one meaning
+    and ``_FLAG_MASK``'s stated reason for rejecting unknown flag bits ("it
+    would let two different files decode to the same model") was violated one
+    byte further down.
+    """
+    header = _HEADER.unpack_from(valid_container, 0)
+    n_docs, n_terms, nnz, token_bytes = header[2], header[3], header[4], header[7]
+    offset = (
+        _HEADER.size
+        + (n_docs + 1) * 8  # indptr
+        + nnz * 4  # indices
+        + nnz * 8  # values
+        + n_terms * 8  # idf
+        + n_docs * 8  # norms
+        + n_docs * 8  # lengths
+        + n_terms * 8  # df
+        + n_terms * 8  # cf
+        + token_bytes
+    )
+    assert valid_container[offset : offset + 1] == b"\n", "the separator is where we think"
+
+    for value in (0x00, 0x20, 0x0D, 0xFF):
+        mutated = bytearray(valid_container)
+        mutated[offset] = value
+        with pytest.raises(TfidfStabilityError):
+            model_from_bytes(bytes(mutated))

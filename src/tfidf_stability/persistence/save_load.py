@@ -379,7 +379,20 @@ def model_from_bytes(data: bytes) -> TfidfModel:
     cf, offset = _unpack_ints("q", data, offset, head.n_terms)
 
     token_block = data[offset : offset + head.token_bytes]
-    offset += head.token_bytes + len(_LINE_SEP)
+    offset += head.token_bytes
+
+    # Checked, not merely stepped over. Both block lengths are already fixed by
+    # the header, so this byte carries no information -- which is precisely why
+    # accepting any value for it breaks the bijection between models and byte
+    # strings that this module's docstring, ``_FLAG_MASK`` and the whole
+    # reproducibility snapshot rest on. Measured before the check existed: all
+    # 255 other values decoded to a byte-identical model.
+    separator = data[offset : offset + len(_LINE_SEP)]
+    if separator != _LINE_SEP:
+        raise TfsxFormatError(
+            f"expected {_LINE_SEP!r} between the token and document-id blocks, got {separator!r}"
+        )
+    offset += len(_LINE_SEP)
     doc_id_block = data[offset : offset + head.doc_id_bytes]
 
     # Through the guarded helper, never `bytes.decode` directly: a single flipped
