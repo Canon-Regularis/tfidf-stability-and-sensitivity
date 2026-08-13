@@ -16,6 +16,7 @@ import pytest
 from tfidf_stability.cli.commands import load_config
 from tfidf_stability.cli.main import main
 from tfidf_stability.utils.hashing import hash_file
+from tfidf_stability.utils.validation import ConfigError
 
 REPO = Path(__file__).resolve().parents[1]
 CORPUS = REPO / "tests" / "fixtures" / "mini_corpus.jsonl"
@@ -69,6 +70,108 @@ def test_every_ablation_names_the_field_it_varies() -> None:
         assert "vary" in entry, f"{name} does not say what it varies"
         assert "values" in entry, f"{name} has no values"
         assert "description" in entry, f"{name} is undocumented"
+
+
+# ---------------------------------------------------------------------------
+# A recorded key must be an applied key
+# ---------------------------------------------------------------------------
+#: ``(section, key, a value that must produce a different model)``. Covers every
+#: key of the three sections ``build-corpus`` consumes, except the four whose
+#: alternatives the mini corpus cannot distinguish (see below).
+#:
+#: This exists because ``cmd_build_corpus`` used to read exactly four keys --
+#: ``n_min``, ``n_max``, ``insert_gaps``, ``cross_gaps`` -- while hashing the
+#: *whole* file into the run manifest. Setting ``numerics.reduction: exact``
+#: got a naive model whose manifest recorded ``exact``, and a typo got the
+#: default in silence. A manifest that describes a run which did not happen is
+#: worse than no manifest.
+_APPLIED_KEYS = [
+    ("preprocessing", "lowercase", False),
+    # One letter per token. ``[a-z]+`` would be a no-op here: the corpus is
+    # lowercased ASCII words with no digits or underscores, so it selects
+    # exactly what the default ``[^\W_]+`` does.
+    ("preprocessing", "token_pattern", r"[a-z]"),
+    ("preprocessing", "min_token_length", 4),
+    ("preprocessing", "max_token_length", 5),
+    ("preprocessing", "stopword_asset", None),
+    ("preprocessing", "lemmatiser", "none"),
+    ("preprocessing", "insert_gaps", False),
+    ("preprocessing", "n_min", 2),
+    ("preprocessing", "n_max", 1),
+    ("vocabulary", "min_df", 2),
+    ("vocabulary", "max_features", 3),
+    ("numerics", "reduction", "exact"),
+    ("numerics", "log_impl", "platform"),
+]
+
+
+def _fit(config: dict[str, object]) -> str:
+    """Fit the mini corpus exactly as ``cmd_build_corpus`` does, return its digest."""
+    from tfidf_stability.cli.commands import pipeline_from_config, vectoriser_from_config
+    from tfidf_stability.utils.io import read_jsonl
+
+    records = list(read_jsonl(CORPUS))
+    pipeline = pipeline_from_config(config)
+    features = [pipeline.preprocess(str(r["text"])) for r in records]
+    model = vectoriser_from_config(config).fit(features, [str(r["doc_id"]) for r in records])
+    return model.digest()
+
+
+@pytest.mark.parametrize(("section", "key", "value"), _APPLIED_KEYS)
+def test_every_config_key_reaches_the_model(section: str, key: str, value: object) -> None:
+    """Changing a declared key must change the fitted model."""
+    config = load_config()
+    baseline = _fit(config)
+    config[section][key] = value  # type: ignore[index]
+    assert _fit(config) != baseline, f"{section}.{key} is recorded but not applied"
+
+
+def test_the_keys_no_fixture_can_exercise_are_still_read() -> None:
+    """``unicode_form``, ``max_df``, ``max_features_policy`` and ``cross_gaps``
+    are consumed but cannot move *this* corpus: it is ASCII, six documents long,
+    and has no n-gram spanning a gap. Assert they reach the objects instead, so
+    they cannot be quietly dropped the way the others were."""
+    from tfidf_stability.cli.commands import pipeline_from_config, vectoriser_from_config
+
+    config = load_config()
+    config["preprocessing"]["unicode_form"] = "NFD"
+    config["preprocessing"]["cross_gaps"] = True
+    config["vocabulary"]["max_df"] = 4
+    config["vocabulary"]["max_features_policy"] = "cf_desc"
+
+    pipeline = pipeline_from_config(config)
+    assert pipeline.config.normalisation.unicode_form == "NFD"
+    assert pipeline.config.cross_gaps is True
+    vocab_config = vectoriser_from_config(config).vocabulary_config
+    assert vocab_config.max_df == 4
+    assert vocab_config.max_features_policy.value == "cf_desc"
+
+
+@pytest.mark.parametrize(
+    ("section", "key"),
+    [("preprocessing", "n_maks"), ("vocabulary", "min_dff"), ("numerics", "redution")],
+)
+def test_an_unrecognised_config_key_is_fatal(section: str, key: str) -> None:
+    """A typo used to be indistinguishable from the default."""
+    config = load_config()
+    config[section][key] = 3  # type: ignore[index]
+    with pytest.raises(ConfigError, match=key):
+        _fit(config)
+
+
+def test_an_inadmissible_value_names_the_key_it_came_from() -> None:
+    config = load_config()
+    config["numerics"]["reduction"] = "kahan"
+    with pytest.raises(ConfigError, match=r"numerics\.reduction"):
+        _fit(config)
+
+
+def test_the_default_config_still_produces_the_documented_model(tmp_path: Path) -> None:
+    """The guard on the fix above: wiring the remaining keys up must not have
+    moved the default path, or every published number silently changed."""
+    out = build(tmp_path)
+    manifest = json.loads(out.with_suffix(".manifest.json").read_text(encoding="utf-8"))
+    assert manifest["model"]["model_digest"] == _fit(load_config())
 
 
 # ---------------------------------------------------------------------------
