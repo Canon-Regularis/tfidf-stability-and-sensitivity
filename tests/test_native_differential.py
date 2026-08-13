@@ -25,7 +25,9 @@ expectation.
 
 from __future__ import annotations
 
+import math
 import random
+import struct
 
 import numpy as np
 import pytest
@@ -279,3 +281,108 @@ def test_non_canonical_query_is_rejected(index) -> None:  # type: ignore[no-unty
 def test_out_of_range_term_is_rejected(index) -> None:  # type: ignore[no-untyped-def]
     with pytest.raises(IndexError):
         index.df(10**9)
+
+
+# ---------------------------------------------------------------------------
+# The boundary is the last line of defence (G3)
+# ---------------------------------------------------------------------------
+def test_paired_arrays_must_agree_in_length() -> None:
+    """``dot`` built its two spans independently and read past the end.
+
+    With 64 indices and 1 value it consumed 63 doubles beyond the values buffer:
+    undefined behaviour reachable from pure Python with no unsafe API, and it
+    showed -- identical calls returned ``nan``, ``1.0``, ``nan``, ``nan``. The
+    reference rejects the same input, and ``NativeIndex`` already checked it;
+    only the free functions did not.
+    """
+    many = np.arange(64, dtype=np.int32)
+    one = np.array([1.0], dtype=np.float64)
+    full = np.ones(64, dtype=np.float64)
+
+    with pytest.raises(ValueError, match="same length"):
+        nat.dot(many, one, many, full, 64, 0)
+    with pytest.raises(ValueError, match="same length"):
+        nat.dot(many, full, many, one, 64, 0)
+    with pytest.raises(ValueError, match="same length"):
+        nat.l2_norm(many, one, 64, 0)
+
+    # The reference refuses to build the vector at all, which is why the
+    # native path is the only way to reach the read.
+    with pytest.raises(ValueError, match="differ in length"):
+        SparseVector(indices=tuple(range(64)), values=(1.0,), dim=64)
+
+
+@pytest.mark.parametrize("policy", [-1, 4, 999])
+def test_a_reduction_policy_outside_the_enumeration_is_rejected(policy: int) -> None:
+    """``static_cast<Reduction>(999)`` silently fell back to a policy.
+
+    This project's central claim is that the summation policy is never implicit
+    and is recorded in every run manifest. Quietly substituting one is the worst
+    available outcome: the manifest would name a policy the arithmetic did not
+    use. ``Reduction(999)`` raises in Python; it does here now too.
+    """
+    values = np.array([1.0, 2.0], dtype=np.float64)
+    with pytest.raises(ValueError, match="policy"):
+        nat.reduce_sum(values, policy)
+
+
+@pytest.mark.parametrize(
+    "name", ["sorted_scores_desc", "boundary_margin", "min_adjacent_margin_top", "tie_chains"]
+)
+def test_every_score_taking_entry_point_rejects_nan(name: str) -> None:
+    """A NaN makes ``<`` false both ways, destroying the strict weak ordering.
+
+    ``NativeRanker.rank`` re-checked, per G3; the free functions did not, and it
+    was observable: ``min_adjacent_margin_top`` returned ``inf`` where the
+    normative reference returns ``nan`` -- a bit-level divergence in a core whose
+    whole contract is bit-identity. Sorting 65,536 scores containing NaN did not
+    crash, but it is formally undefined behaviour and must not be reachable.
+    """
+    scores = np.array([0.9, float("nan"), 0.1], dtype=np.float64)
+    extra = {"boundary_margin": (1,), "min_adjacent_margin_top": (2,), "tie_chains": (0.1,)}
+    with pytest.raises(ValueError, match="finite"):
+        getattr(nat, name)(scores, *extra.get(name, ()))
+
+    # The same call on finite scores must still work, or this proves nothing.
+    getattr(nat, name)(np.array([0.9, 0.5, 0.1]), *extra.get(name, ()))
+
+
+@pytest.mark.parametrize(("n_docs", "n_terms"), [(-1, 4), (0, -1), (1, -1), (-1, -1), (-5, -5)])
+def test_negative_dimensions_are_rejected_before_any_size_arithmetic(
+    n_docs: int, n_terms: int
+) -> None:
+    """These segfaulted the interpreter (SIGSEGV, rc 139) from pure Python.
+
+    ``n_docs = -1`` satisfies ``indptr.size() == n_docs + 1`` when indptr is
+    empty, so the length check waved it through; ``is_canonical()`` then called
+    ``front()``/``back()`` on an empty span and ``transpose()`` sized a colptr
+    from a negative count. Every later check casts to ``std::size_t``, where a
+    negative wraps to something enormous, so the guard has to come first.
+    """
+    empty_i64 = np.array([], dtype=np.int64)
+    empty_i32 = np.array([], dtype=np.int32)
+    empty_f64 = np.array([], dtype=np.float64)
+    indptr = empty_i64 if n_docs < 0 else np.zeros(n_docs + 1, dtype=np.int64)
+
+    with pytest.raises(ValueError, match="non-negative"):
+        nat.NativeIndex(indptr, empty_i32, empty_f64, n_docs, n_terms, 0)
+
+
+@pytest.mark.parametrize("values", [[-0.0], [-0.0, -0.0], [-0.0, -0.0, -0.0], [-0.0, 0.0], [0.0]])
+def test_exact_agrees_with_fsum_on_signed_zero(values: list[float]) -> None:
+    """``Exact`` is the declared cross-language ground truth, so it of all
+    policies must agree bit-for-bit.
+
+    CPython's ``math_fsum`` appends the running total only ``if (x != 0.0)``;
+    the C++ pushed unconditionally. For an input of nothing but negative zeros
+    that made ``value()`` return -0.0 against the reference's +0.0. Because
+    ``-0.0 == 0.0``, neither a tolerance nor an equality check could see it --
+    only a bit comparison, which is what this project uses everywhere else.
+    """
+    native = nat.reduce_sum(np.array(values, dtype=np.float64), _policy(Reduction.EXACT))
+    reference = reduce_sum(values, Reduction.EXACT)
+    assert same_bits(native, reference), (
+        f"native {struct.pack('<d', native).hex()} != reference "
+        f"{struct.pack('<d', reference).hex()}"
+    )
+    assert same_bits(reference, math.fsum(values)), "the reference is math.fsum"

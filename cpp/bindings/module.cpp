@@ -28,8 +28,10 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include <cmath>
 #include <cstring>
 #include <span>
+#include <string>
 #include <stdexcept>
 #include <vector>
 
@@ -50,6 +52,62 @@ std::span<const DocId> as_ids(const I32Array& a) {
     return {a.data(), a.shape(0)};
 }
 
+/// Build a sparse view, checking the two halves describe one vector.
+///
+/// The free functions below take raw parallel arrays rather than building them,
+/// and were the only entry points that did not check the halves agree. `dot`
+/// constructed its SparseView from an indices span and a values span sized
+/// independently, so 64 indices with 1 value read 63 doubles past the end of the
+/// values buffer: undefined behaviour reachable from pure Python with no unsafe
+/// API, returning a different answer on each call. The reference rejects the
+/// same input (`SparseVector` raises "indices and values differ in length"), and
+/// the class methods here already checked it -- this is that check, applied to
+/// the three functions that missed it.
+SparseView checked_view(const I32Array& idx, const F64Array& val, std::int32_t dim,
+                        const char* what) {
+    if (idx.shape(0) != val.shape(0)) {
+        throw std::invalid_argument(std::string(what) +
+                                    " indices and values must be the same length");
+    }
+    return SparseView{std::span<const TermId>(idx.data(), idx.shape(0)), as_span(val), dim};
+}
+
+/// Reject a reduction policy outside the enumeration.
+///
+/// `static_cast<Reduction>(999)` produced a value no switch handles, and the
+/// sum silently fell back to one of the policies rather than failing. In a
+/// project whose central claim is that the summation policy is never implicit
+/// and is recorded in every run manifest, quietly substituting one is the worst
+/// available outcome. Python's `Reduction(999)` raises; so does this now.
+Reduction checked_policy(std::int32_t policy) {
+    if (policy < static_cast<std::int32_t>(Reduction::Naive) ||
+        policy > static_cast<std::int32_t>(Reduction::Exact)) {
+        throw std::invalid_argument("reduction policy out of range (expected 0..3)");
+    }
+    return static_cast<Reduction>(policy);
+}
+
+/// Reject non-finite scores before they reach a comparator.
+///
+/// G3 requires this re-check at the boundary: it is the only thing between an
+/// arbitrary caller and undefined behaviour, because a NaN makes `<` false in
+/// both directions and so destroys the strict weak ordering `std::sort` and
+/// `std::min_element` require. `NativeRanker::rank` already did it; the free
+/// functions below did not, and two consequences were measured. `std::sort`
+/// over 65,536 scores containing NaN did not crash but is formally UB, and
+/// `min_adjacent_margin_top` returned `inf` where the normative Python
+/// reference returns `nan` -- a bit-level divergence in a core whose entire
+/// contract is bit-identity with that reference.
+std::span<const double> checked_scores(const F64Array& scores) {
+    const std::span<const double> span{scores.data(), scores.shape(0)};
+    for (const double value : span) {
+        if (!std::isfinite(value)) {
+            throw std::invalid_argument("scores must all be finite");
+        }
+    }
+    return span;
+}
+
 /// Shape of this binding surface, checked against
 /// `tfidf_stability._native.REQUIRED_ABI` on import.
 ///
@@ -57,7 +115,7 @@ std::span<const DocId> as_ids(const I32Array& a) {
 /// untouched and a new binding can land inside one release, so tying the two
 /// would make the staleness check fire either needlessly or -- the dangerous
 /// direction -- not at all when a rebuilt .pyd is actually required.
-constexpr const char* kAbi = "0.3.0";
+constexpr const char* kAbi = "0.4.0";
 
 /// Return an owning numpy array built from a vector, without copying twice.
 nb::ndarray<nb::numpy, double> to_numpy(std::vector<double>&& v) {
@@ -84,7 +142,18 @@ class NativeIndex {
           values_(values.data(), values.data() + values.shape(0)),
           n_rows_(n_docs),
           n_cols_(n_terms),
-          reduction_(static_cast<Reduction>(reduction)) {
+          reduction_(checked_policy(reduction)) {
+        // Dimensions first, and before any size arithmetic. `n_docs = -1` with
+        // an empty indptr satisfies the length check below -- 0 == -1 + 1 --
+        // and then `is_canonical()` calls front()/back() on an empty span and
+        // `transpose()` sizes a colptr from a negative count. Measured: four
+        // such inputs segfaulted the interpreter (SIGSEGV, rc 139) from pure
+        // Python with no unsafe API. Every later check casts to std::size_t,
+        // where a negative value wraps to something enormous, so this has to
+        // come first to mean anything.
+        if (n_docs < 0 || n_terms < 0) {
+            throw std::invalid_argument("n_docs and n_terms must be non-negative");
+        }
         if (indptr_.size() != static_cast<std::size_t>(n_docs) + 1) {
             throw std::invalid_argument("indptr must have length n_docs + 1");
         }
@@ -301,7 +370,7 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "reduce_sum",
         [](const F64Array& a, std::int32_t policy) {
-            return reduce::sum(a.data(), a.shape(0), static_cast<Reduction>(policy));
+            return reduce::sum(a.data(), a.shape(0), checked_policy(policy));
         },
         nb::arg("values"), nb::arg("policy"),
         "Sum under the given reduction policy. Exposed so the Python and C++\n"
@@ -311,9 +380,9 @@ NB_MODULE(_tfidf_native, m) {
         "dot",
         [](const I32Array& ai, const F64Array& av, const I32Array& bi, const F64Array& bv,
            std::int32_t dim, std::int32_t policy) {
-            const SparseView a{std::span<const TermId>(ai.data(), ai.shape(0)), as_span(av), dim};
-            const SparseView b{std::span<const TermId>(bi.data(), bi.shape(0)), as_span(bv), dim};
-            return dot(a, b, static_cast<Reduction>(policy));
+            const SparseView a = checked_view(ai, av, dim, "a");
+            const SparseView b = checked_view(bi, bv, dim, "b");
+            return dot(a, b, checked_policy(policy));
         },
         nb::arg("a_indices"), nb::arg("a_values"), nb::arg("b_indices"), nb::arg("b_values"),
         nb::arg("dim"), nb::arg("policy"));
@@ -321,8 +390,8 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "l2_norm",
         [](const I32Array& i, const F64Array& v, std::int32_t dim, std::int32_t policy) {
-            const SparseView s{std::span<const TermId>(i.data(), i.shape(0)), as_span(v), dim};
-            return l2_norm(s, static_cast<Reduction>(policy));
+            const SparseView s = checked_view(i, v, dim, "vector");
+            return l2_norm(s, checked_policy(policy));
         },
         nb::arg("indices"), nb::arg("values"), nb::arg("dim"), nb::arg("policy"));
 
@@ -376,14 +445,14 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "sorted_scores_desc",
         [](const F64Array& scores) {
-            return to_numpy(ranking::sorted_scores_desc({scores.data(), scores.shape(0)}));
+            return to_numpy(ranking::sorted_scores_desc(checked_scores(scores)));
         },
         nb::arg("scores"), nb::rv_policy::move);
 
     m.def(
         "boundary_margin",
         [](const F64Array& sorted_scores, std::int32_t k) {
-            const auto mg = ranking::boundary_margin({sorted_scores.data(), sorted_scores.shape(0)}, k);
+            const auto mg = ranking::boundary_margin(checked_scores(sorted_scores), k);
             return nb::make_tuple(mg.value, mg.defined, mg.k_effective);
         },
         nb::arg("sorted_scores"), nb::arg("k"),
@@ -392,8 +461,7 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "min_adjacent_margin_top",
         [](const F64Array& sorted_scores, std::int32_t k) {
-            const auto mg =
-                ranking::min_adjacent_margin_top({sorted_scores.data(), sorted_scores.shape(0)}, k);
+            const auto mg = ranking::min_adjacent_margin_top(checked_scores(sorted_scores), k);
             return nb::make_tuple(mg.value, mg.defined, mg.k_effective);
         },
         nb::arg("sorted_scores"), nb::arg("k"));
@@ -408,7 +476,7 @@ NB_MODULE(_tfidf_native, m) {
                 throw std::invalid_argument("tau must be non-negative");
             }
             const auto [lo, hi] =
-                ranking::tie_ball_interval({sorted_scores.data(), sorted_scores.shape(0)}, j, tau);
+                ranking::tie_ball_interval(checked_scores(sorted_scores), j, tau);
             return nb::make_tuple(lo, hi);
         },
         nb::arg("sorted_scores"), nb::arg("j"), nb::arg("tau"));
@@ -418,7 +486,7 @@ NB_MODULE(_tfidf_native, m) {
         [](const F64Array& sorted_scores, double tau) {
             std::vector<std::int32_t> flat;
             for (const auto& [lo, hi] :
-                 ranking::tie_chains({sorted_scores.data(), sorted_scores.shape(0)}, tau)) {
+                 ranking::tie_chains(checked_scores(sorted_scores), tau)) {
                 flat.push_back(lo);
                 flat.push_back(hi);
             }
@@ -432,7 +500,7 @@ NB_MODULE(_tfidf_native, m) {
         [](const F64Array& sorted_scores, double tau) {
             std::vector<std::int32_t> flat;
             for (const auto& [lo, hi] :
-                 ranking::tie_cliques({sorted_scores.data(), sorted_scores.shape(0)}, tau)) {
+                 ranking::tie_cliques(checked_scores(sorted_scores), tau)) {
                 flat.push_back(lo);
                 flat.push_back(hi);
             }
@@ -443,7 +511,7 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "chain_inflation_ratio",
         [](const F64Array& sorted_scores, double tau) {
-            return ranking::chain_inflation_ratio({sorted_scores.data(), sorted_scores.shape(0)},
+            return ranking::chain_inflation_ratio(checked_scores(sorted_scores),
                                                   tau);
         },
         nb::arg("sorted_scores"), nb::arg("tau"));

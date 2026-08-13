@@ -40,7 +40,7 @@ __all__ = [
 #: silently, which is precisely the failure this constant exists to catch. A
 #: build too old to carry ``__abi__`` at all reports ``None`` and is rejected on
 #: the same path.
-REQUIRED_ABI = "0.3.0"
+REQUIRED_ABI = "0.4.0"
 
 if TYPE_CHECKING:  # pragma: no cover
     _tfidf_native: Any
