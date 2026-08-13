@@ -72,8 +72,19 @@ struct Neumaier {
 /// Recursive pairwise summation; error grows as O(log n) rather than O(n).
 ///
 /// Implemented iteratively with a small stack of partial sums, one per level,
-/// so it allocates nothing and matches the recursive formulation exactly. The
-/// base case is `kPairwiseBlock`, matching numpy so the two agree.
+/// so it allocates nothing and matches the recursive formulation exactly.
+///
+/// The base case is `kPairwiseBlock`, which is numpy's block size -- but that
+/// does **not** make the two agree, and this comment used to claim it did.
+/// numpy unrolls its base case into eight independent accumulators, so its
+/// summation order differs from a straight fold well before the block boundary:
+/// measured against `np.sum` over 262 sizes, the two differ at 208 of them,
+/// first at n = 8. Sharing a block size is not sharing an order.
+///
+/// What is actually contracted, and what is actually true, is agreement with
+/// this repository's own Python reference: bit-identical across 305 sizes from
+/// n = 1 to 10,000, including the 2^k and 2^k+1 boundaries where a block-size
+/// or recursion-cutoff mismatch would first show.
 struct Pairwise {
     // 64 levels is enough for 2^64 * kPairwiseBlock elements.
     std::array<Real, 64> partials{};
