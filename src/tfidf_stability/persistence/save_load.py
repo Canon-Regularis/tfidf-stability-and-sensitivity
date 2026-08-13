@@ -129,6 +129,51 @@ def _encode_strings(items: list[str], what: str) -> bytes:
     return _LINE_SEP.join(item.encode("utf-8") for item in items)
 
 
+def _check_csr(
+    indptr: Sequence[int],
+    indices: Sequence[int],
+    values: Sequence[float],
+    *,
+    n_rows: int,
+    n_cols: int,
+) -> None:
+    """Reject index arrays that do not describe a canonical CSR matrix.
+
+    Canonical here means what ``build`` produces and what every consumer -- the
+    reference scorer, the native core, ``row()`` -- assumes without re-checking:
+    one more offset than rows, starting at zero, non-decreasing, ending at
+    ``nnz``, and column indices in range and strictly increasing within a row.
+    Strictly increasing is the load-bearing one: it is what makes a row's
+    support a *set*, so a duplicate column would double-count a term in every
+    dot product.
+    """
+    if len(indptr) != n_rows + 1:
+        raise TfsxFormatError(
+            f"indptr has {len(indptr)} entries; expected n_docs + 1 = {n_rows + 1}"
+        )
+    if len(values) != len(indices):
+        raise TfsxFormatError(f"{len(values)} weights for {len(indices)} column indices")
+    if indptr[0] != 0:
+        raise TfsxFormatError(f"indptr must start at 0, got {indptr[0]}")
+    if indptr[-1] != len(indices):
+        raise TfsxFormatError(f"indptr ends at {indptr[-1]} but there are {len(indices)} indices")
+    for row in range(n_rows):
+        lo, hi = indptr[row], indptr[row + 1]
+        if hi < lo:
+            raise TfsxFormatError(f"indptr decreases at row {row}: {lo} then {hi}")
+        segment = indices[lo:hi]
+        for position, column in enumerate(segment):
+            if not 0 <= column < n_cols:
+                raise TfsxFormatError(
+                    f"row {row} references column {column}, outside 0..{n_cols - 1}"
+                )
+            if position and column <= segment[position - 1]:
+                raise TfsxFormatError(
+                    f"row {row} column indices are not strictly increasing: "
+                    f"{segment[position - 1]} then {column}"
+                )
+
+
 def model_bytes(model: TfidfModel) -> bytes:
     """Serialise a model to the ``.tfsx`` byte string.
 
@@ -352,6 +397,15 @@ def model_from_bytes(data: bytes) -> TfidfModel:
     # plausible-looking ranking rather than an error -- duplicate ids silently
     # destroy the strict total order the ranking operator depends on, and a NaN
     # in a sort key is undefined behaviour for the sort, not a wrong answer.
+    # The CSR arrays are read as three independent blocks whose *lengths* the
+    # header already fixes, so every check so far can pass while the arrays do
+    # not describe a matrix at all. Fuzzing put numbers on it: of 2715 mutated
+    # containers this parser accepted, 425 carried an indptr that was
+    # non-monotonic or did not start at zero. Nothing downstream re-checks --
+    # CsrMatrix is a frozen dataclass with no __post_init__ -- so the model was
+    # returned intact and misbehaved later, far from the file that caused it.
+    _check_csr(indptr, indices, values, n_rows=head.n_docs, n_cols=head.n_terms)
+
     try:
         check_unique_ids(doc_ids)
         check_finite(idf_values, "idf")

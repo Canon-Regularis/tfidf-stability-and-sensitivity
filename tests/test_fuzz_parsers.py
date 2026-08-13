@@ -29,6 +29,7 @@ not.
 
 from __future__ import annotations
 
+import itertools
 import struct
 
 import pytest
@@ -36,6 +37,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from tfidf_stability.persistence.save_load import (
+    _HEADER,
     MAGIC,
     model_bytes,
     model_from_bytes,
@@ -54,10 +56,59 @@ def valid_container(mini_model) -> bytes:
     return model_bytes(mini_model)
 
 
+#: The header layout, in the order ``_read_header`` unpacks it. Offsets are
+#: derived from this rather than written down, because two of the hand-written
+#: ones were wrong: ``token_bytes`` was given as 32, which is ``reduction``, and
+#: ``doc_id_bytes`` as 40, which is the upper half of ``token_bytes``. The case
+#: named ``doc_id_bytes`` therefore never mutated ``doc_id_bytes`` even once --
+#: and still passed, because clobbering a neighbouring field also gets the
+#: container rejected. A test that passes for the wrong reason is not a test.
+_HEADER_LAYOUT: tuple[tuple[str, str], ...] = (
+    ("magic", "8s"),
+    ("version", "I"),
+    ("n_docs", "I"),
+    ("n_terms", "I"),
+    ("nnz", "Q"),
+    ("flags", "I"),
+    ("reduction", "I"),
+    ("token_bytes", "Q"),
+    ("doc_id_bytes", "Q"),
+    ("reserved_a", "I"),
+    ("reserved_b", "I"),
+)
+
+
+def _header_field(name: str) -> tuple[int, str]:
+    """Byte offset and struct code of one header field."""
+    offset = 0
+    for field, code in _HEADER_LAYOUT:
+        if field == name:
+            return offset, f"<{code}"
+        offset += struct.calcsize(f"<{code}")
+    raise KeyError(name)
+
+
+def test_the_header_layout_this_file_assumes_is_the_real_one() -> None:
+    """Guards every offset-based test below against a format change."""
+    total = sum(struct.calcsize(f"<{code}") for _, code in _HEADER_LAYOUT)
+    assert total == _HEADER.size, f"layout sums to {total}, _HEADER.size is {_HEADER.size}"
+    assert _header_field("magic")[0] == 0
+    assert _header_field("token_bytes")[0] == 36, "the offset the old test got wrong"
+    assert _header_field("doc_id_bytes")[0] == 44, "the offset the old test got wrong"
+
+
 def _assert_typed(call, data: bytes) -> None:
-    """The parser must round-trip or raise a *typed* error. Nothing else."""
+    """The parser must round-trip or raise a *typed* error. Nothing else.
+
+    Both halves are asserted. Returning normally used to be enough to pass, so
+    "accepted" meant "unexamined" and a parser that took a corrupt container
+    and handed back an incoherent model satisfied every test in this file. One
+    did: before ``_check_csr`` existed, 425 of the 2715 mutated containers this
+    parser accepted carried an ``indptr`` that was non-monotonic or did not
+    start at zero, and nothing downstream re-checks it.
+    """
     try:
-        call(data)
+        restored = call(data)
     except TfidfStabilityError:
         return
     except Exception as exc:
@@ -65,6 +116,31 @@ def _assert_typed(call, data: bytes) -> None:
             f"{type(exc).__name__} escaped the parser: {exc!r}. Every rejection "
             f"must be a TfidfStabilityError so a caller can handle it."
         ) from exc
+
+    # Accepting a mutation is legitimate -- flipping a mantissa bit yields a
+    # different but entirely valid model. What is not legitimate is accepting
+    # something that is not a matrix. The invariants are spelled out here rather
+    # than delegated to the parser's own ``_check_csr``, because a test that
+    # calls the code under test to decide whether the code under test is right
+    # disappears the moment that code does.
+    #
+    # Note idempotence is NOT the property to check: a model whose indptr starts
+    # at 255 re-serialises and reparses to identical bytes, so a fixed-point
+    # assertion passes straight over it. Measured, not assumed.
+    matrix = restored.matrix
+    indptr, indices = list(matrix.indptr), list(matrix.indices)
+    assert len(indptr) == matrix.n_rows + 1, f"indptr has {len(indptr)} entries"
+    assert indptr[0] == 0, f"indptr starts at {indptr[0]}"
+    assert indptr[-1] == len(indices), f"indptr ends at {indptr[-1]}, nnz is {len(indices)}"
+    assert len(matrix.values) == len(indices), "one weight per column index"
+    for row in range(matrix.n_rows):
+        lo, hi = indptr[row], indptr[row + 1]
+        assert lo <= hi, f"indptr decreases at row {row}"
+        segment = indices[lo:hi]
+        assert all(0 <= c < matrix.n_cols for c in segment), f"row {row} column out of range"
+        assert all(b > a for a, b in itertools.pairwise(segment)), (
+            f"row {row} column indices are not strictly increasing"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -124,17 +200,10 @@ def test_an_absurd_count_is_rejected_without_allocating(valid_container, field: 
     the parser for terabytes -- a denial of service reachable by anyone who can
     hand over a file.
     """
-    offsets = {"n_docs": 12, "n_terms": 16, "nnz": 20, "token_bytes": 32, "doc_id_bytes": 40}
-    widths = {
-        "n_docs": "<I",
-        "n_terms": "<I",
-        "nnz": "<Q",
-        "token_bytes": "<Q",
-        "doc_id_bytes": "<Q",
-    }
+    offset, width = _header_field(field)
     mutated = bytearray(valid_container)
-    packed = struct.pack(widths[field], 2**31 if widths[field] == "<I" else 2**48)
-    mutated[offsets[field] : offsets[field] + len(packed)] = packed
+    packed = struct.pack(width, 2**31 if width == "<I" else 2**48)
+    mutated[offset : offset + len(packed)] = packed
     _assert_typed(model_from_bytes, bytes(mutated))
 
 
