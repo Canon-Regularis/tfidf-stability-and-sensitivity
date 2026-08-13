@@ -2955,7 +2955,37 @@
           18
         ]
       }
+    },
+    "E4_pair_geometry": {
+      "angle_between_documents_rad": 1.4901161193847656e-08,
+      "angle_is_renderable": false,
+      "decision_statistic_full_space": 0.0,
+      "decision_statistic_in_plane": -1.0242869632786116e-17,
+      "doc_A": "twin0003a",
+      "doc_B": "twin0001a",
+      "documents_coincident": false,
+      "projection_error_absolute": 1.0242869632786116e-17,
+      "projection_error_over_q_norm": 3.176787382779181e-17,
+      "q_in_plane": [
+        0.17919566567014253,
+        0.1765795940988452
+      ],
+      "q_in_plane_norm": 0.2515778997588588,
+      "q_norm": 0.3224285543411232,
+      "q_share_in_plane": 0.7802593671424467,
+      "s_A": 0.5557685982134105,
+      "s_B": 0.5557685982134105,
+      "score_gap": 0.0,
+      "tau": 4.8e-13,
+      "unit_A": [
+        1.0,
+        0.0
+      ],
+      "unit_B": [
+        0.9999999999999999,
+        1.7067422303575003e-16
+      ]
     }
   },
-  "result_digest": "aca14a78dad29953c4e1387878c27dc2e57dbc54be8ce52bc2ec030e2c7c75d5"
+  "result_digest": "59d607b3eac0f7fc5e081c5822c6647552134c9b22942fc8fbf4b15176b1cef3"
 }
