@@ -50,6 +50,7 @@ from tfidf_stability.ranking.margins import (  # noqa: E402
     boundary_margin,
     min_adjacent_margin_top,
 )
+from tfidf_stability.ranking.ranker import rank_top_k  # noqa: E402
 from tfidf_stability.similarity.cosine import cosine_against_corpus  # noqa: E402
 from tfidf_stability.utils.io import write_json  # noqa: E402
 from tfidf_stability.utils.numerics import Reduction  # noqa: E402
@@ -105,6 +106,72 @@ def _margin_distributions(
             f"m_min^top p50={top['percentiles']['p50']:.3e} (n={top['n']})"
         )
     return dists, excluded
+
+
+def _rank_trajectories(
+    scores: list[float],
+    table: AttributeTable,
+    k: int,
+    *,
+    seed: int,
+    n_tracked: int = 12,
+    n_steps: int = 80,
+) -> dict:
+    """Each document's rank as a function of eps, along one fixed direction.
+
+    The direction is drawn **once** and scaled, rather than redrawn at every
+    eps. That is the whole design: independent draws would make each column an
+    unrelated sample, and joining them would draw a path that no single
+    perturbation ever traced. With one direction scaled up, the columns are a
+    genuine one-parameter family, so a crossing in the picture is a crossing
+    that actually happens as eps grows.
+
+    Ranks are integers, so nothing here is projected or approximated -- the
+    quantity plotted is the quantity the study is about. Recorded against
+    ``eps / (m_k / 2)`` so the certified radius sits at 1.0, matching
+    ``fig_transition``: section 4.4 forbids any crossing left of it.
+    """
+    import random
+
+    if k >= len(scores):
+        return {}
+    sorted_scores = sorted(scores, reverse=True)
+    margin = boundary_margin(sorted_scores, k)
+    if not margin.defined or margin.value <= 0.0:
+        # An exact tie at the boundary: the radius is zero, so eps/(m_k/2) is
+        # undefined and there is no transition to trace. A2's regime, not A1's.
+        return {}
+    radius = margin.value / 2.0
+
+    rng = random.Random(seed)
+    direction = [rng.uniform(-1.0, 1.0) for _ in scores]
+    baseline = rank_top_k(scores, table, k=len(scores)).order
+    tracked = list(baseline[:n_tracked])
+
+    ratios = [10 ** (-1.0 + 3.0 * i / (n_steps - 1)) for i in range(n_steps)]
+    positions: dict[str, list[int]] = {str(doc): [] for doc in tracked}
+    realised: list[float] = []
+    for ratio in ratios:
+        eps = radius * ratio
+        perturbed = [s + eps * d for s, d in zip(scores, direction, strict=True)]
+        # The realised movement, not the intended one -- fl(s + d) rounds.
+        realised.append(max(abs(p - s) for p, s in zip(perturbed, scores, strict=True)) / radius)
+        order = rank_top_k(perturbed, table, k=len(perturbed)).order
+        where = {doc: i for i, doc in enumerate(order)}
+        for doc in tracked:
+            positions[str(doc)].append(where[doc] + 1)
+
+    return {
+        "k": k,
+        "certified_radius": radius,
+        "m_k": margin.value,
+        "seed": seed,
+        "ratios": ratios,
+        "realised_ratios": realised,
+        "tracked_documents": [str(d) for d in tracked],
+        "ranks": positions,
+        "n_candidates": len(scores),
+    }
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -214,6 +281,9 @@ def main() -> int:
     points, n_used, n_excluded = transition_curve(
         scores_by_query, table, args.k, seed=args.seed, trials=args.trials, tables=tables
     )
+    trajectories = _rank_trajectories(
+        list(grid.queries[0].scores), grid.queries[0].table, args.k, seed=args.seed + 2
+    )
     audit = certificate_audit(scores_by_query, table, args.k, seed=args.seed + 1, tables=tables)
 
     print(f"\nE2  k={args.k}  queries used={n_used} excluded (m_k == 0, A2's regime)={n_excluded}")
@@ -271,6 +341,7 @@ def main() -> int:
                 "n_queries_excluded_exact_tie": n_excluded,
                 "points": [p.as_dict() for p in points],
                 "certificate_audit": audit.as_dict(),
+                "rank_trajectories": trajectories,
                 "violations": len(violations),
             },
         },

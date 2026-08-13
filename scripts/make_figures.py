@@ -58,6 +58,10 @@ _ACCENT = "#eb6834"
 #: Recessive ink for chrome and annotation. Text never wears a series colour --
 #: the coloured mark beside it carries the identity.
 _MUTED = "#52514e"
+#: Five slots for the cascade, in the palette's fixed order. Validated as a set:
+#: worst adjacent CVD delta-E 9.1, normal-vision 19.6, both passing. Three sit
+#: below 3:1 against the surface, so every series carries a direct label.
+_SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4")
 
 
 def _load(path: Path) -> dict | None:
@@ -246,6 +250,104 @@ def fig_rho_discontinuity(record: dict, out: Path) -> None:
     plt.close(figure)
 
 
+def fig_rank_cascade(record: dict, out: Path) -> None:
+    """A1, per document: which ranks cross, and when.
+
+    ``fig_transition`` gives the *rate* of top-k changes; this gives the paths
+    behind it. Rank is an integer, so nothing is projected -- unlike a 2-D
+    embedding of the document vectors, where apparent distance would be an
+    artefact of the projection rather than a property of the data.
+
+    Emphasis rather than twelve hues: the documents that cross the top-k
+    boundary carry the story, the rest are context and are drawn in recessive
+    grey. Colour follows the entity, not its rank at any given eps.
+
+    Falsification: section 4.4 certifies the top-k *set* below eps = m_k/2, so
+    no line may cross the k boundary left of 1.0. Crossings that stay wholly
+    inside the top-k are permitted there -- the certificate is about the set,
+    not the order within it -- and the two are drawn distinctly for that reason.
+    """
+    import matplotlib.pyplot as plt
+
+    trajectories = record["payload"]["E2_transition"].get("rank_trajectories")
+    if not trajectories:
+        print("skipping fig_rank_cascade (no trajectories recorded)")
+        return
+
+    ratios = trajectories["ratios"]
+    k = trajectories["k"]
+    ranks = trajectories["ranks"]
+
+    # A document "crosses" if it changes side of the top-k boundary anywhere.
+    crossers = [
+        doc for doc, series in ranks.items() if any((r <= k) != (series[0] <= k) for r in series)
+    ]
+
+    figure, axes = plt.subplots(figsize=(7.0, 4.2))
+    for doc, series in ranks.items():
+        if doc in crossers:
+            continue
+        axes.plot(ratios, series, linewidth=1.0, color="#c9c9c6", zorder=1)
+    for index, doc in enumerate(crossers):
+        colour = _SERIES[index % len(_SERIES)]
+        axes.plot(ratios, ranks[doc], linewidth=1.8, color=colour, zorder=3)
+        # Direct labels at the endpoint rather than a legend. Three of the five
+        # hues sit below 3:1 against the surface, and a contrast warning
+        # obligates a visible label -- which this is, and it also removes the
+        # legend's colour-matching step entirely.
+        axes.annotate(
+            f"  {doc}",
+            xy=(ratios[-1], ranks[doc][-1]),
+            fontsize=7,
+            color=colour,
+            va="center",
+            annotation_clip=False,
+        )
+
+    axes.axvline(1.0, linestyle="--", color=_MUTED, linewidth=1.2)
+    axes.axhline(k + 0.5, color=_MUTED, linewidth=0.8)
+    axes.annotate(
+        f"top-{k} boundary",
+        xy=(ratios[0], k + 0.5),
+        xytext=(4, 5),
+        textcoords="offset points",
+        fontsize=8,
+        color=_MUTED,
+    )
+
+    axes.set_xscale("log")
+    # Ranks are 1-based, and the inverted axis needs headroom or the note above
+    # the highest line is clipped by the top spine.
+    deepest = max(max(s) for s in ranks.values())
+    axes.set_ylim(deepest + 2, -1.5)
+    # Placed low-left, where the plot is empty: at the top it collided with the
+    # spine and the title, and every line is flat there anyway.
+    axes.annotate(
+        "certified radius\n$\\epsilon = m_k/2$",
+        xy=(1.0, deepest * 0.78),
+        xytext=(6, 0),
+        textcoords="offset points",
+        fontsize=8,
+        color=_MUTED,
+    )
+    axes.set_xlabel("$\\epsilon \\,/\\, (m_k/2)$")
+    axes.set_ylabel("rank")
+    axes.set_title(
+        f"Rank trajectories along one perturbation direction "
+        f"({len(crossers)} of {len(ranks)} cross the boundary)",
+        fontsize=10,
+    )
+    axes.grid(alpha=0.3, linewidth=0.5)
+    _stamp(
+        figure,
+        f"result {record['result_digest'][:16]}  |  "
+        f"k={k}, one direction scaled over {len(ratios)} steps, seed {trajectories['seed']}",
+    )
+    figure.tight_layout()
+    figure.savefig(out, dpi=200)
+    plt.close(figure)
+
+
 def fig_margins(record: dict, out: Path) -> None:
     """A1: where the margins actually are, including the exact-tie mass."""
     import matplotlib.pyplot as plt
@@ -350,8 +452,9 @@ def main() -> int:
     if profile:
         fig_transition(profile, output / "fig_transition.png")
         fig_tau_band(profile, output / "fig_tau_band.png")
+        fig_rank_cascade(profile, output / "fig_rank_cascade.png")
         fig_margins(profile, output / "fig_margins.png")
-        written += 3
+        written += 4
 
     ablation = _load(args.reports / "tie_break_ablations.json")
     if ablation:

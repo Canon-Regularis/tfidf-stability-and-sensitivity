@@ -107,6 +107,115 @@ def _rho_sweep(scores: list[float]) -> dict:
     }
 
 
+def _pair_geometry(
+    query_features: list[str],
+    model,
+    corpus_ids: list[str],
+    case: dict,
+    tau: float,
+) -> dict:
+    """Exact 2-D coordinates for the section 7.4 pair, in the plane they span.
+
+    Why this projection loses nothing *for the decision*
+    ----------------------------------------------------
+    A query ranks A above B exactly when ``cos(q, w_A) > cos(q, w_B)``, i.e. when
+    ``q . d > 0`` for ``d = w_A/||w_A|| - w_B/||w_B||``. That ``d`` lies **in the
+    plane spanned by the two document directions**, so ``q . d`` depends only on
+    q's component in that plane: the out-of-plane part is orthogonal to ``d`` and
+    contributes exactly zero. Projecting q into the plane therefore preserves the
+    ranking decision exactly -- it is not a lossy embedding of the kind a t-SNE
+    or PCA scatter would give, where apparent distance is an artefact.
+
+    What the projection *does* lose is q's magnitude, so the angles drawn from q
+    to each document are not the true ones. The scores are therefore taken from
+    the record rather than measured off the picture, and the share of ``||q||``
+    lying in the plane is reported so a reader knows how much is hidden.
+
+    Everything here is presentation, so it is computed with ``fsum``; the scores
+    quoted are the recorded ones, computed under the run's own reduction policy.
+    """
+    pair = case.get("pair") or {}
+    if not pair:
+        return {}
+
+    query = TfidfVectoriser.transform_query(list(query_features), model)
+    width = model.n_features
+
+    def densify(vector) -> list[float]:
+        out = [0.0] * width
+        for index, value in zip(vector.indices, vector.values, strict=True):
+            out[index] = value
+        return out
+
+    def inner(a: list[float], b: list[float]) -> float:
+        return math.fsum(x * y for x, y in zip(a, b, strict=True))
+
+    def magnitude(a: list[float]) -> float:
+        return math.sqrt(math.fsum(x * x for x in a))
+
+    q = densify(query)
+    a = densify(model.document(corpus_ids.index(pair["doc_A"])))
+    b = densify(model.document(corpus_ids.index(pair["doc_B"])))
+    q_norm, a_norm, b_norm = magnitude(q), magnitude(a), magnitude(b)
+    if min(q_norm, a_norm, b_norm) == 0.0:
+        return {}
+
+    unit_a = [x / a_norm for x in a]
+    unit_b = [x / b_norm for x in b]
+
+    # Gram-Schmidt: e1 along A, e2 the part of B orthogonal to it.
+    e1 = unit_a
+    overlap = inner(unit_b, e1)
+    residual = [unit_b[i] - overlap * e1[i] for i in range(width)]
+    residual_norm = magnitude(residual)
+    coincident = residual_norm == 0.0
+    e2 = [0.0] * width if coincident else [x / residual_norm for x in residual]
+
+    point_a = (1.0, 0.0)
+    point_b = (overlap, residual_norm)
+    q_plane = (inner(q, e1), inner(q, e2))
+
+    # The claim above, asserted rather than believed: the decision statistic is
+    # identical whether taken in the full space or in the plane.
+    direction = [unit_a[i] - unit_b[i] for i in range(width)]
+    decision_full = inner(q, direction)
+    decision_plane = q_plane[0] * (point_a[0] - point_b[0]) + q_plane[1] * (point_a[1] - point_b[1])
+    # Scaled by ||q||, not by the statistic itself. For an exact tie the
+    # statistic is 0.0, so a self-relative error divides an infinitesimal by an
+    # infinitesimal and reports 1.0 for a discrepancy of 1e-17 -- which is what
+    # the first version of this did. ||q|| is the natural scale: the statistic
+    # is q . d, and dividing it by ||q|| is exactly the score gap.
+    residual_error = abs(decision_full - decision_plane)
+
+    return {
+        "doc_A": pair["doc_A"],
+        "doc_B": pair["doc_B"],
+        "unit_A": list(point_a),
+        "unit_B": list(point_b),
+        "q_in_plane": list(q_plane),
+        "q_norm": q_norm,
+        "q_in_plane_norm": math.hypot(*q_plane),
+        # How much of the query is not drawn. 1.0 means it lies wholly in the plane.
+        "q_share_in_plane": math.hypot(*q_plane) / q_norm,
+        "angle_between_documents_rad": math.acos(max(-1.0, min(1.0, overlap))),
+        "documents_coincident": coincident,
+        # cos(q, w) taken from the record, not measured off the drawing.
+        "s_A": pair["s_A"],
+        "s_B": pair["s_B"],
+        "score_gap": pair["s_A"] - pair["s_B"],
+        "tau": tau,
+        "decision_statistic_full_space": decision_full,
+        "decision_statistic_in_plane": decision_plane,
+        "projection_error_absolute": residual_error,
+        "projection_error_over_q_norm": residual_error / q_norm,
+        # A drawn angle below ~2e-3 rad is under one pixel on a 200 dpi
+        # figure. Recorded so a reader can see whether a geometric
+        # rendering of this pair would show anything at all -- for an
+        # exact tie it cannot, and drawing one would invent structure.
+        "angle_is_renderable": math.degrees(math.acos(max(-1.0, min(1.0, overlap)))) > 0.05,
+    }
+
+
 def _case_study(scores: list[float], table: AttributeTable, tau: float, doc_ids: list[str]) -> dict:
     """E4: identify the closest pair and show what the tie-break does with it.
 
@@ -240,19 +349,15 @@ def main() -> int:
     model = TfidfVectoriser().fit(features, data.doc_ids)
 
     # Section 7.1's protocol, not document prefixes -- see analysis/query_grid.py.
-    grid = evaluate(
-        build_query_grid(
-            data.interactions,
-            dict(zip(data.doc_ids, features, strict=True)),
-            data.doc_ids,
-            mode=QueryMode(args.query_mode),
-            min_interactions=args.min_interactions,
-            limit=args.queries,
-        ),
-        model,
-        data.records,
+    query_set = build_query_grid(
+        data.interactions,
+        dict(zip(data.doc_ids, features, strict=True)),
         data.doc_ids,
+        mode=QueryMode(args.query_mode),
+        min_interactions=args.min_interactions,
+        limit=args.queries,
     )
+    grid = evaluate(query_set, model, data.records, data.doc_ids)
     if not grid.queries:
         print(
             f"no queries: no user has at least {args.min_interactions} interactions.",
@@ -348,6 +453,9 @@ def main() -> int:
     first = grid.queries[0]
     case = _case_study(list(first.scores), first.table, args.tau, list(first.candidate_ids))
     rho_sweep = _rho_sweep(list(first.scores))
+    geometry = _pair_geometry(
+        list(query_set.queries[0].features), model, list(data.doc_ids), case, args.tau
+    )
     _print_case_study(case)
 
     result = ExperimentResult(
@@ -367,6 +475,7 @@ def main() -> int:
             "E3_degenerate_queries_included": True,  # G3: included here, unlike E1
             "E3_rho_sweep": rho_sweep,
             "E4_case_study": case,
+            "E4_pair_geometry": geometry,
         },
     )
 
