@@ -142,7 +142,19 @@ struct Exact {
             x = hi;
         }
         partials.resize(out);
-        partials.push_back(x);
+        // Conditional, exactly as CPython's `math_fsum` is: it appends the
+        // running total only `if (x != 0.0)`. Pushing unconditionally is a
+        // no-op for the *value* of the expansion but not for its *sign*: for an
+        // input of nothing but negative zeros, `x` is -0.0, so an unconditional
+        // push made `value()` return -0.0 where `math.fsum` returns +0.0.
+        // Measured through the shipped extension -- reduce_sum([-0.0], exact)
+        // gave bits 8000000000000000 against the reference's 0000000000000000.
+        // Since -0.0 == 0.0, a tolerance or equality check cannot see it, and
+        // this policy is the declared cross-language ground truth, so the one
+        // reduction that must agree bit-for-bit was the one that did not.
+        if (x != 0.0) {
+            partials.push_back(x);
+        }
     }
 
     /// Round the expansion to a single correctly-rounded binary64.
