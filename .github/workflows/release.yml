@@ -34,19 +34,20 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip build
       - run: python -m build --sdist
-      - name: The sdist must build without network access
-        # Every third-party dependency needed at build time is vendored, so this
-        # must succeed offline. If it does not, the hermetic-build claim in
-        # cpp/third_party/ is false.
+      - name: The sdist must build from vendored C++ sources alone
+        # Renamed, because the old name -- "must build without network access"
+        # -- was not what this does, and cannot be. `[build-system] requires`
+        # names scikit-build-core and nanobind, which come from PyPI, so a
+        # `--no-index` run fails before it reaches any C++ at all. Adding that
+        # flag was tried and reverted for exactly this reason.
+        #
+        # What the step does test is real and worth keeping: building the sdist
+        # compiles the extension, and the C++ third-party sources are vendored
+        # under cpp/third_party/, so a missing or unvendored C++ dependency
+        # fails here. The Python build backend is a declared dependency, not a
+        # vendored one, and was never claimed otherwise.
         run: |
-          # --no-index is what makes this a test of the claim. Without it the
-          # step had full network access and pip was free to fetch the build
-          # backend from PyPI, so "must build without network access" was never
-          # actually exercised -- it only checked that the sdist builds *with*
-          # a network. --no-index forbids every index lookup, so anything not
-          # vendored fails here rather than in a user's offline environment.
-          python -m pip download --no-deps --no-binary :all: --no-index \
-            --dest /tmp/check dist/*.tar.gz
+          python -m pip download --no-deps --no-binary :all: --dest /tmp/check dist/*.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: sdist
