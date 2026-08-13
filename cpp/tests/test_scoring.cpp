@@ -11,8 +11,10 @@
 
 #include <doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -225,11 +227,20 @@ TEST_CASE("scoring: the zero-vector convention of section 2.3") {
     ScoringScratch scratch;
 
     // A zero query scores 0 against everything and must not produce NaN.
+    //
+    // Poisoned first, and compared on bits. `std::vector<Real> out(n)` value-
+    // initialises to 0.0, so the previous form passed unchanged if score_taat
+    // wrote *nothing at all* -- it could not tell "correctly wrote zeros" from
+    // "never ran". And `s == 0.0` is true of -0.0, which this repository treats
+    // as a distinct value everywhere else (ranking/margins.py reasons that -0.0
+    // cannot occur, and every score comparison elsewhere is bitwise).
+    std::fill(out.begin(), out.end(), std::numeric_limits<Real>::quiet_NaN());
     const SparseView zero{{}, {}, csr.n_cols};
     score_taat(zero, csc, norms, 0.0, out, scratch, Reduction::Naive);
     for (const Real s : out) {
+        CHECK_FALSE(std::isnan(s));  // fails now if the kernel wrote nothing
         CHECK(s == 0.0);
-        CHECK_FALSE(std::isnan(s));
+        CHECK(std::signbit(s) == false);  // +0.0, never -0.0
     }
 
     // A zero-norm document scores 0 rather than dividing by zero.

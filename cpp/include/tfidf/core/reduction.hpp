@@ -121,8 +121,22 @@ struct Pairwise {
 ///
 /// Maintains a set of non-overlapping partial sums whose exact total equals the
 /// exact sum of the inputs, then rounds once. This is the same algorithm behind
-/// Python's `math.fsum`, so the two agree bit-for-bit -- which is what lets the
-/// noise-floor study use a common ground truth across both languages.
+/// Python's `math.fsum`, so the two agree bit-for-bit **on finite inputs** --
+/// which is what lets the noise-floor study use a common ground truth across
+/// both languages.
+///
+/// The qualification is load-bearing, and was previously absent. CPython's
+/// `math_fsum` tracks infinities and intermediate overflow separately and
+/// *raises*: `fsum([inf, -inf])` is a ValueError and `fsum([1e308, 1e308])` an
+/// OverflowError. This implementation has no such machinery, so it returns NaN
+/// for all three of those and for `[inf, 1.0]`, where `math.fsum` returns inf.
+/// Measured against the reference; the other three policies agree with it on
+/// exactly these inputs, so the gap is specific to `Exact`.
+///
+/// It is not reachable from the published pipeline: a tf-idf weight is a
+/// product of a non-negative tf with `idf = ln((1+N)/(1+df)) >= 0`, so no
+/// infinity enters a reduction. It is reachable through the `reduce_sum`
+/// binding, which is why the limit is stated rather than left to be discovered.
 struct Exact {
     std::vector<Real> partials;
 

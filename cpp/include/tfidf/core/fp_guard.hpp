@@ -22,6 +22,7 @@
 #pragma once
 
 #include <cfenv>
+#include <cfloat>
 #include <cstdint>
 #include <limits>
 
@@ -75,11 +76,24 @@ enum Failure : std::uint32_t {
 [[nodiscard]] inline std::uint32_t selftest() noexcept {
     std::uint32_t f = kOk;
 
-    // Constant folding at extended precision would make this comparison hold.
-    {
-        volatile double a = 0.1, b = 0.2;
-        if (a + b == 0.3) f |= kConstantFolding;
-    }
+    // Excess intermediate precision.
+    //
+    // The previous probe was `volatile double a = 0.1, b = 0.2; if (a + b ==
+    // 0.3)`, and it could not fire under any configuration tested -- including
+    // `-mfpmath=387 -fexcess-precision=fast`, which is precisely the hazard it
+    // names, and `-ffast-math`. The reason is arithmetic, not optimisation: the
+    // exact sum of the doubles 0.1 and 0.2 differs from the double 0.3 at every
+    // precision, so the comparison is false whether or not intermediates are
+    // widened. `kConstantFolding` was therefore a guard bit that could never be
+    // set, and `describe()`'s branch for it was unreachable.
+    //
+    // FLT_EVAL_METHOD reports the property directly: 0 when each operation is
+    // performed in its own type, 2 when everything is evaluated as long double.
+    // Verified to read 0 under `-mfpmath=sse -fexcess-precision=standard` and 2
+    // under `-mfpmath=387 -fexcess-precision=fast`.
+#if !defined(FLT_EVAL_METHOD) || FLT_EVAL_METHOD != 0
+    f |= kConstantFolding;
+#endif
 
     // Reassociation would preserve the tiny addend instead of losing it.
     {
