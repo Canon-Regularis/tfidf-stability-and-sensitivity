@@ -36,6 +36,12 @@ these entries only fill gaps or make an abstract quantity concrete.
 | [G19](#g19)| §7.1 | The candidate set varies per leave-one-out fold |
 | [G20](#g20)| §7.1 | Profile aggregation is order-sensitive |
 | [G21](#g21)| §7.1 | `vector_sum` and `vector_mean` give identical similarities |
+| [G22](#g22)| §7.4 | A fine near-tie cannot be manufactured; §7.4 must *identify* one |
+| [G23](#g23)| §7.0 | τ is derived as a *band*, not chosen as a value |
+| [G24](#g24)| §6 | `cos ∈ [0, 1]` is true in exact arithmetic and false in binary64 |
+| [G25](#g25)| §7.1 | The query protocol is not interchangeable, and it changes every number |
+| [G26](#g26)| §4.2 | The interaction term never dominates |
+| [G27](#g27)| §4.2 | The bound holds; *testing* it in binary64 needs three preconditions |
 
 ---
 
@@ -749,6 +755,7 @@ are therefore retained, and the choice is recorded in the manifest.
 
 ---
 
+<a id="g22"></a>
 ## G22 — A fine near-tie cannot be manufactured; §7.4 must *identify* one
 
 **Where:** §7.4 ("Case Study: Near-Tie Sensitivity"), §7.3 (stratification by margin).
@@ -877,6 +884,7 @@ model — where any magnitude is reachable — and not from a text edit.
 
 ---
 
+<a id="g23"></a>
 ## G23 — τ is derived as a *band*, not chosen as a value
 
 **Where:** §7.1 ("τ is chosen to exceed floating-point noise while remaining
@@ -1001,6 +1009,7 @@ questions rather than two names for one effect.
 
 ---
 
+<a id="g24"></a>
 ## G24 — `cos ∈ [0, 1]` is true in exact arithmetic and false in binary64
 
 **Where:** §2.3 — *"Since all coordinates are non-negative, it follows that
@@ -1052,6 +1061,7 @@ break down — scale invariance, which fails below `|x| ≈ √DBL_MIN`.
 
 ---
 
+<a id="g25"></a>
 ## G25 — the query protocol is not interchangeable, and it changes every number
 
 **Where:** §7.1 ("Query set and evaluation setup"), and every §7.2/7.3 result.
@@ -1124,6 +1134,7 @@ manifest via `QueryGrid.provenance()`.
 
 ---
 
+<a id="g26"></a>
 ## G26 — the interaction term of §4.2 never dominates
 
 **Where:** §4.2 — *"In sparse high-dimensional embeddings, the interaction
@@ -1198,3 +1209,68 @@ actually inside the radius, and its zero-violation result was therefore vacuous.
 The guard is to count only perturbations whose realised delta is verified
 strictly less than the radius, and to assert that count is large;
 `tests/test_margins_and_flip_radii.py` does both.
+
+---
+
+<a id="g27"></a>
+## G27 — §4.2 holds; *testing* it in binary64 needs three preconditions
+
+**Paper.** §4.2's decomposition (see [G5](#g5)) is a statement about real
+arithmetic. Nothing below contradicts it, and `three_term_bound` is a faithful
+transcription of it.
+
+**Finding.** The nightly job at 100,000 examples falsified
+`test_three_term_bound_is_never_violated` three separate times, in three
+unrelated regimes. Each was a defect in *how the inequality was being checked*,
+not in the inequality. They are recorded because all three are easy to
+reintroduce, and because two of them make the test **silently weaker** rather
+than failing loudly.
+
+**1. The perturbation realised is not the perturbation requested.** With
+`‖idf‖_∞ = 10` and `‖Δidf‖_∞ = 1e-15`, the test built `idf′` as
+`idf + Δidf`. But `ulp(10) = 1.776e-15`, so the step actually taken was a whole
+ulp — **1.776×** what was asked for. The bound was computed from the request and
+compared against an observation of the realisation:
+
+```
+observed 1.7015e-12  >  bound 6.8666e-13     (2.5x)
+```
+
+This is the same trap as the §4.4 vacuous-attack correction above, in the
+opposite direction: there the realised delta was too *large* to certify, here it
+was too large to be *bounded*. The rule is one rule — **assume on the realised
+delta, never the drawn one** — and it applies to every perturbation this project
+generates.
+
+**2. Below `sqrt(DBL_MIN)`, `l2_norm` is not a Euclidean norm.** At
+`tf = {1.516e-161}` with `Δtf = 0`, the inequality holds with *equality* in exact
+arithmetic. In binary64 the two sides differ by **0.54%**, because squaring the
+coordinate lands in the subnormal range and leaves **six significant bits**.
+This is [G18](#g18) reaching §4.2. No `u`-scaled tolerance can absorb it and none
+should: the defect is in the norm, not the decomposition.
+
+**3. The difference vector underflows before its inputs do.** The subtlest of
+the three. `w′ − w` is smaller than `tf` by roughly `‖Δidf‖_∞`, so every input
+vector can sit above the threshold while the quantity actually being measured
+sits below it — found at `tf = sqrt(DBL_MIN)` exactly, with `Δidf = 1e-5`, giving
+a difference of `1.5e-159` whose square is subnormal. Guarding the three *input*
+norms is not enough; the **fourth** norm, the one on the left-hand side, needs
+the same guard.
+
+**Resolution.** The test asserts
+
+```
+observed <= bound*(1 + 1e-9) + u*(‖idf‖_∞ + ‖Δidf‖_∞)*(‖tf‖ + ‖tf′‖)
+```
+
+with `u = 2⁻⁵³`, restricted to inputs whose norms — *all four* — are either
+exactly zero or at or above `sqrt(DBL_MIN)`. The absolute slack is derived, not
+chosen: each `w_i` and `w′_i` carries up to `u|w_i|` of rounding that the
+real-arithmetic inequality does not model, and that is exactly the quantity
+above. The `1e-12` constant it replaces was unrelated to any magnitude in the
+problem — too loose for small vectors, and at ulp-scale perturbations larger
+than the bound it was slackening.
+
+**Verification.** The assertion is mutation-tested: dropping any one of the
+three terms, halving the bound, or shaving the global term by 1% each still
+fails the test, so the added tolerance has not made it vacuous.
