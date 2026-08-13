@@ -166,7 +166,15 @@ def _parser() -> argparse.ArgumentParser:
         choices=[QueryMode.LEAVE_ONE_OUT.value, QueryMode.USER_PROFILE.value],
         default=QueryMode.LEAVE_ONE_OUT.value,
     )
-    parser.add_argument("--min-interactions", type=int, default=3)
+    parser.add_argument(
+        "--min-interactions",
+        type=int,
+        default=5,
+        help="G10(4): eligibility is >= 5 qualifying interactions. This default "
+        "was 3, contradicting both the addendum and the min_interactions: 5 "
+        "pinned in configs/default.yaml, so unattended runs used a threshold "
+        "the specification does not sanction.",
+    )
     parser.add_argument(
         "--tau",
         type=float,

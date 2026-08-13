@@ -84,8 +84,15 @@ class EvaluatedQuery:
         Observational rather than structural: a query can be non-empty and still
         embed to the zero vector when every feature is out of vocabulary, and it
         is the observable condition that makes the ranking pure-attribute.
+
+        The emptiness guard is not redundant. ``all()`` over no scores is
+        ``True``, so a query with *no candidates* answered yes and was counted in
+        the published ``n_zero_vector`` as a pure-attribute ranking. It is not
+        one: there is nothing to rank, by attributes or otherwise. No current
+        dataset produces an empty candidate set, so no published number moves --
+        but the statistic was one degenerate corpus away from being wrong.
         """
-        return all(s == 0.0 for s in self.scores)
+        return bool(self.scores) and all(s == 0.0 for s in self.scores)
 
 
 @dataclass(frozen=True, slots=True)

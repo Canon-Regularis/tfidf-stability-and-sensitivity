@@ -307,3 +307,51 @@ def test_every_command_is_registered(command: str) -> None:
 
     actions = [a for a in build_parser()._actions if hasattr(a, "choices") and a.choices]
     assert any(command in (a.choices or {}) for a in actions)
+
+
+def test_experiment_drivers_do_not_contradict_the_pinned_config() -> None:
+    """A driver default that shadows a pinned key must agree with it.
+
+    ``--min-interactions`` defaulted to 3 in both experiment drivers while
+    ``configs/default.yaml`` pinned ``min_interactions: 5`` citing G10(4)
+    ("users with >= 5 qualifying interactions"). No driver calls
+    ``load_config``, so nothing reconciled the two and every unattended run used
+    a threshold the specification does not sanction -- and the choice moves
+    published numbers, not merely the query count.
+
+    Scanning rather than listing, so a key added to either side is covered the
+    day it appears.
+    """
+    import re
+
+    config = load_config()
+    pinned = {
+        key: value
+        for section, body in config.items()
+        if isinstance(body, dict)
+        for key, value in body.items()
+    }
+
+    disagreements = []
+    compared = []
+    for script in sorted((REPO / "scripts").glob("run_*.py")):
+        source = script.read_text(encoding="utf-8")
+        for match in re.finditer(
+            r'add_argument\(\s*"--([a-z0-9-]+)"(.*?)default=([^,)\n]+)', source, re.S
+        ):
+            name = match.group(1).replace("-", "_")
+            if name not in pinned:
+                continue
+            compared.append(f"{script.name}:{name}")
+            default = match.group(3).strip().strip("\"'")
+            if default != str(pinned[name]):
+                disagreements.append(
+                    f"{script.name} --{match.group(1)}={default} vs {pinned[name]}"
+                )
+
+    # Without this the test starts passing by comparing nothing the moment the
+    # regex stops matching -- a reformatted add_argument call would be enough.
+    assert compared, "the scan matched no shared keys; it is not testing anything"
+    assert not disagreements, "driver defaults contradict configs/default.yaml: " + "; ".join(
+        disagreements
+    )

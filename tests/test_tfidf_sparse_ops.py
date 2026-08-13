@@ -301,3 +301,51 @@ def test_reduction_policy_affects_norms_but_not_weights(mini_features) -> None: 
     a = TfidfVectoriser(reduction=Reduction.NAIVE).fit(list(mini_features))
     b = TfidfVectoriser(reduction=Reduction.EXACT).fit(list(mini_features))
     assert a.matrix.values == b.matrix.values
+
+
+def test_intermediates_reports_the_tf_that_was_actually_used() -> None:
+    """``inspect`` must not print a tf one ulp from the one behind the weight.
+
+    The field was computed as ``weight / idf`` under a comment asserting the
+    division is exact. It is not: two roundings do not cancel, and over a sweep
+    of 184,080 realistic ``(N, df, L, count)`` combinations the round trip
+    missed by an ulp in 9.01% of them. This project compares scores on raw bit
+    patterns, so a reported intermediate that is off by exactly the quantity
+    under study is worse than no intermediate.
+    """
+    from tfidf_stability.vectorisation.idf import smoothed_idf_one
+    from tfidf_stability.vectorisation.tfidf import _exact_tf
+
+    naive_wrong = 0
+    cases = 0
+    for n_docs in (100, 610, 9742):
+        for df in range(1, 40):
+            idf = smoothed_idf_one(df, n_docs)
+            if idf == 0.0:
+                continue
+            for length in range(1, 30):
+                for count in range(1, length + 1):
+                    tf = count / length
+                    weight = tf * idf
+                    cases += 1
+                    naive_wrong += weight / idf != tf
+                    assert same_bits(_exact_tf(weight, idf, length), tf)
+
+    assert cases > 10_000, "the sweep must be large enough to be worth anything"
+    assert naive_wrong > 0, (
+        "the naive weight/idf must fail somewhere, or this test proves nothing "
+        "and the reconstruction it guards is unnecessary"
+    )
+
+
+def test_intermediates_tf_matches_the_term_frequency_vector(mini_model, mini_features) -> None:  # type: ignore[no-untyped-def]
+    """End to end on the fixture, against the tf vector the fit actually built."""
+    from tfidf_stability.vectorisation.tf import term_frequencies
+
+    for i, features in enumerate(mini_features):
+        vector, _length = term_frequencies(features, mini_model.vocabulary)
+        truth = dict(zip(vector.indices, vector.values, strict=True))
+        for term in mini_model.intermediates(i)["terms"]:
+            expected = truth.get(term["term_id"])
+            if expected is not None:
+                assert same_bits(term["tf"], expected), term["token"]

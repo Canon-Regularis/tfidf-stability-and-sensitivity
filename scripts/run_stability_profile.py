@@ -109,7 +109,15 @@ def _parser() -> argparse.ArgumentParser:
         help="section 7.1's construction; item-as-query is implemented but the "
         "paper excludes it from the reported experiments",
     )
-    parser.add_argument("--min-interactions", type=int, default=3)
+    parser.add_argument(
+        "--min-interactions",
+        type=int,
+        default=5,
+        help="G10(4): eligibility is >= 5 qualifying interactions. This default "
+        "was 3, contradicting both the addendum and the min_interactions: 5 "
+        "pinned in configs/default.yaml, so unattended runs used a threshold "
+        "the specification does not sanction.",
+    )
     parser.add_argument("--k", type=int, default=10, help="k for the transition curve")
     parser.add_argument("--trials", type=int, default=40)
     parser.add_argument("--seed", type=int, default=20260811)

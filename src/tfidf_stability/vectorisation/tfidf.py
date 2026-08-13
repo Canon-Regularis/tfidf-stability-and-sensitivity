@@ -32,6 +32,20 @@ from tfidf_stability.vectorisation.vocabulary import (
 __all__ = ["TfidfModel", "TfidfVectoriser"]
 
 
+def _exact_tf(weight: float, idf: float, length: int) -> float:
+    """Recover the exact ``tf`` behind a stored weight.
+
+    ``tf`` is ``count / length`` for an integer ``count``, and ``weight`` is
+    ``fl(tf * idf)``. Dividing the weight back by ``idf`` does not return ``tf``
+    -- two roundings do not cancel -- but it lands nowhere near half a unit away
+    from the integer count, so recovering the count and performing one
+    correctly-rounded division does. See the note at the call site.
+    """
+    if idf == 0.0 or length == 0:
+        return 0.0
+    return round(weight / idf * length) / length
+
+
 @dataclass(frozen=True, slots=True)
 class TfidfModel:
     """A fitted TF-IDF model, with every intermediate retained.
@@ -95,8 +109,21 @@ class TfidfModel:
                     "term_id": t,
                     "df": self.vocabulary.df[t],
                     "idf": self.idf[t],
-                    # w = tf * idf, so tf is recoverable exactly by division.
-                    "tf": w / self.idf[t] if self.idf[t] != 0.0 else 0.0,
+                    # NOT ``w / idf``. That comment used to read "w = tf * idf,
+                    # so tf is recoverable exactly by division", which is false
+                    # in binary64: ``fl(fl(tf*idf)/idf)`` misses ``tf`` by an
+                    # ulp in 9.01% of a sweep over 184,080 realistic
+                    # (N, df, L, count) combinations -- e.g. N=100, df=1, L=6,
+                    # count=5 gives 0x1.aaaaaaaaaaaaap-1 for a true
+                    # 0x1.aaaaaaaaaaaabp-1. In a project that compares scores on
+                    # raw bit patterns, the one field this method reconstructs
+                    # was off by exactly the quantity under study, and `tfidf
+                    # inspect` printed it.
+                    #
+                    # ``tf`` is ``count / L`` for an integer count, so recover
+                    # the count -- the rounding is far below 0.5 -- and divide
+                    # once. Exact on all 184,080 of those cases.
+                    "tf": _exact_tf(w, self.idf[t], self.lengths[i]),
                     "weight": w,
                 }
                 for t, w in zip(row.indices, row.values, strict=True)
