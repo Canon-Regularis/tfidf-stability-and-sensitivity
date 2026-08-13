@@ -227,6 +227,15 @@ def build_vocabulary(
 
     n_seen = len(df_counter)
 
+    # Validated here because the sibling thresholds are, and because the failure
+    # is silent rather than loud: ``survivors[:-1]`` is a legal slice, so
+    # ``max_features=-1`` quietly dropped the lowest-ranked token instead of
+    # raising. ``-1`` is the plausible typo for "unlimited", which this codebase
+    # spells ``null``. ``max_features=0`` already failed, via
+    # ``EmptyVocabularyError``, so the negative case was the only quiet one.
+    if cfg.max_features is not None and cfg.max_features < 0:
+        raise ValueError(f"max_features must be non-negative or None, got {cfg.max_features}")
+
     # --- filter by document frequency ---------------------------------------
     min_df = _resolve_threshold(cfg.min_df, n_docs, name="min_df")
     max_df = (

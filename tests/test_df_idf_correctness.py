@@ -308,3 +308,25 @@ def test_fitting_is_deterministic_across_repeats(mini_features, mini_corpus) -> 
     a = TfidfVectoriser().fit(list(mini_features), ids)
     b = TfidfVectoriser().fit(list(mini_features), ids)
     assert a.digest() == b.digest()
+
+
+def test_a_negative_max_features_is_rejected_not_silently_applied() -> None:
+    """``survivors[:-1]`` is a legal slice, so the failure was silent.
+
+    ``max_features=-1`` quietly dropped the lowest-ranked token instead of
+    raising, while ``min_df=-1`` and ``max_df=-1`` both rejected. ``-1`` is the
+    plausible typo for "unlimited", which this codebase spells ``null``, and
+    ``max_features=0`` already failed loudly -- so the negative case was the
+    only quiet one.
+    """
+    docs = [["a", "b", "c"], ["a", "b"], ["a"], ["b", "d"]]
+    assert build_vocabulary(docs, VocabularyConfig()).tokens == ("a", "b", "c", "d")
+
+    for bad in (-1, -2):
+        with pytest.raises(ValueError, match="max_features"):
+            build_vocabulary(docs, VocabularyConfig(max_features=bad))
+
+    # The siblings already behaved this way; the asymmetry was the tell.
+    for name in ("min_df", "max_df"):
+        with pytest.raises(ValueError, match=name):
+            build_vocabulary(docs, VocabularyConfig(**{name: -1}))
