@@ -121,29 +121,23 @@ jobs:
       - name: C++ unit tests
         run: ctest --test-dir build-tests --output-on-failure --no-tests=error
       - name: Install the extension
-        # -v and the pre-flight dump are here because this step failed on
-        # windows-latest with nothing in the log to say why. It had been failing
-        # for a long time and nobody could see it: the command used to sit at
-        # the top of a multi-line block that ran under pwsh, which does not
-        # abort on a failed native command, so pytest ran anyway, every native
-        # test skipped on its skipif guard, and the job reported success.
-        # Switching the workflow to bash surfaced it. Until the cause is known
-        # this prints the environment the build actually gets.
-        run: |
-          python -c "import sys, platform; print(sys.version); print(platform.platform())"
-          python -m pip --version
-          python -c "import scikit_build_core, nanobind; print('backend ok')" || true
-          cmake --version | head -1
-          ninja --version || true
-          # Windows' 260-character path limit is the standard failure mode for
-          # this toolchain. The runner checkout is already deeply nested, and
-          # build/{wheel_tag}/_deps/nanobind-src/include/nanobind/... adds well
-          # over 200 more, so CMake writes paths the API refuses. A short build
-          # directory sidesteps it; POSIX runners keep the pyproject default.
-          EXTRA=""
-          if [ "$RUNNER_OS" = "Windows" ]; then EXTRA="-C build-dir=C:/b"; fi
-          echo "--- installing ---"
-          python -m pip install -e . --no-build-isolation -v $EXTRA
+        # Build isolation ON -- pip's default -- deliberately.
+        #
+        # This step used `--no-build-isolation`, which resolves the build
+        # backend from the ambient environment. On windows-latest it could not:
+        #     BackendUnavailable: Cannot import 'scikit_build_core.build'
+        # reproduced on a Windows machine where the isolated install succeeds
+        # and the non-isolated one fails, with scikit-build-core installed in
+        # both cases. It had been failing for a long time invisibly: the command
+        # sat at the top of a multi-line block running under pwsh, which does
+        # not abort mid-block, so pytest ran anyway, every native test skipped
+        # on its skipif guard, and the job reported success.
+        #
+        # Isolation is also the more faithful test. pip builds in a clean
+        # environment containing exactly `[build-system] requires`, which is
+        # what someone installing this package actually gets;
+        # `--no-build-isolation` exercises a configuration no user has.
+        run: python -m pip install -e .
 
       # Ordered before the import check on purpose. This guard is the one that
       # can *explain* an import failure -- a .pyd linked against a GCC runtime

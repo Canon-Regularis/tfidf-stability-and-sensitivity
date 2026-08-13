@@ -74,7 +74,9 @@ jobs:
         run: ./build-bench/cpp/bench/tfidf_bench
       - name: Python-side benchmarks
         run: |
-          python -m pip install -e . --no-build-isolation
+          # Build isolation ON, as in ci.yml and determinism.yml:
+          # --no-build-isolation could not find the build backend on Windows.
+          python -m pip install -e .
           python -m pytest tests/ -q --benchmark-only --benchmark-json=bench.json || true
       - uses: actions/upload-artifact@v4
         with:
