@@ -13,12 +13,12 @@ features → vocabulary → df → idf → tf → tf-idf → L2 norm
 ```
 
 Every stage is a separate module under `src/tfidf_stability/`, and every
-intermediate is retained rather than fused — §1.2 requires them to be
+intermediate is retained rather than fused: §1.2 requires them to be
 inspectable, and `TfidfModel.intermediates(i)` returns them for any document.
 
-## §2.1 — vocabulary, document frequency, IDF
+## §2.1. Vocabulary, document frequency, IDF
 
-**Vocabulary order is UTF-8 byte order, not Python string order.** Python
+**Vocabulary order is UTF-8 byte order rather than Python string order.** Python
 compares `str` by code point; the C++ mirror compares by `memcmp`. Those agree
 for ASCII and diverge outside the BMP, so the Python side sorts on the encoded
 bytes to make the two literally the same relation. `vocabulary.py::_byte_key`.
@@ -30,29 +30,29 @@ single most consequential decision in the repository.
 value, it differs in **15.16% of IDF entries** (44.5% of raw logarithms), and
 UCRT, glibc and Apple libm disagree with each other. Left alone, Linux and
 Windows would produce different weights, different norms, different scores and
-different rankings — the reproducibility claim would simply be false.
+different rankings; the reproducibility claim would be false.
 
 So `idf.py` computes each value via `decimal.Decimal.ln()` and rounds once to
 binary64, and the C++ core **never sees a logarithm**. It receives IDF as data.
 What remains in C++ is only `+ − × ÷ √`, which IEEE-754 requires to be correctly
 rounded, so every platform must agree. ([G13](spec_addenda.md#g13))
 
-## §2.2 — the TF-IDF embedding
+## §2.2. The TF-IDF embedding
 
 `tf = count / L` with `L` the document length in tokens. One IEEE division, so
 exact given exact inputs.
 
 This normalisation has a consequence the paper does not draw out: **a
 single-token edit is a `1/(L+1)` relative perturbation applied to every
-coordinate at once**, not a small additive nudge to one. It is why fine near-ties
-cannot be built by editing text, and why §7.4 must search for one.
+coordinate at once**, rather than a small additive nudge to one. It is why fine
+near-ties cannot be built by editing text, and why §7.4 must search for one.
 ([G22](spec_addenda.md#g22))
 
 n-grams are joined with `\x1f` (unit separator), a character that cannot occur in
 normalised text, so a bigram can never collide with a unigram containing the
 join character.
 
-## §2.3 — cosine, ranking, and the stability quantities
+## §2.3. Cosine, ranking, and the stability quantities
 
 ### Cosine
 
@@ -76,35 +76,36 @@ Sort key: `(−score, rank₁, …, rankₘ, id_rank)`, ascending lexicographic.
 (`desc`/`asc`) and missing-value placement are baked into the rank rather than
 applied per comparison. Three consequences:
 
-- the comparator is plain lexicographic — no direction branch, no missing branch;
+- the comparator is plain lexicographic, with no direction branch and no missing
+  branch;
 - **floating point is removed from the tie-break entirely**, which is what G8
-  actually requires, achieved not by care but by there being none left;
-- NaN cannot enter through the tie-break at all — a type-level guarantee.
+  requires; no float survives into the comparator to be handled;
+- NaN cannot enter through the tie-break at all, a type-level guarantee.
 
 Ratings use the exact integer pair `(2 × Σ rating, count)` and compare by
-cross-multiplication. G8's stated justification — that equal means might compare
-unequal — does not survive contact with the data: with half-star ratings the sum
+cross-multiplication. G8's stated justification, that equal means might compare
+unequal, does not survive contact with the data: with half-star ratings the sum
 is exact and IEEE mandates correctly-rounded division, so equal means *do* give
 identical doubles. The real hazard is the opposite: two **distinct** means
 colliding onto one double. The resolution is right; the reason needed restating.
 
 **Why sort stability is irrelevant.** Unique identifiers make the key injective,
 so no two elements compare equal, so "stable" quantifies over the empty set. A
-finite linear order admits exactly one order isomorphism onto `(0..N−1, <)`, so
-the output is unique. The stronger test — that the result is independent of the
-*input* order — is what the suite asserts, because it catches a non-total
+finite linear order admits one order isomorphism onto `(0..N−1, <)`, so the
+output is unique. The stronger test, that the result is independent of the
+*input* order, is what the suite asserts, because it catches a non-total
 comparator that `sort == stable_sort` can miss by luck.
 
 ### Margins (§2.3.2)
 
-`m_k = s_(k) − s_(k+1)`, and the flip radius is `m_k / 2` — exact, since division
-by two only decrements the exponent.
+`m_k = s_(k) − s_(k+1)`, and the flip radius is `m_k / 2`. The halving is exact:
+division by two only decrements the exponent.
 
 `m_k` depends **only on the sorted score multiset**, so it is identical under π,
-π_score and π_alt. That is precisely what makes A1 and A2 independent questions,
-and it is what lets a disagreement rate be stratified by margin without
-circularity. `rank_all_operators` shares one `sorted_scores` object across the
-three operators so this is true by construction rather than by coincidence.
+π_score and π_alt. A1 and A2 are therefore independent questions, and a
+disagreement rate can be stratified by margin without circularity.
+`rank_all_operators` shares one `sorted_scores` object across the three
+operators, so the property holds by construction.
 
 ### Tie groups (§2.3.3)
 
@@ -121,10 +122,10 @@ paper's definition is **not transitive** and so is not a partition.
 plus `ρ(τ) = |largest chain| / |largest clique| ≥ 1`, the chain-inflation ratio.
 
 **The ball must not binary-search for `c ± τ`.** Those bounds round, so the
-realised predicate would differ from the pinned `|sᵢ − c| ≤ τ` exactly at the
-boundary — the only place tie groups are interesting. The search is on the
-*difference* instead, which is exact and still O(log N), and works because IEEE
-subtraction is monotone.
+realised predicate would differ from the pinned `|sᵢ − c| ≤ τ` at the boundary,
+the only place tie groups are interesting. The search is on the *difference*
+instead, which is exact and still O(log N), and works because IEEE subtraction is
+monotone.
 
 **Cliques are O(N) and provably complete.** The graph `|sᵢ − s_j| ≤ τ` is an
 indifference graph, so every maximal clique is a contiguous interval of the
@@ -135,8 +136,8 @@ enumerator for `N ≤ 12`.
 
 Mirrored: `vectorisation/`, `similarity/`, `ranking/`. Not mirrored:
 `preprocessing/`, `analysis/`, `perturbation/`, `persistence/`, `cli/`,
-`datasets/` — orchestration, not hot paths. `scripts/check_layout.py` enforces
-the split so it cannot drift silently.
+`datasets/`, which are orchestration rather than hot paths.
+`scripts/check_layout.py` enforces the split so it cannot drift silently.
 
 The C++ side receives IDF and attribute ranks **as data**. It re-derives neither.
 Every delicate computation happens once, in Python, in exact arithmetic.

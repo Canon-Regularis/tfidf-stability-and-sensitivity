@@ -1,7 +1,7 @@
 // Native microbenchmarks. Kernel-level costs, free of FFI overhead.
 //
-// Populated alongside the kernels themselves in Stage 2; for now this exists so
-// the benchmark target compiles and the build graph is complete from Stage 0.
+// Populated alongside the kernels in Stage 2; for now it keeps the benchmark
+// target compiling and the build graph complete from Stage 0.
 #define ANKERL_NANOBENCH_IMPLEMENT
 #include <tfidf/core/build_config.hpp>
 #include <tfidf/core/fp_guard.hpp>

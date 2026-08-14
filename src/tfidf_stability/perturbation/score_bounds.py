@@ -9,21 +9,20 @@ section 4.4 turns a score bound into a *ranking* guarantee via the margin.
 
 The explicit constant ``C = 1/L`` lives in
 :mod:`~tfidf_stability.similarity.geometry` (``spec_addenda.md#g4``); this module
-is about what follows for the *ranking*.
+covers what follows for the ranking.
 
 Two things here go beyond the paper.
 
-**The bound is tight, not merely sufficient.** Section 4.4 states ``eps < m_k/2``
-as a sufficient condition and never addresses necessity.
-:func:`flip_witness` constructs the perturbation that breaks it at
-``m_k/2 + delta``, which shows the radius is exact. It builds the witness from
-**dyadic rationals** wherever the margin permits, so the construction carries no
+The radius is necessary as well as sufficient. Section 4.4 states ``eps < m_k/2``
+as a sufficient condition and never addresses necessity; :func:`flip_witness`
+constructs the perturbation that breaks it at ``m_k/2 + delta``, built from
+dyadic rationals wherever the margin permits so the construction carries no
 rounding of its own.
 
-**A certificate is not a prediction.** :func:`certified_radius` reports the
-largest perturbation a ranking provably tolerates; it does not claim anything
-about typical perturbations. Section 7.2 uses these as "empirical certificates
-of stability", and reading them as expected behaviour would invert the meaning.
+A certificate is a bound rather than a prediction. :func:`certified_radius`
+reports the largest perturbation a ranking provably tolerates and claims nothing
+about typical perturbations. Section 7.2 uses these as "empirical certificates of
+stability"; reading them as expected behaviour inverts the meaning.
 """
 
 from __future__ import annotations
@@ -50,13 +49,13 @@ class StabilityCertificate:
 
     Attributes:
         k: The boundary rank.
-        set_radius: Largest ``eps`` for which the top-k *set* is guaranteed
-            invariant -- ``m_k / 2``. ``NaN`` when ``m_k`` is undefined.
-        order_radius: Largest ``eps`` for which the top-k *ordering* is
-            guaranteed invariant -- ``m_min^top / 2``.
-        exact_tie: ``m_k == 0``. The certificate is then ``0``, which is not a
-            small radius but *no* radius: membership already depends entirely on
-            the tie-break, so a change of operator flips it with ``ds = 0``.
+        set_radius: Largest ``eps`` for which the top-k set is guaranteed
+            invariant, ``m_k / 2``. ``NaN`` when ``m_k`` is undefined.
+        order_radius: Largest ``eps`` for which the top-k ordering is guaranteed
+            invariant, ``m_min^top / 2``.
+        exact_tie: ``m_k == 0``, so the certificate is ``0``: no radius at all.
+            Membership already depends entirely on the tie-break, so a change of
+            operator flips it with ``ds = 0``.
         defined: Whether a certificate exists at all.
     """
 
@@ -68,19 +67,18 @@ class StabilityCertificate:
 
     @property
     def order_radius_is_binding(self) -> bool:
-        """Whether the *order* radius is the tighter of the two, here.
+        """Whether the order radius is the tighter of the two here.
 
-        Neither radius dominates the other in general, and it is worth being
-        precise about why: ``m_min^top`` minimises over the gaps *strictly
-        inside* the top-k (ranks 1->2 through (k-1)->k), while ``m_k`` is the gap
-        *at the boundary* (rank k->k+1). Those are **disjoint** sets of gaps, so
-        a ranking with a tight cluster at the top and a wide boundary has
-        ``order_radius < set_radius``, and one with a well-spread top and a
-        near-tied boundary has the reverse.
+        Neither radius dominates the other in general: ``m_min^top`` minimises
+        over the gaps strictly inside the top-k (ranks 1->2 through (k-1)->k)
+        while ``m_k`` is the gap at the boundary (rank k->k+1), and those gap
+        sets are disjoint. A tight cluster at the top with a wide boundary gives
+        ``order_radius < set_radius``; a well-spread top with a near-tied
+        boundary gives the reverse.
 
-        A certificate quoted without saying which invariant it certifies is
-        therefore ambiguous, which is why both are carried and
-        :attr:`joint_radius` exists for callers who want both guarantees.
+        So a certificate quoted without saying which invariant it certifies is
+        ambiguous. Both are carried, and :attr:`joint_radius` covers callers who
+        want both guarantees.
         """
         if not self.defined or math.isnan(self.order_radius):
             return False
@@ -88,10 +86,10 @@ class StabilityCertificate:
 
     @property
     def joint_radius(self) -> float:
-        """Largest ``eps`` guaranteeing the top-k set **and** its ordering.
+        """Largest ``eps`` guaranteeing the top-k set and its ordering.
 
-        The minimum of the two radii, since section 4.4's two conditions
-        constrain disjoint sets of gaps and both must hold.
+        The minimum of the two radii, since section 4.4's conditions constrain
+        disjoint sets of gaps and both must hold.
         """
         if not self.defined:
             return math.nan
@@ -109,8 +107,8 @@ def certified_radius(
     """The section 4.4 certificates at rank ``k``.
 
     Both radii come straight from the margins, which depend only on the sorted
-    score multiset -- so a certificate is a property of the *scores*, not of the
-    tie-break operator, and is the same under pi, pi_score and pi_alt.
+    score multiset, so a certificate is a property of the scores and is the same
+    under pi, pi_score and pi_alt.
     """
     boundary = boundary_margin(sorted_scores, k, mode=mode)
     order = min_adjacent_margin_top(sorted_scores, k, mode=mode)
@@ -124,19 +122,19 @@ def certified_radius(
 
 
 def is_top_k_stable(sorted_scores: Sequence[float], k: int, eps: float) -> bool:
-    """Whether section 4.4 *guarantees* top-k set invariance under ``|ds| <= eps``.
+    """Whether section 4.4 guarantees top-k set invariance under ``|ds| <= eps``.
 
-    A sufficient condition, so ``False`` means "not guaranteed", never "will
-    change". The strict inequality is the paper's: at ``eps == m_k / 2`` exactly
-    the two boundary scores can be driven to equality, and membership passes to
-    the tie-break.
+    A sufficient condition, so ``False`` means "not guaranteed" and never "will
+    change". The strict inequality is the paper's: at ``eps == m_k / 2`` the two
+    boundary scores can be driven to equality, and membership passes to the
+    tie-break.
     """
     cert = certified_radius(sorted_scores, k)
     return bool(cert.defined and not math.isnan(cert.set_radius) and eps < cert.set_radius)
 
 
 def is_order_stable(sorted_scores: Sequence[float], k: int, eps: float) -> bool:
-    """Whether section 4.4 guarantees the top-k *ordering* is preserved."""
+    """Whether section 4.4 guarantees the top-k ordering is preserved."""
     cert = certified_radius(sorted_scores, k)
     return bool(cert.defined and not math.isnan(cert.order_radius) and eps < cert.order_radius)
 
@@ -150,9 +148,9 @@ def flip_witness(
 ) -> tuple[list[float], float] | None:
     """Construct a perturbation that provably flips the top-k boundary.
 
-    This is what establishes that section 4.4's radius is **necessary** as well
-    as sufficient, which the paper does not address. The construction pushes the
-    two documents straddling the boundary past each other and nothing else:
+    Establishes that section 4.4's radius is necessary as well as sufficient,
+    which the paper does not address. The construction moves the two documents
+    straddling the boundary past each other and nothing else:
 
         s'[r_k]     = s[r_k]     - eps
         s'[r_{k+1}] = s[r_{k+1}] + eps        with eps = m_k / 2 + delta
@@ -167,17 +165,16 @@ def flip_witness(
             margin, floored at a few ulp so the excess survives rounding.
 
     Returns:
-        ``(perturbed_scores, eps)``, or ``None`` when no witness exists --
-        either ``k`` is out of range, or ``m_k == 0`` and there is no radius to
-        exceed in the first place.
+        ``(perturbed_scores, eps)``, or ``None`` when no witness exists: ``k``
+        out of range, or ``m_k == 0`` with no radius to exceed.
 
     Note:
-        Where the margin is dyadic the whole construction is exact, because
-        ``m/2`` only shifts an exponent and the additions land on representable
-        values. Where it is not, the *realised* perturbation is checked against
-        ``eps`` by the caller rather than assumed -- ``fl(s + eps)`` can differ
-        from ``s + eps`` by up to half an ulp, which is precisely the effect
-        that makes a naive version of this test flaky.
+        Where the margin is dyadic the construction is exact, since ``m/2`` only
+        shifts an exponent and the additions land on representable values.
+        Otherwise the caller checks the realised perturbation against ``eps``
+        rather than assuming it: ``fl(s + eps)`` can differ from ``s + eps`` by
+        up to half an ulp, which is what makes a naive version of this test
+        flaky.
     """
     n = len(scores)
     if not 1 <= k < n:

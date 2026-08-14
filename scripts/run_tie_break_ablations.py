@@ -1,26 +1,18 @@
 #!/usr/bin/env python3
-"""E3/E4 -- A2: tie-breaking causes discontinuities independent of numerical error.
+"""E3/E4 (A2): tie-breaking causes discontinuities independent of numerical error.
 
-**E3, the ablation.** Rank every query under pi, pi_score and pi_alt and measure
-how far the orderings differ. Because all three consume the *same* score vector,
-any disagreement is caused by the tie-break alone -- the scores are bit-identical
-across operators by construction, not by assumption, and the harness asserts it.
+E3, the ablation. Rank every query under pi, pi_score and pi_alt and measure how
+far the orderings differ. ``rank_all_operators`` shares one ``sorted_scores``
+object across the three, so no arithmetic between them can differ and a
+disagreement has one available cause. The harness checks the sharing rather than
+assuming it.
 
-**E4, the section 7.4 case study.** Identify the closest-scoring pair the corpus
-actually contains and show what the operators do with it.
+E4, the section 7.4 case study. Identify the closest-scoring pair the corpus
+contains and show what the operators do with it.
 
-The claim A2 needs, and how it is earned
-----------------------------------------
-"Independent of numerical error" is the load-bearing phrase. It is earned
-structurally rather than statistically: ``rank_all_operators`` shares one
-``sorted_scores`` object across the three operators, so there is no arithmetic
-between them that could differ. A disagreement therefore has exactly one possible
-cause.
-
-Unlike E2, degenerate queries are **included** here -- G3 excludes them from
-margin distributions but keeps them in ablations, and rightly so: a zero-score
-query is ranked purely by the tie-break, which makes it the *most* informative
-case for A2 rather than a nuisance.
+Degenerate queries are included here, unlike E2: G3 excludes them from margin
+distributions but keeps them in ablations, since a zero-score query is ranked
+purely by the tie-break and is therefore the most informative case for A2.
 
 Usage::
 
@@ -66,16 +58,11 @@ DEFAULT_KS = (1, 5, 10, 20, 50)
 def _rho_sweep(scores: list[float]) -> dict:
     """rho(tau) across the whole span, recorded so the discontinuity is checkable.
 
-    ``rho = |largest chain| / |largest clique|`` is **piecewise constant in tau**,
-    and its breakpoints are exactly the observed adjacent gaps: tau can move
-    freely between two gaps without changing which pairs are related, and
-    changing at a gap merges two chains at once. That is why this is sampled on a
-    grid *and* evaluated at the gaps themselves -- a grid alone would land
-    between breakpoints and draw a smooth ramp through a function that has none.
-
-    The sampled points are what ``fig_rho_discontinuity`` plots, as a step, for
-    the same reason: joining them with straight segments would assert
-    intermediate values of rho that the function never takes.
+    ``rho = |largest chain| / |largest clique|`` is piecewise constant in tau,
+    with breakpoints at the observed adjacent gaps: tau moves freely between two
+    gaps without changing which pairs are related, and crossing a gap merges two
+    chains at once. Hence a grid plus the gaps themselves; a grid alone lands
+    between breakpoints and draws a smooth ramp through a step function.
     """
     sorted_scores = sorted(scores, reverse=True)
     gaps = sorted({a - b for a, b in itertools.pairwise(sorted_scores) if a - b > 0.0})
@@ -116,23 +103,18 @@ def _pair_geometry(
 ) -> dict:
     """Exact 2-D coordinates for the section 7.4 pair, in the plane they span.
 
-    Why this projection loses nothing *for the decision*
-    ----------------------------------------------------
-    A query ranks A above B exactly when ``cos(q, w_A) > cos(q, w_B)``, i.e. when
-    ``q . d > 0`` for ``d = w_A/||w_A|| - w_B/||w_B||``. That ``d`` lies **in the
-    plane spanned by the two document directions**, so ``q . d`` depends only on
-    q's component in that plane: the out-of-plane part is orthogonal to ``d`` and
-    contributes exactly zero. Projecting q into the plane therefore preserves the
-    ranking decision exactly -- it is not a lossy embedding of the kind a t-SNE
-    or PCA scatter would give, where apparent distance is an artefact.
+    A query ranks A above B iff ``q . d > 0`` for ``d = w_A/||w_A|| -
+    w_B/||w_B||``. ``d`` lies in the plane spanned by the two document
+    directions, so q's out-of-plane component is orthogonal to ``d`` and
+    contributes zero: the projection preserves the ranking decision exactly,
+    unlike a t-SNE or PCA scatter where apparent distance is an artefact.
 
-    What the projection *does* lose is q's magnitude, so the angles drawn from q
-    to each document are not the true ones. The scores are therefore taken from
-    the record rather than measured off the picture, and the share of ``||q||``
-    lying in the plane is reported so a reader knows how much is hidden.
+    The projection loses q's magnitude, so the drawn angles from q to each
+    document are wrong. Scores are therefore taken from the record, and the share
+    of ``||q||`` lying in the plane is reported.
 
-    Everything here is presentation, so it is computed with ``fsum``; the scores
-    quoted are the recorded ones, computed under the run's own reduction policy.
+    Presentation only, hence ``fsum`` throughout; the quoted scores come from the
+    run's own reduction policy.
     """
     pair = case.get("pair") or {}
     if not pair:
@@ -175,16 +157,14 @@ def _pair_geometry(
     point_b = (overlap, residual_norm)
     q_plane = (inner(q, e1), inner(q, e2))
 
-    # The claim above, asserted rather than believed: the decision statistic is
-    # identical whether taken in the full space or in the plane.
+    # Check the claim above: the decision statistic agrees between the full space
+    # and the plane.
     direction = [unit_a[i] - unit_b[i] for i in range(width)]
     decision_full = inner(q, direction)
     decision_plane = q_plane[0] * (point_a[0] - point_b[0]) + q_plane[1] * (point_a[1] - point_b[1])
-    # Scaled by ||q||, not by the statistic itself. For an exact tie the
-    # statistic is 0.0, so a self-relative error divides an infinitesimal by an
-    # infinitesimal and reports 1.0 for a discrepancy of 1e-17 -- which is what
-    # the first version of this did. ||q|| is the natural scale: the statistic
-    # is q . d, and dividing it by ||q|| is exactly the score gap.
+    # Scaled by ||q||. The first version divided by the statistic itself, which
+    # for an exact tie is 0.0, so a discrepancy of 1e-17 came out as a relative
+    # error of 1.0. The statistic is q . d, so q . d over ||q|| is the score gap.
     residual_error = abs(decision_full - decision_plane)
 
     return {
@@ -199,7 +179,7 @@ def _pair_geometry(
         "q_share_in_plane": math.hypot(*q_plane) / q_norm,
         "angle_between_documents_rad": math.acos(max(-1.0, min(1.0, overlap))),
         "documents_coincident": coincident,
-        # cos(q, w) taken from the record, not measured off the drawing.
+        # cos(q, w) as recorded; nothing is measured off the drawing.
         "s_A": pair["s_A"],
         "s_B": pair["s_B"],
         "score_gap": pair["s_A"] - pair["s_B"],
@@ -208,10 +188,9 @@ def _pair_geometry(
         "decision_statistic_in_plane": decision_plane,
         "projection_error_absolute": residual_error,
         "projection_error_over_q_norm": residual_error / q_norm,
-        # A drawn angle below ~2e-3 rad is under one pixel on a 200 dpi
-        # figure. Recorded so a reader can see whether a geometric
-        # rendering of this pair would show anything at all -- for an
-        # exact tie it cannot, and drawing one would invent structure.
+        # A drawn angle below ~2e-3 rad is under one pixel at 200 dpi, so this
+        # says whether a geometric rendering of the pair shows anything at all.
+        # For an exact tie it shows nothing and invents structure.
         "angle_is_renderable": math.degrees(math.acos(max(-1.0, min(1.0, overlap)))) > 0.05,
     }
 
@@ -219,12 +198,11 @@ def _pair_geometry(
 def _case_study(scores: list[float], table: AttributeTable, tau: float, doc_ids: list[str]) -> dict:
     """E4: identify the closest pair and show what the tie-break does with it.
 
-    Section 7.4 says two documents are "*identified* such that |s_A - s_B| <=
-    tau". Identified, not constructed -- and G22 explains why that word has to be
-    taken literally: ``tf = count / L`` makes a single-token edit a ``1/L``
-    *relative* perturbation, so a near-tie at 1e-9 would need a billion-token
-    document. The pair is therefore searched for, and whatever separation the
-    corpus actually offers is reported rather than assumed.
+    Section 7.4 says two documents are "identified such that |s_A - s_B| <= tau",
+    and G22 forces "identified" to be read literally: ``tf = count / L`` makes a
+    single-token edit a ``1/L`` relative perturbation, so a near-tie at 1e-9 needs
+    a billion-token document. The pair is searched for, and whatever separation
+    the corpus offers is reported.
     """
     sorted_scores = sorted(scores, reverse=True)
     rankings = rank_all_operators(scores, table)
@@ -234,16 +212,15 @@ def _case_study(scores: list[float], table: AttributeTable, tau: float, doc_ids:
 
     chains = tie_chains(sorted_scores, tau)
     cliques = tie_cliques(sorted_scores, tau)
-    # Intervals are half-open [start, stop), so the size is `stop - start`.
-    # Writing `+ 1` here overcounts every group by one and, worse, makes the
-    # ratio wrong whenever the chain and clique sizes differ.
+    # Intervals are half-open [start, stop), so the size is `stop - start`. A
+    # `+ 1` here overcounts every group and skews rho whenever the chain and
+    # clique sizes differ.
     largest_chain = max((b - a for a, b in chains), default=0)
     largest_clique = max((b - a for a, b in cliques), default=0)
 
-    # Section 7.4 asks for the tuple (s_A, s_B, m_k, tau) together with the
-    # tie-break attributes of both documents -- because with s_A == s_B the
-    # attributes are the *entire* explanation of the outcome, and reporting the
-    # scores alone would leave the decision unexplained.
+    # Section 7.4 asks for (s_A, s_B, m_k, tau) together with both documents'
+    # tie-break attributes: at s_A == s_B the attributes are the whole
+    # explanation of the outcome.
     pair: dict[str, object] = {}
     tightest = exact_ties[0] if exact_ties else None
     if tightest is not None:
@@ -271,7 +248,7 @@ def _case_study(scores: list[float], table: AttributeTable, tau: float, doc_ids:
         "closest_pair_rank": closest_positive[0].rank if closest_positive else None,
         "tightest_gap_overall": exact_ties[0].gap if exact_ties else None,
         "tightest_is_exact_tie": exact_ties[0].is_exact if exact_ties else None,
-        # The three tie-group objects of G1, which are not interchangeable.
+        # G1's three tie-group objects; they disagree, so all three are kept.
         "n_chains": len(chains),
         "n_cliques": len(cliques),
         "largest_chain": largest_chain,
@@ -293,9 +270,7 @@ def _print_case_study(case: dict) -> None:
         print(f"    s_A = {found['s_A']!r}  ({found['s_A_hex']})")
         print(f"    s_B = {found['s_B']!r}  ({found['s_B_hex']})")
         print(f"    m_k = {found['m_k']!r}   exact tie: {found['is_exact_tie']}")
-        # With s_A == s_B the attributes are the entire explanation of the
-        # outcome, so printing the scores without them would leave the decision
-        # unexplained -- which is precisely what section 7.4 asks to see.
+        # At s_A == s_B the attributes are the whole explanation of the outcome.
         print(f"    attributes A: {found['attributes_A']}")
         print(f"    attributes B: {found['attributes_B']}")
     print(f"    closest strictly-positive gap {case['closest_strictly_positive_gap']}")
@@ -348,7 +323,8 @@ def main() -> int:
     features = [pipeline.preprocess(str(r["text"])) for r in data.records]
     model = TfidfVectoriser().fit(features, data.doc_ids)
 
-    # Section 7.1's protocol, not document prefixes -- see analysis/query_grid.py.
+    # Section 7.1's protocol; document prefixes are a different and much easier
+    # one. See analysis/query_grid.py.
     query_set = build_query_grid(
         data.interactions,
         dict(zip(data.doc_ids, features, strict=True)),
@@ -368,8 +344,8 @@ def main() -> int:
     tables = [q.table for q in grid.queries]
     print(f"section 7.1 grid: {len(grid)} {args.query_mode} queries")
 
-    # A2's premise, asserted rather than assumed: the three operators consume
-    # bit-identical scores, so any disagreement is caused by the tie-break.
+    # A2's premise, checked here: the three operators consume bit-identical
+    # scores, so any disagreement comes from the tie-break.
     for scores, active in zip(scores_by_query, tables, strict=True):
         rankings = rank_all_operators(scores, active)
         reference = rankings["pi"].sorted_scores
@@ -398,8 +374,8 @@ def main() -> int:
     rates: dict[str, dict] = {}
     for baseline, variant in comparisons:
         label = f"{baseline}_vs_{variant}"
-        # The denominator is kept beside every rate: a disagreement rate quoted
-        # without its n cannot be distinguished from noise over three queries.
+        # n sits beside every rate: a disagreement rate quoted without its
+        # denominator cannot be told from noise over three queries.
         rates[label] = {
             f"k{k}": dict(
                 zip(("rate", "n"), disagreement_rate(results, baseline, variant, k), strict=True)
@@ -411,10 +387,9 @@ def main() -> int:
         )
         print(f"    {label:22} {summary}")
 
-    # Section 7.3 stratifies the disagreement rate by m_k relative to tau. This
-    # is the step that separates A1's regime from A2's: the exact-tie band is
-    # deliberately kept out of the smallest numeric band, because a gap of
-    # exactly zero is not a small gap -- it is a different phenomenon.
+    # Section 7.3 stratifies the disagreement rate by m_k relative to tau, which
+    # separates A1's regime from A2's. The exact-tie band stays out of the
+    # smallest numeric band: a zero gap is a different phenomenon from a small one.
     strata: dict[str, list[dict]] = {}
     for baseline, variant in comparisons:
         label = f"{baseline}_vs_{variant}"

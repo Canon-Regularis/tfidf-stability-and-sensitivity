@@ -1,38 +1,37 @@
 """Query construction, and the leave-one-out protocol (section 7.1, G10).
 
-Section 7.1 names three query modes and evaluates two of them:
+Section 7.1 names three query modes and evaluates two:
 
-* **user-profile queries** -- aggregate a user's interacted items;
-* **leave-one-out** -- hold one interacted item out as the target, build the
+* **user-profile queries**: aggregate a user's interacted items;
+* **leave-one-out**: hold one interacted item out as the target, build the
   profile from the rest;
-* **item-as-query** -- "part of the implementation but not evaluated in the
+* **item-as-query**: "part of the implementation but not evaluated in the
   present experiments".
 
-The leave-one-out description is four sentences long and leaves **five**
-decisions open, each of which changes the reported margin distribution. They are
-pinned here, and every one is recorded on the :class:`Query` so a result can be
-traced back to the protocol that produced it (``spec_addenda.md#g10``).
+The leave-one-out description is four sentences and leaves five decisions open,
+each of which changes the reported margin distribution. They are pinned here and
+recorded on the :class:`Query`, so a result traces back to the protocol that
+produced it (``spec_addenda.md#g10``).
 
-1. **Which item is held out.** Every interacted item in turn -- all folds, not a
-   sample. Deterministic, and it makes the query count a function of the data
-   rather than of a seed.
-2. **Does the held-out item stay in the corpus?** **Yes.** It is the retrieval
-   target; removing it would make the fold unanswerable.
-3. **Are the user's *remaining* profile items excluded from the candidate set?**
-   **Yes**, and this is the single most consequential unstated choice in section
-   7.1. Those items literally contributed the query's text, so left in they
-   score near the top almost by construction, occupy the top-k, and dominate the
-   margin distribution with an artefact. Excluding them is what makes the
-   measurement about retrieval rather than about self-similarity.
+1. **Which item is held out.** Every interacted item in turn, all folds, no
+   sampling. The query count is then a function of the data rather than of a
+   seed.
+2. **Does the held-out item stay in the corpus?** Yes. It is the retrieval
+   target; removing it makes the fold unanswerable.
+3. **Are the user's remaining profile items excluded from the candidate set?**
+   Yes, the most consequential unstated choice in section 7.1. Those items
+   contributed the query's text, so left in they score near the top, occupy the
+   top-k and dominate the margin distribution with an artefact. Excluding them
+   makes the measurement about retrieval rather than self-similarity.
 4. **Eligibility.** Users with at least five qualifying interactions
    (:func:`~tfidf_stability.profiles.user_profile.eligible_users`).
-5. **What counts as an interaction.** A weight threshold, supplied by the
-   dataset configuration -- for MovieLens, ``rating >= 4.0``.
+5. **What counts as an interaction.** A weight threshold from the dataset
+   configuration; for MovieLens, ``rating >= 4.0``.
 
-Decision 3 has a knock-on the paper never mentions: the candidate set is
-*smaller* than the corpus and differs per fold, so ``N`` differs per query. Any
-statistic aggregated across folds therefore has a varying denominator, and
-:attr:`Query.n_candidates` is carried so that is visible rather than assumed
+Decision 3 has a knock-on the paper never mentions: the candidate set is smaller
+than the corpus and differs per fold, so ``N`` differs per query and any
+statistic aggregated across folds has a varying denominator.
+:attr:`Query.n_candidates` carries it, so that is visible rather than assumed
 constant.
 """
 
@@ -75,13 +74,13 @@ class Query:
     """One evaluable query, with the protocol decisions that shaped it.
 
     Attributes:
-        query_id: Unique and deterministic -- ``{user}::{held_out}`` for a fold.
+        query_id: Unique and deterministic: ``{user}::{held_out}`` for a fold.
         mode: Which construction.
         features: The query's preprocessed feature stream.
         profile: The profile it came from, or ``None`` for item-as-query.
         target: The held-out item a leave-one-out fold is trying to retrieve.
         excluded: Documents removed from the candidate set (decision 3). The
-            target is deliberately **not** in here -- it stays scoreable.
+            target is absent from it and stays scoreable.
         n_candidates: Corpus size minus exclusions. Varies per fold, so it is
             carried rather than inferred.
     """
@@ -98,18 +97,17 @@ class Query:
     def is_degenerate(self) -> bool:
         """Whether the query has no features at all.
 
-        Distinct from a *zero-vector* query, which also arises when every
-        feature is out of vocabulary. Both are legitimate and both are reported;
-        this one is visible before embedding.
+        Distinct from a zero-vector query, which also arises when every feature
+        is out of vocabulary. Both are legitimate and both are reported; this
+        one is visible before embedding.
         """
         return not self.features
 
     def candidate_indices(self, doc_ids: Sequence[str]) -> tuple[int, ...]:
         """Positions of the documents this query may retrieve.
 
-        Applying the exclusion by *identifier* rather than index, because
-        indices are positional and a caller may hold a differently-ordered
-        corpus.
+        The exclusion is applied by identifier: indices are positional and a
+        caller may hold a differently-ordered corpus.
         """
         return tuple(i for i, d in enumerate(doc_ids) if d not in self.excluded)
 
@@ -137,10 +135,10 @@ class QuerySet:
     def candidate_spread(self) -> tuple[int, int, int]:
         """``(min, median, max)`` candidate count across queries (G19).
 
-        Excluding a user's profile from the candidate set makes ``N`` differ
-        from query to query, so a margin distribution is pooled over populations
-        of different sizes and a disagreement rate has a varying denominator.
-        The spread is reported so that is visible rather than assumed away.
+        Excluding a user's profile makes ``N`` differ from query to query, so a
+        margin distribution pools populations of different sizes and a
+        disagreement rate has a varying denominator. The spread makes that
+        visible rather than assumed away.
         """
         counts = sorted(q.n_candidates for q in self.queries)
         if not counts:
@@ -176,9 +174,8 @@ def user_profile_queries(
     """One query per user, from their whole interaction history.
 
     No item is held out, so there is no retrieval target. The user's own items
-    are still excluded from the candidate set by default, for the same reason as
-    in a fold: they contributed the query text and would otherwise retrieve
-    themselves.
+    still leave the candidate set by default, for the same reason as in a fold:
+    they contributed the query text and would otherwise retrieve themselves.
     """
     users = (
         eligible_users(grouped, max(min_interactions, 2))
@@ -225,9 +222,9 @@ def leave_one_out_queries(
     """Every fold for every eligible user (G10).
 
     For each eligible user and each of their items in turn, the item becomes the
-    target and the remainder becomes the profile. The target **stays in the
-    corpus** (decision 2); the remaining profile items are **excluded from the
-    candidate set** (decision 3).
+    target and the remainder becomes the profile. The target stays in the corpus
+    (decision 2); the remaining profile items leave the candidate set
+    (decision 3).
 
     Args:
         grouped: ``{user_id: (doc_id, ...)}`` from
@@ -235,15 +232,14 @@ def leave_one_out_queries(
         features_by_doc: Preprocessed feature streams.
         aggregation: Profile aggregation mode (G11).
         min_interactions: Eligibility threshold (decision 4).
-        exclude_profile_items: Decision 3. Defaults to ``True``. Setting it
-            ``False`` is a declared ablation, not a convenience -- it changes
-            what the margin distribution is measuring.
+        exclude_profile_items: Decision 3, default ``True``. ``False`` is a
+            declared ablation: it changes what the margin distribution measures.
         doc_ids: The corpus's identifiers, for the candidate count. Defaults to
             the keys of ``features_by_doc``.
 
     Returns:
         The :class:`QuerySet`. Query count is ``sum(len(items))`` over eligible
-        users -- a function of the data alone, with no sampling and no seed.
+        users: a function of the data alone, no sampling and no seed.
     """
     users = eligible_users(grouped, min_interactions)
     total_docs = len(doc_ids) if doc_ids is not None else len(features_by_doc)
@@ -254,7 +250,7 @@ def leave_one_out_queries(
         for held_out in items:
             remaining = tuple(d for d in items if d != held_out)
             profile = build_profile(user, remaining, features_by_doc, aggregation)
-            # The target is NOT excluded -- it is what the fold is retrieving.
+            # The target stays in: it is what the fold retrieves.
             excluded = frozenset(remaining) if exclude_profile_items else frozenset()
             queries.append(
                 Query(
@@ -288,8 +284,8 @@ def item_as_query(
     """A single item used as its own query.
 
     Section 7.1 lists this as "part of the implementation but not evaluated in
-    the present experiments", so it is provided and left out of the reported
-    results rather than omitted.
+    the present experiments", so it is provided and kept out of the reported
+    results.
 
     ``exclude_self`` defaults to ``True``: an item is its own nearest neighbour
     at similarity 1, which tells you nothing and displaces a real result.

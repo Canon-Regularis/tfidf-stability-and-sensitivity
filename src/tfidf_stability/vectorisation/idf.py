@@ -2,25 +2,23 @@
 
     idf(t) = log((1 + N) / (1 + df(t))) + 1
 
-Two properties of this definition are used throughout and are asserted as tests:
-it decays monotonically as ``df`` increases, and the additive constant keeps it
-strictly positive -- in fact ``idf(t) >= 1`` for every ``t`` with ``df(t) <= N``,
-which is what makes the corpus-level Lipschitz bound of ``spec_addenda.md#g4``
-computable.
+Two properties are used throughout and asserted in tests: idf decays
+monotonically in ``df``, and the additive constant keeps it strictly positive,
+with ``idf(t) >= 1`` for every ``t`` with ``df(t) <= N``, which makes the
+corpus-level Lipschitz bound of ``spec_addenda.md#g4`` computable.
 
-**The logarithm is computed exactly.** IEEE-754 mandates correct rounding for
-``+ - * / sqrt`` but not for ``log``, and platform libms disagree: measured on
-this project's reference machine, ``math.log`` differs from the correctly-rounded
-value in 15.16% of idf entries (44.5% of the raw logarithms before the ``+1``).
-Left alone that would make idf -- and hence every weight, norm and score -- differ
-by ~1 ulp across operating systems, silently breaking the reproducibility claims
-this repository is built on.
+The logarithm is computed exactly. IEEE-754 mandates correct rounding for
+``+ - * / sqrt`` but not for ``log``, and platform libms disagree: on this
+project's reference machine ``math.log`` differs from the correctly-rounded value
+in 15.16% of idf entries (44.5% of the raw logarithms before the ``+1``). Left
+alone, idf and therefore every weight, norm and score would differ by ~1 ulp
+across operating systems.
 
-Since idf is ``O(|V|)`` values computed once and never in a hot loop, it is
-evaluated in :class:`~decimal.Decimal` and rounded once. This also removes the
-only transcendental function from the native pipeline: the C++ core receives idf
-as *data*, so everything it computes is drawn from the correctly-rounded
-operations alone. See ``docs/spec_addenda.md#g13``.
+idf is ``O(|V|)`` values computed once and never in a hot loop, so it is
+evaluated in :class:`~decimal.Decimal` and rounded once. That also removes the
+only transcendental from the native pipeline: the C++ core receives idf as data,
+so it computes with correctly-rounded operations alone. See
+``docs/spec_addenda.md#g13``.
 """
 
 from __future__ import annotations
@@ -41,7 +39,7 @@ class LogImpl(str, Enum):
     #: and the only setting valid for published results.
     CORRECTLY_ROUNDED = "correctly_rounded"
     #: The platform libm. Faster, and differs from the above in ~15% of entries.
-    #: Retained so the difference can be measured rather than become folklore.
+    #: Kept so the difference can be measured.
     PLATFORM = "platform"
 
     def __str__(self) -> str:  # pragma: no cover - trivial
@@ -51,9 +49,9 @@ class LogImpl(str, Enum):
 def smoothed_idf_one(df: int, n_documents: int, impl: LogImpl = LogImpl.CORRECTLY_ROUNDED) -> float:
     """``idf`` for a single token.
 
-    The division is performed *before* the logarithm, exactly as section 2.1
-    writes it. This is not cosmetic: ``log(a/b)`` and ``log(a) - log(b)`` give
-    different binary64 results in 94.5% of the ratios arising at ``N = 9742``.
+    Divide before taking the logarithm, as section 2.1 writes it: ``log(a/b)``
+    and ``log(a) - log(b)`` give different binary64 results in 94.5% of the
+    ratios arising at ``N = 9742``.
 
     Args:
         df: Document frequency of the token. Must satisfy ``0 <= df <= N``.
@@ -91,9 +89,8 @@ class IdfVector:
     def linf(self) -> float:
         """``||idf||_inf``, the largest IDF value.
 
-        Appears directly in the perturbation bound of section 4.2. For a
-        vocabulary whose members all have ``df >= 1`` this equals
-        ``log((1 + N) / 2) + 1``.
+        Appears in the perturbation bound of section 4.2. Equals
+        ``log((1 + N) / 2) + 1`` when every member has ``df >= 1``.
         """
         return max(self.values) if self.values else 0.0
 
@@ -143,14 +140,11 @@ def delta_idf(
 
         delta_idf(t) = log((1 + N') / (1 + df'(t))) - log((1 + N) / (1 + df(t)))
 
-    Section 4.1 notes that this makes the competing effects of a change in corpus
-    size and a change in the document-frequency distribution explicit, and that
-    low-frequency tokens stay sensitive even under smoothing. Computed as a
-    difference of two exact logarithms rather than as a single ``log`` of a ratio
-    of ratios, matching the expression as written.
-
-    Note that the ``+1`` present in ``idf`` cancels in the difference, so it does
-    not appear here.
+    Section 4.1 uses this to separate a change in corpus size from a change in
+    the document-frequency distribution; low-frequency tokens stay sensitive
+    under smoothing. Computed as a difference of two exact logarithms rather than
+    one ``log`` of a ratio of ratios, matching the expression as written. The
+    ``+1`` in ``idf`` cancels in the difference, so it does not appear here.
     """
     log = platform_log_ratio if impl is LogImpl.PLATFORM else correctly_rounded_log_ratio
     return log(1 + n_after, 1 + df_after) - log(1 + n_before, 1 + df_before)

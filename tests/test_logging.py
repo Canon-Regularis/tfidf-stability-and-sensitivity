@@ -1,19 +1,17 @@
-"""Logging as a provenance channel.
+"""Logging as a provenance channel. Three properties.
 
-Three properties are load-bearing and each has a test here.
+*Importing must not configure logging.* A library that installs a handler takes
+the application's decision for it, and this package is imported by notebooks and
+by other people's test suites.
 
-*Importing must not configure logging.* A library that installs a handler steals
-the application's decision, and this package is imported by notebooks and by
-other people's test suites.
-
-*Captured output must be reproducible.* The events are meant to be hashed into a
-run record beside the manifest, and a timestamp would make identical runs
-disagree -- the same failure ``strip_volatile`` exists to prevent.
+*Captured output must be reproducible.* The events are hashed into a run record
+beside the manifest, so a timestamp would make identical runs disagree; that is
+the failure ``strip_volatile`` prevents.
 
 *Warnings must survive.* ``filterwarnings = ["error"]`` makes
 ``TauExceedsScoreRangeWarning`` and ``ChainInflationWarning`` hard failures. If
-adding logging turned either into a line on stderr, the suite would go quiet
-about the degenerate configurations it is supposed to catch.
+logging filed either as a line on stderr, the suite would go quiet about the
+degenerate configurations it exists to catch.
 """
 
 from __future__ import annotations
@@ -53,10 +51,8 @@ CLOCK = re.compile(r"\d{2}:\d{2}:\d{2}")
 
 @pytest.fixture(autouse=True)
 def _pristine_logging() -> Iterator[None]:
-    """Leave the logging system as each test found it.
-
-    Autouse because a leaked handler would make a later test pass or fail for
-    reasons that have nothing to do with what it asserts.
+    """Leave the logging system as each test found it. Autouse: a leaked handler
+    makes a later test pass or fail for reasons unrelated to what it asserts.
     """
     logger = logging.getLogger(ROOT_NAME)
     before = list(logger.handlers)
@@ -71,10 +67,9 @@ def _pristine_logging() -> Iterator[None]:
 # No handler on import
 # ---------------------------------------------------------------------------
 def test_importing_the_package_installs_no_handler() -> None:
-    """Run in a subprocess because by the time pytest collects this file the
-    package is long since imported, and pytest's own logging plugin has put a
-    handler on the root logger. Only a fresh interpreter can answer the
-    question actually being asked."""
+    """Subprocess: by collection time the package is long since imported and
+    pytest's own logging plugin has a handler on the root logger, so only a fresh
+    interpreter can answer the question."""
     probe = (
         "import logging;"
         "import tfidf_stability.cli.main;"
@@ -101,9 +96,9 @@ def test_the_package_logger_has_no_handler_of_ours_until_configured() -> None:
 
 
 def test_emitting_without_configuration_does_not_raise() -> None:
-    """With no handler anywhere, ``logging.lastResort`` takes the record. That
-    is the intended fallback -- a NullHandler would silence diagnostics that a
-    reader of an unconfigured run genuinely wants to see."""
+    """With no handler anywhere ``logging.lastResort`` takes the record, the
+    intended fallback: a NullHandler would silence diagnostics a reader of an
+    unconfigured run wants to see."""
     reset()
     log_event(get_logger("probe"), EventKind.DEGENERATE, case="degenerate_query")
 
@@ -138,8 +133,8 @@ def test_configure_does_not_touch_the_root_logger() -> None:
 
 
 def test_reset_leaves_a_handler_the_application_added() -> None:
-    """Removing a handler we did not install would be the same overreach as
-    configuring the root logger."""
+    """Removing a handler we did not install is the same overreach as configuring
+    the root logger."""
     logger = logging.getLogger(ROOT_NAME)
     foreign = logging.StreamHandler(io.StringIO())
     logger.addHandler(foreign)
@@ -159,8 +154,8 @@ def test_the_level_filters_below_threshold_events() -> None:
     log_event(log, EventKind.DIAGNOSTIC, diagnostic="TauExceedsScoreRange")
     output = buffer.getvalue()
 
-    # The point of fixing a level per event kind: filtering at WARNING yields
-    # exactly the diagnostics, which is only true if no call site can choose.
+    # A level fixed per event kind is what makes filtering at WARNING yield the
+    # diagnostics and nothing else; it holds only if no call site can choose.
     assert "digest" not in output
     assert "diagnostic diagnostic=TauExceedsScoreRange" in output
 
@@ -183,8 +178,8 @@ def test_configured_output_carries_no_timestamp() -> None:
 
 
 def test_timestamps_are_opt_in_and_do_appear_when_asked() -> None:
-    """The negative control for the test above: without this, that assertion
-    would also pass if the formatter had simply stopped working."""
+    """Negative control for the test above, whose assertion would also pass if the
+    formatter had stopped working."""
     buffer = io.StringIO()
     configure(stream=buffer, timestamps=True)
     log_event(get_logger("probe"), EventKind.BACKEND_SELECTED, backend="reference")
@@ -192,8 +187,8 @@ def test_timestamps_are_opt_in_and_do_appear_when_asked() -> None:
 
 
 def test_field_order_does_not_change_the_record() -> None:
-    """Two call sites that recorded the same decision must digest alike, the
-    same canonicalisation ``hash_json`` applies to configs."""
+    """Two call sites recording the same decision must digest alike, under the
+    canonicalisation ``hash_json`` applies to configs."""
     with capture() as first:
         log_event(get_logger("probe"), EventKind.DIGEST, artefact="model", sha256="ab")
     with capture() as second:
@@ -215,7 +210,7 @@ def test_the_digest_is_over_decisions_not_over_when_they_were_taken() -> None:
 
 
 def test_the_digest_is_sensitive_to_order() -> None:
-    """Selecting the native backend after a fallback is not the same run as
+    """Selecting the native backend after a fallback is a different run from
     selecting it first, so the record must distinguish them."""
     log = get_logger("probe")
     with capture() as forward:
@@ -229,22 +224,22 @@ def test_the_digest_is_sensitive_to_order() -> None:
 
 
 def test_a_subnormal_field_is_rendered_without_loss() -> None:
-    """A margin of 5e-324 and a margin of 0.0 are the difference between a
-    near-tie and an exact tie; a rounded rendering would erase it."""
+    """A margin of 5e-324 and a margin of 0.0 separate a near-tie from an exact
+    tie; a rounded rendering erases the difference."""
     event = Event.build(EventKind.DEGENERATE, {"margin": 5e-324})
     assert event.render() == "degenerate margin=5e-324"
     assert Event.build(EventKind.DEGENERATE, {"margin": 0.0}).render() == "degenerate margin=0.0"
 
 
 def test_a_multiline_value_cannot_forge_extra_fields() -> None:
-    """The native loader's fallback reason is a paragraph. One event is one
-    line, or a reader cannot count events."""
+    """The native loader's fallback reason is a paragraph. One event is one line,
+    or a reader cannot count events."""
     event = Event.build(EventKind.BACKEND_SELECTED, {"reason": "not built\nrun cmake x=1"})
     rendered = event.render()
 
     assert rendered == 'backend_selected reason="not built run cmake x=1"'
-    # Quoted, so the embedded "x=1" is one value and not a second field: a
-    # reader splitting the line still counts one key.
+    # Quoted, so the embedded "x=1" stays inside one value and a reader
+    # splitting the line still counts one key.
     assert shlex.split(rendered) == ["backend_selected", "reason=not built run cmake x=1"]
 
 
@@ -268,11 +263,11 @@ def test_capture_restores_the_logger_afterwards() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Warnings remain load-bearing
+# Warnings still abort the suite
 # ---------------------------------------------------------------------------
 def test_configuring_logging_does_not_capture_warnings() -> None:
     """``logging.captureWarnings`` would reroute ``showwarning`` process-wide.
-    Under ``filterwarnings = ["error"]`` these are meant to abort, not to be
+    Under ``filterwarnings = ["error"]`` these must abort the run instead of being
     filed."""
     configure(stream=io.StringIO())
     with pytest.raises(UserWarning):
@@ -280,8 +275,8 @@ def test_configuring_logging_does_not_capture_warnings() -> None:
 
 
 def test_a_real_diagnostic_still_raises_with_logging_configured() -> None:
-    """The end-to-end version: the tie-group diagnostics are what the suite
-    relies on to notice a degenerate tau, and logging must not soften them."""
+    """End to end: the tie-group diagnostics are how the suite notices a degenerate
+    tau, and logging must not soften them."""
     from tfidf_stability.ranking.tie_groups import TieGroupIndex
     from tfidf_stability.utils.validation import TauExceedsScoreRangeWarning
 

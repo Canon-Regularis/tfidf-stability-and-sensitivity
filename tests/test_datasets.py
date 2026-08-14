@@ -1,18 +1,15 @@
 """Dataset generation, parsing and loading.
 
-The MovieLens tests build a **synthetic archive** rather than using real data,
-which is forced by the licence: the real archive cannot be committed, so a test
-that needed it would be skipped everywhere including CI, and a skipped test
-proves nothing.
+The MovieLens tests build a synthetic archive: the licence forbids committing the
+real one, so a test needing it would skip everywhere including CI.
 
-The archive built here reproduces the specific properties the parser has to cope
-with, each of which is a real quirk of ``ml-latest-small`` rather than an
-invented difficulty:
+The archive reproduces the quirks of ``ml-latest-small`` the parser copes with:
 
-* a UTF-8 BOM on every CSV (breaks the first column *name*, not its value);
+* a UTF-8 BOM on every CSV (corrupts the first column's name, leaving its value
+  intact);
 * pipe-separated genres and parenthesised release years;
 * films with no ratings at all, which upstream has;
-* half-star ratings, which is what makes G8's exact integer pair available;
+* half-star ratings, which make G8's exact integer pair available;
 * ``movieId`` ordering where string and integer collation disagree.
 """
 
@@ -45,7 +42,7 @@ _MOVIES = """movieId,title,genres
 9,Sudden Death (1995),Action
 """
 
-# Note 3.5 and 4.5: half-stars are what G8's exact (2*sum, count) pair is for.
+# 3.5 and 4.5: half-stars are what G8's exact (2*sum, count) pair is for.
 _RATINGS = """userId,movieId,rating,timestamp
 1,1,4.0,964982703
 1,2,3.5,964981247
@@ -73,18 +70,17 @@ def _archive(
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         for name, body in (("movies.csv", movies), ("ratings.csv", ratings), ("tags.csv", tags)):
-            # utf-8-sig: GroupLens really does ship a BOM, and a parser that
-            # reads plain utf-8 gets a first column named "﻿movieId".
+            # utf-8-sig: GroupLens does ship a BOM, and a parser reading plain
+            # utf-8 leaves it glued to the front of the first column name.
             archive.writestr(f"{prefix}{name}", body.encode("utf-8-sig"))
     return buffer.getvalue()
 
 
 def _spec(n_docs: int, vocab_size: int, **kw) -> synthetic.SyntheticSpec:
-    """A spec whose duplicate and twin counts are proportionate to its size.
+    """A spec whose duplicate and twin counts scale with its size.
 
     The generator refuses a spec whose special-case documents outnumber its
-    documents, which is right -- silently scaling them down would produce a
-    corpus structurally unlike the one requested.
+    documents.
     """
     return synthetic.SyntheticSpec(
         n_docs=n_docs,
@@ -106,12 +102,11 @@ def test_parses_the_archive_layout() -> None:
 
 
 def test_documents_are_ordered_by_integer_movie_id() -> None:
-    """Not by string, and not by CSV row order.
+    """Neither string order nor CSV row order.
 
-    Both alternatives are wrong in a way that would go unnoticed: the file lists
-    3 and 9 after 10, and string collation puts "10" before "9". Either would
-    give a stable but arbitrary document indexing, which is exactly the kind of
-    thing that makes a result irreproducible against a re-exported file.
+    The file lists 3 and 9 after 10, and string collation puts "10" before "9".
+    Either alternative indexes documents stably but arbitrarily, so a result
+    stops reproducing against a re-exported file.
     """
     corpus = movielens.parse_archive(_archive())
     assert corpus.doc_ids == ("m1", "m2", "m3", "m9", "m10")
@@ -123,12 +118,11 @@ def test_the_byte_order_mark_does_not_become_part_of_a_column_name() -> None:
 
 
 def test_ratings_are_kept_as_an_exact_integer_pair() -> None:
-    """G8's representation, on ratings that are not exactly representable.
+    """G8's representation.
 
-    Toy Story: 4.0 + 5.0 + 4.5 = 13.5, a mean of 4.5 over three ratings. Stored
-    as ``(27, 3)``. Note 13.5/3 is exact in binary64 anyway -- the point is that
-    the code never forms it, so the guarantee does not depend on the arithmetic
-    being lucky.
+    Toy Story: 4.0 + 5.0 + 4.5 = 13.5, a mean of 4.5 over three ratings, stored as
+    ``(27, 3)``. 13.5/3 happens to be exact in binary64; the code never forms it,
+    so the guarantee does not rest on that.
     """
     corpus = movielens.parse_archive(_archive())
     by_id = dict(zip(corpus.doc_ids, corpus.attributes, strict=True))
@@ -138,17 +132,15 @@ def test_ratings_are_kept_as_an_exact_integer_pair() -> None:
 
 
 def test_a_rating_that_is_not_a_half_star_is_rejected() -> None:
-    """The assumption that makes the exact pair valid is checked, not assumed."""
+    """The assumption the exact pair rests on is checked at parse time."""
     with pytest.raises(DataIntegrityError, match=r"multiple of 0\.5"):
         movielens.parse_archive(_archive(ratings="userId,movieId,rating,timestamp\n1,1,3.7,0\n"))
 
 
 def test_an_unrated_film_has_count_zero_rather_than_a_mean_of_zero() -> None:
-    """The missing-value path.
-
-    A mean of zero would rank an unrated film alongside a genuinely terrible one.
-    ``count == 0`` is what makes the attribute table treat it as absent and sort
-    it last.
+    """The missing-value path: a mean of zero would rank an unrated film alongside
+    a genuinely terrible one. ``count == 0`` makes the attribute table treat the
+    rating as absent and sort it last.
     """
     corpus = movielens.parse_archive(_archive())
     by_id = dict(zip(corpus.doc_ids, corpus.attributes, strict=True))
@@ -165,13 +157,13 @@ def test_genres_and_years_are_split_into_tokens() -> None:
     assert "|" not in text  # genres were split
     assert "1995" in text
     assert "(" not in text  # the year was unbracketed
-    # Tags contribute to the document text, not only to the engagement count.
+    # Tags contribute to the document text as well as the engagement count.
     assert "pixar" in text
     assert "fun" in text
 
 
 def test_only_ratings_at_or_above_the_threshold_become_interactions() -> None:
-    """G10 item 5. 4.0 is included, 3.5 is not -- the boundary is inclusive."""
+    """G10 item 5: the boundary is inclusive, so 4.0 is in and 3.5 is out."""
     corpus = movielens.parse_archive(_archive())
     assert corpus.interactions == (
         ("u1", "m1", 4.0),
@@ -199,7 +191,7 @@ def test_an_archive_missing_a_member_is_rejected_by_name() -> None:
 
 
 def test_a_missing_file_names_the_fetch_script(tmp_path) -> None:
-    """The error has to be actionable: the data is deliberately absent."""
+    """The archive is absent by design, so the error has to say how to get it."""
     with pytest.raises(DataIntegrityError, match=r"fetch_data\.py"):
         movielens.load(tmp_path / "absent.zip")
 
@@ -220,10 +212,8 @@ def test_the_digest_is_reported_even_when_unpinned(tmp_path) -> None:
 
 
 def test_movielens_attributes_are_accepted_by_the_attribute_table() -> None:
-    """The end-to-end claim: real-shaped data reaches the ranking layer intact.
-
-    Including the unrated film, whose rating must be *missing* rather than zero.
-    """
+    """Real-shaped data reaches the ranking layer intact, the unrated film
+    included: its rating must arrive missing rather than zero."""
     corpus = movielens.parse_archive(_archive())
     table = AttributeTable.from_records(corpus.records())
     assert table.n_documents == 5
@@ -263,13 +253,13 @@ def test_twins_differ_by_exactly_one_token() -> None:
 
 
 def test_no_document_is_empty() -> None:
-    """An empty document has a zero norm, which is a separate G3 case entirely."""
+    """An empty document has a zero norm, a separate G3 case."""
     corpus = synthetic.generate(_spec(100, 200, n_users=10))
     assert all(len(d) >= corpus.spec.len_min for d in corpus.documents)
 
 
 def test_document_ids_are_unique() -> None:
-    """The precondition of the whole permutation-identity claim."""
+    """The precondition of the permutation-identity claim."""
     corpus = synthetic.generate(_spec(200, 300, n_users=10))
     assert len(set(corpus.doc_ids)) == corpus.n_documents
 
@@ -277,8 +267,8 @@ def test_document_ids_are_unique() -> None:
 def test_the_generator_never_calls_an_unstable_prng_method(monkeypatch) -> None:
     """``choice``/``sample``/``shuffle`` are not stable across CPython versions.
 
-    Asserted by making them explode rather than by reading the source, so the
-    guarantee survives someone adding a call later.
+    Asserted by making them explode rather than by reading the source, so a call
+    added later still fails.
     """
     for name in ("choice", "choices", "sample", "shuffle", "randrange", "randint"):
         monkeypatch.setattr(
@@ -300,7 +290,7 @@ def test_find_near_ties_orders_by_gap() -> None:
 
 
 def test_find_near_ties_can_report_the_exact_tie_block() -> None:
-    """Which is the case that actually dominates -- see G22."""
+    """The case that dominates in practice; see G22."""
     scores = [1.0, 1.0, 0.5, 0.0, 0.0, 0.0]
     assert synthetic.find_near_ties(scores, strictly_positive=True)[0].gap == 0.5
     exact = synthetic.find_near_ties(scores, limit=10, strictly_positive=False)
@@ -313,12 +303,12 @@ def test_find_near_ties_handles_degenerate_lengths() -> None:
 
 
 def test_a_single_token_edit_cannot_produce_a_fine_near_tie() -> None:
-    """G22, as an executable statement rather than a remark.
+    """G22 as an executable statement.
 
-    Section 2.2's ``tf = count / L`` makes a one-token edit a ``1/(L+1)``
-    *relative* perturbation, so the separation it induces has a floor set by
-    document length. This is why section 7.4 must *identify* a near-tie rather
-    than construct one, and why the twin grid bottoms out around 1e-3.
+    Section 2.2's ``tf = count / L`` makes a one-token edit a ``1/(L+1)`` relative
+    perturbation, so document length floors the separation it induces. Hence
+    section 7.4 identifies a near-tie instead of constructing one, and the twin
+    grid bottoms out around 1e-3.
     """
     corpus = synthetic.generate(_spec(300, 600, n_users=20, len_max=40))
     longest = max(len(d) for d in corpus.documents)
@@ -381,8 +371,8 @@ def test_an_empty_jsonl_corpus_is_rejected(tmp_path) -> None:
 def test_the_interaction_threshold_is_configurable_and_exact() -> None:
     """The config declares `interaction_min_weight`; the code must honour it.
 
-    Compared in the doubled integer domain, so a threshold of 3.5 admits exactly
-    the 3.5 rating rather than depending on how `3.5 * 2` happens to round.
+    Compared in the doubled integer domain, so a threshold of 3.5 admits the 3.5
+    rating rather than depending on how `3.5 * 2` rounds.
     """
     at_35 = movielens.parse_archive(_archive(), min_weight=3.5)
     assert ("u1", "m2", 3.5) in at_35.interactions
@@ -397,22 +387,18 @@ def test_the_interaction_threshold_is_configurable_and_exact() -> None:
 
 @pytest.mark.slow
 def test_the_near_tie_interval_below_tau_is_empty() -> None:
-    """A property of **the synthetic generator**, and of nothing wider.
+    """A property of the synthetic generator alone.
 
-    On a seeded synthetic corpus, adjacent score gaps land either at exactly zero
-    or well above 1e-9, with the interval between them empty. That is worth
-    pinning, because the generator is what the CI experiments run on.
+    On a seeded synthetic corpus adjacent score gaps land at zero or well above
+    1e-9, with the interval between them empty. The CI experiments run on this
+    generator, so the lattice is pinned here.
 
-    **It does not generalise, and an earlier version of G22 wrongly said it did.**
-    Measured on MovieLens under the normative naive reduction: 197 of 114,504
-    adjacent pairs fall in (0, 4.44e-16), and the smallest strictly-positive gap
-    is 8.67e-19 -- below the arithmetic noise floor, never mind 1e-9. Recomputed
-    exactly, those gaps disappear, so they are artefacts of naive summation
-    rather than separations in the data.
-
-    So read this as "the generator produces a clean gap lattice", not as
-    "near-ties do not occur". Section 7.4's regime is genuinely different on real
-    data, and G22 now records both.
+    It does not generalise, and an earlier version of G22 said it did. Measured on
+    MovieLens under the normative naive reduction: 197 of 114,504 adjacent pairs
+    fall in (0, 4.44e-16) and the smallest strictly-positive gap is 8.67e-19,
+    below the arithmetic noise floor. Recomputed exactly those gaps disappear, so
+    they are artefacts of naive summation. Section 7.4's regime differs on real
+    data; G22 now records both.
     """
     corpus = synthetic.generate(_spec(600, 1200, n_users=40))
     pipeline = PreprocessingPipeline()

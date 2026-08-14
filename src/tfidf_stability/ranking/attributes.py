@@ -1,44 +1,36 @@
 """Secondary sort attributes (README section 2.3.1, ``spec_addenda.md#g8``).
 
-The ranking operator resolves score ties lexicographically on a fixed attribute
-tuple -- popularity, rating, engagement, identifier. This module holds those
-attributes and, crucially, **converts every one of them to a dense integer rank
-at construction time**.
+Score ties are resolved lexicographically on a fixed attribute tuple: popularity,
+rating, engagement, identifier. Every attribute is converted to a dense integer
+rank at construction time, an ``int32`` in which smaller means earlier, with
+direction (``desc``/``asc``) and missing-value placement folded into the rank.
 
-Why rank-encode
----------------
-Each non-score key component becomes an ``int32`` in which *smaller means
-earlier in the final order*. Direction (``desc``/``asc``) and missing-value
-placement are baked into the rank rather than applied at comparison time. Four
-things follow, and together they are the whole justification:
+Consequences:
 
 1. The comparator degenerates to a plain ascending lexicographic comparison of
-   ``(float, int, int, int, int)`` -- no direction branch, no missing-value
-   branch, no rational arithmetic inside the sort.
-2. **Floating point disappears from the tie-break entirely.** That is G8's real
-   requirement, and it is met not by handling floats carefully but by there
-   being none left. The only ``double`` in the key is the similarity score.
-3. **A NaN cannot enter through an attribute at all** -- a type-level guarantee
-   rather than a runtime check. This matters more than it sounds: a NaN in a
-   sort key destroys the strict weak ordering, which in C++ is undefined
-   behaviour in ``std::sort``, and manifests as a genuine out-of-bounds write.
-4. The C++ mirror receives the rank matrix as *data* and never re-derives it.
-   The cross-language question stops being "do two rational-comparison
-   implementations agree semantically?" and becomes ``py_ranks == cpp_ranks``,
-   an integer equality. This is exactly the move ``spec_addenda.md#g13`` makes
-   for ``idf``.
+   ``(float, int, int, int, int)``: no direction branch, no missing-value branch,
+   no rational arithmetic inside the sort.
+2. No floating point survives in the tie-break, which is G8's requirement. The
+   only ``double`` in the key is the similarity score.
+3. A NaN cannot enter through an attribute, as a type-level guarantee rather
+   than a runtime check. A NaN in a sort key destroys the strict weak ordering,
+   which is undefined behaviour in ``std::sort`` and shows up as an
+   out-of-bounds write.
+4. The C++ mirror receives the rank matrix as data and never re-derives it, so
+   the cross-language question becomes the integer equality
+   ``py_ranks == cpp_ranks``. Same move ``spec_addenda.md#g13`` makes for
+   ``idf``.
 
 Why not ``fractions.Fraction`` in the sort key
 ----------------------------------------------
-It is the obvious way to get exact rational comparison in Python, and it is the
-wrong choice here. ``Fraction`` has no C++ counterpart, so the two languages
-would run structurally different algorithms to produce a result the test suite
-asserts is identical -- precisely the drift that produced this project's
-``pairwise_sum`` bug, where two legitimate formulations agreed on every input
-until n = 129. It also runs ``math.gcd`` and allocates an object per element,
-and ``Fraction(0, 0)`` raises, so an absent rating still needs a separate
-``has_value`` bit. Cross-multiplication is the right *rule*; it belongs in the
-rank construction, evaluated once over the distinct values, not in the hot loop.
+It has no C++ counterpart, so the two languages would run structurally different
+algorithms over a result the test suite asserts is identical: the drift that
+produced this project's ``pairwise_sum`` bug, where two legitimate formulations
+agreed on every input until n = 129. It also runs ``math.gcd`` and allocates an
+object per element, and ``Fraction(0, 0)`` raises, so an absent rating still
+needs a separate ``has_value`` bit. Cross-multiplication is the right rule; it
+belongs in the rank construction, evaluated once over the distinct values,
+rather than inside a sort that runs per query.
 """
 
 from __future__ import annotations
@@ -93,8 +85,7 @@ class AttributeDType(str, Enum):
     #: G8's exact mean, as the pair ``(2 * sum_rating, count)``. Compared by
     #: cross-multiplication, so no division is ever performed.
     RATIO_I64 = "ratio_i64"
-    #: Permitted but discouraged. Never use for a derived mean -- that is what
-    #: RATIO_I64 exists for.
+    #: Permitted but discouraged. A derived mean belongs in RATIO_I64.
     FLOAT64 = "float64"
     #: Text, ordered by UTF-8 bytes. Matches ``vocabulary.py`` and is
     #: reproducible in C++ via ``memcmp``, unlike locale or Unicode collation.
@@ -127,8 +118,8 @@ class AttributeSpec:
     missing_policy: MissingPolicy = MissingPolicy.LAST
 
 
-#: The tuple README section 2.3.1 names, minus the identifier, which is appended
-#: implicitly by the sort key and is never part of a permutable priority.
+#: The tuple README section 2.3.1 names, minus the identifier, which the sort key
+#: appends implicitly and never permutes.
 DEFAULT_SPECS: Final[tuple[AttributeSpec, ...]] = (
     AttributeSpec("popularity", Direction.DESC, AttributeDType.INT64),
     AttributeSpec("rating", Direction.DESC, AttributeDType.RATIO_I64),
@@ -146,9 +137,9 @@ def ratio_less(a_num: int, a_den: int, b_num: int, b_den: int) -> bool:
     guarantees: a zero denominator means "no rating", is carried by the
     ``has_value`` bit, and never reaches here.
 
-    Python's ``int`` is arbitrary precision, so this cannot overflow. The C++
-    mirror uses ``__int128``; :func:`check_ratio_fits_int64` guards it at
-    construction so the native path needs no checked multiply in its inner loop.
+    Python ints are arbitrary precision, so this cannot overflow. The C++ mirror
+    uses ``__int128``, and :func:`check_ratio_fits_int64` guards it at
+    construction, so the native inner loop needs no checked multiply.
     """
     return a_num * b_den < b_num * a_den
 
@@ -156,18 +147,15 @@ def ratio_less(a_num: int, a_den: int, b_num: int, b_den: int) -> bool:
 def check_ratio_fits_int64(pairs: Sequence[tuple[int, int]], what: str) -> None:
     """Reject ratio data whose cross-products would overflow the C++ mirror.
 
-    The products that actually occur are ``num_i * den_j`` for **distinct**
-    documents ``i != j``, since nothing is ever compared with itself. Bounding
-    by ``max(num) * max(den)`` across the whole column is therefore too
-    conservative: when the largest numerator and the largest denominator belong
-    to the *same* document -- which is the normal case, because a large
-    numerator usually accompanies a large denominator -- that product never
-    arises, and rejecting the data on account of it would be a false positive.
+    The products that occur are ``num_i * den_j`` for distinct ``i != j``, since
+    nothing is compared with itself. Bounding by ``max(num) * max(den)`` over the
+    whole column is therefore too conservative: when the largest numerator and
+    the largest denominator belong to the same document, which is the usual case,
+    that product never arises and rejecting on it would be a false positive.
 
-    The exact maximum over ``i != j`` is found by considering only the two
-    largest numerators and the two largest denominators: any maximising pair
-    must draw from those, and at least one valid combination avoids the index
-    collision. O(n), and exact.
+    The exact maximum over ``i != j`` comes from the two largest numerators and
+    the two largest denominators: a maximising pair must draw from those, and at
+    least one such combination avoids the index collision. O(n), and exact.
     """
     if len(pairs) < 2:
         return  # nothing is ever compared with itself
@@ -204,13 +192,13 @@ class AttributeColumn:
 
     Attributes:
         spec: The pinned semantics.
-        has_value: Per document. Absence is an explicit bit, **never** NaN.
+        has_value: Per document. Absence is an explicit bit, never NaN.
         ranks: Dense ``int32``-compatible ranks; smaller sorts earlier. Direction
-            and missing placement are already folded in, so a consumer never
-            needs to know either.
+            and missing placement are already folded in, so a consumer needs
+            neither.
         n_distinct: Number of distinct present values.
-        values: The raw values, retained for reporting (section 7.4 wants to
-            print the tie-break attributes of a near-tie pair).
+        values: The raw values, retained for reporting (section 7.4 prints the
+            tie-break attributes of a near-tie pair).
     """
 
     spec: AttributeSpec
@@ -244,9 +232,9 @@ def _order_distinct(values: Sequence[Any], spec: AttributeSpec) -> list[Any]:
 def _ratio_cmp(a: tuple[int, int], b: tuple[int, int]) -> int:
     """Ascending comparison of exact rationals, for sorting distinct values only.
 
-    ``cmp_to_key`` is acceptable here precisely because it runs over the
-    ``m`` *distinct* pairs once per corpus, not over ``N`` documents inside a
-    sort that executes per query.
+    ``cmp_to_key`` is affordable here because it runs over the ``m`` distinct
+    pairs once per corpus, rather than over ``N`` documents inside a sort that
+    executes per query.
     """
     if ratio_less(a[0], a[1], b[0], b[1]):
         return -1
@@ -256,32 +244,30 @@ def _ratio_cmp(a: tuple[int, int], b: tuple[int, int]) -> int:
 
 
 def _dense_positions(ordered: Sequence[Any], spec: AttributeSpec) -> dict[Any, int]:
-    """Rank the sorted distinct values by *equivalence class*, not by identity.
+    """Rank the sorted distinct values by equivalence class rather than identity.
 
-    The distinction is only visible for :data:`AttributeDType.RATIO_I64`, and it
-    is the whole point of G8's exact comparison. ``_order_distinct`` deduplicates
-    with ``dict.fromkeys``, which uses tuple equality, so ``(14, 2)`` and
-    ``(21, 3)`` both survive -- yet ``_ratio_cmp`` correctly reports them equal,
-    because 14/2 == 21/3. Numbering the survivors ``enumerate``-style would then
-    hand two documents with the *same* mean rating two *different* ranks.
+    Only visible for :data:`AttributeDType.RATIO_I64`. ``_order_distinct``
+    deduplicates with ``dict.fromkeys``, which is tuple equality, so ``(14, 2)``
+    and ``(21, 3)`` both survive even though ``_ratio_cmp`` reports them equal
+    (14/2 == 21/3). Numbering the survivors ``enumerate``-style would hand two
+    documents with the same mean rating two different ranks.
 
-    That is not a cosmetic ordering quirk. It breaks two stated guarantees at
-    once: the rating component stops tying when G8 says it must, so the
-    tie-break never falls through to engagement; and because ``dict.fromkeys``
-    preserves *insertion* order, which of the two equal representations sorts
-    first depends on the order the records were supplied in -- making the whole
-    ranking depend on corpus order, which section 2.3.1's total-order argument
-    explicitly forbids.
+    Two guarantees break together if it does: the rating component stops tying
+    where G8 says it must, so the tie-break never falls through to engagement;
+    and since ``dict.fromkeys`` preserves insertion order, which of the two equal
+    representations sorts first depends on the order the records arrived in,
+    making the ranking depend on corpus order, which section 2.3.1's total-order
+    argument forbids.
 
-    Ranks are therefore assigned densely: consecutive entries that compare equal
-    share a rank, and the next class takes the next integer.
+    Ranks are therefore dense: consecutive entries that compare equal share a
+    rank, and the next class takes the next integer.
     """
     if not ordered:
         return {}
 
-    # Only ratios can have two distinct representations of one value. Every
-    # other dtype was deduplicated by `==` under an ordering consistent with its
-    # sort key, so its surviving values are genuinely distinct.
+    # Only ratios can have two distinct representations of one value. Every other
+    # dtype was deduplicated by `==` under an ordering consistent with its sort
+    # key, so its survivors are genuinely distinct.
     ratios = spec.dtype is AttributeDType.RATIO_I64
 
     positions: dict[Any, int] = {ordered[0]: 0}
@@ -308,7 +294,8 @@ def _build_column(
 
     ordered = _order_distinct(present, spec)
     position = _dense_positions(ordered, spec)
-    # The number of *classes*, not of representations -- see `_dense_positions`.
+    # Counts classes, which can be fewer than the representations kept; see
+    # `_dense_positions`.
     n_distinct = (max(position.values()) + 1) if position else 0
 
     # Missing sorts last by taking the rank one past every present value, or
@@ -340,10 +327,10 @@ class AttributeTable:
     """Every tie-break attribute for a corpus, rank-encoded.
 
     ``id_ranks`` is a bijection onto ``0..N-1`` given by UTF-8 byte order of the
-    document identifiers. It terminates every sort key, and it is what makes the
-    ordering a strict *total* order rather than merely a weak one -- which in
-    turn is what makes the sorted permutation unique and sort stability
-    irrelevant. Uniqueness of identifiers is therefore validated, not assumed.
+    document identifiers. It terminates every sort key and makes the ordering a
+    strict total order rather than a weak one, which in turn makes the sorted
+    permutation unique and sort stability irrelevant. Identifier uniqueness is
+    validated rather than assumed.
     """
 
     doc_ids: tuple[str, ...]
@@ -366,8 +353,8 @@ class AttributeTable:
     def rank_matrix(self, priority: Sequence[str]) -> tuple[tuple[int, ...], ...]:
         """Rank rows for the named attributes, in the given priority order.
 
-        This is exactly what crosses the language boundary: the native backend
-        receives these integers and never recomputes them.
+        This is what crosses the language boundary: the native backend receives
+        these integers and never recomputes them.
         """
         return tuple(self.column(name).ranks for name in priority)
 
@@ -381,7 +368,7 @@ class AttributeTable:
     def digest(self) -> str:
         """SHA-256 over the specs and the integer ranks, for the run manifest.
 
-        Over the *ranks*, not the raw values: the ranks are what determine the
+        Over the ranks rather than the raw values: the ranks determine the
         ordering, so two tables with identical digests provably induce identical
         rankings.
         """
@@ -408,7 +395,7 @@ class AttributeTable:
 
         Reads the field names ``tests/fixtures/mini_corpus.jsonl`` already
         carries. A ``RATIO_I64`` attribute named ``rating`` is assembled from
-        ``rating_sum2`` and ``rating_count`` -- the fixture was written to G8's
+        ``rating_sum2`` and ``rating_count``: the fixture was written to G8's
         exact-pair representation, so it is honoured rather than replaced.
 
         Raises:

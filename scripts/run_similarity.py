@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """Score a query set and write the ranked results, with a manifest.
 
-The plainest of the runners: no perturbation, no ablation, just the pipeline of
-sections 2 and 3 run end to end. It exists so that "what does this system
-actually return" is answerable without reading an experiment, and so the other
-runners have something to be compared against.
+The plainest runner: no perturbation, no ablation, sections 2 and 3 end to end.
+Answers "what does this system return", and gives the other runners a baseline.
 
-Reports the margin at every ``k`` beside each ranking, because a top-k list
-without its margin is exactly the artefact this study argues is misleading: two
-rankings that look identical can be one ulp and one tie-break apart.
+Reports the margin at every ``k`` beside each ranking. Two rankings that look
+identical can be one ulp and one tie-break apart, so a top-k list on its own is
+the artefact this study argues is misleading.
 
 Usage::
 

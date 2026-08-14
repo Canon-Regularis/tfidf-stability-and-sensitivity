@@ -2,24 +2,20 @@
 
 Section 7.3: "Results are stratified by the boundary margin ``m_k`` relative to
 ``tau``, since tie-break effects are expected to concentrate in the near-tie
-regime ``m_k <= tau``."
+regime ``m_k <= tau``." That expectation is research question A2, so the
+stratification tests it: disagreement spread uniformly across bands would falsify
+the claim that tie-breaking is a near-tie phenomenon.
 
-That expectation is the substance of research question A2, so the stratification
-is what tests it rather than merely presenting it. If disagreement were spread
-uniformly across margin bands, the claim that tie-breaking is a *near-tie*
-phenomenon would be false.
+Stratifying by ``m_k`` is legitimate because the margin is tie-break independent,
+depending only on the sorted score multiset and so identical under all three
+operators. Stratifying an operator comparison by an operator-dependent quantity
+would be circular.
 
-Stratifying by ``m_k`` is legitimate precisely because the margin is
-**tie-break independent** -- it depends only on the sorted score multiset, so it
-is identical under all three operators. Stratifying an operator comparison by a
-quantity that itself depended on the operator would be circular.
-
-One empirical warning, worth carrying into the interpretation. On short-text
-corpora the ``m_k == 0`` band is not a small tail: documents with no
-in-vocabulary tokens all score exactly zero, so they form one large exact-tie
-block. The near-tie regime is, in practice, substantially an *exact*-tie regime,
-and :data:`EXACT_TIE_BAND` is therefore kept separate from the merely-small band
-rather than absorbed into it.
+Empirical warning for the interpretation: on short-text corpora the ``m_k == 0``
+band is no small tail. Documents with no in-vocabulary tokens all score zero and
+form one large exact-tie block, so the near-tie regime is in practice
+substantially an exact-tie regime. Hence :data:`EXACT_TIE_BAND` stays separate
+from the merely-small band.
 """
 
 from __future__ import annotations
@@ -39,22 +35,22 @@ __all__ = [
     "stratify_by_margin",
 ]
 
-#: Margins of exactly zero. Kept as its own band rather than folded into the
-#: smallest numeric band: ``m_k == 0`` means membership is decided *entirely* by
-#: the tie-break, which is a categorically different situation from a small but
-#: positive margin, and on real corpora it is where most of the mass sits.
+#: Margins of zero. Its own band rather than the smallest numeric one: at
+#: ``m_k == 0`` the tie-break decides membership outright, a categorically
+#: different situation from a small positive margin, and on real corpora it is
+#: where most of the mass sits.
 EXACT_TIE_BAND: Final[str] = "exact_tie"
 
-#: Queries for which ``m_k`` does not exist (``k >= N``). Counted, never dropped.
+#: Queries for which ``m_k`` does not exist (``k >= N``). Kept and counted.
 UNDEFINED_BAND: Final[str] = "undefined"
 
 
 def margin_bands(tau: float) -> tuple[tuple[str, float, float], ...]:
     """Bands for ``m_k`` relative to ``tau``, as ``(label, lo, hi)`` half-open.
 
-    Centred on ``tau`` because that is the transition section 7.3 predicts, with
-    decade-wide bands either side so the shape of the transition is visible
-    rather than just its existence.
+    Centred on ``tau``, the transition section 7.3 predicts, with decade-wide
+    bands either side so the shape of the transition shows up rather than only
+    its existence.
     """
     return (
         ("(0, tau/100]", 0.0, tau / 100.0),
@@ -83,9 +79,9 @@ class Stratum:
     def disagreement_rate(self) -> float:
         """Fraction whose top-k set differs; ``NaN`` on an empty band.
 
-        ``NaN`` rather than ``0.0``: an empty band means "no evidence", which is
-        not the same claim as "no disagreement", and plotting the two the same
-        way would invent a data point.
+        ``NaN`` rather than ``0.0``: an empty band means "no evidence", a
+        different claim from "no disagreement", and plotting the two alike would
+        invent a data point.
         """
         return self.n_disagree / self.n if self.n else math.nan
 
@@ -114,15 +110,14 @@ def stratify_by_margin(
     Args:
         results: Ablation results, one per query.
         tau: The near-tie tolerance the bands are centred on. Explicit and
-            required -- there is deliberately no default anywhere in this
-            package, because section 7.1 makes every tie-break result
-            conditional on the choice of ``tau``.
+            required: nothing in this package supplies a default, because
+            section 7.1 makes every tie-break result conditional on ``tau``.
         baseline, variant: Which operator comparison to stratify.
         ks: The k values to report.
 
     Returns:
-        One :class:`Stratum` per (band, k), including empty bands so that a
-        plot's x-axis is complete rather than silently ragged.
+        One :class:`Stratum` per (band, k), empty bands included so a plot's
+        x-axis is complete rather than silently ragged.
     """
     if tau < 0.0:
         raise ValueError(f"tau must be non-negative, got {tau}")

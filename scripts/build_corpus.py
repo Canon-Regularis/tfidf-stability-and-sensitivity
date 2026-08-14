@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
 """Materialise a registered dataset as JSONL, with a provenance sidecar.
 
-The boundary between "where data comes from" and "what the pipeline consumes".
-Everything upstream of this script knows about zip archives, CSV quirks and
-seeded generators; everything downstream sees only ``{doc_id, text, ...}``
-records.
+The boundary between "where data comes from" and "what the pipeline consumes":
+upstream knows about zip archives, CSV quirks and seeded generators, downstream
+sees only ``{doc_id, text, ...}`` records.
 
-Why materialise at all, when :func:`load_dataset` could be called directly?
-Three reasons, and the third is the one that matters:
+Three reasons to materialise instead of calling :func:`load_dataset` directly:
 
 1. Parsing MovieLens takes a few seconds; experiments read the corpus many times.
 2. It gives a stable file to point ``build-corpus`` and the notebooks at.
-3. **It fixes the corpus.** A regenerated corpus is only as reproducible as the
-   generator, and the generator depends on the PRNG -- whose selection functions
-   are not promised to be stable across CPython versions. Writing the file once
-   moves the reproducibility boundary from "same interpreter" to "same bytes",
-   which is a far weaker and therefore far safer assumption. This is the same
-   rule stated in ``datasets/synthetic.py``: the generator writes files, and
-   downstream consumes the files.
+3. It fixes the corpus. A regenerated corpus is only as reproducible as its
+   generator, which depends on the PRNG, whose selection functions carry no
+   stability promise across CPython versions. Writing the file once moves the
+   reproducibility boundary from "same interpreter" to "same bytes". Same rule as
+   ``datasets/synthetic.py``: the generator writes files, downstream consumes the
+   files.
 
 Usage::
 
@@ -68,9 +65,9 @@ def main() -> int:
         [{"user_id": u, "doc_id": d, "weight": w} for u, d, w in data.interactions],
     )
 
-    # The sidecar, not an embedded field: keeping provenance out of the records
-    # means the corpus digest is over the documents alone, so two corpora with
-    # identical content agree even when they were produced differently.
+    # Provenance sits in a sidecar so the corpus digest covers the documents
+    # alone: two corpora with identical content agree even when produced
+    # differently.
     sidecar = args.output.with_suffix(".provenance.json")
     write_json(sidecar, {**data.provenance, "corpus_digest": data.digest()})
 

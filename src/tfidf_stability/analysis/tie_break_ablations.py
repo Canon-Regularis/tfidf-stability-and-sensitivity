@@ -6,26 +6,25 @@ Section 7.3 recomputes each ranking under three sorting operators
     pi_score = Sort(s_i, id_i)                  attribute-independent baseline
     pi_alt   = Sort(s_i, a_i reordered)         alternate priority
 
-and measures how far apart the results are. The point is to isolate
-**decision-level** instability -- change that arises purely from the choice of
-secondary ordering rule -- from numerical instability in the scores themselves.
+and measures how far apart the results are, isolating decision-level instability
+(change arising from the choice of secondary ordering rule) from numerical
+instability in the scores.
 
-What makes the isolation clean is a fact the paper does not state and this
-implementation makes structural: **all three operators share the same sorted
-score array**, so every margin is identical between them (see
-:mod:`~tfidf_stability.ranking.margins`). Any disagreement observed here is
-therefore attributable to the tie-break alone, with ``delta s = 0`` exactly. That
-is what makes A1 and A2 independent questions rather than confounded ones.
+The isolation rests on a fact the paper does not state and this implementation
+makes structural: all three operators share the same sorted score array, so every
+margin is identical between them (see
+:mod:`~tfidf_stability.ranking.margins`). Disagreement here is attributable to
+the tie-break alone, with ``delta s = 0``, which keeps A1 and A2 independent
+questions rather than confounded ones.
 
-Two guards on the interpretation, both worth stating because they are easy to
-lose:
+Two guards on the interpretation:
 
-* the comparison is only meaningful where ties exist. With all scores distinct
-  the three operators coincide exactly, and
-  :attr:`AblationResult.scores_all_distinct` records when that was the case;
+* the comparison only bites where ties exist. With all scores distinct the three
+  operators coincide, and :attr:`AblationResult.scores_all_distinct` records
+  when that was the case;
 * ``pi_score`` is the empty-priority special case of ``pi``, so it agrees with
-  ``pi`` whenever the attributes happen not to discriminate. That slightly
-  weakens the ablation, and it is the honest reading of section 4.5.
+  ``pi`` whenever the attributes fail to discriminate. That weakens the ablation
+  slightly, and is the honest reading of section 4.5.
 """
 
 from __future__ import annotations
@@ -56,9 +55,9 @@ class OperatorPair:
     baseline: str
     variant: str
     comparison: TopKComparison
-    #: ``m_k`` for this query. Identical across all three operators -- it depends
-    #: only on the sorted score multiset -- which is precisely why it can be used
-    #: to *stratify* the disagreement rate without circularity.
+    #: ``m_k`` for this query. Identical across all three operators (it depends
+    #: only on the sorted score multiset), so stratifying the disagreement rate
+    #: by it is free of circularity.
     margin: Margin
 
     @property
@@ -78,9 +77,9 @@ class AblationResult:
     n_documents: int
     pairs: tuple[OperatorPair, ...]
     rankings: dict[str, Ranking]
-    #: True when no two documents share a score. The three operators must then
-    #: agree exactly; recorded so that a zero disagreement rate can be
-    #: distinguished from "the ablation had nothing to bite on".
+    #: True when no two documents share a score, in which case the three
+    #: operators must agree. Recorded so a zero disagreement rate stays
+    #: distinguishable from "the ablation had nothing to bite on".
     scores_all_distinct: bool
     query_degenerate: bool
     n_zero_norm_docs: int
@@ -111,10 +110,10 @@ def ablate_query(
         query_id: Recorded on the result for provenance.
         ks: The k-set of section 7.1.
         specs: Operators to evaluate; the baseline is skipped against itself.
-        baseline: The operator everything is compared against -- ``pi``, since
-            section 7.3 asks for "pi versus pi_score" and "pi versus pi_alt".
+        baseline: The operator everything is compared against, ``pi``: section
+            7.3 asks for "pi versus pi_score" and "pi versus pi_alt".
         n_zero_norm_docs: Passed through for reporting.
-        mode: Lenient by default, because a ``k`` larger than the corpus is a
+        mode: Lenient by default, since a ``k`` larger than the corpus is a
             legitimate grid point in a sweep rather than a configuration error.
 
     Returns:
@@ -174,20 +173,18 @@ def disagreement_rate(
 ) -> tuple[float, int]:
     """Section 7.3's headline statistic, with its denominator.
 
-    Returns ``(rate, n)`` -- the fraction of queries whose top-k *set* differs
-    between the two operators, and how many queries contributed. The count is
-    returned rather than discarded because a rate over three queries and a rate
-    over thirty thousand are not the same claim, and section 7.1 requires the
-    query count to be reported.
+    Returns ``(rate, n)``: the fraction of queries whose top-k set differs
+    between the two operators, and how many queries contributed. A rate over
+    three queries and a rate over thirty thousand are different claims, and
+    section 7.1 requires the query count to be reported.
     """
     considered = []
     for result in results:
-        # At most ONE pair per query. `ablate_query` clamps k to the candidate
-        # count (G3's lenient mode), so several requested k values can collapse
-        # onto the same effective k and emit several identical pairs for a single
-        # query -- on a 7-document corpus, k in (10, 20, 50) all become 7. Taking
-        # them all would count that query three times and report a denominator
-        # this docstring promises is a query count.
+        # At most one pair per query. `ablate_query` clamps k to the candidate
+        # count (G3's lenient mode), so several requested k values collapse onto
+        # the same effective k: on a 7-document corpus k in (10, 20, 50) all
+        # become 7. Taking every match counted such a query three times, against
+        # a denominator this docstring promises is a query count.
         match = next(
             (
                 p

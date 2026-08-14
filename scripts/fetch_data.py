@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
 """Download MovieLens, verify it, and record the digest.
 
-The only code in this repository that opens a network connection. Kept in one
-short script, out of the library, so that "does this package phone home?" is
-answerable by reading one file -- and so the library itself stays usable in an
-air-gapped or reviewer-sandboxed environment.
+The only code in this repository that opens a network connection, kept in one
+short script outside the library so that "does this package phone home?" is
+answerable by reading one file, and so the library stays usable air-gapped.
 
-What it does not do
--------------------
-It does not put the archive anywhere git tracks. ``data/raw/`` is gitignored, and
-this script refuses to write outside it without ``--output``. The MovieLens
-licence prohibits redistribution, and an accidental ``git add -A`` is exactly how
-that gets violated.
+The archive lands nowhere git tracks: ``data/raw/`` is gitignored and this script
+refuses to write outside it without ``--output``. The MovieLens licence prohibits
+redistribution, and an accidental ``git add -A`` is how that gets violated.
 
 The pin
 -------
-GroupLens replaces ``ml-latest-small.zip`` **in place**. So on first run there is
-no digest to check against; the script downloads, prints the digest, and tells
-you to paste it into ``movielens.MOVIELENS_SHA256``. On every subsequent run the
-digest is checked and a mismatch is fatal.
-
-That order matters: pinning *after* the fact is the only honest option when
-upstream publishes no digest of its own. What the pin buys is not authenticity
-but *stability* -- a guarantee that the corpus underneath a published number has
-not moved.
+GroupLens replaces ``ml-latest-small.zip`` in place and publishes no digest of
+its own, so on first run there is nothing to check against: the script downloads,
+prints the digest, and tells you to paste it into ``movielens.MOVIELENS_SHA256``.
+Every later run verifies against it and a mismatch is fatal. The pin buys one
+guarantee: the corpus underneath a published number has not moved.
 
 Usage::
 
@@ -53,9 +45,9 @@ _CHUNK = 1 << 16
 def _download(url: str, dest: Path) -> str:
     """Stream to a temporary file, then rename. Returns the digest.
 
-    Streamed rather than read whole so an interrupted transfer cannot leave a
-    truncated file at the destination path -- which would then fail the digest
-    check confusingly, rather than simply being absent.
+    An interrupted transfer must not leave a truncated file at the destination,
+    where it would fail the digest check confusingly instead of simply being
+    absent.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_suffix(dest.suffix + ".partial")

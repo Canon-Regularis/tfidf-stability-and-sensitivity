@@ -1,21 +1,19 @@
 """One way in to every dataset, and one place the provenance is recorded.
 
 The registry in ``configs/datasets.yaml`` names datasets; this module turns a
-name into records. Everything downstream -- the CLI, the experiment scripts, the
-notebooks -- goes through :func:`load_dataset` and none of them know whether the
-corpus was generated, downloaded or read off disk.
+name into records. The CLI, the experiment scripts and the notebooks all go
+through :func:`load_dataset` and none of them know whether the corpus was
+generated, downloaded or read off disk.
 
-That indirection earns its keep in one specific way: :class:`LoadedDataset`
-carries a :attr:`~LoadedDataset.provenance` block that goes verbatim into the run
-manifest. A result computed on synthetic data and a result computed on MovieLens
-are then distinguishable *after the fact*, from the manifest alone, including
-which archive digest and which generator spec produced it. Without that, the two
-are a filename apart, and filenames do not survive being copied.
+:class:`LoadedDataset` carries a :attr:`~LoadedDataset.provenance` block that
+goes verbatim into the run manifest, so a synthetic result and a MovieLens result
+stay distinguishable after the fact from the manifest alone, down to the archive
+digest or generator spec behind each. Without it the two are a filename apart,
+and filenames do not survive being copied.
 
-The asymmetry between the two datasets is deliberate and is a licence
-consequence, not an oversight: synthetic data is regenerated from its spec on
-demand, MovieLens is loaded from a local archive that this repository will never
-contain. See ``data/README.md``.
+The asymmetry between the two datasets follows from the licence: synthetic data
+is regenerated from its spec on demand, MovieLens is loaded from a local archive
+this repository will never contain. See ``data/README.md``.
 """
 
 from __future__ import annotations
@@ -37,7 +35,7 @@ __all__ = [
 ]
 
 #: Registered names. ``jsonl:<path>`` is also accepted, for a corpus already on
-#: disk -- which is how a MovieLens-derived corpus is consumed once
+#: disk, which is how a MovieLens-derived corpus is consumed once
 #: ``scripts/build_corpus.py`` has written it out.
 DATASET_NAMES = ("synthetic_small", "synthetic_tiny", "movielens_small")
 
@@ -68,10 +66,10 @@ class LoadedDataset:
     def digest(self) -> str:
         """Identity of the loaded corpus, for the manifest.
 
-        Over the records, not over the provenance -- two loads that produce
+        Over the records rather than the provenance: two loads producing
         identical documents must agree here even if one came from a regenerated
-        spec and the other from a file, since it is the *documents* that
-        determine every downstream number.
+        spec and the other from a file, since the documents determine every
+        downstream number.
         """
         return hash_text(canonical_json(self.records, indent=None))
 
@@ -142,8 +140,8 @@ def load_dataset(
             interactions=list(corpus.interactions),
             provenance={
                 "kind": "synthetic",
-                # asdict, not __dict__: SyntheticSpec is slots=True, so it has
-                # no instance dict at all.
+                # SyntheticSpec is slots=True, so there is no instance __dict__
+                # to read.
                 "spec": {
                     k: list(v) if isinstance(v, tuple) else v
                     for k, v in asdict(corpus.spec).items()
@@ -152,8 +150,8 @@ def load_dataset(
                 "n_documents": corpus.n_documents,
                 "n_twin_pairs": len(corpus.twins),
                 "n_exact_duplicate_pairs": len(corpus.exact_duplicate_pairs),
-                # Redistributable, so this one *can* be regenerated anywhere --
-                # the distinction that matters when reproducing a result.
+                # Redistributable, so this corpus regenerates anywhere: the
+                # distinction that matters when reproducing a result.
                 "redistributable": True,
             },
         )
@@ -178,9 +176,8 @@ def load_dataset(
                 "n_ratings": films.n_ratings,
                 "n_users": films.n_users,
                 "n_unrated_documents": films.n_unrated,
-                # False, and recorded as such: a reader of the manifest can see
-                # immediately that this result cannot be reproduced from the
-                # repository alone.
+                # Recorded so the manifest shows at a glance that this result
+                # cannot be reproduced from the repository alone.
                 "redistributable": False,
             },
         )

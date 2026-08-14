@@ -2,37 +2,36 @@
 
 Why this exists alongside a real dataset
 ----------------------------------------
-Real short text gives external validity but no *control*. This generator gives
-control, and specifically the three things MovieLens cannot:
+Real short text gives external validity but no control. This generator gives
+control, and three things MovieLens cannot:
 
 1. **Near-ties at chosen magnitudes.** Section 7.4 asks for a constructed
    near-tie case; on real data, near-ties in the interesting range are rare
    enough that finding one is a search problem. Here they are built.
 2. **Scaling.** Sweeping ``N``, ``|V|`` and document length shows how margins
-   *scale*, which the paper does not currently examine at all.
+   scale, which the paper does not currently examine.
 3. **A redistributable corpus.** MovieLens may not be redistributed, so CI
    cannot use it. This can be committed and runs offline.
 
-Determinism, and a trap worth naming
-------------------------------------
-``random.choice``, ``random.sample`` and ``random.shuffle`` are **not** promised
-to be stable across CPython versions -- their implementations have changed --
-so a corpus generated with them would not regenerate identically on a different
-interpreter. Only the Mersenne Twister core is stable. Everything here is
-therefore derived from :meth:`random.Random.random` and
-:meth:`random.Random.getrandbits` alone, with the selection logic written out.
+Determinism, and a trap
+-----------------------
+``random.choice``, ``random.sample`` and ``random.shuffle`` are not promised to
+be stable across CPython versions and their implementations have changed, so a
+corpus generated with them would not regenerate identically on another
+interpreter. Only the Mersenne Twister core is stable, so everything here comes
+from :meth:`random.Random.random` and :meth:`random.Random.getrandbits` alone,
+with the selection logic written out.
 
 Transcendentals are avoided for the same reason at one remove: ``pow`` with a
 non-integer exponent goes to the platform libm, which
 ``docs/spec_addenda.md#g13`` shows disagrees across systems. The default Zipf
 exponent of 1 is computed in exact integer arithmetic; a non-integer exponent is
-permitted but flagged, because it makes the *spec* rather than the generated
-files the reproducible artefact.
+permitted but flagged, since it makes the spec rather than the generated files
+the reproducible artefact.
 
-That distinction is the design rule: **the generator writes files, and
-downstream consumes the files.** Nothing re-derives a corpus from a spec at
-experiment time, which keeps PRNG portability out of the reproducibility surface
-entirely.
+Hence the design rule: the generator writes files and downstream consumes the
+files. Nothing re-derives a corpus from a spec at experiment time, which keeps
+PRNG portability out of the reproducibility surface.
 """
 
 from __future__ import annotations
@@ -69,19 +68,18 @@ class SyntheticSpec:
     n_docs: int = 2000
     vocab_size: int = 4000
     #: Zipf exponent. ``1`` is computed exactly in integers; anything else goes
-    #: through ``pow`` and is therefore platform-dependent -- see the module
-    #: docstring.
+    #: through ``pow`` and is platform-dependent, see the module docstring.
     zipf_exponent: float = 1.0
     len_min: int = 3
     len_max: int = 40
     n_users: int = 200
     max_interactions_per_user: int = 12
-    #: Duplicated documents, which tie *exactly* by construction -- the tau = 0
-    #: baseline, and the case where only the tie-break can separate two items.
+    #: Duplicated documents, which tie exactly: the tau = 0 baseline, and the
+    #: case where only the tie-break can separate two items.
     n_exact_duplicates: int = 20
     #: Twin pairs: a copy plus one extra token. The extra token's document
-    #: frequency controls how far the two scores separate, which is what gives a
-    #: usable grid of near-tie magnitudes rather than a single value.
+    #: frequency controls how far the two scores separate, giving a grid of
+    #: near-tie magnitudes rather than a single value.
     n_twin_pairs: int = 40
     twin_extra_token_df: tuple[int, ...] = (1, 2, 4, 8, 16, 32, 64, 128)
 
@@ -130,9 +128,9 @@ class SyntheticCorpus:
 def _zipf_weights(vocab_size: int, exponent: float) -> list[int]:
     """Integer Zipf weights, exact when ``exponent`` is 1.
 
-    Integers rather than floats so the cumulative distribution and every
-    comparison against it are exact, which is what makes the sampling
-    reproducible without depending on floating-point rounding.
+    Integers so the cumulative distribution and every comparison against it are
+    exact, making the sampling reproducible without depending on floating-point
+    rounding.
     """
     if exponent == 1.0:
         return [max(1, _ZIPF_SCALE // (rank + 1)) for rank in range(vocab_size)]
@@ -153,9 +151,9 @@ def _cumulative(weights: list[int]) -> list[int]:
 def _pick(rng: random.Random, cumulative: list[int]) -> int:
     """Sample an index from an integer cumulative distribution.
 
-    Uses ``getrandbits`` and integer comparison only. ``random.choices`` would
-    be shorter and would introduce both a float comparison and a function whose
-    implementation is not promised to be stable across CPython versions.
+    ``getrandbits`` and integer comparison only. ``random.choices`` would be
+    shorter and would bring in both a float comparison and a function whose
+    implementation is not promised stable across CPython versions.
     """
     total = cumulative[-1]
     # Rejection-sample to a uniform integer in [0, total), so the result does
@@ -192,18 +190,17 @@ def _uniform_int(rng: random.Random, low: int, high: int) -> int:
 def generate(spec: SyntheticSpec | None = None) -> SyntheticCorpus:
     """Generate a corpus from a spec.
 
-    The near-tie construction is the point of this function, so it is worth
-    saying what each mechanism buys:
+    What each near-tie mechanism buys:
 
-    * **exact duplicates** give ``m_k = 0`` -- membership decided entirely by the
-      tie-break, and the ``tau = 0`` baseline;
-    * **twins** give a *graded* separation: a copy plus one extra token, where
-      the extra token's document frequency sets how far apart the two scores
-      land. Sweeping that frequency produces a range of near-tie magnitudes
-      instead of a single one, which is what section 7.3's transition plot needs.
+    * **exact duplicates** give ``m_k = 0``: membership decided by the tie-break,
+      and the ``tau = 0`` baseline;
+    * **twins** give graded separation. A copy plus one extra token, whose
+      document frequency sets how far apart the two scores land; sweeping that
+      frequency produces the range of near-tie magnitudes section 7.3's
+      transition plot needs.
 
     Both are recorded on the result, so an experiment can locate the constructed
-    cases directly rather than searching the corpus for them.
+    cases without searching the corpus.
     """
     spec = spec or SyntheticSpec()
     rng = random.Random(spec.seed)
@@ -235,8 +232,8 @@ def generate(spec: SyntheticSpec | None = None) -> SyntheticCorpus:
         doc_ids.append(new_id)
         exact_pairs.append((doc_ids[source], new_id))
 
-    # Twins: a copy plus one extra token whose document frequency is controlled,
-    # so the pair separates by a tunable amount rather than not at all.
+    # Twins: a copy plus one extra token of controlled document frequency, so
+    # the pair separates by a tunable amount rather than not at all.
     twins: list[tuple[str, str, int]] = []
     for j in range(spec.n_twin_pairs):
         source = _uniform_int(rng, 0, n_base - 1)
@@ -255,8 +252,8 @@ def generate(spec: SyntheticSpec | None = None) -> SyntheticCorpus:
     attributes = [
         {
             "popularity": _uniform_int(rng, 0, 500),
-            # G8: the exact integer pair, never a float mean. Ratings are
-            # 0.5-quantised, so 2 * sum is an integer.
+            # G8: the exact integer pair; no float mean is ever formed. Ratings
+            # are 0.5-quantised, so 2 * sum is an integer.
             "rating_sum2": _uniform_int(rng, 2, 10) * _uniform_int(rng, 1, 20),
             "rating_count": _uniform_int(rng, 1, 20),
             "engagement": _uniform_int(rng, 0, 50),
@@ -267,9 +264,9 @@ def generate(spec: SyntheticSpec | None = None) -> SyntheticCorpus:
     interactions: list[tuple[str, str, float]] = []
     for u in range(spec.n_users):
         user = f"u{u:05d}"
-        # Heavy-tailed: most users interact little, a few a great deal. That
-        # matters because profile size drives both the candidate-set size (G19)
-        # and how length-weighted the profile is (G11).
+        # Heavy-tailed: most users interact little, a few a great deal. Profile
+        # size drives both the candidate-set size (G19) and how length-weighted
+        # the profile is (G11).
         n_interactions = 1 + _pick(
             rng, _cumulative([max(1, 64 // (i + 1)) for i in range(spec.max_interactions_per_user)])
         )
@@ -296,9 +293,9 @@ def generate(spec: SyntheticSpec | None = None) -> SyntheticCorpus:
 def write_corpus(corpus: SyntheticCorpus, directory: Path | str) -> dict[str, str]:
     """Write the corpus, its interactions and its spec, with a digest manifest.
 
-    Everything downstream reads these **files**. Nothing regenerates from the
-    spec at experiment time, which is what keeps PRNG portability out of the
-    reproducibility surface: the committed bytes are the artefact.
+    Everything downstream reads these files. Nothing regenerates from the spec at
+    experiment time, which keeps PRNG portability out of the reproducibility
+    surface: the committed bytes are the artefact.
     """
     out = Path(directory)
     out.mkdir(parents=True, exist_ok=True)
@@ -357,16 +354,13 @@ def find_near_ties(
     """Find the closest adjacent pairs in a scored ranking.
 
     Section 7.4 asks for two documents "identified such that ``|s_A - s_B| <=
-    tau``". Identified, not manufactured -- and that wording matters, because
-    **a fine near-tie cannot be manufactured at all**.
-
-    Why not. Section 2.2 normalises ``tf = count / L``, so adding or removing a
-    single token changes every term frequency from ``c/L`` to ``c/(L+1)`` -- a
-    relative perturbation of ``1/(L+1)``. A separation of ``1e-9`` would
-    therefore require a document of roughly a billion tokens. The twin mechanism
-    in :func:`generate` produces separations in the ``1e-3`` to ``1e-1`` range
-    and cannot go finer, which is a structural property of the specification
-    rather than a limitation of the generator.
+    tau``". Identified, because a fine near-tie cannot be manufactured: section
+    2.2 normalises ``tf = count / L``, so adding or removing one token moves
+    every term frequency from ``c/L`` to ``c/(L+1)``, a relative perturbation of
+    ``1/(L+1)``. A separation of ``1e-9`` would need a document of roughly a
+    billion tokens. The twin mechanism in :func:`generate` reaches the ``1e-3``
+    to ``1e-1`` range and no finer, which follows from the specification rather
+    than from the generator.
 
     What is observed instead, measured on a 3000-document synthetic corpus:
 
@@ -379,19 +373,19 @@ def find_near_ties(
     in [1e-6, 1e-3)              79.5%
     ==========================  =======
 
-    So the near-tie regime is, empirically, the **exact**-tie regime: at
-    ``tau = 1e-9`` essentially every within-tau pair has a gap of exactly zero.
-    See ``docs/spec_addenda.md#g22``.
+    So the near-tie regime is empirically the exact-tie regime: at
+    ``tau = 1e-9`` essentially every within-tau pair has a gap of zero. See
+    ``docs/spec_addenda.md#g22``.
 
     Args:
         sorted_scores: Scores in non-increasing order.
         limit: How many pairs to return.
-        strictly_positive: Skip exact ties. Set ``False`` to find the exact-tie
-            block, which is the case that actually dominates.
+        strictly_positive: Skip exact ties. ``False`` finds the exact-tie block,
+            which is the case that dominates.
 
     Returns:
         The closest pairs, tightest first. ``rank`` is 1-indexed, so the pair is
-        ``(r_rank, r_{rank+1})`` and ``gap`` is exactly ``m_rank``.
+        ``(r_rank, r_{rank+1})`` and ``gap`` is ``m_rank``.
     """
     pairs = [
         NearTie(i + 1, above, below, above - below)

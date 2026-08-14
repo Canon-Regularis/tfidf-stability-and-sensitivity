@@ -1,16 +1,15 @@
 """Reference vs native: bit-exact equivalence.
 
-This is the load-bearing test of the whole architecture. The project's claim is
-that the optimised C++20 evaluator performs *the same floating-point operations
-in the same order* as the pure-Python reference, so that section 6's "no
+The claim under test: the C++20 evaluator performs the same floating-point
+operations in the same order as the pure-Python reference, so section 6's "no
 numerical optimisation techniques are employed" stays literally true while the
-experiment grid still runs in minutes rather than days.
+experiment grid still runs in minutes.
 
-The comparison is therefore on **bit patterns**, never on tolerances. A
-tolerance-based test would pass while quietly permitting exactly the divergence
-this project exists to detect. ``pytest.approx`` does not appear in this file.
+Comparison is on bit patterns, never tolerances; ``pytest.approx`` does not
+appear in this file. A tolerance would pass while permitting the divergence this
+project exists to detect.
 
-Three independent implementations are compared:
+Three implementations are compared:
 
 * the Python reference (normative);
 * the native **TAAT** kernel, which walks postings lists out of an inverted
@@ -19,8 +18,7 @@ Three independent implementations are compared:
   and never builds an inverted index at all.
 
 TAAT and DAAT share no data structure and no loop nesting, so their agreeing to
-the last bit is a much stronger statement than either matching a recorded
-expectation.
+the last bit says more than either matching a recorded expectation.
 """
 
 from __future__ import annotations
@@ -56,7 +54,7 @@ def _policy(p: Reduction) -> int:
 def corpus() -> list[list[str]]:
     rng = random.Random(20260811)
     alpha = [f"t{i}" for i in range(400)]
-    # Deliberately includes empty documents, which embed to the zero vector.
+    # Includes empty documents, which embed to the zero vector.
     return [[rng.choice(alpha) for _ in range(rng.randint(0, 40))] for _ in range(300)]
 
 
@@ -83,12 +81,11 @@ def index(model: TfidfModel):  # type: ignore[no-untyped-def]
 def test_build_is_reproducible() -> None:
     """A build with fast-math or arch tuning must never produce published numbers.
 
-    The contraction check is per compiler, because the two spell it differently
-    and one of the spellings used to be wrong. MSVC has no negative form of
-    ``/fp:contract``; the flag list carried ``/fp:contract-`` for a long time and
-    MSVC answered ``warning D9002: ignoring unknown option`` and went on
-    contracting, so this assertion passed on a substring of a flag that did
-    nothing. ``/fp:strict`` is the documented way to forbid it there.
+    The contraction check is per compiler because they spell it differently.
+    MSVC has no negative form of ``/fp:contract``: the flag list carried
+    ``/fp:contract-``, MSVC answered ``warning D9002: ignoring unknown option``
+    and went on contracting, so the assertion matched a substring of a flag that
+    did nothing. ``/fp:strict`` is the documented way to forbid it there.
     """
     info = build_info()
     assert info["reproducible"] is True, f"non-reproducible build: {info}"
@@ -98,7 +95,7 @@ def test_build_is_reproducible() -> None:
     flags = str(info["numeric_flags"])
     compiler = str(info["compiler_id"])
     if compiler == "MSVC":
-        # Not "contract-": that is the string that never worked.
+        # "/fp:contract-" is the spelling that never worked.
         assert "/fp:strict" in flags, f"MSVC may contract to FMA: {flags}"
     else:
         assert "-ffp-contract=off" in flags, f"{compiler} may contract to FMA: {flags}"
@@ -126,12 +123,12 @@ def test_reduction_policies_are_bit_exact(policy: Reduction) -> None:
 
 @pytest.mark.parametrize("n", [0, 1, 127, 128, 129, 255, 256, 257, 384, 385, 1000])
 def test_pairwise_agrees_at_tree_shape_boundaries(n: int) -> None:
-    """Pairwise is the policy most sensitive to how the summation tree is built.
+    """Pairwise is the policy most sensitive to the shape of the summation tree.
 
-    The two implementations originally used different formulations -- recursive
-    split at n//2 versus a streaming binary-counter merge -- and first diverged
-    at n = 129. Both are legitimate; the streaming one is the pinned
-    specification because the dot-product kernel cannot see n in advance.
+    The two implementations started from different formulations (recursive split
+    at n//2 versus a streaming binary-counter merge) and first diverged at
+    n = 129. Both are legitimate; the streaming one is the pinned specification
+    because the dot-product kernel cannot see n in advance.
     """
     v = ([1.0] + [1e-17] * (n - 1)) if n else []
     got = nat.reduce_sum(np.array(v, dtype=np.float64), _policy(Reduction.PAIRWISE))
@@ -140,7 +137,7 @@ def test_pairwise_agrees_at_tree_shape_boundaries(n: int) -> None:
 
 def test_exact_reduction_matches_math_fsum() -> None:
     """`Exact` is the ground truth for the noise-floor study, so both languages
-    must share it. CPython's half-even correction is reproduced verbatim."""
+    must share it down to CPython's half-even correction."""
     cases = [
         [1e-16, 1.0, 1e16],  # CPython's own half-even regression case
         [1e100, 1.0, -1e100, 1.0],  # catastrophic cancellation
@@ -214,8 +211,8 @@ def test_taat_and_daat_agree(model: TfidfModel, index, corpus: list[list[str]]) 
     """Two structurally unrelated traversals of the same data.
 
     TAAT accumulates over postings lists into a dense array; DAAT merges each
-    row independently and never builds an inverted index. Identical bits from
-    both leaves very little room for an indexing or accumulation bug to hide.
+    row independently with no inverted index. Identical bits from both leaves an
+    indexing or accumulation bug nowhere to hide.
     """
     rng = random.Random(31337)
     alpha = sorted({t for d in corpus for t in d})
@@ -258,7 +255,7 @@ def test_zero_query_scores_zero_everywhere(model: TfidfModel, index) -> None:  #
 # Input validation
 # ---------------------------------------------------------------------------
 def test_non_canonical_matrix_is_rejected() -> None:
-    """Ascending indices are an invariant the kernels rely on, not a hint."""
+    """Ascending indices are an invariant the kernels rely on rather than a hint."""
     with pytest.raises(ValueError, match="not canonical"):
         nat.NativeIndex(
             np.array([0, 3], dtype=np.int64),
@@ -302,10 +299,10 @@ def test_out_of_range_term_is_rejected(index) -> None:  # type: ignore[no-untype
 def test_paired_arrays_must_agree_in_length() -> None:
     """``dot`` built its two spans independently and read past the end.
 
-    With 64 indices and 1 value it consumed 63 doubles beyond the values buffer:
-    undefined behaviour reachable from pure Python with no unsafe API, and it
-    showed -- identical calls returned ``nan``, ``1.0``, ``nan``, ``nan``. The
-    reference rejects the same input, and ``NativeIndex`` already checked it;
+    With 64 indices and 1 value it read 63 doubles beyond the values buffer:
+    undefined behaviour reachable from pure Python with no unsafe API, and
+    visible as identical calls returning ``nan``, ``1.0``, ``nan``, ``nan``. The
+    reference rejects the same input and ``NativeIndex`` already checked it;
     only the free functions did not.
     """
     many = np.arange(64, dtype=np.int32)
@@ -319,8 +316,8 @@ def test_paired_arrays_must_agree_in_length() -> None:
     with pytest.raises(ValueError, match="same length"):
         nat.l2_norm(many, one, 64, 0)
 
-    # The reference refuses to build the vector at all, which is why the
-    # native path is the only way to reach the read.
+    # The reference refuses to build the vector at all, so the native path is
+    # the only route to the read.
     with pytest.raises(ValueError, match="differ in length"):
         SparseVector(indices=tuple(range(64)), values=(1.0,), dim=64)
 
@@ -329,10 +326,9 @@ def test_paired_arrays_must_agree_in_length() -> None:
 def test_a_reduction_policy_outside_the_enumeration_is_rejected(policy: int) -> None:
     """``static_cast<Reduction>(999)`` silently fell back to a policy.
 
-    This project's central claim is that the summation policy is never implicit
-    and is recorded in every run manifest. Quietly substituting one is the worst
-    available outcome: the manifest would name a policy the arithmetic did not
-    use. ``Reduction(999)`` raises in Python; it does here now too.
+    The summation policy is recorded in every run manifest, so a quiet
+    substitution leaves the manifest naming a policy the arithmetic did not use.
+    ``Reduction(999)`` raises in Python; it raises here too.
     """
     values = np.array([1.0, 2.0], dtype=np.float64)
     with pytest.raises(ValueError, match="policy"):
@@ -345,11 +341,10 @@ def test_a_reduction_policy_outside_the_enumeration_is_rejected(policy: int) -> 
 def test_every_score_taking_entry_point_rejects_nan(name: str) -> None:
     """A NaN makes ``<`` false both ways, destroying the strict weak ordering.
 
-    ``NativeRanker.rank`` re-checked, per G3; the free functions did not, and it
-    was observable: ``min_adjacent_margin_top`` returned ``inf`` where the
-    normative reference returns ``nan`` -- a bit-level divergence in a core whose
-    whole contract is bit-identity. Sorting 65,536 scores containing NaN did not
-    crash, but it is formally undefined behaviour and must not be reachable.
+    ``NativeRanker.rank`` re-checked per G3, the free functions did not, and it
+    showed: ``min_adjacent_margin_top`` returned ``inf`` where the normative
+    reference returns ``nan``. Sorting 65,536 scores containing NaN did not
+    crash, but it is formally undefined behaviour and must stay unreachable.
     """
     scores = np.array([0.9, float("nan"), 0.1], dtype=np.float64)
     extra = {"boundary_margin": (1,), "min_adjacent_margin_top": (2,), "tie_chains": (0.1,)}
@@ -366,11 +361,11 @@ def test_negative_dimensions_are_rejected_before_any_size_arithmetic(
 ) -> None:
     """These segfaulted the interpreter (SIGSEGV, rc 139) from pure Python.
 
-    ``n_docs = -1`` satisfies ``indptr.size() == n_docs + 1`` when indptr is
-    empty, so the length check waved it through; ``is_canonical()`` then called
+    ``n_docs = -1`` satisfies ``indptr.size() == n_docs + 1`` for an empty
+    indptr, so the length check passed it; ``is_canonical()`` then called
     ``front()``/``back()`` on an empty span and ``transpose()`` sized a colptr
-    from a negative count. Every later check casts to ``std::size_t``, where a
-    negative wraps to something enormous, so the guard has to come first.
+    from a negative count. Later checks cast to ``std::size_t``, where a
+    negative wraps to something enormous, so the guard comes first.
     """
     empty_i64 = np.array([], dtype=np.int64)
     empty_i32 = np.array([], dtype=np.int32)
@@ -383,14 +378,13 @@ def test_negative_dimensions_are_rejected_before_any_size_arithmetic(
 
 @pytest.mark.parametrize("values", [[-0.0], [-0.0, -0.0], [-0.0, -0.0, -0.0], [-0.0, 0.0], [0.0]])
 def test_exact_agrees_with_fsum_on_signed_zero(values: list[float]) -> None:
-    """``Exact`` is the declared cross-language ground truth, so it of all
-    policies must agree bit-for-bit.
+    """``Exact`` is the declared cross-language ground truth, so of all the
+    policies it must agree bit-for-bit.
 
     CPython's ``math_fsum`` appends the running total only ``if (x != 0.0)``;
-    the C++ pushed unconditionally. For an input of nothing but negative zeros
-    that made ``value()`` return -0.0 against the reference's +0.0. Because
-    ``-0.0 == 0.0``, neither a tolerance nor an equality check could see it --
-    only a bit comparison, which is what this project uses everywhere else.
+    the C++ pushed unconditionally, so an input of nothing but negative zeros
+    made ``value()`` return -0.0 against the reference's +0.0. Since
+    ``-0.0 == 0.0``, only a bit comparison catches it.
     """
     native = nat.reduce_sum(np.array(values, dtype=np.float64), _policy(Reduction.EXACT))
     reference = reduce_sum(values, Reduction.EXACT)

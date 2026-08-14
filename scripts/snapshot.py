@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """Emit the pipeline reproducibility digest.
 
-Prints one SHA-256 covering every number the pipeline produces on a fixed
-corpus: vocabulary, IDF, weights, norms, scores, rankings and margins, all
-hashed from raw binary64 bit patterns.
+One SHA-256 over every number the pipeline produces on a fixed corpus:
+vocabulary, IDF, weights, norms, scores, rankings and margins, all hashed from
+raw binary64 bit patterns.
 
-This exists so CI can compare the digest **across jobs** -- different operating
-systems, compilers and optimisation levels -- which no in-process test can do.
-That comparison is the acid test of ``spec_addenda.md#g13``: the platform
-logarithm differs from the correctly-rounded value in about 15% of IDF entries,
-so before that fix this digest would have differed between Linux and Windows and
-the reproducibility claim would have been false.
+Exists so CI can compare the digest across jobs (operating systems, compilers,
+optimisation levels), which no in-process test can do. That comparison is the
+acid test of ``spec_addenda.md#g13``: the platform logarithm differs from the
+correctly-rounded value in about 15% of IDF entries, and before that fix this
+digest differed between Linux and Windows.
 
 Usage::
 
@@ -52,10 +51,9 @@ QUERIES = (
 def compute() -> dict[str, str]:
     """Digest every stage, keyed by stage name.
 
-    Per-stage rather than one opaque value, so a CI failure says *where* the
-    divergence is. A mismatch in ``idf`` alone points at the logarithm; one that
-    starts at ``weights`` points at the vectoriser; one confined to ``scores``
-    points at the reduction policy.
+    Per-stage so a CI failure says where the divergence is: ``idf`` alone points
+    at the logarithm, one starting at ``weights`` at the vectoriser, one confined
+    to ``scores`` at the reduction policy.
     """
     records = list(read_jsonl(CORPUS))
     pipeline = PreprocessingPipeline()

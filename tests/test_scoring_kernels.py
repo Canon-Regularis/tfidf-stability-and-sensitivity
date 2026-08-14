@@ -1,18 +1,16 @@
 """The two Python scoring kernels, and their agreement with the cosine reference.
 
-The centrepiece is ``TAAT == DAAT == cosine_against_corpus`` on **raw bit
-patterns**. Those three share no loop nesting and no data structure: TAAT walks
-postings lists out of an inverted index into a dense accumulator, DAAT merges
-each row against the query independently, and ``cosine_against_corpus`` merges
-against a materialised sequence of document vectors. Identical binary64 output
-from all three leaves very little room for an indexing or accumulation bug to
-hide, and it is a far stronger statement than any of them matching a recorded
-expectation.
+``TAAT == DAAT == cosine_against_corpus`` on raw bit patterns. The three share
+no loop nesting and no data structure: TAAT walks postings lists out of an
+inverted index into a dense accumulator, DAAT merges each row against the query
+independently, and ``cosine_against_corpus`` merges against a materialised
+sequence of document vectors. Identical binary64 from all three leaves an
+indexing or accumulation bug nowhere to hide, and says more than any of them
+matching a recorded expectation.
 
-Nothing here uses a tolerance. ``pytest.approx`` compares numbers that are
-*close*; the property under test is that they are *the same*, and a tolerance
-would pass while quietly permitting exactly the divergence this project exists
-to detect.
+No tolerances. ``pytest.approx`` compares numbers that are close; the property
+under test is bit identity, and a tolerance would pass while permitting the
+divergence this project exists to detect.
 """
 
 from __future__ import annotations
@@ -45,8 +43,8 @@ POLICIES = list(Reduction)
 def corpus() -> list[list[str]]:
     """A corpus large enough for the comparison to be more than anecdotal.
 
-    Deliberately includes empty documents, which embed to the zero vector and so
-    exercise the zero-norm branch of both kernels on every single query.
+    Includes empty documents, which embed to the zero vector and so exercise the
+    zero-norm branch of both kernels on every query.
     """
     rng = random.Random(20260811)
     alpha = [f"t{i}" for i in range(400)]
@@ -84,18 +82,18 @@ def sv(mapping: dict[int, float], dim: int) -> SparseVector:
 # The inverted index
 # ---------------------------------------------------------------------------
 def test_transposition_is_canonical_and_complete(model: TfidfModel, index: InvertedIndex) -> None:
-    """Postings must be ascending in document id, which the scoring loops assume.
+    """Postings must ascend in document id, which the scoring loops assume.
 
-    That comes for free from the counting sort visiting rows in ascending
-    document order -- but the accumulation order, and hence every digit of every
-    score, depends on it, so it is asserted rather than trusted.
+    It follows from the counting sort visiting rows in ascending document order.
+    Accumulation order, and so every digit of every score, depends on it, hence
+    the assertion rather than trust.
     """
     assert index.is_canonical()
     assert index.nnz == model.matrix.nnz
     assert all(index.df(t) == model.vocabulary.df[t] for t in range(model.n_features))
 
-    # Every (doc, term, weight) triple in the CSR appears once in the CSC, with
-    # the identical bit pattern -- a transpose may not perturb a value.
+    # Every (doc, term, weight) triple in the CSR appears once in the CSC with
+    # the same bit pattern: a transpose may not perturb a value.
     seen = 0
     for d in range(model.n_documents):
         row = model.matrix.row(d)
@@ -111,12 +109,12 @@ def test_transposition_is_canonical_and_complete(model: TfidfModel, index: Inver
 
 
 def test_single_term_postings_are_handled(mini_model: TfidfModel) -> None:
-    """A term occurring in exactly one document: the shortest non-empty list.
+    """A term occurring in one document: the shortest non-empty postings list.
 
-    A postings list of length one is where an off-by-one in the column bounds
-    would first show. The random fixture corpus has no such term -- its smallest
-    df is 5 -- so the hand-written mini corpus is used instead, where 10 of the
-    26 vocabulary entries occur in a single document.
+    Length one is where an off-by-one in the column bounds shows first. The
+    random fixture corpus has no such term (its smallest df is 5), so the
+    hand-written mini corpus is used, where 10 of its 26 vocabulary entries
+    occur in a single document.
     """
     idx = InvertedIndex.from_csr(mini_model.matrix)
     docs = list(mini_model.matrix.rows())
@@ -162,10 +160,9 @@ def test_the_comparison_is_not_vacuous(
 ) -> None:
     """Agreement on an all-zero score vector would prove nothing.
 
-    So it is checked that the queries actually reach a substantial fraction of
-    the corpus with non-zero scores. Ten queries reach 901 documents here; the
-    threshold is set well below that so a change of seed does not turn a
-    measurement into a failure.
+    Ten queries reach 901 documents with non-zero scores here; the threshold
+    sits well below that so a change of seed does not turn a measurement into a
+    failure.
     """
     reached = 0
     for q in queries(model, corpus, 10, seed=99):
@@ -178,9 +175,9 @@ def test_scratch_reuse_is_numerically_invisible(
 ) -> None:
     """The dense accumulator survives between calls; a stale slot would leak.
 
-    The touched-list reset is ``O(|touched|)``, so it clears only what the last
-    query wrote. If that bookkeeping were wrong the contamination would be
-    silent -- a plausible score, just the wrong one.
+    The touched-list reset is ``O(|touched|)`` and clears only what the last
+    query wrote. Wrong bookkeeping there yields a plausible score that is the
+    wrong one.
     """
     qs = queries(model, corpus, 6, seed=4242)
     fresh = [taat_scores(q, index, model.norms, scratch=ScoringScratch()) for q in qs]
@@ -214,10 +211,10 @@ def test_precomputed_query_norm_changes_nothing(
 
 
 def test_long_intersections_exercise_the_pairwise_tree() -> None:
-    """Pairwise is the policy most sensitive to how the summation tree is built.
+    """Pairwise is the policy most sensitive to the shape of the summation tree.
 
-    Its base case is 128 elements, so an intersection of a few hundred terms is
-    what distinguishes a streaming binary-counter merge from any other pairwise
+    Its base case is 128 elements, so only an intersection of a few hundred
+    terms separates a streaming binary-counter merge from any other pairwise
     scheme. The generic corpus above never produces one; this does.
     """
     dim = 400
@@ -251,8 +248,8 @@ def test_empty_query_scores_zero_everywhere(
         cosine_against_corpus(empty, list(model.matrix.rows()), model.norms, policy),
     ):
         assert len(got) == model.n_documents
-        # Bit patterns, not `== 0.0`: that comparison accepts a negative zero,
-        # which would then serialise as "-0.0" and break the run digest.
+        # Bit patterns rather than `== 0.0`, which accepts a negative zero that
+        # would serialise as "-0.0" and break the run digest.
         assert all(same_bits(s, 0.0) for s in got)
 
 
@@ -277,8 +274,8 @@ def test_query_with_no_matching_term_scores_zero() -> None:
     assert all(same_bits(a, b) for a, b in zip(reference, taat, strict=True))
     assert all(same_bits(a, b) for a, b in zip(reference, daat, strict=True))
 
-    # The touched list must have stayed empty: every score comes from the initial
-    # fill, not from an accumulator that happened to sum back to zero.
+    # The touched list must have stayed empty, so every score comes from the
+    # initial fill rather than an accumulator that summed back to zero.
     scratch = ScoringScratch()
     taat_scores(query, idx, norms, scratch=scratch)
     assert scratch.touched == []
@@ -286,12 +283,12 @@ def test_query_with_no_matching_term_scores_zero() -> None:
 
 @pytest.mark.parametrize("policy", POLICIES)
 def test_zero_norm_document_scores_zero_rather_than_dividing(policy: Reduction) -> None:
-    """``cos := 0`` for a zero-norm document (section 2.3), not ``0/0``.
+    """``cos := 0`` for a zero-norm document (section 2.3) in place of ``0/0``.
 
-    A zero-norm document is common in short-text corpora and stays *rankable* at
-    score 0, so it must produce a real zero rather than a NaN -- a NaN in a sort
-    key is undefined behaviour, and these documents form the large exact-tie
-    block the section 4.5 tie-break analysis is about.
+    Zero-norm documents are common in short-text corpora and stay rankable at
+    score 0, so the result must be a real zero: a NaN in a sort key is undefined
+    behaviour, and these documents form the large exact-tie block the section
+    4.5 tie-break analysis is about.
     """
     dim = 6
     docs = [sv({0: 1.0, 2: 2.0}, dim), SparseVector.zero(dim), sv({0: 3.0}, dim)]
@@ -308,8 +305,8 @@ def test_zero_norm_document_scores_zero_rather_than_dividing(policy: Reduction) 
     assert all(same_bits(a, b) for a, b in zip(reference, taat, strict=True))
     assert all(same_bits(a, b) for a, b in zip(reference, daat, strict=True))
 
-    # A *stored* zero norm on a document that does have postings takes the same
-    # branch -- the guard is on the norm, not on the structure.
+    # A stored zero norm on a document that does have postings takes the same
+    # branch: the guard reads the norm rather than the structure.
     forced = list(norms)
     forced[0] = 0.0
     assert same_bits(taat_scores(query, idx, forced, policy)[0], 0.0)

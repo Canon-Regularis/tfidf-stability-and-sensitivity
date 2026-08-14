@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Time the native backend against the normative reference, and prove they agree.
 
-The C++20 core is justified by speed alone -- it is required to be bit-identical,
-so it can never be justified by producing a better answer. This runner is what
-turns "it is faster" from a claim into a measurement, and it refuses to print a
-single ratio until it has checked that the two backends agreed to the last bit.
+The C++20 core is required to be bit-identical, so speed is its only available
+justification. No ratio is printed until the two backends have been checked to
+agree to the last bit.
 
-Without a compiled backend it degrades to reference-only timings, which is the
-supported configuration for a contributor with no compiler rather than a
-failure. ``--reference-only`` forces that path on a machine that does have one.
+Without a compiled backend it degrades to reference-only timings, the supported
+configuration for a contributor with no compiler. ``--reference-only`` forces
+that path on a machine that does have one.
 
 Usage::
 
@@ -35,8 +34,8 @@ from tfidf_stability.benchmarks.tfidf_perf import (  # noqa: E402
 )
 from tfidf_stability.utils.io import write_json  # noqa: E402
 
-# The defaults are read off an instance rather than the class: `Workload` uses
-# `slots=True`, so the class attributes are slot descriptors, not the defaults.
+# Defaults read off an instance: `Workload` uses `slots=True`, so the class
+# attributes are slot descriptors.
 DEFAULTS = Workload()
 
 
@@ -74,8 +73,8 @@ def main() -> int:
     try:
         report = run_benchmarks(workload, repeats=args.repeats, use_native=not args.reference_only)
     except BitIdentityError as exc:
-        # Deliberately not a traceback: this is a finding about the build, not a
-        # crash in the harness, and it must not be mistaken for one.
+        # Printed as a message: a traceback here reads as a crash in the harness
+        # rather than as a finding about the build.
         print("BIT-IDENTITY FAILURE -- no timings reported", file=sys.stderr)
         print(f"  {exc}", file=sys.stderr)
         return 1

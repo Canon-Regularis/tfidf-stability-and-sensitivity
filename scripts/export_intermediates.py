@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """Export every intermediate quantity for one document (section 1.2).
 
-Section 1.2 requires that the intermediate quantities be inspectable, not just
-the final score. This writes them all out for a single document: term counts,
-term frequencies, document frequencies, IDF, the tf-idf weights and the norm --
-each with its **raw bit pattern** beside the decimal value.
+Term counts, term frequencies, document frequencies, IDF, the tf-idf weights and
+the norm, for a single document, each with its raw bit pattern beside the decimal.
 
-The hex is the point. A decimal rendering of a binary64 is a lossy summary at
-whatever precision the formatter chose, so two values that differ in the last
-ulp -- exactly the difference this study is about -- can print identically.
-``float.hex`` round-trips exactly, which makes the export usable as evidence
-rather than illustration.
+The hex is what makes this evidence. A decimal rendering of a binary64 is a lossy
+summary at whatever precision the formatter chose, so two values one ulp apart,
+the difference this study is about, can print identically. ``float.hex``
+round-trips.
 
 Usage::
 

@@ -1,14 +1,10 @@
 """CLI command implementations.
 
 Each command is a thin wrapper over a library function that emits a run
-manifest. That shape is deliberate: the manifest is the reproducibility
-contract, and making it a *side effect of every command* rather than something a
-caller remembers to request means an undocumented result cannot be produced by
-accident.
+manifest. The manifest comes as a side effect of every command rather than on
+request, so an undocumented result cannot be produced by accident.
 
-Commands are stdlib-only (``argparse``, not a framework). The reference backend
-is standard-library only by design, and a CLI dependency would undermine that
-for no benefit at this size.
+stdlib-only (``argparse``), matching the reference backend.
 """
 
 from __future__ import annotations
@@ -55,10 +51,8 @@ _DEFAULT_CONFIG = _REPO / "configs" / "default.yaml"
 def load_config(path: Path | str | None = None) -> dict[str, Any]:
     """Load a configuration, defaulting to the normative one.
 
-    The file's digest travels with the parsed content, so a manifest records
-    *which* config produced a result and not merely its values -- a comment
-    change is then visible too, which matters when the comments carry the
-    spec_addenda citations.
+    The digest travels with the parsed content, so a manifest identifies the
+    config down to its comments, which carry the spec_addenda citations.
     """
     import yaml
 
@@ -69,11 +63,10 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
     return parsed
 
 
-# Every key ``configs/default.yaml`` declares, per section. These sets are the
-# contract: a key listed here is honoured, and a key not listed is rejected.
-# The alternative -- reading a handful and ignoring the rest -- is what this
-# replaces, and it made the manifest's ``config`` block a record of what was
-# *on disk* rather than of what was *applied*.
+# Every key ``configs/default.yaml`` declares, per section. A key listed here is
+# honoured, anything else rejected. Unlisted keys used to be read and ignored,
+# which made the manifest's ``config`` block a record of what was on disk rather
+# than of what was applied.
 _PREPROCESSING_KEYS = frozenset(
     {
         "unicode_form",
@@ -94,8 +87,8 @@ _NUMERICS_KEYS = frozenset({"reduction", "log_impl"})
 
 _UNICODE_FORMS = frozenset({"NFC", "NFD", "NFKC", "NFKD"})
 
-# Absent keys must behave exactly as they did before this was wired up, so the
-# fallbacks are read off the dataclasses themselves rather than restated here.
+# Fallbacks come off the dataclasses rather than being restated, so an absent
+# key behaves as it did before the config was wired up.
 _NORM_DEFAULTS = NormalisationConfig()
 _TOKEN_DEFAULTS = TokenisationConfig()
 _PRE_DEFAULTS = PreprocessingConfig()
@@ -128,7 +121,7 @@ def _enum(kind: type[_E], value: Any, *, where: str) -> _E:
 
 
 def pipeline_from_config(config: dict[str, Any]) -> PreprocessingPipeline:
-    """Build the preprocessing pipeline the configuration actually describes."""
+    """Build the preprocessing pipeline the configuration describes."""
     pre = _section(config, "preprocessing", _PREPROCESSING_KEYS)
 
     form = pre.get("unicode_form", _NORM_DEFAULTS.unicode_form)
@@ -162,12 +155,11 @@ def pipeline_from_config(config: dict[str, Any]) -> PreprocessingPipeline:
 
 
 def vectoriser_from_config(config: dict[str, Any]) -> TfidfVectoriser:
-    """Build the vectoriser the configuration actually describes.
+    """Build the vectoriser the configuration describes.
 
-    ``numerics.reduction`` and ``numerics.log_impl`` matter most here: the first
-    decides the summation order every norm uses, and the second is G13's
-    cross-platform bit-exactness switch. Both were previously read from the
-    file, hashed into the manifest, and then dropped on the floor.
+    ``numerics.reduction`` fixes the summation order every norm uses and
+    ``numerics.log_impl`` is G13's cross-platform bit-exactness switch. Both were
+    once read from the file, hashed into the manifest, and then ignored.
     """
     vocab = _section(config, "vocabulary", _VOCABULARY_KEYS)
     numerics = _section(config, "numerics", _NUMERICS_KEYS)
@@ -240,7 +232,7 @@ def cmd_build_corpus(args: argparse.Namespace) -> int:
     manifest.write(out.with_suffix(".manifest.json"))
 
     # Digests only, never the output path: the path is the caller's choice and
-    # would put a machine-specific value into an otherwise reproducible record.
+    # would put a machine-specific value into a reproducible record.
     for artefact, sha256 in (
         ("model", model.digest()),
         ("vocabulary", model.vocabulary.digest()),
@@ -261,8 +253,8 @@ def cmd_build_corpus(args: argparse.Namespace) -> int:
 def cmd_inspect(args: argparse.Namespace) -> int:
     """Print a document's intermediate quantities (README section 1.2).
 
-    Section 1.2 requires that intermediates stay inspectable rather than being
-    abstracted away; this is the command that honours it from a shell.
+    Section 1.2 requires the intermediates stay inspectable; this reaches them
+    from a shell without a Python session.
     """
     model = load_model(args.model)
     if args.doc_id not in model.doc_ids:
@@ -275,9 +267,8 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 def cmd_verify(args: argparse.Namespace) -> int:
     """Re-derive a saved model's digests and compare against its manifest.
 
-    The check the reproducibility claim rests on: it answers "does this file
-    still contain what the manifest says it does?" without needing the original
-    corpus.
+    Does this file still contain what the manifest says it does? Answered
+    without the original corpus.
     """
     model = load_model(args.model)
     manifest_path = Path(args.model).with_suffix(".manifest.json")
@@ -300,10 +291,9 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print("\n".join(failures))
         return 1
 
-    # A build with fast-math or architecture tuning is not allowed to produce
-    # published numbers, so report what the manifest actually recorded. Absence
-    # of a native block means the pure-Python reference produced this, which is
-    # reproducible by construction.
+    # A build with fast-math or architecture tuning may not reproduce published
+    # numbers, so report what the manifest recorded. No native block means the
+    # pure-Python reference produced this, reproducible on its own.
     native = recorded.get("environment", {}).get("native")
     reproducible = True if native is None else bool(native.get("reproducible", False))
 
@@ -318,9 +308,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
 def cmd_info(args: argparse.Namespace) -> int:
     """Report the environment a run would execute in.
 
-    Worth having as its own command: the first question about a surprising
-    number is which build produced it, and this answers that without running an
-    experiment.
+    The first question about a surprising number is which build produced it.
+    This answers it without running an experiment.
     """
     payload: dict[str, Any] = {"environment": environment_block()}
     if args.config:

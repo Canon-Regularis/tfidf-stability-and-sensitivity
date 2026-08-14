@@ -1,13 +1,11 @@
 """``tfidf-stability`` command-line entry point.
 
-Built on ``argparse`` rather than a CLI framework: the normative backend is
-standard-library only by design, and adding a dependency for a handful of
-subcommands would undermine that for no benefit.
+``argparse`` rather than a CLI framework: the normative backend is
+standard-library only, and a dependency for a handful of subcommands would
+undermine that.
 
-Every command that produces a result also writes a run manifest beside it. That
-is not a convenience -- it is what makes a published number traceable to the
-build, configuration and data that produced it, and making it automatic means an
-unrecorded result cannot be produced by forgetting a flag.
+Every result-producing command writes a run manifest beside its output, so no
+flag can be forgotten into an unrecorded result.
 """
 
 from __future__ import annotations
@@ -98,8 +96,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Only on request: an unconfigured package logger leaves the logging system
-    # exactly as the caller had it, which is what makes this entry point safe to
-    # call from a test or a notebook as well as from a shell.
+    # as the caller had it, so this entry point is safe to call from a test or a
+    # notebook as well as from a shell.
     if getattr(args, "log_level", None):
         configure(
             level=args.log_level.upper(),

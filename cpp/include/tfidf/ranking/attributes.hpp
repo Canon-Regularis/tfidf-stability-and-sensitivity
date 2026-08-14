@@ -1,15 +1,14 @@
 // Tie-break attributes, as they cross the language boundary.
 //
 // The native side never builds a rank encoding and never compares a rational.
-// Python does that once per corpus, in unbounded-precision integer arithmetic,
-// and hands over the resulting `int32` ranks as data. This is the same move
-// `spec_addenda.md#g13` makes for `idf`: compute the delicate thing once, in
-// exact arithmetic, on the Python side.
+// Python does that once per corpus in unbounded-precision integer arithmetic
+// and hands over `int32` ranks as data, the same move `spec_addenda.md#g13`
+// makes for `idf`.
 //
-// The payoff is that the cross-language question stops being "do two
-// rational-comparison implementations agree semantically?" and becomes
-// `py_ranks == cpp_ranks`, an integer equality. It also removes any possibility
-// of overflow from the hot path, since no multiplication happens there at all.
+// So the cross-language question is `py_ranks == cpp_ranks`, an integer
+// equality, rather than whether two rational-comparison implementations agree
+// semantically. No multiplication happens on the hot path, so nothing there can
+// overflow.
 #pragma once
 
 #include <tfidf/core/types.hpp>
@@ -23,8 +22,8 @@ namespace tfidf::ranking {
 /// The maximum number of tie-break attributes a key can carry.
 ///
 /// README section 2.3.1 names three (popularity, rating, engagement) before the
-/// identifier. Four keeps `SortKey` at exactly 32 bytes -- two per cache line --
-/// with a slot spare.
+/// identifier. Four keeps `SortKey` at 32 bytes, two per cache line, with a
+/// slot spare.
 inline constexpr std::size_t kMaxAttributes = 4;
 
 /// Dense integer ranks for one corpus: `n_attrs` rows of `n_docs` entries,
@@ -44,11 +43,11 @@ struct RankTable {
                      static_cast<std::size_t>(doc)];
     }
 
-    /// Whether the identifier ranks really are a bijection onto `0..n_docs-1`.
+    /// Whether the identifier ranks are a bijection onto `0..n_docs-1`.
     ///
-    /// This is the precondition for the sort key being *injective*, and hence
-    /// for the sorted permutation being unique. Everything this layer claims
-    /// rests on it, so it is checked rather than assumed.
+    /// Precondition for the sort key being injective, and hence for the sorted
+    /// permutation being unique. Everything this layer claims rests on it, so
+    /// it is checked rather than assumed.
     [[nodiscard]] bool id_ranks_are_a_bijection() const {
         std::vector<char> seen(static_cast<std::size_t>(n_docs), 0);
         for (const std::int32_t r : id_ranks) {
@@ -63,9 +62,9 @@ struct RankTable {
 
 /// Exact rational comparison, for the C++-only tests and benchmarks.
 ///
-/// The published path never calls this -- Python has already reduced ratios to
-/// ranks. It exists so the native test suite can verify that the two languages
-/// agree on the *rule*, not merely on the pre-computed answer.
+/// The published path never calls this; Python has already reduced ratios to
+/// ranks. It lets the native suite check that the two languages agree on the
+/// rule rather than only on the pre-computed answer.
 ///
 /// Uses a 128-bit intermediate where the compiler provides one. The Python side
 /// separately guarantees the products fit in 64 bits, so this is belt and
@@ -75,9 +74,8 @@ struct RankTable {
                                      std::int64_t b_num,
                                      std::int64_t b_den) noexcept {
 #if defined(__SIZEOF_INT128__)
-// __int128 is a compiler extension, so -Wpedantic objects. It is the right tool
-// here and the objection is purely about ISO conformance, so it is silenced
-// locally rather than by relaxing the project's warning set.
+// __int128 is a compiler extension, so -Wpedantic objects on ISO conformance
+// grounds alone. Silenced here rather than by relaxing the project's warnings.
 #  if defined(__GNUC__) || defined(__clang__)
 #    pragma GCC diagnostic push
 #    pragma GCC diagnostic ignored "-Wpedantic"

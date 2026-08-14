@@ -1,16 +1,14 @@
 """User profiles and the leave-one-out protocol (section 7.1, G10, G11).
 
 Section 7.1 describes leave-one-out in four sentences and leaves five decisions
-open. Each is pinned in ``profiles/query_modes.py`` and tested here, because
-each changes the reported margin distribution and none of them is recoverable
-from the paper.
+open. Each is pinned in ``profiles/query_modes.py`` and tested here: each moves
+the reported margin distribution, and none is recoverable from the paper.
 
-The one that matters most is decision 3 -- whether the user's *remaining*
-profile items stay in the candidate set.
-:func:`test_leaving_profile_items_in_lets_them_retrieve_themselves` demonstrates
-what goes wrong without it: those documents contributed the query's text, so they
-occupy the top ranks by construction and the measurement stops being about
-retrieval at all.
+Decision 3 (whether the user's remaining profile items stay in the candidate
+set) matters most. Those documents contributed the query's text, so without the
+exclusion they take the top ranks and the measurement describes self-similarity
+instead of retrieval. See
+:func:`test_leaving_profile_items_in_lets_them_retrieve_themselves`.
 """
 
 from __future__ import annotations
@@ -68,8 +66,8 @@ def interactions() -> list[Interaction]:
 # Grouping and eligibility (G10 decisions 4 and 5)
 # ---------------------------------------------------------------------------
 def test_grouping_is_canonically_ordered_not_arrival_ordered() -> None:
-    """Interaction files are not order-stable, and a concatenated profile is
-    order-*sensitive*, so the order is canonicalised rather than inherited."""
+    """Interaction files are not order-stable and a concatenated profile is
+    order-sensitive, so the order is canonicalised rather than inherited."""
     forward = group_interactions(interactions())
     backward = group_interactions(list(reversed(interactions())))
     assert forward == backward
@@ -107,9 +105,9 @@ def test_leave_one_out_needs_at_least_two_interactions() -> None:
 def test_text_concat_is_length_weighted() -> None:
     """The consequence section 7.1 does not draw out.
 
-    A verbose item contributes more tokens, so it pulls the profile towards
-    itself even though it is one item among several. That is a real fragility,
-    which is why the vector modes exist as ablations.
+    A verbose item contributes more tokens and so pulls the profile towards
+    itself while being one item among several. The vector modes exist as
+    ablations for it.
     """
     features = {"short": ("a",), "long": tuple(["b"] * 50)}
     profile = build_profile("u", ("short", "long"), features)
@@ -129,8 +127,8 @@ def test_vector_mean_weights_items_equally() -> None:
 def test_vector_sum_and_mean_give_the_same_similarities() -> None:
     """They differ by a positive scalar, and cosine is scale-invariant.
 
-    The sum is kept anyway because the *norm* differs, and sections 4.2-4.3
-    state their bounds in terms of norms.
+    The sum is kept because the norm differs, and sections 4.2-4.3 state their
+    bounds in terms of norms.
     """
     m = model()
     docs = [m.document(i) for i in range(m.n_documents)]
@@ -211,10 +209,9 @@ def test_the_remaining_profile_items_are_excluded() -> None:
 def test_leaving_profile_items_in_lets_them_retrieve_themselves() -> None:
     """Why decision 3 is not a detail.
 
-    The remaining profile items literally contributed the query's tokens, so
-    without the exclusion they occupy the top of the ranking by construction --
-    and the margin distribution then describes self-similarity rather than
-    retrieval.
+    The remaining profile items contributed the query's tokens, so without the
+    exclusion they take the top of the ranking and the margin distribution
+    describes self-similarity rather than retrieval.
     """
     m = model()
     docs = [m.document(i) for i in range(m.n_documents)]
@@ -317,7 +314,7 @@ def test_a_degenerate_query_is_flagged() -> None:
 
 
 # ---------------------------------------------------------------------------
-# G19 / G20 -- consequences the paper does not draw out
+# G19 / G20: consequences the paper does not draw out
 # ---------------------------------------------------------------------------
 def test_the_candidate_spread_is_recorded(  # G19
 ) -> None:
@@ -335,9 +332,9 @@ def test_concatenation_is_order_sensitive_at_the_seams(  # G20
 ) -> None:
     """Why the item order has to be canonicalised.
 
-    Concatenating in a different order changes the tokens that meet at the
-    boundary between two items -- and with n-grams enabled that changes the
-    feature set, hence df, hence every score.
+    A different concatenation order changes the tokens that meet at the boundary
+    between two items; with n-grams enabled that changes the feature set, hence
+    df, hence every score.
     """
     features = {"a": ("x", "y"), "b": ("p", "q")}
     forward = build_profile("u", ("a", "b"), features).features
@@ -351,8 +348,8 @@ def test_the_gap_sentinel_ablation_blocks_seam_ngrams(  # G20
 ) -> None:
     """The available fix, offered as an ablation rather than adopted silently.
 
-    With a sentinel between items, no n-gram can span the seam, so the profile
-    becomes a function of the item *set* rather than of its order.
+    With a sentinel between items no n-gram can span the seam, so the profile
+    becomes a function of the item set rather than of its order.
     """
     from tfidf_stability.preprocessing.ngrams import generate_ngrams
     from tfidf_stability.preprocessing.tokenise import GAP
@@ -371,8 +368,8 @@ def test_the_gap_sentinel_ablation_blocks_seam_ngrams(  # G20
 
 def test_vector_sum_and_mean_differ_only_in_norm(  # G21
 ) -> None:
-    """They differ by a positive scalar, so no similarity can tell them apart --
-    but the norms differ, and sections 4.2-4.3 bound in terms of norms."""
+    """They differ by a positive scalar, so no similarity can tell them apart;
+    the norms differ, and sections 4.2-4.3 bound in terms of norms."""
     m = model()
     vectors = {
         aggregation: embed_profile(
@@ -392,14 +389,14 @@ def test_vector_sum_and_mean_differ_only_in_norm(  # G21
 # What aggregation actually joins (spec_addenda G28)
 # ---------------------------------------------------------------------------
 def test_aggregation_joins_feature_streams_and_so_makes_no_seam_ngrams() -> None:
-    """``build_profile`` concatenates *preprocessed streams*, not text.
+    """``build_profile`` concatenates preprocessed streams rather than text.
 
     G20 and this function's own docstring both used to say n-grams are generated
     over the concatenated stream, so item order changes the features produced at
     the seams. No pass runs over the joined result, so no seam n-gram is ever
-    produced -- and the order-sensitivity that motivated the canonical ordering
+    produced, and the order-sensitivity that motivated the canonical ordering
     does not exist either. Pinned so the gap between the spec and the code
-    cannot quietly close in the wrong direction.
+    cannot close in the wrong direction.
     """
     from tfidf_stability.preprocessing.pipeline import PreprocessingPipeline
 

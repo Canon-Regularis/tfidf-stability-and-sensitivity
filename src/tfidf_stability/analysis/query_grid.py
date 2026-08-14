@@ -1,41 +1,34 @@
 """The section 7.1 query grid, shared by every experiment runner.
 
-Why this exists
----------------
-Section 7.1 specifies how queries are constructed: **user-profile** queries and
-**leave-one-out** folds, with item-as-query implemented but not evaluated. The
-experiment runners originally used truncated document prefixes instead, which is
-a different protocol and a much easier one -- a document prefix always retrieves
-its own source document at high similarity, whereas a leave-one-out fold has to
-find a held-out item from the *rest* of a user's history.
+Section 7.1 constructs queries as user-profile queries and leave-one-out folds,
+with item-as-query implemented but not evaluated. The experiment runners
+originally used truncated document prefixes, a different and much easier
+protocol: a prefix always retrieves its own source document at high similarity,
+whereas a fold has to find a held-out item from the rest of a user's history.
+That moves the score distribution, the margin distribution and every A1 number,
+so both runners now go through the grid built here.
 
-That difference is not cosmetic. It changes the score distribution, the margin
-distribution and therefore every A1 number, so the two must not be conflated.
-This module builds the specified grid, and both runners go through it.
+Per-query candidate sets
+------------------------
+Each query carries its own exclusions, so the candidate set differs per query
+(G19). A fold excludes the remaining profile items (they contributed the query
+text and would otherwise retrieve themselves) and keeps the target scoreable.
+Consequences:
 
-The candidate set moves, and that is the point
-----------------------------------------------
-Each query carries its own exclusions, so **the candidate set differs per query**
-(G19). A fold excludes the remaining profile items -- they contributed the query
-text and would otherwise retrieve themselves -- while deliberately keeping the
-*target* scoreable.
-
-Consequences that must not be papered over:
-
-* ``N`` differs between queries, so ``k`` may exceed the candidate count for some
-  of them. Those are reported, not silently clamped.
-* Margins are computed over the candidate scores only. A margin computed over the
-  full corpus would include documents the query was never allowed to retrieve,
-  which would inflate the apparent separation.
+* ``N`` differs between queries, so ``k`` may exceed the candidate count. Those
+  queries are reported rather than silently clamped.
+* Margins are computed over the candidate scores only. Over the full corpus they
+  would include documents the query could never retrieve and would inflate the
+  apparent separation.
 * The attribute table must be restricted to the same subset, or the tie-break
-  would rank over documents that are not candidates.
+  ranks over non-candidates.
 
 Degenerate queries
 ------------------
-A profile can be empty after preprocessing, and a query can be non-empty yet
-embed to the zero vector when every feature is out of vocabulary. Both are
-legitimate section 7.1 outcomes and both are counted separately, because G3
-excludes them from margin distributions but keeps them in ablations.
+A profile can be empty after preprocessing, and a non-empty query can embed to
+the zero vector when every feature is out of vocabulary. Both are legitimate
+section 7.1 outcomes and are counted separately: G3 excludes them from margin
+distributions and keeps them in ablations.
 """
 
 from __future__ import annotations
@@ -67,7 +60,7 @@ class EvaluatedQuery:
     mode: str
     scores: tuple[float, ...]
     #: Attribute table restricted to this query's candidates, so the tie-break
-    #: ranks over exactly the documents the query was allowed to retrieve.
+    #: only ranks documents the query was allowed to retrieve.
     table: AttributeTable
     candidate_ids: tuple[str, ...]
     target: str | None
@@ -79,18 +72,16 @@ class EvaluatedQuery:
 
     @property
     def is_zero_vector(self) -> bool:
-        """Every score is zero, so the ranking is decided purely by attributes.
+        """Every score is zero, so attributes alone decide the ranking.
 
         Observational rather than structural: a query can be non-empty and still
-        embed to the zero vector when every feature is out of vocabulary, and it
-        is the observable condition that makes the ranking pure-attribute.
+        embed to the zero vector when every feature is out of vocabulary.
 
-        The emptiness guard is not redundant. ``all()`` over no scores is
-        ``True``, so a query with *no candidates* answered yes and was counted in
-        the published ``n_zero_vector`` as a pure-attribute ranking. It is not
-        one: there is nothing to rank, by attributes or otherwise. No current
-        dataset produces an empty candidate set, so no published number moves --
-        but the statistic was one degenerate corpus away from being wrong.
+        The emptiness guard earns its place. ``all()`` over no scores is
+        ``True``, so a query with no candidates once answered yes and entered
+        the published ``n_zero_vector`` as a pure-attribute ranking, with
+        nothing there to rank. No current dataset produces an empty candidate
+        set, so no published number moves.
         """
         return bool(self.scores) and all(s == 0.0 for s in self.scores)
 
@@ -125,8 +116,8 @@ class QueryGrid:
             "n_queries": len(self.queries),
             "n_degenerate_profiles": self.n_degenerate,
             "n_zero_vector_queries": self.n_zero_vector,
-            # The candidate set varies per query (G19), so a single N would be
-            # a fiction. Both ends are reported.
+            # Candidate sets vary per query (G19), so a single N would be a
+            # fiction; report both ends.
             "n_candidates_min": min((q.n_candidates for q in self.queries), default=0),
             "n_candidates_max": max((q.n_candidates for q in self.queries), default=0),
         }
@@ -150,19 +141,19 @@ def build_query_grid(
         doc_ids: Corpus order, used to size the candidate sets.
         mode: Which construction. Item-as-query is implemented in
             :mod:`~tfidf_stability.profiles.query_modes` but section 7.1
-            excludes it from the reported experiments, so it is not offered here.
+            excludes it from the reported experiments, so it is rejected here.
         min_interactions: Eligibility threshold.
         exclude_profile_items: G10 decision 3.
         limit: Cap the number of queries, taking a deterministic prefix. Every
-            leave-one-out fold of every eligible user is a lot of queries; the
-            cap keeps CI fast. Capping is *reported*, never silent.
+            fold of every eligible user is a lot of queries and the cap keeps CI
+            fast. Capping is always reported.
 
     Raises:
         ValueError: If ``mode`` is item-as-query.
     """
-    # The loaders hand back plain triples; group_interactions wants the typed
-    # record, whose `weight` is deliberately not used for aggregation (section
-    # 7.1 specifies an unweighted aggregation) but is available for eligibility.
+    # Loaders hand back plain triples; group_interactions wants the typed record.
+    # Its `weight` feeds eligibility only, since section 7.1 specifies an
+    # unweighted aggregation.
     grouped = group_interactions(
         Interaction(user_id=u, doc_id=d, weight=w) for u, d, w in interactions
     )
@@ -190,8 +181,8 @@ def build_query_grid(
         )
 
     if limit is not None and len(query_set.queries) > limit:
-        # A deterministic prefix, not a sample: the grid must not move when the
-        # cap changes, or two runs at different caps become incomparable.
+        # A deterministic prefix rather than a sample: the grid must not move
+        # when the cap changes, or two runs at different caps are incomparable.
         query_set = QuerySet(
             queries=query_set.queries[:limit],
             mode=query_set.mode,
@@ -217,8 +208,7 @@ def _score_one(
     embedded = TfidfVectoriser.transform_query(list(query.features), model)
     scores = cosine_against_corpus(embedded, documents, norms, model.reduction)
 
-    # Restricted to the same subset: ranking over documents the query may not
-    # retrieve would let the tie-break consider non-candidates.
+    # Same subset as the scores, so the tie-break cannot reach a non-candidate.
     table = AttributeTable.from_records([records[i] for i in candidates])
 
     return EvaluatedQuery(
@@ -243,9 +233,9 @@ def evaluate(
     n_degenerate = 0
     for query in query_set.queries:
         if query.is_degenerate:
-            # No features at all. Counted and skipped: scoring it would produce
-            # an all-zero vector indistinguishable from a genuine out-of-
-            # vocabulary query, and the two are different findings.
+            # No features at all. Scoring it would give an all-zero vector
+            # indistinguishable from an out-of-vocabulary query, and those are
+            # different findings, so count it here and skip.
             n_degenerate += 1
             continue
         evaluated.append(_score_one(query, model, records, doc_ids))

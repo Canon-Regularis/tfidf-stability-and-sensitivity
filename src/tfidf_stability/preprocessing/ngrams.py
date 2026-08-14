@@ -3,17 +3,16 @@
 Two decisions are pinned here, both of which change the vocabulary and therefore
 every number downstream. See ``docs/spec_addenda.md#g7``.
 
-**The joiner is ASCII Unit Separator, not a space.** After normalisation and
+The joiner is ASCII Unit Separator. After normalisation and
 tokenisation no token can contain a control character, so ``\\x1f`` cannot occur
-inside a token. That makes the token-sequence to n-gram encoding *injective*: the
-bigram ("new", "york") and a hypothetical single token "new york" map to
-different vocabulary entries, and an n-gram can always be split back into its
-constituents. A space joiner would conflate them.
+inside a token. The token-sequence to n-gram encoding is therefore injective:
+the bigram ("new", "york") and a hypothetical single token "new york" land on
+different vocabulary entries, and an n-gram splits back into its constituents.
+A space joiner conflates them.
 
-**N-grams never span a gap sentinel.** A gap marks a removed stopword or a hard
-boundary. Allowing a bigram to bridge one would manufacture features that appear
-in no document -- "king of pop" becoming "king pop" -- which is an artefact of
-preprocessing order rather than a property of the text.
+N-grams never span a gap sentinel. A gap marks a removed stopword or a hard
+boundary; bridging one manufactures features that appear in no document ("king
+of pop" becoming "king pop"), an artefact of preprocessing order.
 """
 
 from __future__ import annotations
@@ -47,8 +46,8 @@ def generate_ngrams(
         joiner: Separator placed between constituents. Do not change without
             re-reading the injectivity argument in this module's docstring.
         cross_gaps: If ``True``, n-grams may bridge a gap sentinel. Off by
-            default and off in the normative configuration; exposed only so the
-            effect can be measured as an ablation.
+            default and in the normative configuration; exposed so the effect can
+            be measured as an ablation.
 
     Returns:
         N-grams in order. Unigrams come from the same pass, so the relative order
@@ -64,7 +63,7 @@ def generate_ngrams(
 
     # Segment on gap sentinels; each segment is n-grammed independently. When
     # bridging is permitted the sentinels are dropped rather than treated as
-    # tokens -- they are boundary markers, never features in their own right.
+    # tokens: they are boundary markers, never features in their own right.
     segments: list[Sequence[str]] = (
         [[t for t in tokens if t != GAP]] if cross_gaps else _split_on_gaps(tokens)
     )
@@ -102,15 +101,15 @@ def _split_on_gaps(tokens: Sequence[str]) -> list[Sequence[str]]:
 def split_ngram(ngram: str, joiner: str = JOINER) -> list[str]:
     """Recover the constituent tokens of an n-gram.
 
-    Well-defined precisely because the joiner cannot occur inside a token, which
-    is what makes the encoding injective. Used by the intermediate-inspection
-    tooling required by README section 1.2.
+    Well-defined because the joiner cannot occur inside a token, which is what
+    makes the encoding injective. Used by the intermediate-inspection tooling of
+    README section 1.2.
     """
     return ngram.split(joiner)
 
 
 def ngram_order(ngram: str, joiner: str = JOINER) -> int:
-    """The order (n) of an n-gram, i.e. how many tokens it comprises."""
+    """The order (n) of an n-gram: how many tokens it comprises."""
     return ngram.count(joiner) + 1
 
 

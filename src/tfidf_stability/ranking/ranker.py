@@ -3,13 +3,12 @@
 Produces a :class:`Ranking`: a total order over documents, together with the
 sorted score array that margins and tie groups are computed from.
 
-One structural rule governs the API, and it is worth roughly three orders of
-magnitude on the experiment grid: **the sort depends on neither ``k`` nor
-``tau``.** A ranking is a function of ``(scores, table, priority)`` alone. So
-section 7's grid is not "queries x k-values x tau-values" rankings, it is
-"queries x 3 operators", with every ``k`` and every ``tau`` read off the result
-afterwards. :func:`rank` therefore takes no ``k``, and the margin and tie-group
-modules take a *sorted score array* rather than a ``Ranking``.
+The sort depends on neither ``k`` nor ``tau``: a ranking is a function of
+``(scores, table, priority)`` alone. Section 7's grid is therefore
+"queries x 3 operators" rather than "queries x k-values x tau-values", with every
+``k`` and ``tau`` read off the result afterwards, worth roughly three orders of
+magnitude. So :func:`rank` takes no ``k``, and the margin and tie-group modules
+take a sorted score array rather than a ``Ranking``.
 """
 
 from __future__ import annotations
@@ -46,11 +45,10 @@ __all__ = [
 class Selection(str, Enum):
     """Which selection algorithm produced an order.
 
-    All of these must yield the *identical* permutation, because the comparator
-    is a strict total order. That is the point of enumerating them: the
-    agreement test is the operational content of "sort stability is irrelevant
-    here", and it is the ranking analogue of the ``TAAT == DAAT`` check in the
-    scoring layer.
+    All of these must yield the identical permutation, since the comparator is a
+    strict total order. The agreement test over them is the operational content
+    of "sort stability is irrelevant here", and the ranking analogue of the
+    ``TAAT == DAAT`` check in the scoring layer.
     """
 
     FULL_SORT = "full_sort"
@@ -67,11 +65,10 @@ class Selection(str, Enum):
 class Ranking:
     """A total order over documents, plus everything derived from the scores.
 
-    The load-bearing asymmetry: **``order`` may be truncated by a top-k
-    selection; ``sorted_scores`` never is.** Truncating the document order is
-    what makes partial selection worth doing; keeping the full score array is
-    what keeps margins and tie groups answerable at every ``k`` and every
-    ``tau`` without re-ranking.
+    ``order`` may be truncated by a top-k selection; ``sorted_scores`` never is.
+    Truncating the document order is what makes partial selection worth doing,
+    and keeping the full score array keeps margins and tie groups answerable at
+    every ``k`` and ``tau`` without re-ranking.
 
     Attributes:
         order: Document indices, best first. Length ``n_selected``.
@@ -79,11 +76,10 @@ class Ranking:
         scores: The raw score vector, index-aligned to documents.
         operator: The operator's name.
         key_digest: Identity of (operator, attribute table), for the manifest.
-        query_degenerate: Every score is exactly zero, so the order is decided
-            entirely by attributes. Defined *observationally* rather than as
-            "the query vector was zero", because that is not checkable from the
-            ranker's inputs and the observable condition is the one that matters.
-        n_zero_norm_docs: Passed in, not derived -- this module has no
+        query_degenerate: Every score is exactly zero, so the attributes decide
+            the order alone. Defined observationally, since "the query vector was
+            zero" is not checkable from the ranker's inputs.
+        n_zero_norm_docs: Passed in rather than derived; this module has no
             dependency on ``vectorisation``.
         k_effective: The clamped ``k`` when lenient mode clamped one; ``None``
             for a full ranking.
@@ -123,7 +119,7 @@ class Ranking:
         return self.order[:k]
 
     def score_at_rank(self, j: int) -> float:
-        """``score(r_j)`` for the paper's **1-indexed** rank ``j``.
+        """``score(r_j)`` for the paper's 1-indexed rank ``j``.
 
         Ranks are 1-indexed in the public API to match ``r_1 ... r_n`` and
         0-indexed in the arrays beneath it.
@@ -133,7 +129,7 @@ class Ranking:
         return self.sorted_scores[j - 1]
 
     def rank_of(self, doc: int) -> int:
-        """The **1-indexed** rank of a document, which must have been selected."""
+        """The 1-indexed rank of a document, which must have been selected."""
         try:
             return self.order.index(doc) + 1
         except ValueError:
@@ -145,8 +141,8 @@ class Ranking:
     def order_within(self, documents: Sequence[int]) -> tuple[int, ...]:
         """``documents`` restricted to this ranking's order.
 
-        Used by the ordering distances of stage 5, which compare two operators
-        over a tie group or a top-k set.
+        Used by the stage 5 ordering distances, which compare two operators over
+        a tie group or a top-k set.
         """
         wanted = set(documents)
         return tuple(d for d in self.order if d in wanted)
@@ -155,9 +151,9 @@ class Ranking:
 def sorted_scores_desc(scores: Sequence[float]) -> tuple[float, ...]:
     """Scores in non-increasing order.
 
-    Sorted as raw doubles, independently of the ranking: this array is shared by
-    all three operators and by every ``k`` and ``tau``, so it is worth computing
-    once, and it is what makes margins provably tie-break independent.
+    Sorted as raw doubles, independently of the ranking. All three operators and
+    every ``k`` and ``tau`` share this array, and it is what makes margins
+    provably tie-break independent.
     """
     return tuple(sorted(scores, reverse=True))
 
@@ -169,14 +165,14 @@ def _select(keys: Sequence[tuple[float, ...]], m: int, how: Selection) -> tuple[
     if how is Selection.FULL_SORT:
         return tuple(sorted(idx, key=keys.__getitem__))[:m]
     if how is Selection.STABLE_SORT:
-        # Python's sort is always stable; listed separately because the
-        # agreement test's point is that stability cannot matter here.
+        # Python's sort is always stable; enumerated separately so the agreement
+        # test can show stability cannot matter here.
         return tuple(sorted(idx, key=lambda i: keys[i]))[:m]
     if how is Selection.HEAP_ALL:
         return tuple(heapq.nsmallest(n, idx, key=keys.__getitem__))[:m]
     if how is Selection.HEAP_TOP_K:
         return tuple(heapq.nsmallest(m, idx, key=keys.__getitem__))
-    # Insertion sort: deliberately naive, as an independent implementation.
+    # Insertion sort: naive, as an independent implementation.
     out: list[int] = []
     for i in idx:
         lo, hi = 0, len(out)
@@ -218,17 +214,17 @@ def rank(
 
     Raises:
         EmptyCorpusError: If there are no documents.
-        TfidfStabilityError: If any score is NaN or infinite. This is raised in
-            **lenient mode too**: ``spec_addenda.md#g3`` lists non-finite scores
-            among the *rejected* inputs, not among the legitimate degenerate
-            grid points, and a NaN in a sort key is undefined behaviour in the
-            native backend rather than merely a wrong answer.
+        TfidfStabilityError: If any score is NaN or infinite, in lenient mode
+            too: ``spec_addenda.md#g3`` lists non-finite scores among the
+            rejected inputs rather than the legitimate degenerate grid points,
+            and a NaN in a sort key is undefined behaviour in the native backend
+            rather than merely a wrong answer.
     """
     n = len(scores)
     if n == 0:
         raise EmptyCorpusError("cannot rank an empty corpus")
     # One O(N) pass guarding an O(N log N) sort: under 1% overhead, and the only
-    # thing standing between a corrupt score vector and undefined behaviour.
+    # thing between a corrupt score vector and undefined behaviour.
     check_finite(scores, "scores")
 
     keys = build_keys(scores, table, spec)
@@ -261,10 +257,9 @@ def rank_top_k(
 ) -> Ranking:
     """Rank only the top ``min(k + 1, N)`` documents.
 
-    ``k + 1``, not ``k``: the boundary margin ``m_k = score(r_k) -
-    score(r_{k+1})`` needs the first document *outside* the top-k, and section
-    7.3 stratifies every disagreement rate by ``m_k``. A top-k that cannot
-    report its own boundary margin would be useless here.
+    ``k + 1`` because the boundary margin ``m_k = score(r_k) - score(r_{k+1})``
+    needs the first document outside the top-k, and section 7.3 stratifies every
+    disagreement rate by ``m_k``.
 
     ``sorted_scores`` is still complete, so margins and tie groups remain
     answerable.
@@ -304,10 +299,10 @@ def rank_all_operators(
 ) -> dict[str, Ranking]:
     """Rank under several operators, sharing one ``sorted_scores`` object.
 
-    The sharing is the point. Margins depend only on the sorted score multiset,
-    so they are identical under every operator -- and sharing the array object
-    makes that true *by construction* rather than by coincidence, and turns the
-    corresponding test into a regression guard on the sharing itself.
+    Margins depend only on the sorted score multiset, so they are identical under
+    every operator. Sharing the array object makes that structural rather than
+    coincidental, and turns the corresponding test into a regression guard on the
+    sharing itself.
     """
     shared = sorted_scores_desc(scores)
     return {

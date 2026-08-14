@@ -11,8 +11,8 @@ version = "0.2.0"
 description = "Numerical stability and perturbation behaviour in TF-IDF-based similarity systems"
 readme = "README.md"
 requires-python = ">=3.11"
-# Code is Apache-2.0; the prose and generated reports remain CC BY 4.0.
-# See LICENSE.md for the split and its rationale.
+# Code is Apache-2.0; prose and generated reports stay CC BY 4.0. LICENSE.md
+# sets out the split.
 license = "Apache-2.0"
 license-files = ["LICENSES/Apache-2.0.txt", "LICENSES/CC-BY-4.0.txt", "LICENSE.md"]
 authors = [{ name = "Matthew Maksymilian Miezaniec", email = "matthewmiezaniec1@gmail.com" }]
@@ -32,9 +32,9 @@ classifiers = [
   "Topic :: Text Processing :: Indexing",
 ]
 
-# The `reference` backend is stdlib-only by design -- it is the normative
-# implementation and must be auditable without reading any third-party code.
-# numpy is required only by the native adapter and the analysis layer.
+# The `reference` backend is stdlib-only: it is the normative implementation and
+# has to be auditable without reading third-party code. numpy is needed only by
+# the native adapter and the analysis layer.
 dependencies = ["numpy>=1.24", "pyyaml>=6.0"]
 
 [project.optional-dependencies]

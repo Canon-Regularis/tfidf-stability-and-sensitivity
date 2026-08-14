@@ -1,23 +1,19 @@
 // =============================================================================
-// fp_guard.hpp -- refuse to produce numbers from an untrustworthy build.
+// fp_guard.hpp: refuse to produce numbers from an untrustworthy build.
 //
-// This project publishes bit-reproducibility claims. A single stray compiler
-// flag silently invalidates all of them, and the failure mode is the worst kind:
-// the code still runs, still looks right, and quietly returns different digits.
+// One stray compiler flag invalidates every bit-reproducibility claim here, and
+// the code still runs, still looks right, and returns different digits.
 //
-// Three layers of defence:
-//   Layer 1  compile time -- #error on flags known to break IEEE-754 semantics
-//   Layer 2  build time   -- the resolved flag string is baked into the binary
-//                            (build_config.hpp) and recorded in every manifest
-//   Layer 3  run time     -- fp_selftest() probes for behaviour the flags were
-//                            supposed to prevent, catching cases the compiler
-//                            macros miss (notably FTZ/DAZ set by a third-party
-//                            library at load time -- see below)
+//   Layer 1  compile time: #error on flags known to break IEEE-754 semantics
+//   Layer 2  build time:   the resolved flag string is baked into the binary
+//                          (build_config.hpp) and recorded in every manifest
+//   Layer 3  run time:     selftest() probes for the behaviour the flags were
+//                          meant to prevent
 //
-// Layer 3 is not paranoia. numpy's BLAS (MKL, and some OpenBLAS builds) sets
-// flush-to-zero / denormals-are-zero process-wide when it loads. In a project
-// whose entire subject is near-tie margins, silently flushing subnormal score
-// differences to zero would corrupt precisely the phenomenon under study.
+// Layer 3 catches what the compiler macros cannot. numpy's BLAS (MKL, some
+// OpenBLAS builds) sets flush-to-zero / denormals-are-zero process-wide when it
+// loads, which would flush subnormal score differences to zero, and near-tie
+// margins are the subject of the study.
 // =============================================================================
 #pragma once
 
@@ -35,7 +31,7 @@
 #endif
 
 // -----------------------------------------------------------------------------
-// Layer 1 -- compile time
+// Layer 1: compile time
 // -----------------------------------------------------------------------------
 #if defined(__FAST_MATH__) && !defined(TFIDF_ALLOW_FAST_MATH)
 #  error "tfidf: built with -ffast-math. Numerical results would not be trustworthy. \
@@ -65,32 +61,31 @@ enum Failure : std::uint32_t {
     kReassociation      = 1u << 1,  ///< (a+b)+c rewritten as a+(b+c)
     kFmaContraction     = 1u << 2,  ///< a*b+c contracted to fma(a,b,c)
     kRoundingMode       = 1u << 3,  ///< rounding mode is not to-nearest
-    kFlushToZero        = 1u << 4,  ///< subnormals flushed -- corrupts tiny margins
+    kFlushToZero        = 1u << 4,  ///< subnormals flushed; corrupts tiny margins
     kDenormalsAreZero   = 1u << 5,  ///< subnormal inputs treated as zero
 };
 
-/// Probe the *actual* floating-point behaviour of this process, right now.
+/// Probe the live floating-point behaviour of this process.
 ///
-/// Cheap enough (a handful of arithmetic ops plus one `stmxcsr`) to call at
-/// import and again at the head of every batch scoring call.
+/// A handful of arithmetic ops plus one `stmxcsr`, so it is cheap enough to run
+/// at import and again at the head of every batch scoring call.
 [[nodiscard]] inline std::uint32_t selftest() noexcept {
     std::uint32_t f = kOk;
 
     // Excess intermediate precision.
     //
-    // The previous probe was `volatile double a = 0.1, b = 0.2; if (a + b ==
-    // 0.3)`, and it could not fire under any configuration tested -- including
-    // `-mfpmath=387 -fexcess-precision=fast`, which is precisely the hazard it
-    // names, and `-ffast-math`. The reason is arithmetic, not optimisation: the
-    // exact sum of the doubles 0.1 and 0.2 differs from the double 0.3 at every
-    // precision, so the comparison is false whether or not intermediates are
-    // widened. `kConstantFolding` was therefore a guard bit that could never be
-    // set, and `describe()`'s branch for it was unreachable.
+    // The previous probe, `volatile double a = 0.1, b = 0.2; if (a + b == 0.3)`,
+    // fired under no configuration tested, including `-ffast-math` and
+    // `-mfpmath=387 -fexcess-precision=fast`, the hazard it names. The exact sum
+    // of the doubles 0.1 and 0.2 differs from the double 0.3 at every precision,
+    // so the comparison is false whether or not intermediates are widened;
+    // `kConstantFolding` could never be set and `describe()`'s branch for it was
+    // unreachable.
     //
     // FLT_EVAL_METHOD reports the property directly: 0 when each operation is
     // performed in its own type, 2 when everything is evaluated as long double.
-    // Verified to read 0 under `-mfpmath=sse -fexcess-precision=standard` and 2
-    // under `-mfpmath=387 -fexcess-precision=fast`.
+    // Reads 0 under `-mfpmath=sse -fexcess-precision=standard`, 2 under
+    // `-mfpmath=387 -fexcess-precision=fast`.
 #if !defined(FLT_EVAL_METHOD) || FLT_EVAL_METHOD != 0
     f |= kConstantFolding;
 #endif

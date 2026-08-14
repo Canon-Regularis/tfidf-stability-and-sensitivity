@@ -1,14 +1,13 @@
 // =============================================================================
-// module.cpp -- the nanobind surface of the native backend.
+// module.cpp: the nanobind surface of the native backend.
 //
-// This layer is deliberately thin. It performs argument marshalling and nothing
-// else: no arithmetic lives here, so the mathematics in cpp/include/tfidf/
-// stays independently testable from C++ and the binding technology stays a
-// swappable detail.
+// Argument marshalling and nothing else. No arithmetic lives here, so the
+// mathematics in cpp/include/tfidf/ stays testable from C++ alone and the
+// binding technology stays swappable.
 //
 // The Python side owns every input buffer. `NativeIndex` copies what it needs
-// into owned storage at construction, so no C++ object ever holds a borrowed
-// pointer into a numpy array that Python might collect.
+// into owned storage at construction, so no C++ object holds a borrowed pointer
+// into a numpy array that Python might collect.
 // =============================================================================
 #include <tfidf/core/build_config.hpp>
 #include <tfidf/core/fp_guard.hpp>
@@ -54,15 +53,13 @@ std::span<const DocId> as_ids(const I32Array& a) {
 
 /// Build a sparse view, checking the two halves describe one vector.
 ///
-/// The free functions below take raw parallel arrays rather than building them,
-/// and were the only entry points that did not check the halves agree. `dot`
-/// constructed its SparseView from an indices span and a values span sized
-/// independently, so 64 indices with 1 value read 63 doubles past the end of the
-/// values buffer: undefined behaviour reachable from pure Python with no unsafe
-/// API, returning a different answer on each call. The reference rejects the
-/// same input (`SparseVector` raises "indices and values differ in length"), and
-/// the class methods here already checked it -- this is that check, applied to
-/// the three functions that missed it.
+/// The free functions below take raw parallel arrays and were the only entry
+/// points not checking that the halves agree. `dot` built its SparseView from
+/// independently sized index and value spans, so 64 indices with 1 value read
+/// 63 doubles past the end of the values buffer: undefined behaviour reachable
+/// from pure Python with no unsafe API, returning a different answer on each
+/// call. The reference rejects the same input (`SparseVector` raises "indices
+/// and values differ in length") and the class methods here already checked it.
 SparseView checked_view(const I32Array& idx, const F64Array& val, std::int32_t dim,
                         const char* what) {
     if (idx.shape(0) != val.shape(0)) {
@@ -74,11 +71,10 @@ SparseView checked_view(const I32Array& idx, const F64Array& val, std::int32_t d
 
 /// Reject a reduction policy outside the enumeration.
 ///
-/// `static_cast<Reduction>(999)` produced a value no switch handles, and the
-/// sum silently fell back to one of the policies rather than failing. In a
-/// project whose central claim is that the summation policy is never implicit
-/// and is recorded in every run manifest, quietly substituting one is the worst
-/// available outcome. Python's `Reduction(999)` raises; so does this now.
+/// `static_cast<Reduction>(999)` produced a value no switch handles and the sum
+/// fell back to one of the policies instead of failing. The policy is recorded
+/// in every run manifest and is never implicit, so substituting one silently is
+/// the worst available outcome. Python's `Reduction(999)` raises; so does this.
 Reduction checked_policy(std::int32_t policy) {
     if (policy < static_cast<std::int32_t>(Reduction::Naive) ||
         policy > static_cast<std::int32_t>(Reduction::Exact)) {
@@ -89,15 +85,15 @@ Reduction checked_policy(std::int32_t policy) {
 
 /// Reject non-finite scores before they reach a comparator.
 ///
-/// G3 requires this re-check at the boundary: it is the only thing between an
-/// arbitrary caller and undefined behaviour, because a NaN makes `<` false in
-/// both directions and so destroys the strict weak ordering `std::sort` and
-/// `std::min_element` require. `NativeRanker::rank` already did it; the free
+/// G3 requires this re-check at the boundary, the only thing between an
+/// arbitrary caller and undefined behaviour: a NaN makes `<` false in both
+/// directions and destroys the strict weak ordering `std::sort` and
+/// `std::min_element` require. `NativeRanker::rank` already did it, the free
 /// functions below did not, and two consequences were measured. `std::sort`
 /// over 65,536 scores containing NaN did not crash but is formally UB, and
 /// `min_adjacent_margin_top` returned `inf` where the normative Python
-/// reference returns `nan` -- a bit-level divergence in a core whose entire
-/// contract is bit-identity with that reference.
+/// reference returns `nan`, a bit-level divergence in a core contracted to be
+/// bit-identical with that reference.
 std::span<const double> checked_scores(const F64Array& scores) {
     const std::span<const double> span{scores.data(), scores.shape(0)};
     for (const double value : span) {
@@ -110,15 +106,15 @@ std::span<const double> checked_scores(const F64Array& scores) {
 
 /// Reject a tolerance that is negative or NaN.
 ///
-/// `!(tau >= 0.0)`, not `tau < 0.0`: every comparison with NaN is false, so the
-/// second form passes NaN through a guard whose message says non-negative.
+/// `!(tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
+/// so the second form passes NaN through a guard whose message says
+/// non-negative.
 ///
 /// Applied to all four tie-group entry points. An earlier sweep added the check
 /// to `tie_ball_interval` alone, leaving `tie_chains`, `tie_cliques` and
 /// `chain_inflation_ratio` to accept a negative tau that the normative Python
-/// rejects -- and to answer it, which is worse than refusing: the ratio comes
-/// back as 1.0, its *minimum*, so an invalid tolerance serialises as the
-/// healthiest possible tie structure.
+/// rejects, and to answer it: the ratio comes back as 1.0, its minimum, so an
+/// invalid tolerance serialises as the healthiest possible tie structure.
 double checked_tau(double tau) {
     if (!(tau >= 0.0)) {
         throw std::invalid_argument("tau must be non-negative");
@@ -129,10 +125,10 @@ double checked_tau(double tau) {
 /// Shape of this binding surface, checked against
 /// `tfidf_stability._native.REQUIRED_ABI` on import.
 ///
-/// Deliberately *not* the project version. A release can leave the surface
-/// untouched and a new binding can land inside one release, so tying the two
-/// would make the staleness check fire either needlessly or -- the dangerous
-/// direction -- not at all when a rebuilt .pyd is actually required.
+/// Distinct from the project version. A release can leave the surface untouched
+/// and a new binding can land inside one release, so tying the two would make
+/// the staleness check fire needlessly, or fail to fire when a rebuilt .pyd is
+/// required, which is the dangerous direction.
 constexpr const char* kAbi = "0.4.0";
 
 /// Return an owning numpy array built from a vector, without copying twice.
@@ -144,9 +140,9 @@ nb::ndarray<nb::numpy, double> to_numpy(std::vector<double>&& v) {
 
 /// An immutable, fitted corpus index: CSR, its transpose, and the row norms.
 ///
-/// Immutable by design. Every quantity is computed once at construction under a
-/// single declared reduction policy, so a scored result can never silently mix
-/// norms computed one way with dot products computed another.
+/// Every quantity is computed once at construction under a single declared
+/// reduction policy, so a scored result cannot mix norms computed one way with
+/// dot products computed another.
 class NativeIndex {
   public:
     NativeIndex(const I64Array& indptr,
@@ -161,14 +157,13 @@ class NativeIndex {
           n_rows_(n_docs),
           n_cols_(n_terms),
           reduction_(checked_policy(reduction)) {
-        // Dimensions first, and before any size arithmetic. `n_docs = -1` with
-        // an empty indptr satisfies the length check below -- 0 == -1 + 1 --
-        // and then `is_canonical()` calls front()/back() on an empty span and
-        // `transpose()` sizes a colptr from a negative count. Measured: four
-        // such inputs segfaulted the interpreter (SIGSEGV, rc 139) from pure
-        // Python with no unsafe API. Every later check casts to std::size_t,
-        // where a negative value wraps to something enormous, so this has to
-        // come first to mean anything.
+        // Dimensions first, before any size arithmetic. `n_docs = -1` with an
+        // empty indptr passes the length check below (0 == -1 + 1), and then
+        // `is_canonical()` calls front()/back() on an empty span and
+        // `transpose()` sizes a colptr from a negative count. Four such inputs
+        // segfaulted the interpreter (SIGSEGV, rc 139) from pure Python with no
+        // unsafe API. Every later check casts to std::size_t, where a negative
+        // value wraps to something enormous.
         if (n_docs < 0 || n_terms < 0) {
             throw std::invalid_argument("n_docs and n_terms must be non-negative");
         }
@@ -254,9 +249,9 @@ nb::ndarray<nb::numpy, std::int32_t> to_numpy_i32(std::vector<std::int32_t>&& v)
 
 /// A corpus's tie-break ranks plus one operator's attribute priority.
 ///
-/// The rank matrix is built in Python -- in exact, unbounded-precision integer
-/// arithmetic -- and crosses the boundary as data. Nothing here re-derives it,
-/// so the cross-language check is integer equality rather than a question about
+/// The rank matrix is built in Python, in exact unbounded-precision integer
+/// arithmetic, and crosses the boundary as data. Nothing here re-derives it, so
+/// the cross-language check is integer equality rather than a question about
 /// two rational-comparison implementations agreeing.
 class NativeRanker {
   public:
@@ -282,8 +277,8 @@ class NativeRanker {
         table_.id_ranks.assign(id_ranks.data(), id_ranks.data() + id_ranks.shape(0));
         priority_.assign(priority.data(), priority.data() + priority.shape(0));
 
-        // Injectivity of the key -- and hence uniqueness of the sorted
-        // permutation -- rests entirely on this.
+        // Injectivity of the key, and hence uniqueness of the sorted
+        // permutation, rests entirely on this.
         if (!table_.id_ranks_are_a_bijection()) {
             throw std::invalid_argument(
                 "identifier ranks must be a bijection onto 0..n_docs-1; without that the "
@@ -322,9 +317,9 @@ class NativeRanker {
             throw std::invalid_argument("score count does not match the ranker's document count");
         }
         const std::span<const Real> s(scores.data(), scores.shape(0));
-        // G3 requires this re-check at the boundary. A NaN in a sort key is
-        // undefined behaviour in std::sort -- a real out-of-bounds write --
-        // so this is the last line of defence against an arbitrary caller.
+        // G3 requires this re-check at the boundary: a NaN in a sort key is
+        // undefined behaviour in std::sort, a real out-of-bounds write, and
+        // this is the last line of defence against an arbitrary caller.
         if (!ranking::all_finite(s)) {
             throw std::invalid_argument("scores must all be finite");
         }
@@ -424,9 +419,9 @@ NB_MODULE(_tfidf_native, m) {
         .def_prop_ro("n_features", &NativeIndex::n_features)
         .def_prop_ro("nnz", &NativeIndex::nnz)
         .def_prop_ro("reduction", &NativeIndex::reduction)
-        // `move`, not the default `reference_internal`: to_numpy hands back an
-        // array that already owns its buffer through a capsule, and nanobind
-        // refuses to re-parent an ndarray that has an owner.
+        // `move` rather than the default `reference_internal`: to_numpy hands
+        // back an array that already owns its buffer through a capsule, and
+        // nanobind refuses to re-parent an ndarray that has an owner.
         .def_prop_ro(
             "norms",
             [](const NativeIndex& self) { return to_numpy(std::vector<double>(self.norms())); },
@@ -583,9 +578,8 @@ NB_MODULE(_tfidf_native, m) {
         "compare_top_k",
         [](const I32Array& a, const I32Array& b, std::int32_t k) {
             // Refused rather than clamped: a negative k is a Python slice
-            // counting from the end, which is a different question, and
-            // answering the wrong one silently is the failure mode this whole
-            // boundary exists to prevent.
+            // counting from the end, a different question, and answering the
+            // wrong one silently is what this boundary exists to prevent.
             if (k < 0) {
                 throw std::invalid_argument("k must be non-negative");
             }

@@ -2,17 +2,15 @@
 
     cos(u, v) = (u . v) / (||u||_2 ||v||_2),  and 0 if either vector is zero.
 
-Because TF-IDF coordinates are non-negative, ``cos(u, v)`` lies in ``[0, 1]``.
-That is asserted rather than assumed: a negative coordinate anywhere upstream
-would void the guarantee silently, so
+TF-IDF coordinates are non-negative, so ``cos(u, v)`` lies in ``[0, 1]``. A
+negative coordinate anywhere upstream would void that silently, so
 :func:`~tfidf_stability.utils.validation.check_non_negative` exists to catch it.
 
-The zero-vector convention is not an implementation detail to be tidied away. A
-document with no in-vocabulary tokens is common in short-text corpora -- on a
-MovieLens-shaped corpus it can be around 17% of documents -- and every one of
-them scores exactly 0 against every query. They therefore form a large block of
-*exact* ties at the bottom of every ranking, which is precisely the regime the
-tie-break analysis of section 4.5 is about.
+The zero-vector convention drives the study. A document with no in-vocabulary
+tokens is common in short-text corpora (around 17% of documents on a
+MovieLens-shaped corpus) and scores exactly 0 against every query, so they form a
+large block of exact ties at the bottom of every ranking, which is the regime
+section 4.5's tie-break analysis is about.
 """
 
 from __future__ import annotations
@@ -48,10 +46,9 @@ def cosine(
         either vector is zero.
 
     Note:
-        The expression is ``dot / (nu * nv)``. It is deliberately *not*
-        ``(dot / nu) / nv`` nor ``dot * (1 / (nu * nv))``: those are
-        algebraically equal but numerically different, and the native backend
-        has to reproduce this one bit for bit.
+        The expression is ``dot / (nu * nv)``. The groupings ``(dot / nu) / nv``
+        and ``dot * (1 / (nu * nv))`` are algebraically equal and numerically
+        different, and the native backend reproduces this one bit for bit.
     """
     if u.dim != v.dim:
         raise ValueError(f"dimension mismatch: {u.dim} vs {v.dim}")
@@ -71,13 +68,12 @@ def cosine_against_corpus(
 ) -> list[float]:
     """Score one query against every document: ``s_i = cos(q, w_i)``.
 
-    The query norm is computed once, and the document norms are supplied
-    precomputed, so the cost is dominated by the dot products alone.
+    The query norm is computed once and the document norms are supplied
+    precomputed, so the dot products dominate the cost.
 
-    A zero query vector yields all-zero scores. That is a degenerate but
-    legitimate case -- the ranking then depends entirely on the tie-break
-    attributes -- and it is flagged rather than excluded; see
-    ``docs/spec_addenda.md#g3``.
+    A zero query vector yields all-zero scores: degenerate but legitimate, since
+    the ranking then depends entirely on the tie-break attributes. Flagged rather
+    than excluded; see ``docs/spec_addenda.md#g3``.
     """
     if len(documents) != len(doc_norms):
         raise ValueError(f"{len(documents)} documents but {len(doc_norms)} norms were supplied")
@@ -97,9 +93,8 @@ def cosine_matrix(
 ) -> list[list[float]]:
     """Full pairwise similarity matrix.
 
-    Symmetric by construction: only the upper triangle is computed and the
-    result mirrored, which also guarantees ``S[i][j] == S[j][i]`` bit-for-bit
-    rather than merely to within rounding.
+    Only the upper triangle is computed and the result mirrored, so
+    ``S[i][j] == S[j][i]`` holds bit for bit rather than to within rounding.
     """
     n = len(vectors)
     ns = [l2_norm(v, policy) for v in vectors] if norms is None else list(norms)

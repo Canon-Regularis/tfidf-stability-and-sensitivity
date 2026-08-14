@@ -1,23 +1,22 @@
 """Perturbation experiments: apply an edit, refit, measure everything (section 4).
 
-Ties the pieces together. Given a corpus, a query and an edit, this reports the
-whole chain section 4 describes -- corpus change, IDF shift, vector movement,
-score movement, ranking consequence -- for one perturbation, in one object.
+Ties the pieces together. Given a corpus, a query and an edit, reports the whole
+chain section 4 describes (corpus change, IDF shift, vector movement, score
+movement, ranking consequence) for one perturbation, in one object.
 
 Section 4's framing is that a perturbation propagates:
 
     corpus edit -> df -> idf -> w -> cos -> ranking
 
-and that each stage has a bound relating its output movement to its input
-movement. :class:`PerturbationReport` records the measured movement at every
-stage alongside the bound that governs it, so the chain can be inspected rather
-than only its endpoints.
+with each stage bounding its output movement by its input movement.
+:class:`PerturbationReport` records the measured movement at every stage
+alongside the bound governing it, so the chain can be inspected rather than only
+its endpoints.
 
-The pipeline is deliberately *not* incremental. Both models are fitted from
-scratch, because a partial update that shared state with the baseline would be
-the thing most likely to hide a real perturbation effect, and correctness
-matters more here than speed -- these runs are a handful per experiment, not per
-query.
+The pipeline is not incremental: both models are fitted from scratch. A partial
+update sharing state with the baseline is the thing most likely to hide a real
+perturbation effect, and these runs are a handful per experiment rather than one
+per query.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ class PerturbationReport:
 
     @property
     def max_score_shift(self) -> float:
-        """``max |ds_i|`` over surviving documents -- the ``eps`` of section 4.4."""
+        """``max |ds_i|`` over surviving documents: the ``eps`` of section 4.4."""
         shared = set(self.score_before) & set(self.score_after)
         return max((abs(self.score_after[d] - self.score_before[d]) for d in shared), default=0.0)
 
@@ -61,12 +60,12 @@ class PerturbationReport:
         return all(v.bound.holds for v in self.vector_shifts)
 
     def certified_stable(self, k: int) -> bool | None:
-        """Whether section 4.4 *guarantees* the top-k set survived this edit.
+        """Whether section 4.4 guarantees the top-k set survived this edit.
 
-        Returns ``None`` when no certificate exists at that ``k``. Note the
-        asymmetry: ``True`` is a proof, ``False`` merely means the certificate
-        does not cover this perturbation -- the ranking may well be unchanged
-        anyway. Section 7.2 uses these as certificates, not predictions.
+        Returns ``None`` when no certificate exists at that ``k``. The asymmetry
+        matters: ``True`` is a proof, while ``False`` says only that the
+        certificate does not cover this perturbation, and the ranking may be
+        unchanged anyway. Section 7.2 uses these as certificates of stability.
         """
         for cert in self.certificates_before:
             if cert.k == k:
@@ -80,8 +79,7 @@ class PerturbationReport:
         """How often each of section 4.2's three terms dominated.
 
         Section 4.2 claims the interaction term is a mechanism for
-        amplification; this is the count that lets the claim be checked against
-        data rather than assumed.
+        amplification; this is the count that checks the claim against data.
         """
         counts = {"local": 0, "global": 0, "interaction": 0}
         for shift in self.vector_shifts:

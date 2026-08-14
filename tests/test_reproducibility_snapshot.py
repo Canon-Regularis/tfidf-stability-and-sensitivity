@@ -1,26 +1,22 @@
 """The reproducibility snapshot: one digest over the whole pipeline.
 
 README section 3 promises that "all stages of the pipeline are deterministic
-given a fixed corpus, configuration, and software environment". This file is
-what holds that promise to account.
+given a fixed corpus, configuration, and software environment". This file holds
+that promise to account.
 
-The snapshot is a single SHA-256 taken over every intermediate the pipeline
-produces -- vocabulary, document frequencies, IDF, weights, norms, scores,
-rankings, margins -- computed from the raw binary64 bit patterns rather than any
-decimal rendering. **Any** change to any number, anywhere, by a single ulp,
-changes it.
+The snapshot is one SHA-256 over every intermediate the pipeline produces
+(vocabulary, document frequencies, IDF, weights, norms, scores, rankings,
+margins), taken from raw binary64 bit patterns rather than any decimal
+rendering. A one-ulp change anywhere moves it, so a change here means a
+published number has moved and the commit should say why.
 
-That makes the digest deliberately brittle, and the brittleness is the feature.
-A change here means a published number has moved, and the commit that moves it
-should say why. What the digest must *not* be sensitive to is anything that is
-not a number: the working directory, the time, the order documents arrive in, or
-the interpreter's hash seed. Those are tested separately below.
+The digest must stay insensitive to everything that is not a number: working
+directory, time, document arrival order, interpreter hash seed. Those are tested
+separately below.
 
-The value is not hard-coded. Pinning a literal digest would make this file fail
-on any platform whose ``log`` rounds differently -- which, before G13, was every
-platform. Instead the digest is recomputed twice under deliberately varied
-conditions and required to agree, which tests the property the paper actually
-claims.
+The value is not hard-coded. A literal digest would fail on any platform whose
+``log`` rounds differently, which before G13 was every platform. Instead the
+digest is recomputed under varied conditions and required to agree.
 """
 
 from __future__ import annotations
@@ -51,8 +47,8 @@ QUERIES = (
 def pipeline_digest(model: TfidfModel, table: AttributeTable) -> str:
     """One digest over every stage of the pipeline.
 
-    Ordered deliberately: vocabulary first, then the quantities derived from it,
-    so a diff in the digest can be localised by recomputing the prefixes.
+    Vocabulary first, then the quantities derived from it, so a changed digest
+    can be localised by recomputing the prefixes.
     """
     parts: list[str] = [
         model.vocabulary.digest(),
@@ -92,8 +88,8 @@ def test_the_digest_is_independent_of_document_order(
     """Refitting on a shuffled corpus must give the identical digest.
 
     The vocabulary is frozen in byte order and every sum runs over ascending
-    term identifiers, so presentation order cannot reach any number. This is the
-    determinism guarantee of section 3, end to end rather than per module.
+    term identifiers, so presentation order reaches no number. Section 3's
+    determinism guarantee, end to end rather than per module.
     """
     ids = [str(d["doc_id"]) for d in mini_corpus]
     features = [pipeline.preprocess(str(d["text"])) for d in mini_corpus]
@@ -102,7 +98,7 @@ def test_the_digest_is_independent_of_document_order(
     order = list(reversed(range(len(ids))))
     shuffled = TfidfVectoriser().fit([features[i] for i in order], [ids[i] for i in order])
 
-    # The document *matrix* is permuted, so compare the order-independent parts.
+    # The document matrix is permuted, so compare the order-independent parts.
     assert forward.vocabulary.digest() == shuffled.vocabulary.digest()
     assert hash_floats(forward.idf.values) == hash_floats(shuffled.idf.values)
     by_id = {d: i for i, d in enumerate(shuffled.doc_ids)}
@@ -126,10 +122,9 @@ def test_the_digest_survives_a_save_load_round_trip(mini_model, mini_attributes,
 def test_the_digest_is_stable_across_processes_and_hash_seeds() -> None:
     """The check nothing in-process can make.
 
-    ``PYTHONHASHSEED`` is fixed at interpreter start-up, so a dictionary
-    ordering leaking into any stage would be invisible to a single-process test.
-    The working directory is varied at the same time, which catches a path
-    reaching a digest.
+    ``PYTHONHASHSEED`` is fixed at interpreter start-up, so a dict ordering
+    leaking into any stage is invisible to a single-process test. The working
+    directory varies at the same time, catching a path that reaches a digest.
     """
     snippet = (
         "import json,sys;"
@@ -162,7 +157,7 @@ def test_the_digest_is_stable_across_processes_and_hash_seeds() -> None:
 
 
 def test_the_serialised_model_is_byte_stable_across_processes() -> None:
-    """The container, not just the numbers."""
+    """The container as well as the numbers."""
     snippet = (
         "import json,sys,hashlib;"
         f"sys.path.insert(0, r'{REPO / 'src'}');"

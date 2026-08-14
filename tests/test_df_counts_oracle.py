@@ -1,21 +1,15 @@
 """``df_counts`` as a checked oracle for the counts the vocabulary builds.
 
-This module was found at **0% coverage**: nothing in the package imports it. It
-is a second, independent implementation of document and collection frequency,
-and an unexercised duplicate of a core quantity is a bug waiting to happen --
-`vocabulary.py` computes `df` during vocabulary construction, and if the two ever
-disagreed, every idf and therefore every score would depend on which one a caller
-happened to reach for.
+Nothing in the package imports this module; it sat at 0% coverage. It is a second
+implementation of document and collection frequency, `vocabulary.py` computes
+`df` during vocabulary construction, and a disagreement would make every idf, and
+every score, depend on which one a caller reached for. These tests turn the
+duplication into a differential oracle in the sense the reference-versus-native
+suite uses.
 
-Rather than delete it, these tests turn it into a **differential oracle**, in
-exactly the sense the reference-versus-native suite uses: two implementations
-written differently, required to agree. That makes the duplication a check rather
-than a liability.
-
-`df_after_edit` earns its place separately. It is the incremental update §4.1
-needs, and the property that matters -- an edit changes `df` by at most one per
-term -- is what makes corpus perturbation tractable at scale. It is asserted
-against a from-scratch recomputation here.
+`df_after_edit` is the incremental update section 4.1 needs. Its property, that an
+edit changes `df` by at most one per term, is asserted here against a
+from-scratch recomputation.
 """
 
 from __future__ import annotations
@@ -60,8 +54,7 @@ def test_collection_frequency_agrees_with_the_vocabulary(mini_features) -> None:
 def test_the_two_implementations_never_disagree(corpus: list[list[str]]) -> None:
     """Searched adversarially rather than checked on one fixture."""
     if not any(corpus):
-        # A corpus with no features at all has no vocabulary to compare against;
-        # that case is covered by its own test below.
+        # No features means no vocabulary to compare against; covered below.
         return
     vocabulary = build_vocabulary(corpus)
     df = document_frequencies(corpus)
@@ -88,12 +81,10 @@ def test_an_empty_corpus_and_empty_documents_are_distinguished() -> None:
 
 
 def test_a_featureless_corpus_has_counts_but_no_vocabulary() -> None:
-    """The two disagree here, and correctly so.
-
-    Counting is total -- every corpus has document frequencies, even if they are
-    empty -- whereas vocabulary construction treats an empty result as a
-    configuration error rather than a valid state, because it almost always means
-    ``min_df`` is too high for the corpus.
+    """The two disagree here, correctly. Counting is total: every corpus has
+    document frequencies, possibly empty. Vocabulary construction treats an empty
+    result as a configuration error, since it almost always means ``min_df`` is
+    too high for the corpus.
     """
     assert document_frequencies([[], []]) == {}
     with pytest.raises(EmptyVocabularyError):
@@ -108,12 +99,9 @@ def test_a_featureless_corpus_has_counts_but_no_vocabulary() -> None:
 def test_an_incremental_update_matches_recomputing_from_scratch(
     corpus: list[list[str]], replacement: list[str], index: int
 ) -> None:
-    """The whole point of the incremental path: it must not cut a corner.
-
-    An O(nnz of one document) update that disagreed with the O(nnz) recomputation
-    would make section 4.1's perturbation experiments measure something other than
-    what they claim.
-    """
+    """An O(nnz of one document) update disagreeing with the O(nnz) recomputation
+    would make section 4.1's perturbation experiments measure something other
+    than what they claim."""
     position = index % len(corpus)
     before = document_frequencies(corpus)
 
@@ -130,12 +118,10 @@ def test_an_incremental_update_matches_recomputing_from_scratch(
 def test_an_edit_moves_each_term_by_at_most_one(
     corpus: list[list[str]], replacement: list[str], index: int
 ) -> None:
-    """Section 4.1's premise, and what bounds the induced idf shift.
-
-    A single-document edit can add or remove a term for *that* document only, so
-    no term's document frequency can move by more than one. If it could, the
-    perturbation bounds of section 4.2 would be computed against the wrong
-    baseline.
+    """Section 4.1's premise, which bounds the induced idf shift: a single-document
+    edit adds or removes a term for that document alone, so no term's document
+    frequency moves by more than one. Otherwise section 4.2's perturbation bounds
+    sit on the wrong baseline.
     """
     position = index % len(corpus)
     before = document_frequencies(corpus)
@@ -155,8 +141,8 @@ def test_a_term_falling_to_zero_is_dropped_not_kept_at_zero() -> None:
 
 
 def test_the_input_mapping_is_not_mutated() -> None:
-    """Callers hold the pre-edit counts to compute the *shift*; mutating them in
-    place would silently make every measured shift zero."""
+    """Callers hold the pre-edit counts to compute the shift; mutating them in
+    place makes every measured shift zero."""
     before = document_frequencies([["a"], ["a", "b"]])
     snapshot = dict(before)
     df_after_edit(before, removed=["a"], added=["c"])

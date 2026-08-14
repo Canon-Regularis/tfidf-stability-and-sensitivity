@@ -1,16 +1,15 @@
 """Tie-break ablations and margin stratification (README sections 4.5, 7.3).
 
-Research question A2 asks whether ranking outcomes change *purely* because of the
-secondary ordering rule, with no numerical perturbation at all. These tests
-establish the two halves of that:
+Research question A2 asks whether ranking outcomes change purely because of the
+secondary ordering rule, with no numerical perturbation at all. Two halves:
 
-* with all scores distinct, the three operators coincide exactly -- so the
-  ablation has a well-defined null;
-* with ties present, they diverge with ``delta s = 0`` bit-for-bit.
+* with all scores distinct the three operators coincide, so the ablation has a
+  well-defined null;
+* with ties present they diverge at ``delta s = 0`` bit-for-bit.
 
-They also check the stratification is not circular. Grouping an operator
-comparison by ``m_k`` is only legitimate because the margin is tie-break
-independent, and that is asserted rather than assumed.
+Also that the stratification is not circular: grouping an operator comparison by
+``m_k`` is legitimate only because the margin is tie-break independent, which is
+asserted rather than assumed.
 """
 
 from __future__ import annotations
@@ -77,8 +76,8 @@ def test_ties_make_the_operators_diverge() -> None:
 def test_every_operator_shares_one_sorted_score_array() -> None:
     """The structural guarantee that makes A1 and A2 independent.
 
-    Sharing the array *object* means a margin cannot drift between operators,
-    so stratifying an operator comparison by ``m_k`` is not circular.
+    Sharing the array object means a margin cannot drift between operators, so
+    stratifying an operator comparison by ``m_k`` is not circular.
     """
     table = table_of([3, 2, 1, 0])
     result = ablate_query([0.5, 0.5, 0.2, 0.0], table, ks=KS)
@@ -112,8 +111,8 @@ def test_the_baseline_is_not_compared_against_itself(
 def test_degenerate_query_is_flagged_and_still_ablated(
     mini_attributes: AttributeTable,
 ) -> None:
-    """G3: a zero query is excluded from margin distributions but **included**
-    in tie-break ablations -- it is the extreme case, not a nuisance."""
+    """G3: a zero query is excluded from margin distributions and included in
+    tie-break ablations, where it is the extreme case."""
     result = ablate_query([0.0] * 6, mini_attributes, ks=KS)
     assert result.query_degenerate is True
     assert result.pairs, "the degenerate query must still be compared"
@@ -176,10 +175,9 @@ def test_margin_bands_bracket_tau() -> None:
 
 
 def test_exact_ties_get_their_own_band() -> None:
-    """``m_k == 0`` is categorically different from "small": membership is
-    decided *entirely* by the tie-break. On short text it is also where most of
-    the mass sits, so folding it into the smallest numeric band would hide the
-    dominant effect."""
+    """``m_k == 0`` differs in kind from "small": the tie-break decides
+    membership outright. On short text most of the mass sits there, so folding
+    it into the smallest numeric band would hide the dominant effect."""
     table = table_of([3, 2, 1, 0])
     results = ablate_queries([("a", [0.5, 0.5, 0.5, 0.5])], table, ks=(2,))
     strata = stratify_by_margin(results, tau=1e-9, variant="pi_alt", ks=(2,))
@@ -223,7 +221,7 @@ def test_every_band_appears_for_every_k() -> None:
 
 
 def test_every_pair_lands_in_exactly_one_band() -> None:
-    """Partition, not merely coverage: the totals must reconcile."""
+    """A partition rather than mere coverage: the totals must reconcile."""
     table = table_of([3, 2, 1, 0])
     results = ablate_queries(
         [("a", [0.5, 0.5, 0.2, 0.0]), ("b", [0.9, 0.9, 0.9, 0.9]), ("c", [1.0, 0.7, 0.3, 0.0])],
@@ -256,8 +254,8 @@ def test_one_query_is_counted_once_even_when_several_k_clamp_together(
 
     `ablate_query` clamps k to the candidate count (G3's lenient mode), so on a
     6-document corpus k in (10, 20, 50) all become 6 and emit three identical
-    pairs for the *same* query. Counting all three reported n = 3 for a single
-    query -- inflating the denominator of section 7.3's headline statistic.
+    pairs for one query. Counting all three reported n = 3 for a single query,
+    inflating the denominator of section 7.3's headline statistic.
     """
     result = ablate_query([0.5] * 6, mini_attributes, ks=(5, 10, 20, 50), query_id="q0")
 

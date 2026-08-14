@@ -1,30 +1,23 @@
 """Fuzzing the two parsers that consume bytes this package did not write.
 
-Everything else here is fed by our own code. These two are not: a ``.tfsx`` file
-can arrive from anywhere, and document text is by definition arbitrary. They are
-therefore the only places where "what does this do on input we did not design
-for" is a question with teeth.
+A ``.tfsx`` file can arrive from anywhere and document text is arbitrary; every
+other input in the suite comes from our own code.
 
 The property, stated once
 -------------------------
-**Either it round-trips correctly, or it raises a typed exception from
-``tfidf_stability.utils.validation``.** Nothing else is acceptable -- and in
-particular these three failures are what the harness is looking for:
+Either it round-trips correctly, or it raises a typed exception from
+``tfidf_stability.utils.validation``. The three failures being hunted:
 
-* returning a silently *wrong* model, which is far worse than crashing, because
-  a plausible ranking computed from corrupt weights looks exactly like a real
-  one;
-* leaking an untyped exception (``struct.error``, ``IndexError``,
-  ``UnicodeDecodeError``, ``MemoryError``), which tells a caller nothing and
-  cannot be handled;
-* consuming unbounded time or memory on a small input, which a hostile
-  ``nnz`` field could otherwise arrange.
+* a silently wrong model, worse than a crash, because a plausible ranking
+  computed from corrupt weights looks like a real one;
+* an untyped exception (``struct.error``, ``IndexError``,
+  ``UnicodeDecodeError``, ``MemoryError``), which a caller cannot handle;
+* unbounded time or memory on a small input, which a hostile ``nnz`` field could
+  otherwise arrange.
 
-This is not hypothetical. A truncation bug was already found and fixed in this
-parser once: the document-id block was read with an open-ended slice, so cutting
-the final byte corrupted the last identifier while satisfying every count check.
-That is precisely the shape of bug byte-level fuzzing finds and unit tests do
-not.
+A truncation bug was found and fixed here once: the document-id block was read
+with an open-ended slice, so cutting the final byte corrupted the last identifier
+while satisfying every count check.
 """
 
 from __future__ import annotations
@@ -57,12 +50,11 @@ def valid_container(mini_model) -> bytes:
 
 
 #: The header layout, in the order ``_read_header`` unpacks it. Offsets are
-#: derived from this rather than written down, because two of the hand-written
-#: ones were wrong: ``token_bytes`` was given as 32, which is ``reduction``, and
-#: ``doc_id_bytes`` as 40, which is the upper half of ``token_bytes``. The case
-#: named ``doc_id_bytes`` therefore never mutated ``doc_id_bytes`` even once --
-#: and still passed, because clobbering a neighbouring field also gets the
-#: container rejected. A test that passes for the wrong reason is not a test.
+#: derived from it because two hand-written ones were wrong: ``token_bytes`` as 32
+#: (which is ``reduction``) and ``doc_id_bytes`` as 40 (the upper half of
+#: ``token_bytes``). The ``doc_id_bytes`` case never touched ``doc_id_bytes`` and
+#: passed anyway, since clobbering a neighbouring field also gets the container
+#: rejected.
 _HEADER_LAYOUT: tuple[tuple[str, str], ...] = (
     ("magic", "8s"),
     ("version", "I"),
@@ -98,14 +90,12 @@ def test_the_header_layout_this_file_assumes_is_the_real_one() -> None:
 
 
 def _assert_typed(call, data: bytes) -> None:
-    """The parser must round-trip or raise a *typed* error. Nothing else.
+    """The parser must round-trip or raise a typed error.
 
-    Both halves are asserted. Returning normally used to be enough to pass, so
-    "accepted" meant "unexamined" and a parser that took a corrupt container
-    and handed back an incoherent model satisfied every test in this file. One
-    did: before ``_check_csr`` existed, 425 of the 2715 mutated containers this
-    parser accepted carried an ``indptr`` that was non-monotonic or did not
-    start at zero, and nothing downstream re-checks it.
+    Returning normally used to be enough to pass, so "accepted" meant
+    "unexamined": before ``_check_csr`` existed, 425 of the 2715 mutated
+    containers this parser accepted carried an ``indptr`` that was non-monotonic
+    or did not start at zero, and nothing downstream re-checks it.
     """
     try:
         restored = call(data)
@@ -117,16 +107,14 @@ def _assert_typed(call, data: bytes) -> None:
             f"must be a TfidfStabilityError so a caller can handle it."
         ) from exc
 
-    # Accepting a mutation is legitimate -- flipping a mantissa bit yields a
-    # different but entirely valid model. What is not legitimate is accepting
-    # something that is not a matrix. The invariants are spelled out here rather
-    # than delegated to the parser's own ``_check_csr``, because a test that
-    # calls the code under test to decide whether the code under test is right
-    # disappears the moment that code does.
+    # Accepting a mutation is legitimate (a flipped mantissa bit gives a different
+    # valid model); accepting one that violates the CSR invariants is a defect.
+    # The invariants are spelled out here rather than delegated to the parser's own
+    # ``_check_csr``, which would take this test with it if it were deleted.
     #
-    # Note idempotence is NOT the property to check: a model whose indptr starts
-    # at 255 re-serialises and reparses to identical bytes, so a fixed-point
-    # assertion passes straight over it. Measured, not assumed.
+    # Idempotence is the wrong property: a model whose indptr starts at 255
+    # re-serialises and reparses to identical bytes, so a fixed-point assertion
+    # passes straight over it.
     matrix = restored.matrix
     indptr, indices = list(matrix.indptr), list(matrix.indices)
     assert len(indptr) == matrix.n_rows + 1, f"indptr has {len(indptr)} entries"
@@ -147,7 +135,7 @@ def _assert_typed(call, data: bytes) -> None:
 # The .tfsx container
 # ---------------------------------------------------------------------------
 def test_a_valid_container_round_trips(mini_model, valid_container) -> None:
-    """The baseline. Without this the rest proves only that nothing crashes."""
+    """The baseline. Without it the rest proves only that nothing crashes."""
     restored = model_from_bytes(valid_container)
     assert restored.doc_ids == mini_model.doc_ids
     assert all(same_bits(a, b) for a, b in zip(restored.norms, mini_model.norms, strict=True))
@@ -156,20 +144,18 @@ def test_a_valid_container_round_trips(mini_model, valid_container) -> None:
 def test_truncation_at_every_offset_is_rejected(valid_container) -> None:
     """The regression that motivated this file.
 
-    Every proper prefix of a valid container is invalid. Checked exhaustively
-    rather than by sampling, because the bug that occurred was at exactly one
-    offset -- the last byte -- and a sampler would very likely have missed it.
+    Every proper prefix of a valid container is invalid. Checked exhaustively: the
+    bug was at a single offset, the last byte, which a sampler would likely have
+    missed.
     """
     for cut in range(len(valid_container)):
         _assert_typed(model_from_bytes, valid_container[:cut])
 
 
 def test_trailing_bytes_are_rejected(valid_container) -> None:
-    """A container plus junk is not a container.
-
-    Accepting it would break the bijection between models and byte strings that
-    the reproducibility snapshot depends on: two different files would decode to
-    the same model.
+    """Accepting a container plus junk breaks the bijection between models and
+    byte strings that the reproducibility snapshot depends on: two files would
+    decode to one model.
     """
     _assert_typed(model_from_bytes, valid_container + b"\x00")
     _assert_typed(model_from_bytes, valid_container + b"trailing garbage")
@@ -194,11 +180,9 @@ def test_a_single_byte_flip_never_yields_a_silently_wrong_model(
 
 @pytest.mark.parametrize("field", ["n_docs", "n_terms", "nnz", "token_bytes", "doc_id_bytes"])
 def test_an_absurd_count_is_rejected_without_allocating(valid_container, field: str) -> None:
-    """A hostile length field must not become a huge allocation.
-
-    ``nnz`` sizes an array read. If it were trusted, a twelve-byte edit could ask
-    the parser for terabytes -- a denial of service reachable by anyone who can
-    hand over a file.
+    """A hostile length field must not become a huge allocation. ``nnz`` sizes an
+    array read, so if it were trusted a twelve-byte edit could ask the parser for
+    terabytes: denial of service reachable by anyone who can hand over a file.
     """
     offset, width = _header_field(field)
     mutated = bytearray(valid_container)
@@ -226,7 +210,7 @@ def test_the_empty_input_is_rejected() -> None:
 @settings(max_examples=200, deadline=None)
 @given(data=st.binary(min_size=0, max_size=512))
 def test_arbitrary_bytes_never_escape_an_untyped_exception(data: bytes) -> None:
-    """Random input almost never reaches deep parsing, but it is free to check."""
+    """Random input almost never reaches deep parsing; the check is free."""
     _assert_typed(model_from_bytes, data)
 
 
@@ -236,7 +220,7 @@ def test_arbitrary_bytes_never_escape_an_untyped_exception(data: bytes) -> None:
 @settings(max_examples=300, deadline=None)
 @given(text=st.text(max_size=400))
 def test_the_tokeniser_accepts_any_text(text: str) -> None:
-    """No input is a parse error: text is data, not a format."""
+    """No input is a parse error; text is data rather than a format."""
     features = PreprocessingPipeline().preprocess(text)
     assert isinstance(features, list)
     assert all(isinstance(f, str) for f in features)
@@ -250,14 +234,13 @@ def test_the_tokeniser_accepts_any_text(text: str) -> None:
     )
 )
 def test_no_token_ever_contains_the_ngram_joiner(text: str) -> None:
-    """The invariant the whole n-gram representation rests on.
+    """The invariant the n-gram representation rests on.
 
-    Bigrams are stored as ``a + U+001F + b``. If a *unigram* could contain
-    U+001F, a bigram would be indistinguishable from a unigram that happened to
-    embed the separator, and the vocabulary would stop being a bijection between
-    strings and feature identities. Normalisation must strip the character; this
-    asserts it does, over arbitrary Unicode rather than over the ASCII the unit
-    tests use.
+    Bigrams are stored as ``a + U+001F + b``, so a unigram containing U+001F would
+    be indistinguishable from a bigram and the vocabulary would stop being a
+    bijection between strings and feature identities. Normalisation strips the
+    character; checked here over arbitrary Unicode, where the unit tests use
+    ASCII.
     """
     for feature in PreprocessingPipeline().preprocess(text):
         # A bigram legitimately contains exactly one joiner; a unigram none.
@@ -267,11 +250,10 @@ def test_no_token_ever_contains_the_ngram_joiner(text: str) -> None:
             assert part, "an empty side of a bigram means the joiner leaked into a token"
 
 
-#: Adversarial inputs, built with ``chr`` rather than written as literals.
-#: A bidirectional override or a null byte pasted into source can reorder how
-#: the surrounding code *displays* -- which is exactly what ruff's PLE2502
-#: forbids -- so the characters are constructed instead. The tokeniser still
-#: receives them.
+#: Adversarial inputs, built with ``chr`` rather than written as literals: a
+#: bidirectional override or a null byte pasted into source reorders how the
+#: surrounding code displays (ruff PLE2502). The tokeniser receives the same
+#: characters either way.
 _ADVERSARIAL_TEXT = [
     _JOINER,  # the joiner alone
     "a" + _JOINER + "b",  # the joiner between letters
@@ -293,11 +275,9 @@ def test_adversarial_text_is_handled_without_raising(text: str) -> None:
 
 
 def test_combining_and_precomposed_forms_agree() -> None:
-    """Normalisation must fold them together, or the same word gets two ids.
-
-    A corpus mixing the two encodings of an accented word would otherwise split
-    its document frequency across two vocabulary entries, changing every idf that
-    depends on it.
+    """Normalisation must fold them together, or the same word gets two ids: a
+    corpus mixing the two encodings of an accented word splits its document
+    frequency across two vocabulary entries and moves every idf that depends on it.
     """
     pipeline = PreprocessingPipeline()
     assert pipeline.preprocess("égal") == pipeline.preprocess("égal")
@@ -307,12 +287,9 @@ def test_the_block_separator_is_validated_not_merely_skipped(valid_container) ->
     """The container must be a bijection between models and byte strings.
 
     Both block lengths are fixed by the header, so the separating LF carries no
-    information -- which is exactly why accepting any value for it is a defect
-    rather than a nicety. Before this was checked, all 255 other byte values
-    decoded to a byte-identical model, so 256 distinct files shared one meaning
-    and ``_FLAG_MASK``'s stated reason for rejecting unknown flag bits ("it
-    would let two different files decode to the same model") was violated one
-    byte further down.
+    information and any value for it was accepted: all 255 alternatives decoded to
+    a byte-identical model, 256 distinct files sharing one meaning. ``_FLAG_MASK``
+    rejects unknown flag bits one byte further down for that same reason.
     """
     header = _HEADER.unpack_from(valid_container, 0)
     n_docs, n_terms, nnz, token_bytes = header[2], header[3], header[4], header[7]

@@ -4,11 +4,10 @@
 //   m_min^top  = min over 1 <= j < k of (score(r_j) - score(r_{j+1}))
 //   eps_k^flip = m_k / 2
 //
-// Everything here takes a *sorted score array*, never a ranking. That
-// dependency direction is what makes the following structural rather than
-// merely asserted: m_k depends only on the score multiset, so it is identical
-// under every tie-break operator -- which is what makes the paper's research
-// questions A1 (margins) and A2 (tie-breaking) independent.
+// Everything here takes a sorted score array and never a ranking. So m_k depends
+// only on the score multiset and is identical under every tie-break operator,
+// which is what makes research questions A1 (margins) and A2 (tie-breaking)
+// independent. Structural, given the dependency direction, rather than asserted.
 #pragma once
 
 #include <tfidf/core/types.hpp>
@@ -24,9 +23,9 @@ namespace tfidf::ranking {
 
 /// A margin, carrying the validity flag `spec_addenda.md#g3` requires.
 ///
-/// An undefined margin is NaN plus `defined == false`; it is never coerced to
-/// 0 (which would look like an exact tie) or to infinity (which would look like
-/// perfect stability). Either coercion would silently corrupt a distribution.
+/// An undefined margin is NaN plus `defined == false`, never coerced: 0 would
+/// read as an exact tie and infinity as perfect stability, and either corrupts
+/// the distribution.
 struct Margin {
     std::int32_t k = 0;
     std::int32_t k_effective = 0;
@@ -36,8 +35,8 @@ struct Margin {
     /// eps_k^flip. Exact: dividing by two only shifts the exponent.
     [[nodiscard]] Real flip_radius() const noexcept { return value / 2.0; }
 
-    /// A *defined* margin of exactly zero -- the interesting case, where top-k
-    /// membership is decided purely by the tie-break.
+    /// A defined margin of exactly zero: top-k membership then rests entirely
+    /// on the tie-break.
     [[nodiscard]] bool is_exact_tie() const noexcept { return defined && value == 0.0; }
 };
 
@@ -73,8 +72,7 @@ struct Margin {
 /// `m_min^top`, governing the ordering *within* the top-k.
 ///
 /// Undefined at `k = 1`: the minimum is over an empty set. G3 does not cover
-/// that case; addendum G16 adopts NaN rather than +inf, which would silently
-/// claim "no constraint".
+/// that case; addendum G16 adopts NaN, where +inf would claim "no constraint".
 [[nodiscard]] inline Margin min_adjacent_margin_top(std::span<const Real> sorted_scores,
                                                     std::int32_t k) noexcept {
     const auto n = static_cast<std::int32_t>(sorted_scores.size());

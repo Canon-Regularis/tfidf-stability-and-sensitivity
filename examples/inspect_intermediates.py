@@ -1,39 +1,36 @@
 #!/usr/bin/env python3
-"""Why the raw bit patterns are kept, and not just the decimal values.
+"""Why the raw bit patterns are kept alongside the decimal values.
 
-Section 1.2 asks for intermediate quantities to stay inspectable. This example
-is about the *representation* in which they are inspected, because a decimal
-rendering is a lossy summary and the differences this study is built on are
-exactly the ones it discards.
+Section 1.2 asks for intermediate quantities to stay inspectable. This example is
+about the representation they are inspected in: a decimal rendering is a lossy
+summary, and it discards the differences this study is built on.
 
-Three claims are demonstrated on a twelve-document corpus, each by measurement
-rather than assertion:
+Three claims, measured on a twelve-document corpus:
 
-1. **A single library call makes the pipeline platform-dependent.** ``log`` is
-   the only transcendental here and IEEE-754 does not require it to be correctly
-   rounded, so the platform libm and the exact value disagree on a real
-   vocabulary entry -- at *N* = 12, not only at scale. That is
-   ``docs/spec_addenda.md#g13``, reproduced small enough to read.
+1. A single library call makes the pipeline platform-dependent. ``log`` is the
+   only transcendental here and IEEE-754 leaves its rounding to the libm, so the
+   platform value and the exact value disagree on a real vocabulary entry at
+   N = 12, well before any question of scale. ``docs/spec_addenda.md#g13``.
 
-2. **The disagreement is invisible in decimal and fatal to a digest.** The
-   affected scores print identically at every precision a report would plausibly
-   use, and differ in ``float.hex``. Any equality check written against a
-   formatted string reports agreement; ``same_bits`` reports the truth. This is
-   why ``TfidfModel.digest`` hashes ``struct.pack("<d", ...)`` and not a
+2. The disagreement is invisible in decimal and fatal to a digest. The affected
+   scores print identically at every precision a report would plausibly use and
+   differ in ``float.hex``, so an equality check written against a formatted
+   string reports agreement where ``same_bits`` reports the truth. Hence
+   ``TfidfModel.digest`` hashes ``struct.pack("<d", ...)`` rather than a
    rendering.
 
-3. **Where the bits are measured decides what is measured.** Sweeping the
-   reduction policy passed to the scorer, with the model's norms held fixed,
-   finds *nothing* on this corpus. Refitting so the norms move too finds the
-   noise floor immediately. That is the trap named in ``docs/spec_addenda.md#g23``,
-   and it is the difference between a measured tau_floor and a vacuous one.
+3. Where the bits are measured decides what is measured. Sweeping the reduction
+   policy passed to the scorer, with the model's norms held fixed, finds nothing
+   on this corpus; refitting so the norms move too finds the noise floor
+   immediately. That is the trap named in ``docs/spec_addenda.md#g23``, and the
+   difference between a measured tau_floor and a vacuous one.
 
-The closing sections give the phenomenon its place in the two research
-questions. Bit-level disturbance is roughly thirteen decades below the smallest
-real score gap, so A1's ranking instability is a story about corpus perturbation
-and not about arithmetic -- but exact ties are a *bit* property, and the block of
-bit-identical scores at the bottom of the ranking is precisely where A2's
-deterministic tie-break, rather than any number, chooses the order.
+The closing sections place the phenomenon in the two research questions.
+Bit-level disturbance is roughly thirteen decades below the smallest real score
+gap, so A1's ranking instability is a story about corpus perturbation rather than
+arithmetic. Exact ties are a bit property, and the block of bit-identical scores
+at the bottom of the ranking is where A2's deterministic tie-break chooses the
+order.
 
 Which vocabulary entry the libm gets wrong depends on the libm, so nothing here
 is hardcoded: the corpus is searched and whatever is found is reported. Run it::
@@ -68,9 +65,9 @@ from tfidf_stability.utils.numerics import (  # noqa: E402
 from tfidf_stability.vectorisation.idf import LogImpl  # noqa: E402
 from tfidf_stability.vectorisation.tfidf import TfidfModel, TfidfVectoriser  # noqa: E402
 
-# Twelve documents, chosen so that one genuine vocabulary entry lands on a
-# document frequency where this machine's libm rounds the logarithm differently
-# from the exact value. Small enough that every intermediate can be printed.
+# Twelve documents, chosen so one genuine vocabulary entry lands on a document
+# frequency where this machine's libm rounds the logarithm away from the exact
+# value. Small enough that every intermediate can be printed.
 DOCUMENTS: tuple[tuple[str, str], ...] = (
     ("d01", "A space opera about rebel pilots and a doomed alien battle station."),
     ("d02", "A space station crew fights an alien stowaway in deep space."),
@@ -119,8 +116,7 @@ def rule(text: str) -> None:
 def triple(label: str, x: float) -> str:
     """Decimal, hex and raw bytes side by side.
 
-    All three are printed together throughout because the point of the example
-    is that only the last two are decisive.
+    Printed together throughout: only the last two are decisive.
     """
     return f"  {label:<26}{x:>24.17g}   {float.hex(x):<22}{bits_of(x).hex()}"
 
@@ -305,8 +301,8 @@ def section_reduction(fixture: Fixture) -> tuple[float, float]:
     refit = {p: score(models[p], qf) for p in Reduction}
     ground = refit[Reduction.EXACT]
 
-    # G23's trap: hold the model (and therefore its norms) at NAIVE and vary only
-    # the policy handed to the scorer, so the dot product alone moves.
+    # G23's trap: hold the model (hence its norms) at NAIVE and vary only the
+    # policy handed to the scorer, so the dot product alone moves.
     naive_model = models[Reduction.NAIVE]
     dot_only = score(naive_model, qf, Reduction.EXACT)
     trap_eta = max(abs(a - b) for a, b in zip(refit[Reduction.NAIVE], dot_only, strict=True))

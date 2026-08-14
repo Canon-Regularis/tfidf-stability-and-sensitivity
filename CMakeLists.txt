@@ -1,10 +1,10 @@
 # =============================================================================
-# tfidf-stability -- top-level build
+# tfidf-stability, top-level build.
 #
 # The native backend is an OPTIONAL accelerator. The normative implementation is
-# the pure-Python `reference` backend, which requires no compiler at all. Build
-# with -DTFIDF_BUILD_NATIVE=OFF to obtain a fully functional reference-only
-# install on a machine with no C++ toolchain.
+# the pure-Python `reference` backend, which needs no compiler. Configure with
+# -DTFIDF_BUILD_NATIVE=OFF for a fully functional reference-only install on a
+# machine with no C++ toolchain.
 # =============================================================================
 cmake_minimum_required(VERSION 3.20)
 
@@ -33,8 +33,8 @@ option(TFIDF_BUILD_TESTS  "Build the C++ unit-test binary"                   OFF
 option(TFIDF_BUILD_BENCH  "Build the C++ microbenchmark binary"              OFF)
 option(TFIDF_WERROR       "Treat compiler warnings as errors"                OFF)
 
-# NON-REPRODUCIBLE build knobs. Both are OFF for every published result; the
-# manifest records their state and refuses to label a run reproducible if set.
+# NON-REPRODUCIBLE knobs. Both OFF for every published result. The manifest
+# records their state and refuses to label a run reproducible when either is on.
 option(TFIDF_ARCH_TUNE    "Enable -march=native (NON-REPRODUCIBLE)"          OFF)
 option(TFIDF_FAST_MATH    "Deliberately enable fast-math, to prove the numeric \
 guard rails actually fire. Never use for results." OFF)
@@ -42,8 +42,9 @@ guard rails actually fire. Never use for results." OFF)
 set(TFIDF_SANITIZERS "" CACHE STRING
     "Semicolon/comma list of sanitizers, e.g. 'address;undefined' or 'thread'")
 
-# enable_testing() must be called in the TOP-LEVEL list file, otherwise CTest
-# generates no root CTestTestfile.cmake and `ctest` reports "No tests were found".
+# enable_testing() has to be called from the TOP-LEVEL list file. Called deeper,
+# CTest writes no root CTestTestfile.cmake and `ctest` reports "No tests were
+# found" while still exiting 0.
 if(TFIDF_BUILD_TESTS)
   enable_testing()
 endif()
@@ -51,7 +52,7 @@ endif()
 add_subdirectory(cpp)
 
 # -----------------------------------------------------------------------------
-# Configuration summary -- printed so a build's numeric policy is never implicit
+# Configuration summary. Printed so a build's numeric policy is never implicit.
 # -----------------------------------------------------------------------------
 message(STATUS "")
 message(STATUS "=== tfidf-stability ${PROJECT_VERSION} =====================================")

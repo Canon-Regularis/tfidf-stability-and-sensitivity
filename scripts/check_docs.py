@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
 """Verify that relative links and code references in the docs resolve.
 
-The implementation notes cross-reference the code heavily -- that is what makes
-them useful rather than a second copy of the paper. It is also what makes them
-rot: a module renamed in `src/` leaves a link in `docs/` pointing nowhere, and a
-stale link is a silent lie about where something lives.
+The implementation notes cross-reference the code heavily, which is what makes
+them rot: a module renamed in `src/` leaves a link in `docs/` pointing nowhere.
 
 Three checks, in increasing order of how often they catch something:
 
-1. **Relative links resolve.** `[text](path)` and `[text](path#anchor)` must name
-   a file that exists.
-2. **Anchors exist.** A `#g23` fragment must correspond to a heading in the
-   target Markdown file, since `spec_addenda.md#g22` and `#g23` are cited
-   throughout and an off-by-one would go unnoticed.
-3. **Referenced source files exist.** A backticked path like
+1. Relative links resolve. `[text](path)` and `[text](path#anchor)` must name an
+   existing file.
+2. Anchors exist. A `#g23` fragment must correspond to a heading in the target
+   Markdown file; `spec_addenda.md#g22` and `#g23` are cited throughout and an
+   off-by-one would go unnoticed.
+3. Referenced source files exist. A backticked path like
    `analysis/noise_floor.py` or `src/tfidf_stability/ranking/margins.py` is
    checked against the tree.
 
-External links (http, https, mailto) are not fetched: the build must stay
-hermetic and offline.
+External links (http, https, mailto) go unfetched; the build stays hermetic and
+offline.
 """
 
 from __future__ import annotations
@@ -44,8 +42,8 @@ def _anchors(text: str) -> set[str]:
         slug = re.sub(r"[^\w\s-]", "", slug)
         slug = re.sub(r"[\s]+", "-", slug)
         found.add(slug)
-        # `## G23 -- title` should also be reachable as `#g23`, which is how the
-        # addenda are cited everywhere.
+        # A heading whose first word is `G23` must also resolve as `#g23`, the
+        # form the addenda are cited in.
         first = slug.split("-")[0]
         if re.fullmatch(r"g\d+", first):
             found.add(first)

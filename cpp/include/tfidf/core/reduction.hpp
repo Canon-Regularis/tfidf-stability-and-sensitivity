@@ -1,21 +1,20 @@
 // Reduction policies: how a sum of binary64 values is accumulated.
 //
-// Summation order is part of this project's specification, not an
-// implementation detail. `(a + b) + c` and `a + (b + c)` are different
-// computations in binary64, README section 2 writes its sums without
-// bracketing, and so the normative reading is a plain left-to-right fold.
-// `Naive` implements exactly that, and every published result uses it.
+// Summation order is part of this project's specification. `(a + b) + c` and
+// `a + (b + c)` are different computations in binary64, and README section 2
+// writes its sums without bracketing, so the normative reading is a plain
+// left-to-right fold. `Naive` is that fold, and every published result uses it.
 //
-// The other policies are *instruments*. The spread between them is a direct
-// measurement of the floating-point noise floor, from which the near-tie
-// tolerance tau of section 7.1 is derived rather than asserted. `Exact` gives
-// the correctly-rounded sum and so turns that spread into an absolute error.
+// The other three are instruments. Their spread measures the floating-point
+// noise floor, from which the near-tie tolerance tau of section 7.1 is derived
+// rather than asserted; `Exact` is correctly rounded, so the spread against it
+// is an absolute error.
 //
-// Design note -- why policy classes and not std::function or virtual calls:
-// each kernel is a template on the accumulator type and is instantiated once
-// per policy, so the compiler sees a concrete accumulator it can keep in
-// registers and the inner loop contains no dispatch at all. Selection happens
-// once per call, at the boundary, via a switch over `Reduction`.
+// Policy classes rather than std::function or virtual calls: each kernel is a
+// template on the accumulator type, instantiated once per policy, so the
+// accumulator stays in registers and the inner loop holds no dispatch.
+// Selection happens once per call, at the boundary, via a switch over
+// `Reduction`.
 #pragma once
 
 #include <tfidf/core/types.hpp>
@@ -32,11 +31,9 @@ namespace tfidf::reduce {
 // Policies
 // -----------------------------------------------------------------------------
 
-/// Plain left-to-right accumulation. The normative policy.
-///
-/// Deliberately the least accurate of the four: silently improving on the
-/// paper's arithmetic would mean publishing numbers the stated mathematics does
-/// not produce.
+/// Plain left-to-right accumulation. The normative policy, and the least
+/// accurate of the four: improving on the paper's arithmetic would publish
+/// numbers its stated mathematics does not produce.
 struct Naive {
     Real sum = 0.0;
 
@@ -44,38 +41,36 @@ struct Naive {
     [[nodiscard]] constexpr Real value() const noexcept { return sum; }
 };
 
-/// Kahan-Babuska-Neumaier compensated summation.
-///
-/// Tracks the rounding error lost at each step in a second accumulator and adds
-/// it back once at the end. Unlike plain Kahan this variant is also correct when
-/// the running total is smaller in magnitude than the addend, which is the
-/// common case when a large term arrives late.
 /// ``|x|``, usable in a constant expression on every supported compiler.
 ///
-/// Deliberately not `std::abs`. That is `constexpr` in libstdc++ (C++23's
-/// P0533) but **not** in MSVC's STL, so `constexpr` + `std::abs` compiles under
-/// GCC and fails under MSVC with C3615, "cannot result in a constant
-/// expression". This project's own CI hit exactly that split: the C++ tests are
-/// built by a hand-rolled CMake invocation that picks MinGW GCC, while
-/// scikit-build-core builds the Python extension with MSVC -- so the same
-/// header compiled in one job and broke the other, and only on Windows.
+/// `std::abs` is `constexpr` in libstdc++ (C++23's P0533) and not in MSVC's
+/// STL, which rejects it with C3615, "cannot result in a constant expression".
+/// CI hit the split: the C++ tests are built by a hand-rolled CMake invocation
+/// that picks MinGW GCC, while scikit-build-core builds the Python extension
+/// with MSVC, so the same header compiled in one job and broke the other, on
+/// Windows only.
 ///
-/// Behaviourally identical at the one call site. The sole difference from
-/// `std::abs` is that this returns -0.0 rather than +0.0 for a negative zero,
-/// and the use below is a magnitude *comparison*, where -0.0 and +0.0 compare
-/// equal. NaN and the infinities are unaffected.
+/// The sole behavioural difference is -0.0, returned here where `std::abs`
+/// gives +0.0. The one call site is a magnitude comparison, where the two
+/// compare equal. NaN and the infinities are unaffected.
 [[nodiscard]] constexpr Real magnitude(Real x) noexcept {
     return x < Real(0) ? -x : x;
 }
 
+/// Kahan-Babuska-Neumaier compensated summation.
+///
+/// Tracks the rounding error lost at each step in a second accumulator and adds
+/// it back once at the end. Unlike plain Kahan, correct when the running total
+/// is smaller in magnitude than the addend, the common case when a large term
+/// arrives late.
 struct Neumaier {
     Real sum = 0.0;
     Real compensation = 0.0;
 
     constexpr void add(Real x) noexcept {
         const Real t = sum + x;
-        // Whichever operand is larger keeps its bits; the other one is the one
-        // whose low-order bits were discarded, so that is where we recover them.
+        // The larger operand keeps its bits, so the low-order bits that were
+        // discarded belong to the smaller one; recover them from there.
         if (magnitude(sum) >= magnitude(x)) {
             compensation += (sum - t) + x;
         } else {
@@ -89,20 +84,18 @@ struct Neumaier {
 
 /// Recursive pairwise summation; error grows as O(log n) rather than O(n).
 ///
-/// Implemented iteratively with a small stack of partial sums, one per level,
-/// so it allocates nothing and matches the recursive formulation exactly.
+/// Iterative, with a small stack of partial sums, one per level, so it
+/// allocates nothing and matches the recursive formulation.
 ///
-/// The base case is `kPairwiseBlock`, which is numpy's block size -- but that
-/// does **not** make the two agree, and this comment used to claim it did.
-/// numpy unrolls its base case into eight independent accumulators, so its
-/// summation order differs from a straight fold well before the block boundary:
-/// measured against `np.sum` over 262 sizes, the two differ at 208 of them,
-/// first at n = 8. Sharing a block size is not sharing an order.
+/// The base case is `kPairwiseBlock`, numpy's block size, which does not make
+/// the two agree: numpy unrolls its base case into eight independent
+/// accumulators, so its order diverges from a straight fold well before the
+/// block boundary. Against `np.sum` over 262 sizes the two differ at 208 of
+/// them, first at n = 8.
 ///
-/// What is actually contracted, and what is actually true, is agreement with
-/// this repository's own Python reference: bit-identical across 305 sizes from
-/// n = 1 to 10,000, including the 2^k and 2^k+1 boundaries where a block-size
-/// or recursion-cutoff mismatch would first show.
+/// The contract is with this repository's Python reference: bit-identical
+/// across 305 sizes from n = 1 to 10,000, including the 2^k and 2^k+1
+/// boundaries where a block-size or recursion-cutoff mismatch would first show.
 struct Pairwise {
     // 64 levels is enough for 2^64 * kPairwiseBlock elements.
     std::array<Real, 64> partials{};
@@ -148,24 +141,21 @@ struct Pairwise {
 
 /// Correctly-rounded summation via Shewchuk's expansion algorithm.
 ///
-/// Maintains a set of non-overlapping partial sums whose exact total equals the
-/// exact sum of the inputs, then rounds once. This is the same algorithm behind
-/// Python's `math.fsum`, so the two agree bit-for-bit **on finite inputs** --
-/// which is what lets the noise-floor study use a common ground truth across
-/// both languages.
+/// Keeps non-overlapping partial sums whose exact total is the exact sum of the
+/// inputs, then rounds once. Same algorithm as Python's `math.fsum`, so the two
+/// agree bit-for-bit on finite inputs, which gives the noise-floor study one
+/// ground truth across both languages.
 ///
-/// The qualification is load-bearing, and was previously absent. CPython's
-/// `math_fsum` tracks infinities and intermediate overflow separately and
-/// *raises*: `fsum([inf, -inf])` is a ValueError and `fsum([1e308, 1e308])` an
-/// OverflowError. This implementation has no such machinery, so it returns NaN
-/// for all three of those and for `[inf, 1.0]`, where `math.fsum` returns inf.
-/// Measured against the reference; the other three policies agree with it on
-/// exactly these inputs, so the gap is specific to `Exact`.
+/// Finite inputs only. CPython's `math_fsum` tracks infinities and intermediate
+/// overflow separately and raises: `fsum([inf, -inf])` is a ValueError and
+/// `fsum([1e308, 1e308])` an OverflowError. This has no such machinery and
+/// returns NaN for those two and for `[inf, 1.0]`, where `math.fsum` returns
+/// inf. The other three policies agree with the reference on those inputs, so
+/// the gap is specific to `Exact`.
 ///
-/// It is not reachable from the published pipeline: a tf-idf weight is a
-/// product of a non-negative tf with `idf = ln((1+N)/(1+df)) >= 0`, so no
-/// infinity enters a reduction. It is reachable through the `reduce_sum`
-/// binding, which is why the limit is stated rather than left to be discovered.
+/// Unreachable from the published pipeline (a weight is a non-negative tf times
+/// `idf = ln((1+N)/(1+df)) >= 0`, so no infinity enters a reduction), reachable
+/// through the `reduce_sum` binding.
 struct Exact {
     std::vector<Real> partials;
 
@@ -185,16 +175,14 @@ struct Exact {
             x = hi;
         }
         partials.resize(out);
-        // Conditional, exactly as CPython's `math_fsum` is: it appends the
-        // running total only `if (x != 0.0)`. Pushing unconditionally is a
-        // no-op for the *value* of the expansion but not for its *sign*: for an
-        // input of nothing but negative zeros, `x` is -0.0, so an unconditional
-        // push made `value()` return -0.0 where `math.fsum` returns +0.0.
-        // Measured through the shipped extension -- reduce_sum([-0.0], exact)
-        // gave bits 8000000000000000 against the reference's 0000000000000000.
-        // Since -0.0 == 0.0, a tolerance or equality check cannot see it, and
-        // this policy is the declared cross-language ground truth, so the one
-        // reduction that must agree bit-for-bit was the one that did not.
+        // Conditional, as CPython's `math_fsum` is: it appends the running total
+        // only `if (x != 0.0)`. Pushing unconditionally preserves the value of
+        // the expansion but can flip its sign: over nothing but negative zeros
+        // `x` is -0.0, so `value()` returned -0.0 where `math.fsum` returns
+        // +0.0. Measured through the shipped extension, reduce_sum([-0.0],
+        // exact) gave bits 8000000000000000 against the reference's
+        // 0000000000000000. Since -0.0 == 0.0, no tolerance or equality check
+        // sees it.
         if (x != 0.0) {
             partials.push_back(x);
         }
@@ -202,13 +190,11 @@ struct Exact {
 
     /// Round the expansion to a single correctly-rounded binary64.
     ///
-    /// A naive fold over the partials is *not* sufficient, and getting this
-    /// wrong is subtle: the expansion is exact, but collapsing it can still be
-    /// off by one ulp, which makes the result depend on the order the inputs
-    /// arrived in. Since `Exact` is the ground truth against which the other
-    /// policies' error is measured -- and must agree with Python's `math.fsum`
-    /// bit-for-bit so both languages share that ground truth -- this reproduces
-    /// CPython's algorithm exactly, including its half-even correction.
+    /// The expansion is exact, but a plain fold over the partials can still
+    /// collapse it one ulp off, which makes the result depend on the order the
+    /// inputs arrived in. `Exact` is the ground truth the other policies' error
+    /// is measured against and must match `math.fsum` bit-for-bit, so this
+    /// reproduces CPython's algorithm including its half-even correction.
     ///
     /// Sum from the largest partial downward until the running total becomes
     /// inexact, then apply the correction that makes the result independent of
@@ -259,8 +245,8 @@ template <class Policy>
 
 /// Sum a contiguous range under a policy chosen at run time.
 ///
-/// The switch runs once per call and selects a fully monomorphised kernel, so
-/// the cost is O(1) per call rather than O(1) per element.
+/// The switch runs once per call and selects a monomorphised kernel, so
+/// dispatch costs O(1) per call rather than O(1) per element.
 [[nodiscard]] inline Real sum(const Real* data, std::size_t n, Reduction policy) noexcept {
     switch (policy) {
         case Reduction::Naive:

@@ -1,15 +1,13 @@
 """Model serialisation: round-trip fidelity and byte determinism.
 
-Two properties, and the second is the one that is easy to lose.
+Round-trip fidelity: a loaded model must be bit-identical to the saved one.
+Everything downstream compares floats bitwise, so a format that lost one ulp
+would break every differential test while looking fine.
 
-**Round-trip fidelity** -- a loaded model must be bit-identical to the saved one,
-not merely close. Everything downstream compares floats bitwise, so a format
-that lost a single ulp would break every differential test while looking fine.
-
-**Byte determinism** -- saving the same model twice must produce identical
-bytes. This is why the format is hand-rolled rather than ``numpy.savez``: a zip
-embeds a per-member modification timestamp, so two saves of an identical model
-differ, and the reproducibility snapshot could not exist.
+Byte determinism: saving the same model twice must produce identical bytes.
+Hence the hand-rolled container in place of ``numpy.savez``: a zip embeds a
+per-member modification timestamp, so two saves of one model differ and the
+reproducibility snapshot could not exist.
 """
 
 from __future__ import annotations
@@ -37,7 +35,7 @@ TfsxFormatError = pytest.importorskip("tfidf_stability.persistence.save_load").T
 # Round trip
 # ---------------------------------------------------------------------------
 def test_round_trip_is_bit_identical(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """Not "close" -- identical. Downstream comparisons are bitwise."""
+    """Identical rather than close: downstream comparisons are bitwise."""
     path = tmp_path / "model.tfsx"
     save_model(mini_model, path)
     restored = load_model(path)
@@ -119,7 +117,7 @@ def test_the_container_carries_no_ambient_state(mini_model, tmp_path) -> None:  
 
 
 def test_a_one_ulp_change_changes_the_file(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """The container must be sensitive to exactly what the project cares about."""
+    """The container must be sensitive at the ulp, the scale under study."""
     import dataclasses
 
     original = model_bytes(mini_model)
@@ -156,8 +154,8 @@ def test_a_truncated_file_is_rejected(mini_model, tmp_path) -> None:  # type: ig
     """This parser is the project's only reader of untrusted bytes.
 
     Every length comes from the header and is checked against the file size
-    *before* any slice is taken, so a truncated file raises rather than quietly
-    producing a model assembled from adjacent bytes.
+    before any slice is taken, so a truncated file raises rather than yielding a
+    model assembled from adjacent bytes.
     """
     path = tmp_path / "model.tfsx"
     save_model(mini_model, path, sidecar=False)
@@ -176,7 +174,7 @@ def test_bad_magic_is_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def
 
 
 def test_an_unsupported_format_version_is_rejected(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """A future file must fail loudly, not be misread by an older parser."""
+    """A future file must fail loudly rather than be misread by an older parser."""
     path = tmp_path / "future.tfsx"
     payload = bytearray(model_bytes(mini_model))
     struct.pack_into("<I", payload, len(MAGIC), FORMAT_VERSION + 99)
@@ -186,10 +184,9 @@ def test_an_unsupported_format_version_is_rejected(mini_model, tmp_path) -> None
 
 
 def test_a_newline_in_a_token_is_refused(mini_features) -> None:  # type: ignore[no-untyped-def]
-    """The token block is LF-separated, so a token containing LF would make the
-    encoding ambiguous. Normalisation strips control characters, so this cannot
-    arise from real text -- but the format refuses it rather than relying on
-    that."""
+    """The token block is LF-separated, so a token containing LF makes the
+    encoding ambiguous. Normalisation strips control characters, so real text
+    cannot get here; the format refuses it without relying on that."""
     model = TfidfVectoriser().fit([["ok"], ["also\nbad"]])
     with pytest.raises(TfsxFormatError, match="newline"):
         model_bytes(model)

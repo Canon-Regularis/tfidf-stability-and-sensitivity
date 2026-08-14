@@ -8,8 +8,8 @@
 //
 // The ball is what the paper defines; the chain is the object with a
 // well-defined "group containing document i"; the clique is the set in which
-// "mutually indistinguishable" is actually true. The chain-inflation ratio
-// rho = |largest chain| / |largest clique| says how far the first two have
+// "mutually indistinguishable" holds. The chain-inflation ratio
+// rho = |largest chain| / |largest clique| measures how far the first two have
 // drifted apart.
 #pragma once
 
@@ -31,17 +31,17 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
 
 /// `{ i : |S[i] - S[j]| <= tau }`, as a rank interval.
 ///
-/// The obvious implementation binary-searches for `S[j] +/- tau`. That is
-/// **wrong**, and wrong exactly where it matters: those bounds are themselves
-/// rounded, so the predicate actually evaluated becomes `S[i] <= fl(S[j] + tau)`,
-/// which differs from `spec_addenda.md#g9`'s pinned `|s_i - s_j| <= tau`
-/// precisely at the boundary -- the only place tie groups are interesting.
+/// Binary-searching for `S[j] +/- tau` is wrong, and wrong at the boundary,
+/// which is the only place tie groups are interesting: those bounds are
+/// themselves rounded, so the predicate evaluated becomes
+/// `S[i] <= fl(S[j] + tau)`, which differs from `spec_addenda.md#g9`'s pinned
+/// `|s_i - s_j| <= tau`.
 ///
 /// So the search runs on the difference itself. On a non-increasing array
 /// `S[i] - S[j]` is non-increasing in i and `S[j] - S[i]` is non-decreasing in
-/// i, so both bounds remain binary-searchable while evaluating exactly the
-/// subtraction G9 specifies. The monotonicity holds in binary64, not merely in
-/// the reals, because IEEE subtraction is monotone.
+/// i, so both bounds remain binary-searchable while evaluating the subtraction
+/// G9 specifies. IEEE subtraction is monotone, so the monotonicity holds in
+/// binary64 and not merely in the reals.
 [[nodiscard]] inline Interval tie_ball_interval(std::span<const Real> sorted_scores,
                                                 std::int32_t j,
                                                 Real tau) noexcept {
@@ -76,7 +76,7 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
 
 /// The transitive closure: cut wherever an adjacent gap exceeds `tau`.
 ///
-/// This *is* the closure because on a linearly ordered set any sequence of
+/// This is the closure because on a linearly ordered set any sequence of
 /// "within tau" steps can be replaced by the monotone path through the
 /// intervening points, along which gaps only shrink.
 [[nodiscard]] inline std::vector<Interval> tie_chains(std::span<const Real> sorted_scores,
@@ -101,11 +101,11 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
 
 /// Maximal intervals of diameter `<= tau`.
 ///
-/// The O(N) sweep is *complete*, not merely cheap: the near-tie graph is an
+/// The O(N) sweep is complete as well as cheap: the near-tie graph is an
 /// indifference graph, so every maximal clique is a contiguous interval of the
-/// sorted order, and there are at most N of them. `R(a)`, the largest b with
+/// sorted order and there are at most N of them. `R(a)`, the largest b with
 /// `S[a] - S[b] <= tau`, is non-decreasing, so one two-pointer pass finds all
-/// of them; `[a, R(a)]` is maximal exactly when `a == 0` or `R(a) > R(a-1)`.
+/// of them; `[a, R(a)]` is maximal iff `a == 0` or `R(a) > R(a-1)`.
 [[nodiscard]] inline std::vector<Interval> tie_cliques(std::span<const Real> sorted_scores,
                                                        Real tau) {
     std::vector<Interval> out;

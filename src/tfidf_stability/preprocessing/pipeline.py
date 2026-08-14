@@ -3,21 +3,20 @@
     raw text -> normalise -> tokenise -> remove stopwords -> lemmatise -> n-grams
 
 Section 2 requires this map to be "deterministic and fixed across all
-perturbation experiments". That is a stronger requirement than it appears: it
-must be stable not only within a run but across processes, Python versions,
-platforms, and the C++ mirror of this code. Everything that could vary is
-therefore pinned in :class:`PreprocessingConfig` and folded into
-:meth:`PreprocessingConfig.digest`, which every run manifest records.
+perturbation experiments", meaning stable across processes, Python versions,
+platforms, and the C++ mirror of this code, and not merely within a run.
+Everything that could vary is pinned in :class:`PreprocessingConfig` and folded
+into :meth:`PreprocessingConfig.digest`, which every run manifest records.
 
-Order matters and is not arbitrary:
+The order is forced:
 
-* Stopwords are removed **before** n-gram construction, leaving a gap sentinel,
-  so that no n-gram spans a removed token (``docs/spec_addenda.md#g7``).
-* Lemmatisation runs **after** stopword removal, so the stopword list is matched
-  against surface forms rather than stems -- otherwise "willing" would stem to
-  "will" and be silently deleted as a stopword.
-* N-grams are built **last**, from lemmatised tokens, so that "running shoes"
-  and "run shoe" collapse to the same bigram.
+* Stopwords go before n-gram construction, leaving a gap sentinel, so no n-gram
+  spans a removed token (``docs/spec_addenda.md#g7``).
+* Lemmatisation runs after stopword removal, so the list is matched against
+  surface forms; otherwise "willing" stems to "will" and is silently deleted as
+  a stopword.
+* N-grams are built last, from lemmatised tokens, so "running shoes" and "run
+  shoe" collapse to the same bigram.
 """
 
 from __future__ import annotations
@@ -101,15 +100,15 @@ class PreprocessingConfig:
     ) -> str:
         """SHA-256 over the canonical config, optionally binding the word list.
 
-        Passing ``stopword_digest`` makes the identity cover the *contents* of
-        the stopword file, not merely its name -- so editing the asset changes
-        the config digest and invalidates cached results, as it must.
+        ``stopword_digest`` makes the identity cover the contents of the stopword
+        file rather than its name alone, so editing the asset changes the config
+        digest and invalidates cached results.
 
-        ``lemmatiser_override`` covers the same hole one field along.
+        ``lemmatiser_override`` covers the same hole one field along:
         :class:`PreprocessingPipeline` accepts a ready-made lemmatiser that
-        bypasses :attr:`lemmatiser` entirely, and without this the two pipelines
-        would share an identity while producing different features. Both keys are
-        omitted when absent, so a run with no override digests exactly as before.
+        bypasses :attr:`lemmatiser` entirely, and without this two pipelines
+        producing different features share an identity. Both keys are omitted
+        when absent, so a run with no override digests as before.
         """
         payload = self.to_dict()
         if stopword_digest is not None:
@@ -120,13 +119,13 @@ class PreprocessingConfig:
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     def with_(self, **changes: Any) -> PreprocessingConfig:
-        """Return a copy with fields replaced -- handy for ablation sweeps."""
+        """Return a copy with fields replaced; used by the ablation sweeps."""
         return replace(self, **changes)
 
 
 @dataclass(frozen=True, slots=True)
 class PreprocessedDocument:
-    """A document's token stream plus the intermediates section 1.2 requires."""
+    """A document's feature stream plus the intermediates section 1.2 requires."""
 
     doc_id: str
     features: tuple[str, ...]
@@ -143,11 +142,11 @@ class PreprocessedDocument:
 class PreprocessingPipeline:
     """A configured, reusable preprocessing map.
 
-    The instance is stateless with respect to the documents it processes: calling
-    :meth:`preprocess` twice on the same text always yields the same result, and
-    processing documents in a different order cannot change any of them. Both
-    properties are asserted in ``tests/test_preprocessing_determinism.py``,
-    because the determinism guarantee of section 3 depends on them.
+    Stateless with respect to the documents it processes: :meth:`preprocess`
+    twice on the same text gives the same result, and document order cannot
+    change any result. Both are asserted in
+    ``tests/test_preprocessing_determinism.py``; the determinism guarantee of
+    section 3 depends on them.
     """
 
     __slots__ = ("_lemmatiser", "_stopwords", "config")
@@ -170,7 +169,7 @@ class PreprocessingPipeline:
 
         self._lemmatiser = lemmatiser or make_lemmatiser(self.config.lemmatiser)
 
-    # -- identity ------------------------------------------------------------
+    # --- identity -----------------------------------------------------------
     @property
     def stopwords(self) -> StopwordSet:
         return self._stopwords
@@ -183,13 +182,12 @@ class PreprocessingPipeline:
         """Identity of this exact preprocessing map, for the run manifest.
 
         The lemmatiser is bound only when an injected one disagrees with the
-        config, which is the sole way the two can differ. Previously the digest
-        read the config alone, so ``PreprocessingPipeline(cfg)`` and
-        ``PreprocessingPipeline(cfg, lemmatiser=IdentityLemmatiser())`` -- which
-        turn "running cats" into ``run|cat`` and ``running|cats`` respectively --
-        were the same string. The sibling ``stopwords=`` injection was always
-        bound by content, so this was an oversight rather than a scoping
-        decision. No current caller injects, so no recorded digest changes.
+        config, the sole way the two can differ. The digest previously read the
+        config alone, so ``PreprocessingPipeline(cfg)`` and
+        ``PreprocessingPipeline(cfg, lemmatiser=IdentityLemmatiser())``, which
+        turn "running cats" into ``run|cat`` and ``running|cats``, hashed to the
+        same string. The sibling ``stopwords=`` injection was always bound by
+        content. No current caller injects, so no recorded digest changes.
         """
         effective = self._lemmatiser.name
         override = None if effective == str(self.config.lemmatiser) else effective
@@ -210,7 +208,7 @@ class PreprocessingPipeline:
             "lemmatiser": self._lemmatiser.name,
         }
 
-    # -- the map -------------------------------------------------------------
+    # --- the map ------------------------------------------------------------
     def preprocess(self, text: str) -> list[str]:
         """Apply the full map, returning the feature (n-gram) stream."""
         cfg = self.config
@@ -224,8 +222,8 @@ class PreprocessingPipeline:
     def preprocess_document(self, doc_id: str, text: str) -> PreprocessedDocument:
         """As :meth:`preprocess`, retaining the intermediate stages for inspection.
 
-        Section 1.2 of the paper requires intermediate quantities to remain
-        accessible; this is where that begins.
+        Section 1.2 of the paper requires intermediate quantities to stay
+        accessible; the chain starts here.
         """
         cfg = self.config
         raw = tokenise(normalise(text, cfg.normalisation), cfg.tokenisation)
@@ -244,9 +242,9 @@ class PreprocessingPipeline:
     def preprocess_corpus(self, documents: Iterable[tuple[str, str]]) -> list[PreprocessedDocument]:
         """Preprocess ``(doc_id, text)`` pairs, preserving input order.
 
-        Documents are independent: the result for one never depends on the
-        others, nor on the order they arrive in. That independence is what lets
-        the native backend parallelise this stage without affecting any value.
+        Documents are independent: no result depends on another, or on arrival
+        order, which lets the native backend parallelise this stage without
+        moving a value.
         """
         return [self.preprocess_document(doc_id, text) for doc_id, text in documents]
 

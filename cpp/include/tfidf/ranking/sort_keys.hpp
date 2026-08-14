@@ -1,17 +1,17 @@
 // The sort key, and why it is a strict total order.
 //
 // key = (-score, rank_1, ..., rank_m, id_rank), compared ascending and
-// lexicographically -- exactly the tuple the Python reference builds.
+// lexicographically, the tuple the Python reference builds.
 //
-// Negating the score is *exact*: it flips the sign bit and never rounds. Using
-// negation rather than a reversed comparator means Python's tuple `<` and this
-// `operator<` are literally the same relation, so there is one comparator to
-// reason about instead of two that must be kept in agreement.
+// Negating the score is exact: it flips the sign bit and never rounds.
+// Negation rather than a reversed comparator makes Python's tuple `<` and this
+// `operator<` the same relation, so there is one comparator to reason about
+// instead of two kept in agreement.
 //
-// Because identifier ranks are a bijection, the key is **injective**, so no two
-// documents ever compare equal. Two consequences follow, and both are tested:
+// Identifier ranks are a bijection, so the key is injective and no two
+// documents ever compare equal. Two consequences, both tested:
 //
-//   * the sorted sequence is *unique*, so every correct sorting algorithm
+//   * the sorted sequence is unique, so every correct sorting algorithm
 //     produces the identical permutation and stability is irrelevant;
 //   * the output does not depend on the input order.
 #pragma once
@@ -40,13 +40,11 @@ static_assert(sizeof(SortKey) == 32, "SortKey should stay at two per cache line"
 
 /// Ascending lexicographic comparison.
 ///
-/// Written with explicit `<` rather than a defaulted `operator<=>`, and that is
-/// a correctness requirement rather than a style preference: a defaulted `<=>`
-/// on a struct containing a `double` yields `std::partial_ordering`, which
-/// `std::sort` cannot consume, and forcing it to `strong_ordering` would
-/// reintroduce the NaN question that the boundary guard exists to settle.
-///
-/// With finiteness guaranteed on entry, plain `<` *is* a strict total order.
+/// Explicit `<` rather than a defaulted `operator<=>`, for correctness rather
+/// than style: a defaulted `<=>` on a struct containing a `double` yields
+/// `std::partial_ordering`, which `std::sort` cannot consume, and forcing
+/// `strong_ordering` would reopen the NaN question the boundary guard settles.
+/// With finiteness guaranteed on entry, plain `<` is a strict total order.
 [[nodiscard]] inline bool key_less(const SortKey& a, const SortKey& b) noexcept {
     if (a.neg_score != b.neg_score) {
         return a.neg_score < b.neg_score;
@@ -82,11 +80,10 @@ inline void build_keys(std::span<const Real> scores,
 
 /// Whether every score is finite.
 ///
-/// The guard runs once per query, O(N), against an O(N log N) sort. It is the
-/// only thing between an arbitrary caller and genuine undefined behaviour: a
-/// NaN destroys the strict weak ordering, and libstdc++'s final insertion pass
-/// then walks off the front of the array -- a real out-of-bounds write, not
-/// merely a wrong answer.
+/// O(N) once per query against an O(N log N) sort, and the only thing between
+/// an arbitrary caller and undefined behaviour: a NaN destroys the strict weak
+/// ordering, and libstdc++'s final insertion pass then walks off the front of
+/// the array, which is a real out-of-bounds write rather than a wrong answer.
 [[nodiscard]] inline bool all_finite(std::span<const Real> scores) noexcept {
     for (const Real s : scores) {
         if (!std::isfinite(s)) {
@@ -98,9 +95,8 @@ inline void build_keys(std::span<const Real> scores,
 
 /// Whether the keys are pairwise distinct.
 ///
-/// Injectivity is the precondition for the sorted permutation being unique, so
-/// this is the single most important structural property of the key. O(n log n)
-/// via a sort of copies; intended for tests and debug builds, never the
+/// Injectivity is the precondition for the sorted permutation being unique.
+/// O(n log n) via a sort of copies; for tests and debug builds, never the
 /// published path.
 [[nodiscard]] inline bool keys_are_injective(std::span<const SortKey> keys) {
     std::vector<SortKey> copy(keys.begin(), keys.end());

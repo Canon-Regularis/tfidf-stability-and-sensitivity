@@ -1,24 +1,15 @@
 #!/usr/bin/env python3
 """Verify every vendored file against its recorded digest.
 
-This repository vendors third-party code in three places -- the Snowball
-stemmer, the doctest and nanobench headers, and the Snowball test vectors -- and
-in each case the justification for vendoring rests on the bytes being *exactly*
-what upstream published:
+Three vendored trees, each depending on the bytes being what upstream published:
+the Snowball stemmer (Python and C++ backends run implementations generated from
+one source), the doctest and nanobench headers (hermetic offline build), and the
+Snowball test vectors (ground truth for the stemmer). ``THIRD_PARTY_NOTICES.md``
+asserts all three.
 
-* the stemmer, because the Python and C++ backends must run implementations
-  generated from one source, so they agree by construction rather than by
-  hand-porting;
-* the headers, because the build must be hermetic and offline;
-* the vectors, because they are the ground truth the stemmer is checked against.
-
-An unverified vendored file makes all three claims unfalsifiable, and
-``THIRD_PARTY_NOTICES.md`` states them as fact. This check is what keeps that
-honest.
-
-Also verifies the *reverse* direction, which is the failure that actually
-happens: a file added to a vendored directory but never added to its manifest.
-A digest check alone would pass, because nothing points at the new file.
+Also checks the reverse direction, which is the failure that actually happens: a
+file added to a vendored directory but never added to its manifest. A digest
+check alone passes, since nothing points at the new file.
 """
 
 from __future__ import annotations
@@ -67,8 +58,8 @@ def check() -> list[str]:
                 )
             checked += 1
 
-        # The reverse check: a file present but unlisted is invisible to the
-        # digest comparison, so it would ship unverified.
+        # An unlisted file is invisible to the digest comparison, so it ships
+        # unverified.
         for path in manifest.parent.iterdir():
             if path.name in _EXEMPT or path.is_dir():
                 continue

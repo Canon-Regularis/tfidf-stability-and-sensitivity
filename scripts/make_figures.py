@@ -1,39 +1,36 @@
 #!/usr/bin/env python3
 """Render the figures from the experiment JSON, never from a live computation.
 
-Figures are built from the files the runners wrote, not by recomputing. That
-separation is deliberate: a figure that recomputes its own data can silently
-disagree with the numbers in the text, and the two would drift the first time a
-default changed. Here a figure is a *view* of a recorded result, and its caption
-carries that result's digest, so a plot can always be traced to the run that
-produced it.
+A figure is a view of a recorded result and its caption carries that result's
+digest, so a plot traces back to the run that produced it. A figure that
+recomputed its own data would drift from the numbers in the text the first time a
+default changed.
 
 Matplotlib is an optional dependency (``pip install tfidf-stability[viz]``); the
 normative pipeline never imports it.
 
 Each figure and its falsification
 ---------------------------------
-**fig_transition** -- flip rate against ``eps / (m_k / 2)``. If A1 were false the
-curve would rise before 1.0; section 4.4 forbids that, so any non-zero point left
-of the dashed line falsifies the theorem or the code.
+``fig_transition``: flip rate against ``eps / (m_k / 2)``. If A1 were false the
+curve would rise before 1.0, so any non-zero point left of the dashed line
+falsifies section 4.4 or the code.
 
-**fig_margins** -- the distribution of ``m_k`` at each ``k``, log-scaled, with the
-exact-tie share annotated. If margins were comfortably large this would sit far
-from zero; the exact-tie mass is the finding.
+``fig_margins``: the distribution of ``m_k`` at each ``k``, log-scaled, with the
+exact-tie share annotated. Comfortably large margins would sit far from zero; the
+exact-tie mass is the finding.
 
-**fig_tau_band** -- the admissible band for ``tau``, from the arithmetic noise
-floor to the smallest observed gap, on a log axis. If the band were empty no
-``tau`` could separate numerical error from tie structure; that would be a
-finding about the corpus, and this is where it would show.
+``fig_tau_band``: the admissible band for ``tau``, from the arithmetic noise floor
+to the smallest observed gap, on a log axis. An empty band would mean no ``tau``
+separates numerical error from tie structure, a finding about the corpus.
 
-**fig_rho_discontinuity** -- ``rho(tau)`` as a step function. Drawn as a step
-because it *is* one: ``rho`` changes only at an observed gap, so interpolating
-between samples would assert values it never takes. ``rho = 1`` means chains and
-cliques agree; any step above it is single-linkage chaining.
+``fig_rho_discontinuity``: ``rho(tau)`` as a step function. ``rho`` changes only
+at an observed gap, so interpolating would assert values it never takes.
+``rho = 1`` means chains and cliques agree; any step above it is single-linkage
+chaining.
 
-**fig_ablation** -- disagreement rate by operator pair and ``k``. If A2 were
-false every bar would be zero, because the operators consume bit-identical
-scores. Any non-zero bar is caused by the tie-break and nothing else.
+``fig_ablation``: disagreement rate by operator pair and ``k``. The operators
+consume bit-identical scores, so a false A2 would leave every bar at zero and a
+non-zero bar can only come from the tie-break.
 
 Usage::
 
@@ -49,18 +46,17 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-#: Slots 1 and 2 of a validated light-mode categorical palette. Checked rather
-#: than chosen: adjacent CVD delta-E 24.7 (target >= 8) and normal-vision
-#: delta-E 33.6 (floor >= 15), both passing, so the two series stay separable
-#: for colour-blind readers and in greyscale print.
+#: Slots 1 and 2 of a validated light-mode categorical palette: adjacent CVD
+#: delta-E 24.7 (target >= 8), normal-vision delta-E 33.6 (floor >= 15). Keeps the
+#: two series separable for colour-blind readers and in greyscale print.
 _INK = "#2a78d6"
 _ACCENT = "#eb6834"
-#: Recessive ink for chrome and annotation. Text never wears a series colour --
-#: the coloured mark beside it carries the identity.
+#: Recessive ink for chrome and annotation. Text never wears a series colour; the
+#: coloured mark beside it carries the identity.
 _MUTED = "#52514e"
 #: Five slots for the cascade, in the palette's fixed order. Validated as a set:
-#: worst adjacent CVD delta-E 9.1, normal-vision 19.6, both passing. Three sit
-#: below 3:1 against the surface, so every series carries a direct label.
+#: worst adjacent CVD delta-E 9.1, normal-vision 19.6. Three sit below 3:1
+#: against the surface, so every series carries a direct label.
 _SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4")
 
 
@@ -116,17 +112,15 @@ def fig_transition(record: dict, out: Path) -> None:
 
 
 def fig_tau_band(record: dict, out: Path) -> None:
-    """G23: tau is derived as a *band*, and the band is not empty.
+    """G23: tau is derived as a band, and the band has width.
 
-    The claim is spatial: a lower bound from arithmetic noise, an upper bound
-    from the data, and a gap between them wide enough to choose from. Three
-    numbers in a table make the reader do the subtraction; a log axis shows it.
-    One interval, so no legend -- the title names the quantity.
+    Lower bound from arithmetic noise, upper bound from the data. A log axis
+    shows the gap between them; three numbers in a table make the reader do the
+    subtraction. One interval, so no legend; the title names the quantity.
 
-    Falsification: if the noise floor reached the smallest observed gap the band
-    would be empty, and no tau could separate numerical error from tie
-    structure. That is a finding about the corpus rather than a bug, and this is
-    where it would be visible.
+    Falsification: a noise floor reaching the smallest observed gap leaves the
+    band empty, so no tau separates numerical error from tie structure. A finding
+    about the corpus, visible here.
     """
     import matplotlib.pyplot as plt
 
@@ -135,10 +129,9 @@ def fig_tau_band(record: dict, out: Path) -> None:
     band = derivation["band"]
     g_min, tau, decades = band["g_min"], band["display_tau"], band["decades"]
 
-    # The band is [2 eta, g_min), not [eta, g_min) -- G23 doubles the floor so a
-    # difference of two noisy scores clears it. Drawing from eta would show a
-    # band the derivation does not claim, so eta is marked as the measured floor
-    # and the admissible interval starts one doubling to its right.
+    # G23 doubles the floor so a difference of two noisy scores clears it: the
+    # band is [2 eta, g_min). Drawing from eta would show a band the derivation
+    # never claims, so eta is marked separately as the measured floor.
     lower = 2.0 * eta
     figure, axes = plt.subplots(figsize=(6.4, 2.4))
     axes.hlines(0.5, lower, g_min, color=_INK, linewidth=2.0)
@@ -146,8 +139,8 @@ def fig_tau_band(record: dict, out: Path) -> None:
     axes.vlines([eta], 0.44, 0.56, color=_MUTED, linewidth=1.2)
     axes.plot([tau], [0.5], marker="o", markersize=8, color=_ACCENT, zorder=3)
 
-    # Three labels, not one per sample: the endpoints define the band and the
-    # marker is the value chosen inside it.
+    # Three labels only: the endpoints define the band, and the marker is the
+    # value chosen inside it.
     axes.annotate(
         f"$\\eta$ = {eta:.3e}\nnoise floor",
         xy=(eta, 0.68),
@@ -183,12 +176,11 @@ def fig_tau_band(record: dict, out: Path) -> None:
 
 
 def fig_rho_discontinuity(record: dict, out: Path) -> None:
-    """G1: rho(tau) is piecewise constant, and the steps are the point.
+    """G1: rho(tau) is piecewise constant, and the steps are the subject.
 
-    Drawn as a **step**, not a line, because it *is* one: rho changes only at an
-    observed gap, so joining the samples with straight segments would assert
-    intermediate values the function never takes -- smoothing away the exact
-    discontinuity the figure exists to show.
+    rho changes only at an observed gap, so joining the samples with straight
+    segments would assert intermediate values the function never takes, smoothing
+    away the discontinuity.
 
     Falsification: rho = 1 means chains and cliques agree, so tie groups are
     unambiguous at that tau. Any step above 1 is single-linkage chaining, and
@@ -208,9 +200,8 @@ def fig_rho_discontinuity(record: dict, out: Path) -> None:
     figure, axes = plt.subplots(figsize=(6.4, 4.0))
     axes.step(taus, rho, where="post", linewidth=1.6, color=_INK)
     axes.axhline(1.0, color=_MUTED, linewidth=0.8)
-    # Headroom, or the peak's label is clipped by the top spine; and the
-    # baseline note sits well clear of the step, which runs along rho = 1 for
-    # the whole left half of the axis.
+    # Headroom, or the top spine clips the peak's label. The baseline note also
+    # has to clear the step, which runs along rho = 1 across the left half.
     axes.set_ylim(0.85, peak * 1.14)
     axes.annotate(
         "$\\rho = 1$: chains and cliques agree",
@@ -253,19 +244,19 @@ def fig_rho_discontinuity(record: dict, out: Path) -> None:
 def fig_rank_cascade(record: dict, out: Path) -> None:
     """A1, per document: which ranks cross, and when.
 
-    ``fig_transition`` gives the *rate* of top-k changes; this gives the paths
-    behind it. Rank is an integer, so nothing is projected -- unlike a 2-D
-    embedding of the document vectors, where apparent distance would be an
-    artefact of the projection rather than a property of the data.
+    ``fig_transition`` gives the rate of top-k changes; this gives the paths
+    behind it. Rank is an integer, so nothing is projected, unlike a 2-D
+    embedding of the document vectors where apparent distance is an artefact of
+    the projection.
 
-    Emphasis rather than twelve hues: the documents that cross the top-k
-    boundary carry the story, the rest are context and are drawn in recessive
-    grey. Colour follows the entity, not its rank at any given eps.
+    Emphasis rather than twelve hues: documents crossing the top-k boundary are
+    coloured, the rest drawn in recessive grey. Colour follows the entity, so it
+    stays put as the rank moves.
 
-    Falsification: section 4.4 certifies the top-k *set* below eps = m_k/2, so
-    no line may cross the k boundary left of 1.0. Crossings that stay wholly
-    inside the top-k are permitted there -- the certificate is about the set,
-    not the order within it -- and the two are drawn distinctly for that reason.
+    Falsification: section 4.4 certifies the top-k set below eps = m_k/2, so no
+    line may cross the k boundary left of 1.0. Crossings wholly inside the top-k
+    are permitted there, since the certificate covers set membership rather than
+    the order within it; the two are drawn distinctly.
     """
     import matplotlib.pyplot as plt
 
@@ -291,10 +282,8 @@ def fig_rank_cascade(record: dict, out: Path) -> None:
     for index, doc in enumerate(crossers):
         colour = _SERIES[index % len(_SERIES)]
         axes.plot(ratios, ranks[doc], linewidth=1.8, color=colour, zorder=3)
-        # Direct labels at the endpoint rather than a legend. Three of the five
-        # hues sit below 3:1 against the surface, and a contrast warning
-        # obligates a visible label -- which this is, and it also removes the
-        # legend's colour-matching step entirely.
+        # Direct labels at the endpoint rather than a legend: three of the five
+        # hues sit below 3:1 against the surface and need a visible label anyway.
         axes.annotate(
             f"  {doc}",
             xy=(ratios[-1], ranks[doc][-1]),
@@ -357,13 +346,13 @@ def fig_margins(record: dict, out: Path) -> None:
     figure, axes = plt.subplots(figsize=(6.4, 4.0))
 
     for offset, label in enumerate(labels):
-        # E1 reports both margins per k; the boundary margin is what governs
-        # top-k *membership*, which is what this figure is about.
+        # E1 reports both margins per k; the boundary margin governs top-k
+        # membership, which is this figure's subject.
         d = dists[label]["m_k"]
         percentiles = d["percentiles"]
-        # Zero margins cannot be drawn on a log axis, so the exact-tie share is
-        # annotated rather than silently dropped -- it is the finding, not an
-        # inconvenience, and a reader must not have to infer it from a gap.
+        # Zero cannot be drawn on a log axis, so the exact-tie share is annotated
+        # rather than dropped; it is the finding, and inferring it from a gap in
+        # the plot asks too much.
         lo = max(percentiles["p5"], 1e-18)
         hi = max(percentiles["p95"], 1e-18)
         mid = max(percentiles["p50"], 1e-18)
@@ -382,9 +371,9 @@ def fig_margins(record: dict, out: Path) -> None:
     axes.set_xticks(range(len(labels)))
     axes.set_xticklabels([f"$k$={label[1:]}" for label in labels])
     axes.set_ylabel("$m_k$  (p5-p95, median marked)")
-    # m_min^top is deliberately not overlaid: it constrains a disjoint set of
-    # gaps, so plotting the two on one axis would invite the reading that one
-    # bounds the other. It is in the JSON alongside.
+    # m_min^top stays off this axis: it constrains a disjoint set of gaps, so
+    # sharing one axis would invite the reading that either bounds the other. It
+    # sits in the JSON alongside.
     axes.set_title("Score-separation margins by rank", fontsize=10)
     axes.grid(alpha=0.3, axis="y", linewidth=0.5)
     _stamp(figure, f"result {record['result_digest'][:16]}")

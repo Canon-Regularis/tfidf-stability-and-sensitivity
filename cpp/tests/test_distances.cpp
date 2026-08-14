@@ -1,14 +1,13 @@
 // Ordering distances: inversion counting, Kendall tau, FKS, and the top-k set
 // measures.
 //
-// Two properties are worth more than the rest of this file put together, and
-// both are guards against a plausible "improvement" rather than against a typo:
+// Two cases guard against a plausible "improvement" rather than against a typo:
 //
 //   * the FKS triangle-inequality violation is asserted, with G2's witness and
-//     its exact values. K^(p) is a near-metric; a future patch that "repairs"
-//     it would silently move every published disagreement number.
+//     its values. K^(p) is a near-metric; a patch that "repairs" it would move
+//     every published disagreement number.
 //   * fks_max(1) == 1.0. Two disjoint singletons contribute one case-3 pair, so
-//     the maximum is 1 -- an early `if k < 2: return 0` guard normalised two
+//     the maximum is 1; an early `if k < 2: return 0` guard normalised two
 //     entirely disjoint lists to distance zero.
 #include <tfidf/ranking/distances.hpp>
 
@@ -59,8 +58,8 @@ TEST_CASE("inversions: merge sort agrees with the quadratic definition") {
         const std::size_t n = static_cast<std::size_t>(rng() % 13);
         std::vector<std::int32_t> v(n);
         for (auto& x : v) {
-            // A small alphabet, so equal elements -- the case the `<=` in the
-            // merge decides -- occur constantly rather than never.
+            // A small alphabet, so equal elements (the case the `<=` in the
+            // merge decides) occur constantly rather than never.
             x = static_cast<std::int32_t>(rng() % 5);
         }
         CHECK(inversion_count(v) == brute_force_inversions(v));
@@ -71,7 +70,7 @@ TEST_CASE("inversions: extremes") {
     CHECK(inversion_count(std::vector<std::int32_t>{}) == 0);
     CHECK(inversion_count(std::vector<std::int32_t>{1, 2, 3, 4}) == 0);
     CHECK(inversion_count(std::vector<std::int32_t>{4, 3, 2, 1}) == 6);  // C(4, 2)
-    CHECK(inversion_count(std::vector<std::int32_t>{1, 1, 1}) == 0);     // equals are not inversions
+    CHECK(inversion_count(std::vector<std::int32_t>{1, 1, 1}) == 0);     // equals: no inversion
 }
 
 TEST_CASE("inversions: a reversed run of 1000 is C(1000, 2)") {
@@ -111,8 +110,7 @@ TEST_CASE("kendall tau: fewer than two elements is 0, not undefined") {
 }
 
 TEST_CASE("kendall tau: differing sets are refused, not approximated") {
-    // The refusal is the point: it is the signal that kendall_fks is the
-    // function actually wanted.
+    // The refusal is the signal that kendall_fks is the function wanted.
     const auto attempt = [](const std::vector<DocId>& a, const std::vector<DocId>& b) {
         static_cast<void>(kendall_tau_distance(a, b));  // discarding a [[nodiscard]] Real
     };
@@ -137,7 +135,7 @@ TEST_CASE("kendall tau: unlike FKS, this one really is a metric") {
             }
         }
     }
-    // Not exactly zero: the distances are sixths, which binary64 cannot hold, so
+    // Nonzero because the distances are sixths, which binary64 cannot hold, so
     // the slack is rounding rather than structure.
     CHECK(worst <= 1e-12);
 }
@@ -171,8 +169,8 @@ TEST_CASE("fks: disjoint lists attain the maximum exactly, bitwise") {
         std::vector<DocId> b(static_cast<std::size_t>(k));
         std::iota(a.begin(), a.end(), 0);
         std::iota(b.begin(), b.end(), 1000);
-        // Bit equality, not approximate: at p = 1/2 every addend is dyadic, so
-        // the accumulated sum of k^2 ones and k(k-1) halves is exact.
+        // Bit equality rather than approximate: at p = 1/2 every addend is
+        // dyadic, so the sum of k^2 ones and k(k-1) halves is exact.
         CHECK(same_bits(fks_raw(a, b), fks_max(k)));
         CHECK(kendall_fks(a, b) == 1.0);
     }
@@ -195,8 +193,8 @@ TEST_CASE("fks: two disjoint singletons are maximally distant, not identical") {
 
 TEST_CASE("fks: is a near-metric, not a metric -- G2's witness") {
     // A and C are disjoint, so their distance is maximal, while B shares one
-    // element with each. The triangle inequality fails by a wide margin. This
-    // is intended behaviour and must not be "fixed".
+    // element with each. The triangle inequality then fails by a wide margin,
+    // which is intended behaviour and must not be "fixed".
     const std::vector<DocId> a{3, 1, 0};
     const std::vector<DocId> b{5, 3, 4};
     const std::vector<DocId> c{5, 4, 2};
@@ -296,7 +294,7 @@ TEST_CASE("compare_top_k: identical lists") {
 }
 
 TEST_CASE("compare_top_k: the intersection Kendall is undefined below two shared") {
-    // Why K_int is never reported alone: it reads as "no reordering" here while
+    // Why K_int is never reported alone: here it reads as "no reordering" while
     // the set indicator and the FKS distance both see the change.
     const TopKComparison c =
         compare_top_k(std::vector<DocId>{1, 2, 3}, std::vector<DocId>{1, 4, 5}, 3);
@@ -356,7 +354,7 @@ TEST_CASE("compare_top_k: k beyond the lists, and k = 0") {
     CHECK(compare_top_k(a, b, 99).kendall_intersection == 1.0);
     const TopKComparison empty = compare_top_k(a, b, 0);
     CHECK_FALSE(empty.sets_differ);
-    CHECK(empty.fks == 0.0);  // no pairs at all, and the ceiling is 0 -> 0, not NaN
+    CHECK(empty.fks == 0.0);  // no pairs, and a ceiling of 0 yields 0 rather than NaN
     CHECK(empty.jaccard == 0.0);
     CHECK(std::isnan(empty.kendall_intersection));
 }

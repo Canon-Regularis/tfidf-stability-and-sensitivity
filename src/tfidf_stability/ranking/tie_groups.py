@@ -5,19 +5,16 @@ Section 2.3.3 defines, for a tolerance ``tau > 0`` and a rank ``j``,
     G_tau(j) = { i : |s_i - score(r_j)| <= tau }
 
 and says documents inside one are "indistinguishable at the level of similarity
-scores". The definition is a **ball**, not an equivalence class, and the
-difference is not pedantic:
+scores". The definition is a ball rather than an equivalence class:
 
-* the relation ``|s_i - s_j| <= tau`` is reflexive and symmetric but **not
-  transitive** -- for scores ``{0, tau, 2*tau}`` the first and second are
-  related, the second and third are related, the first and third are not;
-* balls therefore overlap and do **not** partition the corpus;
+* ``|s_i - s_j| <= tau`` is reflexive and symmetric but not transitive: for
+  scores ``{0, tau, 2*tau}`` the outer pair is unrelated;
+* balls therefore overlap and do not partition the corpus;
 * "the tie group of document i" is not well defined;
-* and two members of one ball can differ by as much as ``2*tau``, so the quoted
+* two members of one ball can differ by as much as ``2*tau``, so the quoted
   sentence is not strictly true as written.
 
-G1's resolution is to implement three separately named objects and never
-conflate them:
+G1's resolution is three separately named objects, never conflated:
 
 ===============  ==========================================  =========  ==========
 object           definition                                  cost       partition?
@@ -27,9 +24,9 @@ object           definition                                  cost       partitio
 :func:`tie_cliques` complete-linkage: diameter <= tau        O(N)       no
 ===============  ==========================================  =========  ==========
 
-The ball stays the primary reported object, because it is what the paper
-defines. Chains are reported alongside it wherever a partition is required, and
-the **chain-inflation ratio** ``rho(tau)`` flags when the two have diverged.
+The ball stays the primary reported object, being what the paper defines. Chains
+are reported alongside it wherever a partition is required, and the
+chain-inflation ratio ``rho(tau)`` flags when the two have diverged.
 """
 
 from __future__ import annotations
@@ -60,9 +57,9 @@ __all__ = [
 #: sequence of small steps rather than by indistinguishability.
 DEFAULT_RHO_WARN: float = 2.0
 
-#: A half-open ``[lo, hi)`` range of *ranks* (0-indexed positions in the sorted
-#: score array), which every group in this module is, because all three objects
-#: are contiguous there.
+#: A half-open ``[lo, hi)`` range of ranks (0-indexed positions in the sorted
+#: score array). Every group in this module is one, since all three objects are
+#: contiguous there.
 Interval = tuple[int, int]
 
 
@@ -81,31 +78,28 @@ def tie_ball_interval(sorted_scores: Sequence[float], j: int, tau: float) -> Int
         The half-open rank range. Contiguous, because the array is sorted.
 
     Note:
-        The obvious implementation binary-searches for ``S[j] + tau`` and
-        ``S[j] - tau``. **That is wrong**, and wrong exactly where it matters.
-        Those bounds are themselves rounded, so the predicate actually evaluated
-        becomes ``S[i] <= fl(S[j] + tau)``, which is a *different* test from
-        ``spec_addenda.md#g9``'s pinned ``|s_i - s_{r_j}| <= tau``. The two
-        disagree only at the boundary -- which is the sole place tie groups are
-        interesting.
+        Binary-searching for ``S[j] + tau`` and ``S[j] - tau`` is wrong: those
+        bounds are themselves rounded, so the predicate evaluated becomes
+        ``S[i] <= fl(S[j] + tau)``, a different test from ``spec_addenda.md#g9``'s
+        pinned ``|s_i - s_{r_j}| <= tau``. The two disagree only at the boundary,
+        the one place tie groups are interesting.
 
-        So the search runs on the difference itself. On a non-increasing array,
-        ``S[i] - S[j]`` is non-increasing in ``i``, and ``S[j] - S[i]`` is
-        non-decreasing in ``i``; both are therefore still binary-searchable, and
-        both evaluate exactly the subtraction G9 specifies. The monotonicity
-        holds in binary64 and not merely in the reals, because IEEE subtraction
-        is monotone: ``a >= b`` implies ``fl(a - c) >= fl(b - c)``.
+        So the search runs on the difference itself. On a non-increasing array
+        ``S[i] - S[j]`` is non-increasing in ``i`` and ``S[j] - S[i]`` is
+        non-decreasing, so both stay binary-searchable and both evaluate the
+        subtraction G9 specifies. Monotonicity survives binary64 as well as the
+        reals, because IEEE subtraction is monotone: ``a >= b`` implies
+        ``fl(a - c) >= fl(b - c)``.
     """
     n = len(sorted_scores)
     if not 0 <= j < n:
         raise IndexError(f"rank index {j} out of range 0..{n - 1}")
-    # `not (tau >= 0.0)`, not `tau < 0.0`: every comparison with NaN is
-    # false, so the second form lets NaN straight through a guard whose
-    # own message says non-negative. It is not harmless -- with tau = NaN
-    # `gap > tau` and `gap <= tau` are both false, so tie_chains returns a
-    # single group covering the corpus while tie_cliques returns all
-    # singletons, and rho reports N. Three mutually contradictory answers
-    # to the same question, with no error raised.
+    # `not (tau >= 0.0)` rather than `tau < 0.0`: comparisons with NaN are all
+    # false, so the second form lets NaN through a guard whose own message says
+    # non-negative. With tau = NaN, `gap > tau` and `gap <= tau` are both false,
+    # so tie_chains returns one group covering the corpus, tie_cliques returns
+    # all singletons, and rho reports N: three contradictory answers to the same
+    # question, with no error raised.
     if not (tau >= 0.0):
         raise ValueError(f"tau must be non-negative, got {tau}")
 
@@ -138,24 +132,21 @@ def tie_ball_interval(sorted_scores: Sequence[float], j: int, tau: float) -> Int
 def tie_chains(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ...]:
     """The transitive closure of the near-tie relation: a partition.
 
-    Cut wherever an adjacent gap exceeds ``tau``.
-
-    Why that is exactly the closure: on a linearly ordered set, any sequence of
-    "within tau" steps between two points can be replaced by the monotone path
-    through the points between them, because gaps only shrink along the way. So
-    two documents are connected precisely when every adjacent gap separating
-    them is ``<= tau``.
+    Cut wherever an adjacent gap exceeds ``tau``. That is the closure because on
+    a linearly ordered set any sequence of "within tau" steps between two points
+    can be replaced by the monotone path through the points between them, gaps
+    only shrinking along the way. So two documents are connected when every
+    adjacent gap separating them is ``<= tau``.
     """
     n = len(sorted_scores)
     if n == 0:
         return ()
-    # `not (tau >= 0.0)`, not `tau < 0.0`: every comparison with NaN is
-    # false, so the second form lets NaN straight through a guard whose
-    # own message says non-negative. It is not harmless -- with tau = NaN
-    # `gap > tau` and `gap <= tau` are both false, so tie_chains returns a
-    # single group covering the corpus while tie_cliques returns all
-    # singletons, and rho reports N. Three mutually contradictory answers
-    # to the same question, with no error raised.
+    # `not (tau >= 0.0)` rather than `tau < 0.0`: comparisons with NaN are all
+    # false, so the second form lets NaN through a guard whose own message says
+    # non-negative. With tau = NaN, `gap > tau` and `gap <= tau` are both false,
+    # so tie_chains returns one group covering the corpus, tie_cliques returns
+    # all singletons, and rho reports N: three contradictory answers to the same
+    # question, with no error raised.
     if not (tau >= 0.0):
         raise ValueError(f"tau must be non-negative, got {tau}")
 
@@ -173,35 +164,33 @@ def tie_chains(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ..
 # Cliques -- complete linkage, overlapping
 # ---------------------------------------------------------------------------
 def tie_cliques(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ...]:
-    """Maximal sets in which *every pair* is within ``tau``.
+    """Maximal sets in which every pair is within ``tau``.
 
-    These are the sets for which "mutually indistinguishable" is actually true,
-    as opposed to chains, where only neighbours need be close.
+    These are the sets for which "mutually indistinguishable" holds; in a chain
+    only neighbours need be close.
 
-    The O(N) sweep is not merely cheap, it is **complete**, and the reason is a
-    small lemma. The graph ``|s_i - s_j| <= tau`` is an indifference graph, so
-    every maximal clique is a contiguous interval of the sorted order: if
-    ``i < m < j`` and ``i, j`` are both in a clique, then
+    The O(N) sweep is complete, by a small lemma. The graph ``|s_i - s_j| <= tau``
+    is an indifference graph, so every maximal clique is a contiguous interval of
+    the sorted order: if ``i < m < j`` and ``i, j`` are both in a clique, then
     ``S[i] >= S[m] >= S[j]`` gives ``|S[i] - S[m]| <= |S[i] - S[j]| <= tau`` and
     likewise for ``m, j``, so ``m`` belongs too. An interval graph on ``N``
-    vertices has at most ``N`` maximal cliques, so enumerating one per left
-    endpoint misses none.
+    vertices has at most ``N`` maximal cliques, so one per left endpoint misses
+    none.
 
     Let ``R(a)`` be the largest ``b`` with ``S[a] - S[b] <= tau``. ``R`` is
-    non-decreasing, so a two-pointer pass computes all of it; and ``[a, R(a)]``
+    non-decreasing, so a two-pointer pass computes all of it, and ``[a, R(a)]``
     is maximal exactly when ``a == 0`` or ``R(a) > R(a - 1)``, since otherwise
     the previous interval strictly contains it.
     """
     n = len(sorted_scores)
     if n == 0:
         return ()
-    # `not (tau >= 0.0)`, not `tau < 0.0`: every comparison with NaN is
-    # false, so the second form lets NaN straight through a guard whose
-    # own message says non-negative. It is not harmless -- with tau = NaN
-    # `gap > tau` and `gap <= tau` are both false, so tie_chains returns a
-    # single group covering the corpus while tie_cliques returns all
-    # singletons, and rho reports N. Three mutually contradictory answers
-    # to the same question, with no error raised.
+    # `not (tau >= 0.0)` rather than `tau < 0.0`: comparisons with NaN are all
+    # false, so the second form lets NaN through a guard whose own message says
+    # non-negative. With tau = NaN, `gap > tau` and `gap <= tau` are both false,
+    # so tie_chains returns one group covering the corpus, tie_cliques returns
+    # all singletons, and rho reports N: three contradictory answers to the same
+    # question, with no error raised.
     if not (tau >= 0.0):
         raise ValueError(f"tau must be non-negative, got {tau}")
 
@@ -239,10 +228,9 @@ def chain_inflation_ratio(sorted_scores: Sequence[float], tau: float) -> float:
 class TieGroupIndex:
     """All three tie-group objects for one ``(sorted_scores, tau)`` pair.
 
-    Diagnostics are emitted **from the constructor, exactly once**. That is not
-    tidiness: ``pyproject.toml`` sets ``filterwarnings = ["error"]``, so a
-    warning raised per :func:`tie_ball_interval` call would abort a tau sweep on
-    its first query.
+    Diagnostics are emitted from the constructor, once: ``pyproject.toml`` sets
+    ``filterwarnings = ["error"]``, so a warning raised per
+    :func:`tie_ball_interval` call would abort a tau sweep on its first query.
     """
 
     sorted_scores: tuple[float, ...]
@@ -269,10 +257,10 @@ class TieGroupIndex:
 
         if scores:
             span = scores[0] - scores[-1]
-            # ">=", not ">": at tau exactly equal to the range every ball is
+            # ">=" rather than ">": at tau equal to the range, every ball is
             # already the whole corpus, so the degeneracy has begun. The
-            # exception is span == 0 with tau == 0, which is the legitimate
-            # exact-tie baseline rather than a degenerate configuration.
+            # exception is span == 0 with tau == 0, the legitimate exact-tie
+            # baseline.
             if tau >= span and not (span == 0.0 and tau == 0.0):
                 ratio = math.inf if span == 0.0 else tau / span
                 warnings.warn(
@@ -328,7 +316,7 @@ class TieGroupIndex:
         return len(self.chains)
 
     def chain_of(self, j: int) -> Interval:
-        """The unique chain containing rank ``j`` -- chains do partition."""
+        """The unique chain containing rank ``j``; chains do partition."""
         for lo, hi in self.chains:
             if lo <= j < hi:
                 return lo, hi
@@ -338,8 +326,8 @@ class TieGroupIndex:
         """Both the paper-faithful and the partition statistics, side by side.
 
         G1 requires reporting them together: the ball is what section 2.3.3
-        defines, the chain is the object with a well-defined notion of "the
-        group containing document i", and rho says how far apart they are.
+        defines, the chain is the object with a well-defined "group containing
+        document i", and rho says how far apart the two are.
         """
         return {
             "tau": self.tau,

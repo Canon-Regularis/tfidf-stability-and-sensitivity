@@ -8,19 +8,17 @@ Aggregation
 -----------
 Section 7.1 says a profile is built "by aggregating **text** from a user's
 interacted items", which pins :attr:`ProfileAggregation.TEXT_CONCAT` as the
-normative mode. It has a consequence the paper does not draw out, and it is not
-a small one:
+normative mode. Its consequence, which the paper does not draw out:
 
-    concatenating token streams makes ``tf`` a **length-weighted** average, so a
-    single verbose item can dominate a user's profile regardless of how many
-    other items they interacted with.
+    concatenating token streams makes ``tf`` a length-weighted average, so one
+    verbose item can dominate a user's profile however many other items they
+    interacted with.
 
-That is itself a stability question -- a profile whose direction is decided by
-one long document is fragile in exactly the way section 1.1 is interested in --
-so :attr:`ProfileAggregation.VECTOR_MEAN` and
-:attr:`ProfileAggregation.VECTOR_SUM` are implemented as ablations. They weight
-each item equally in the embedding space rather than by its token count. The
-default remains the paper's.
+That is a stability question in its own right (a profile whose direction is set
+by one long document is fragile in the way section 1.1 cares about), so
+:attr:`ProfileAggregation.VECTOR_MEAN` and :attr:`ProfileAggregation.VECTOR_SUM`
+are implemented as ablations, weighting each item equally in the embedding space
+rather than by token count. The default stays the paper's.
 """
 
 from __future__ import annotations
@@ -53,8 +51,8 @@ class ProfileAggregation(str, Enum):
     TEXT_CONCAT = "text_concat"
     #: Embed each item, then average the vectors. Equal weight per item.
     VECTOR_MEAN = "vector_mean"
-    #: Embed each item, then sum. Same *direction* as the mean, so identical
-    #: cosine similarities -- retained because the norm differs, and section
+    #: Embed each item, then sum. Same direction as the mean, so cosine
+    #: similarities are identical; kept because the norm differs and section
     #: 4.2's bounds are stated in terms of norms.
     VECTOR_SUM = "vector_sum"
 
@@ -67,11 +65,10 @@ class Interaction:
     """One user-item interaction.
 
     ``weight`` carries the rating or engagement value the interaction came with.
-    It is *not* used to weight the aggregation: section 7.1 describes an
-    unweighted aggregation of interacted text, and introducing a weighting the
-    paper does not specify would change every published number. It is retained
-    so an eligibility filter can be applied over it, and so a weighted variant
-    can be added later as a declared ablation.
+    The aggregation ignores it: section 7.1 describes an unweighted aggregation
+    of interacted text, and adding a weighting the paper does not specify would
+    move every published number. Retained so an eligibility filter can run over
+    it, and so a weighted variant can arrive later as a declared ablation.
     """
 
     user_id: str
@@ -106,16 +103,15 @@ def group_interactions(
     Args:
         interactions: All interactions.
         min_weight: Keep only interactions at or above this weight. For
-            MovieLens this is the ``rating >= 4.0`` threshold that decides what
-            "interacted" means -- a decision section 7.1 leaves open and that
+            MovieLens this is the ``rating >= 4.0`` threshold deciding what
+            "interacted" means, a choice section 7.1 leaves open and that
             materially changes the profile.
 
     Returns:
-        ``{user_id: (doc_id, ...)}`` with items in **ascending identifier
-        order**, not arrival order. Interaction files are not order-stable, and
-        a profile built by concatenation is order-*sensitive* (the feature
-        stream differs, and with n-grams so does the vocabulary), so the order
-        is canonicalised here rather than inherited.
+        ``{user_id: (doc_id, ...)}`` with items in ascending identifier order
+        rather than arrival order. Interaction files are not order-stable and a
+        concatenated profile's feature tuple follows item order, so the order is
+        canonicalised here rather than inherited (G20).
     """
     grouped: dict[str, list[str]] = {}
     for interaction in interactions:
@@ -133,10 +129,10 @@ def eligible_users(
 ) -> tuple[str, ...]:
     """Users with enough interactions for leave-one-out (G10(4)).
 
-    Five is the pinned threshold. Below it, holding one item out leaves a
-    profile too thin to be meaningful, and section 7.1's "users with multiple
-    interactions" does not say how many. Returned in ascending identifier order
-    so the evaluated query set is reproducible.
+    Five is the pinned threshold: section 7.1's "users with multiple
+    interactions" does not say how many, and below five, holding one item out
+    leaves a profile too thin to be meaningful. Ascending identifier order, so
+    the evaluated query set is reproducible.
     """
     if min_interactions < 2:
         raise ValueError(
@@ -165,42 +161,39 @@ def build_profile(
     :func:`group_interactions` has already canonicalised into ascending
     identifier byte order (``spec_addenda.md#g20``).
 
-    What is concatenated is **feature streams, not text**
-    -------------------------------------------------------
-    ``features_by_doc`` holds streams that have already been through
+    What is concatenated is feature streams
+    ---------------------------------------
+    ``features_by_doc`` holds streams already through
     :meth:`PreprocessingPipeline.preprocess`, so the n-grams exist before this
     function sees them and no n-gram pass runs over the joined result. Three
-    consequences follow, and each contradicts something previously written here
-    or in ``spec_addenda.md#g20`` (see ``#g28``):
+    consequences, each contradicting something written earlier here or in
+    ``spec_addenda.md#g20`` (see ``#g28``):
 
-    * **No seam n-grams are ever produced.** Text aggregation of
-      ``"quick brown fox"`` and ``"lazy sleeping dog"`` yields the bigram
-      ``fox|lazi``; this function yields the union of the two streams and
-      nothing spanning the join.
-    * **Aggregation is therefore already order-insensitive.** Reordering the
-      items permutes the feature tuple but leaves the multiset, and hence the
-      embedding, bit-identical. G20's canonical ordering remains worth having --
-      it makes the *tuple* reproducible, which the digest depends on -- but it
-      is not what stops scores moving, because nothing was moving them.
+    * **No seam n-grams.** Text aggregation of ``"quick brown fox"`` and
+      ``"lazy sleeping dog"`` yields the bigram ``fox|lazi``; this yields the
+      union of the two streams and nothing spanning the join.
+    * **Aggregation is already order-insensitive.** Reordering items permutes
+      the feature tuple but leaves the multiset, hence the embedding,
+      bit-identical. G20's canonical ordering still makes the tuple
+      reproducible, which the digest depends on, though no score was moving.
     * **``separate_items`` is inert**, for the same reason.
 
-    Whether to switch to genuine text aggregation is a research decision, not a
-    tidy-up: it would add one bigram per item boundary, change every profile's
-    ``L``, and so move every number in section 7.1.
+    Switching to genuine text aggregation is a research decision: it adds one
+    bigram per item boundary, changes every profile's ``L``, and moves every
+    number in section 7.1.
 
     Args:
-        separate_items: Insert a gap sentinel between consecutive items. Its
-            intent is to stop n-grams spanning the seam between two documents,
-            but there are no such n-grams to stop (above), and the sentinel is
-            not in the vocabulary, so it is discarded before it reaches a
-            count. Retained rather than removed because it becomes meaningful
-            the moment aggregation moves to text; asserted inert by
+        separate_items: Insert a gap sentinel between consecutive items. Meant
+            to stop n-grams spanning the seam between two documents, but there
+            are none to stop (above) and the sentinel is out of vocabulary, so
+            it is dropped before reaching a count. Kept because it becomes
+            meaningful once aggregation moves to text; inertness asserted by
             ``test_separate_items_is_inert_while_aggregation_joins_features``.
 
     Raises:
-        KeyError: If an item has no feature stream. Silently skipping it would
-            shrink the profile without record, and a profile's size is part of
-            what the leave-one-out protocol reports.
+        KeyError: If an item has no feature stream. Skipping it would shrink the
+            profile without record, and profile size is part of what the
+            leave-one-out protocol reports.
     """
     missing = [d for d in item_ids if d not in features_by_doc]
     if missing:
@@ -237,8 +230,8 @@ def embed_profile(
     """Embed a profile into the corpus's TF-IDF space.
 
     Uses the model's own vocabulary and IDF mapping in every mode, as section 3
-    requires (``spec_addenda.md#g12``) -- nothing is refitted and the vocabulary
-    is never extended.
+    requires (``spec_addenda.md#g12``): nothing is refitted and the vocabulary is
+    never extended.
 
     Args:
         profile: The aggregated profile.
@@ -281,7 +274,7 @@ def profile_norm(vector: SparseVector, policy: Reduction = Reduction.NAIVE) -> f
     """``||q||_2`` for a profile vector.
 
     Exposed because section 6 identifies low-norm vectors as the unstable
-    regime, and a thin profile -- few items, few in-vocabulary tokens -- is
-    exactly how a low-norm *query* arises in practice.
+    regime, and a thin profile (few items, few in-vocabulary tokens) is how a
+    low-norm query arises in practice.
     """
     return sqrt(reduce_sum([v * v for v in vector.values], policy))

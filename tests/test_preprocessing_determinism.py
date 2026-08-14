@@ -1,11 +1,10 @@
 """The preprocessing map is deterministic and fixed (README sections 2 and 3).
 
-Section 3 promises that "all stages of the pipeline are deterministic given a
-fixed corpus, configuration, and software environment". These tests hold that
-promise to a stricter standard than it is usually read: the map must be stable
-across *processes* and *hash seeds*, not merely within one run, because
-otherwise the perturbation experiments would be measuring interpreter noise
-rather than corpus perturbations.
+Section 3 promises "all stages of the pipeline are deterministic given a fixed
+corpus, configuration, and software environment". Tested at the stricter
+reading: stability within one run is too weak, so the map must also be stable
+across processes and hash seeds. Otherwise the perturbation experiments would
+be measuring interpreter noise.
 """
 
 from __future__ import annotations
@@ -44,8 +43,8 @@ REPO = Path(__file__).resolve().parents[1]
 # ---------------------------------------------------------------------------
 @given(st.text(max_size=200))
 def test_normalisation_is_idempotent(text: str) -> None:
-    """A non-idempotent normaliser would make the map depend on how many times
-    it had been applied -- a subtle and very hard-to-locate irreproducibility."""
+    """Otherwise the map depends on how many times it has been applied, which is
+    an irreproducibility that is hard to locate."""
     once = normalise(text)
     assert normalise(once) == once
 
@@ -65,14 +64,13 @@ def test_normalisation_folds_compatibility_forms() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Porter2 -- against the official Snowball vectors
+# Porter2 against the official Snowball vectors
 # ---------------------------------------------------------------------------
 def test_porter2_matches_official_snowball_vectors(snowball_vectors) -> None:  # type: ignore[no-untyped-def]
     """The strongest available check on the stemmer: 42 649 published word pairs.
 
-    This is what justifies vendoring the generated implementation rather than
-    hand-porting it -- and it is what will catch any future divergence between
-    the Python and C++ backends.
+    Justifies vendoring the generated implementation instead of hand-porting it,
+    and catches any future divergence between the Python and C++ backends.
     """
     voc, out = snowball_vectors
     assert len(voc) == len(out) > 40_000
@@ -220,11 +218,10 @@ def test_all_stopword_document_yields_no_features(pipeline: PreprocessingPipelin
 def test_map_is_stable_across_processes_and_hash_seeds() -> None:
     """PYTHONHASHSEED must not be able to influence the output.
 
-    Run in subprocesses precisely because ``PYTHONHASHSEED`` is fixed at
-    interpreter start-up and cannot be changed from within a running process.
-    Dictionary and set iteration order depend on it, so if any of that order
-    leaked into the feature stream this test would catch it -- and nothing else
-    in the suite would.
+    Subprocesses, because ``PYTHONHASHSEED`` is fixed at interpreter start-up
+    and cannot be changed from inside a running process. Dict and set iteration
+    order depend on it, and nothing else in the suite would see that order
+    leaking into the feature stream.
     """
     snippet = (
         "import sys; sys.path.insert(0, r'%s');"
@@ -251,13 +248,12 @@ def test_the_stopword_asset_is_verified_against_its_recorded_digest(tmp_path) ->
     """ "Hash-verified" is asserted in three places; make it true in one.
 
     ``stopwords.py``'s header, the asset's own header and
-    ``configs/default.yaml`` all say the list is verified at load. Nothing
+    ``configs/default.yaml`` all say the list is verified at load, and nothing
     verified it: ``data/assets/MANIFEST.sha256`` did not exist, and
     ``scripts/check_vendored.py`` discovers work by ``rglob("MANIFEST.sha256")``
-    so a directory without one is invisible to it. Editing a single word
-    silently changed every df, idf and score, and the reproducibility snapshot
-    could not catch it because it compares runs to each other, not to a pinned
-    value.
+    so a directory without one is invisible to it. Editing a single word changed
+    every df, idf and score; the reproducibility snapshot compares runs to each
+    other rather than to a pinned value, so it could not catch that.
     """
     import shutil
 
@@ -289,13 +285,12 @@ def test_the_stopword_asset_is_verified_against_its_recorded_digest(tmp_path) ->
 def test_an_injected_lemmatiser_reaches_the_digest() -> None:
     """Two pipelines that produce different features must not share an identity.
 
-    ``digest()`` read the config alone, but the constructor accepts a ready-made
-    lemmatiser that bypasses ``config.lemmatiser`` entirely. So
-    ``PreprocessingPipeline(cfg)`` and
-    ``PreprocessingPipeline(cfg, lemmatiser=IdentityLemmatiser())`` -- which turn
-    "running cats" into ``run|cat`` and ``running|cats`` -- were the same string,
-    and a run manifest could not tell them apart. The sibling ``stopwords=``
-    injection was always bound by content, so the omission was an oversight.
+    ``digest()`` read the config alone, but the constructor takes a ready-made
+    lemmatiser that bypasses ``config.lemmatiser``. ``PreprocessingPipeline(cfg)``
+    and ``PreprocessingPipeline(cfg, lemmatiser=IdentityLemmatiser())`` turn
+    "running cats" into ``run|cat`` and ``running|cats`` respectively, yet
+    digested to the same string, so a run manifest could not tell them apart. The
+    sibling ``stopwords=`` injection was always bound by content.
     """
     from tfidf_stability.preprocessing.lemmatise import LemmatiserKind, make_lemmatiser
     from tfidf_stability.preprocessing.pipeline import PreprocessingConfig, PreprocessingPipeline

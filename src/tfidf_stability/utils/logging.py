@@ -1,50 +1,37 @@
-"""Structured logging for provenance, not for debugging.
+"""Structured logging for provenance.
 
-A run manifest records the *inputs* a number depended on -- data, config, build.
-This module records the *decisions taken while producing it*: which backend the
-process selected, which reduction policy was in force, which degenerate cases
-the data actually hit, which warning-worthy diagnostics fired, and the digests
-of what came out. Between the two, a surprising number can be accounted for
-without rerunning anything, which is the whole reason this repository logs at
-all. General-purpose tracing is explicitly not the goal.
+A run manifest records the inputs a number depended on: data, config, build.
+This module records the decisions taken while producing it: backend selected,
+reduction policy in force, degenerate cases hit, diagnostics fired, digests of
+what came out. Between the two, a surprising number can be accounted for without
+rerunning anything. General-purpose tracing is out of scope.
 
-Four decisions follow from that purpose.
+Closed vocabulary. :class:`EventKind` names every recordable kind and
+:func:`log_event` is the only emitter. Lines render as ``kind key=value ...``
+with keys sorted, so two runs that took the same decisions produce the same
+lines whatever order a call site passed its fields, matching the
+canonicalisation :func:`~tfidf_stability.utils.hashing.hash_json` applies to
+configs.
 
-**A closed vocabulary, not free text.** :class:`EventKind` names every kind of
-thing worth recording, and :func:`log_event` is the only way to emit one. Lines
-render as ``kind key=value ...`` with the keys sorted, so two runs that took the
-same decisions produce the same lines regardless of the order a call site
-happened to pass its fields -- the same canonicalisation rule
-:func:`~tfidf_stability.utils.hashing.hash_json` applies to configs.
-
-**Volatile state never reaches the reproducibility surface.** A
+Volatile state stays off the reproducibility surface. A
 :class:`logging.LogRecord` carries ``created``, ``msecs``, ``relativeCreated``,
-``process`` and ``thread``, and every one of them differs between two identical
-runs. None is ever read here. :data:`DETERMINISTIC_FORMAT` names only
-``levelname``, ``name`` and ``message``; :class:`EventRecorder` stores only the
-structured payload the call site supplied and never the record it arrived on.
-So :meth:`EventRecorder.digest` covers the decisions and not when, where or by
-which process they were taken -- the same separation
-:func:`~tfidf_stability.utils.io.strip_volatile` makes for manifests. Wall-clock
-timestamps exist (``configure(timestamps=True)``) but are opt-in, and turning
-them on is what takes the output out of the reproducible set.
+``process`` and ``thread``, all of which differ between two identical runs; none
+is read here. :data:`DETERMINISTIC_FORMAT` names only ``levelname``, ``name``
+and ``message``, and :class:`EventRecorder` stores the structured payload the
+call site supplied rather than the record it arrived on, so
+:meth:`EventRecorder.digest` covers the decisions alone. Wall-clock timestamps
+are opt-in (``configure(timestamps=True)``) and leave the reproducible set.
 
-**Warnings are not routed through here.** ``TauExceedsScoreRangeWarning`` and
-``ChainInflationWarning`` stay :func:`warnings.warn` calls, and this module
-never calls :func:`logging.captureWarnings`. ``pyproject.toml`` sets
-``filterwarnings = ["error"]``, which makes those diagnostics load-bearing test
-failures rather than notices; capturing them into the logging system would
-demote a hard failure into a line nobody reads. An ``EventKind.DIAGNOSTIC``
-event records *that* a diagnostic fired and never stands in for the warning.
+Warnings do not route through here. ``pyproject.toml`` sets
+``filterwarnings = ["error"]``, so ``TauExceedsScoreRangeWarning`` and
+``ChainInflationWarning`` are test failures; :func:`logging.captureWarnings`
+would demote them to a line nobody reads. An ``EventKind.DIAGNOSTIC`` event
+records that a diagnostic fired alongside the :func:`warnings.warn` call.
 
-**No handler is installed on import.** Whether and how to log is the
-application's decision, so importing this package leaves the logging system
-exactly as it found it, root logger included; :func:`configure` is the opt-in
-the CLI calls. Not even a :class:`~logging.NullHandler` is installed: with no
-handler anywhere on the chain, records at ``WARNING`` and above still reach
-stderr through :data:`logging.lastResort`, and in a project where a degenerate
-configuration is a genuine finding, silencing that default would be the wrong
-favour.
+No handler is installed on import, not even a :class:`~logging.NullHandler`:
+with nothing on the chain, records at ``WARNING`` and above still reach stderr
+through :data:`logging.lastResort`, and a degenerate configuration is a genuine
+finding here. :func:`configure` is the opt-in the CLI calls.
 """
 
 from __future__ import annotations
@@ -98,10 +85,8 @@ _INSTALLED_MARK = "_tfidf_stability_installed"
 class EventKind(str, Enum):
     """The closed set of decisions worth recording.
 
-    Closed on purpose. An open-ended log becomes debugging chatter that nobody
-    reads; this vocabulary is short enough that a reader can be told what a run
-    record contains, and every member answers a question that has actually been
-    asked of a published number.
+    Every member answers a question that has been asked of a published number,
+    which keeps the set short enough to state in full.
     """
 
     #: Which backend this process selected, and why the other one was not used.
@@ -126,9 +111,8 @@ class EventKind(str, Enum):
     def level(self) -> int:
         """Severity, fixed per kind rather than chosen per call site.
 
-        Fixed because the level is part of the vocabulary: a reader filtering at
-        ``WARNING`` must get exactly the diagnostics and nothing else, which is
-        not true if each call site picks for itself.
+        Part of the vocabulary: a reader filtering at ``WARNING`` gets the
+        diagnostics and nothing else, which fails once call sites choose.
         """
         return logging.WARNING if self is EventKind.DIAGNOSTIC else logging.INFO
 
@@ -139,9 +123,9 @@ _PLAIN = re.compile(r"[A-Za-z0-9_.:/@+-]+")
 def _render_value(value: object) -> str:
     """Render one field value unambiguously, on a single line."""
     if isinstance(value, float):
-        # repr, not a fixed-precision format: a margin of 5e-324 and a margin of
-        # 0.0 are the difference between a near-tie and an exact tie, and any
-        # rounding in the rendering erases exactly that distinction.
+        # repr keeps every bit: a margin of 5e-324 and a margin of 0.0 separate a
+        # near-tie from an exact tie, and fixed precision would round that
+        # distinction away.
         return repr(value)
     if value is None or isinstance(value, (bool, int)):
         return json.dumps(value)
@@ -155,9 +139,8 @@ def _render_value(value: object) -> str:
 class Event:
     """One recorded decision: a kind, and the fields that qualify it.
 
-    Fields are held as a sorted tuple rather than a mapping so that an event is
-    hashable and compares equal regardless of the order its call site listed
-    them -- two runs that decided the same thing produce equal events.
+    Fields are a sorted tuple rather than a mapping, so an event is hashable and
+    compares equal whatever order the call site listed them in.
     """
 
     kind: EventKind
@@ -181,8 +164,8 @@ def get_logger(name: str | None = None) -> logging.Logger:
     """The package logger, or the child of it named for a module.
 
     Call sites pass ``__name__``. Names already inside the package are used
-    as-is; anything else is reparented under :data:`ROOT_NAME`, so no caller can
-    accidentally emit outside the subtree :func:`configure` controls.
+    as-is; anything else is reparented under :data:`ROOT_NAME`, so nothing emits
+    outside the subtree :func:`configure` controls.
     """
     if name is None or name == ROOT_NAME:
         return logging.getLogger(ROOT_NAME)
@@ -207,9 +190,8 @@ def log_event(logger: logging.Logger, kind: EventKind, /, **fields: Any) -> Even
 class EventRecorder(logging.Handler):
     """Collects events into a run record that can be digested.
 
-    Only structured events are kept. Free-text records from third-party
-    libraries are for a human to read and would put whatever they happened to
-    say -- paths, addresses, timings -- into the digest.
+    Only structured events are kept: free-text records from other libraries would
+    put whatever they happened to say (paths, addresses, timings) into the digest.
     """
 
     def __init__(self) -> None:
@@ -233,9 +215,8 @@ class EventRecorder(logging.Handler):
     def digest(self) -> str:
         """SHA-256 over the recorded decisions.
 
-        Order-sensitive, because the order decisions were taken in is itself
-        part of what happened -- selecting the native backend after a fallback
-        is not the same run as selecting it first.
+        Order-sensitive: selecting the native backend after a fallback is a
+        different run from selecting it outright.
         """
         return hash_json(self.to_list())
 
@@ -244,9 +225,9 @@ class EventRecorder(logging.Handler):
 def capture(level: int = logging.DEBUG) -> Iterator[EventRecorder]:
     """Collect this package's events for the duration of the block.
 
-    Restores the package logger's previous level and handler set on exit,
-    including when the body raises, so a captured section cannot leave the
-    logging system altered for whatever runs next.
+    Restores the package logger's previous level and handler set on exit, the
+    raising case included, so a captured section leaves the logging system as it
+    found it.
     """
     logger = logging.getLogger(ROOT_NAME)
     recorder = EventRecorder()
@@ -266,22 +247,18 @@ def configure(
     stream: IO[str] | None = None,
     timestamps: bool = False,
 ) -> logging.Handler:
-    """Install this package's handler. For applications to call, never imports.
+    """Install this package's handler. For applications to call; imports must not.
 
-    Only the ``tfidf_stability`` logger is touched -- never the root logger, and
-    never another library's -- so calling this cannot redirect or silence
-    anything a host application had already set up.
-
-    Idempotent: a second call replaces the handler the first installed rather
-    than stacking a duplicate, so an entry point invoked twice in one process
-    does not emit every line twice.
+    Touches only the ``tfidf_stability`` logger, so it cannot redirect or silence
+    anything a host application had already set up. Idempotent: a second call
+    replaces the handler the first installed rather than stacking a duplicate, so
+    an entry point invoked twice in one process does not double every line.
 
     Args:
         level: Threshold for the package logger.
         stream: Destination; defaults to ``sys.stderr``.
-        timestamps: Prefix each line with wall-clock time. Off by default
-            because it is the one thing here that makes output differ between
-            two identical runs, and reproducible output is the point.
+        timestamps: Prefix each line with wall-clock time. Off by default: it is
+            the one thing here that makes two identical runs differ.
 
     Returns:
         The installed handler, for a caller that wants to adjust it further.
@@ -301,9 +278,8 @@ def configure(
 def reset() -> None:
     """Undo :func:`configure`, returning the package logger to its import state.
 
-    Removes only handlers this module installed. A handler the host application
-    attached to our logger is its business, and silently detaching it would be
-    the same overreach as configuring the root logger in the first place.
+    Removes only handlers this module installed; one the host application
+    attached to our logger is its business.
     """
     logger = logging.getLogger(ROOT_NAME)
     for handler in [h for h in logger.handlers if getattr(h, _INSTALLED_MARK, False)]:

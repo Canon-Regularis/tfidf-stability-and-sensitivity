@@ -1,27 +1,22 @@
 """Reference vs native for the ordering distances: bit-exact equivalence.
 
-The claim is the usual one -- the C++ mirror performs *the same floating-point
-operations in the same order* as the normative Python reference -- but the two
-halves of this module reach it by different routes, and the distinction matters
-when a failure has to be diagnosed.
+Same claim as the scoring differential (same operations, same order), reached by
+two different routes here, which matters when diagnosing a failure.
 
-``inversion_count`` and the set measures are **integer** quantities dressed up as
-floats only at the last division, so agreement there is combinatorial and any
-divergence is a logic bug.
+``inversion_count`` and the set measures are integer quantities, floats only at
+the final division, so agreement is combinatorial and any divergence is a logic
+bug.
 
-``kendall_fks`` is a **float accumulation**, and that is where a plausible
-implementation goes quietly wrong. Its total is a sum of ones and penalties over
-the pairs of the union, so it depends on the order in which the union is walked.
-At ``p = 1/2`` every addend is dyadic and the sum is exact whatever the order --
-which means the default penalty *cannot* expose a mis-ordered enumeration. The
-tests therefore also drive penalties that are not dyadic (``1/3``, ``0.1``),
-where the additions genuinely round and the reference's first-appearance
-enumeration order is the only one that reproduces its bits.
+``kendall_fks`` accumulates floats. Its total sums ones and penalties over the
+pairs of the union, so it depends on the order the union is walked in. At
+``p = 1/2`` every addend is dyadic and the sum is exact in any order, so the
+default penalty cannot expose a mis-ordered enumeration. Non-dyadic penalties
+(``1/3``, ``0.1``) are driven as well, where the additions round and only the
+reference's first-appearance order reproduces its bits.
 
-NaN is compared as NaN, not as a bit pattern. ``kendall_intersection`` is
-undefined below two shared elements, and "undefined" is the contract; asserting a
-particular quiet-NaN payload would be asserting something the reference does not
-promise.
+NaN is compared as NaN rather than as a bit pattern. ``kendall_intersection`` is
+undefined below two shared elements, and the contract stops at "undefined": no
+particular quiet-NaN payload is promised.
 """
 
 from __future__ import annotations
@@ -54,9 +49,9 @@ pytestmark = [
 if native_available():
     from tfidf_stability._native import _tfidf_native as nat  # type: ignore[attr-defined]
 
-#: Penalties that are *not* dyadic rationals, so the accumulation rounds and the
-#: enumeration order becomes observable. Without these the suite would pass on an
-#: implementation that walked the union in sorted order instead.
+#: Non-dyadic penalties, so the accumulation rounds and the enumeration order
+#: becomes observable. Without these the suite passes on an implementation that
+#: walks the union in sorted order.
 ROUNDING_PENALTIES = (1.0 / 3.0, 0.1, 0.7)
 
 
@@ -68,10 +63,9 @@ def ids(seq: list[int]) -> np.ndarray:
 def top_k_pair(rng: random.Random, pool: int = 12) -> tuple[list[int], list[int]]:
     """Two overlapping top-k lists over a small pool.
 
-    The pool is deliberately tight. Two lists sampled from thousands of documents
-    would be disjoint almost every time, exercising only FKS case 3 and 4 and
-    never case 1 or 2 -- and case 2 is where the "present outranks absent"
-    convention lives.
+    The pool is tight because lists sampled from thousands of documents are
+    almost always disjoint, reaching only FKS cases 3 and 4. Case 2 is where the
+    "present outranks absent" convention lives.
     """
     a = rng.sample(range(pool), rng.randint(0, 6))
     b = rng.sample(range(pool), rng.randint(0, 6))
@@ -85,8 +79,8 @@ def test_inversion_count_is_identical() -> None:
     rng = random.Random(11)
     for _ in range(200):
         n = rng.randint(0, 60)
-        # A small alphabet, so equal elements -- which are NOT inversions -- are
-        # the rule rather than the exception.
+        # Small alphabet, so equal elements (which are not inversions) are the
+        # rule rather than the exception.
         seq = [rng.randrange(5) for _ in range(n)]
         assert nat.inversion_count(ids(seq)) == inversion_count(seq)
 
@@ -120,7 +114,7 @@ def test_kendall_tau_is_bit_exact() -> None:
 
 
 def test_kendall_tau_refuses_differing_sets_on_both_sides() -> None:
-    """The refusal is part of the contract, so it is mirrored, not just the value."""
+    """The refusal is part of the contract, so both sides must raise."""
     with pytest.raises(ValueError, match="same set"):
         kendall_tau_distance([1, 2], [1, 3])
     with pytest.raises(ValueError, match="same set"):
@@ -147,9 +141,9 @@ def test_kendall_fks_is_bit_exact(penalty: float) -> None:
 def test_the_inputs_really_do_exercise_every_fks_case() -> None:
     """Guards the guard.
 
-    If the generator drifted towards disjoint lists, the tests above would keep
-    passing while never reaching case 1 or case 2 -- the only cases where the
-    two implementations could disagree about *ordering* rather than membership.
+    If the generator drifted towards disjoint lists the tests above would keep
+    passing while never reaching case 1 or case 2, the only cases where the two
+    implementations can disagree about ordering rather than membership.
     """
     rng = random.Random(15)
     seen = {"shared_pair": 0, "case_two": 0, "case_three": 0, "case_four": 0}
@@ -203,8 +197,8 @@ def test_compare_top_k_is_field_for_field_identical() -> None:
             assert same_bits(jac, expected.jaccard)
             assert swapped == expected.swapped
 
-            # NaN is the contract, not a payload: compare definedness, and bits
-            # only where a value is actually claimed.
+            # The contract is NaN with no promised payload: compare
+            # definedness, and bits only where a value is claimed.
             if math.isnan(expected.kendall_intersection):
                 assert math.isnan(k_int)
                 undefined += 1

@@ -1,24 +1,18 @@
 """Canonical hashing.
 
-Every published number in this repository is supposed to be traceable to the
-data, config and build that produced it. That only works if "the same input"
-has one digest, so this module fixes exactly one way to hash each kind of thing
-and everything else uses it.
+Tracing a published number back to its data, config and build needs "the same
+input" to have one digest, so this module fixes one way to hash each kind of
+thing and everything else uses it.
 
-Two rules govern the design.
+Hash bytes rather than renderings: a float goes through its raw binary64 bit
+pattern. ``repr`` is lossless in CPython today, but that is a language guarantee
+rather than a file-format one, and the bit pattern keeps a one-ulp difference
+visible.
 
-**Hash bytes, not renderings.** A float is hashed through its raw binary64 bit
-pattern, never a decimal string. ``repr`` is lossless in CPython today but that
-is a language guarantee, not a file-format one, and a digest that changes with
-the interpreter's formatting would be worthless. The bit pattern also makes a
-one-ulp difference visible, which is the entire point in a project about
-numerical stability.
-
-**Hash a canonical form.** JSON is emitted with sorted keys and no incidental
-whitespace, so two configs that differ only in key order digest identically.
-Text is normalised to LF, so a Windows checkout and a Linux checkout of the same
-file agree -- which matters because ``.gitattributes`` normalises on write but a
-digest taken before that would not.
+Hash a canonical form: JSON with sorted keys and no incidental whitespace, text
+normalised to LF so a Windows checkout and a Linux checkout of the same file
+agree. ``.gitattributes`` normalises on write, but a digest taken before that
+would not.
 """
 
 from __future__ import annotations
@@ -51,9 +45,8 @@ def hash_bytes(data: bytes) -> str:
 def hash_text(text: str) -> str:
     """SHA-256 of text, normalised to LF and encoded UTF-8.
 
-    Line-ending normalisation is not cosmetic here: this repository claims
-    byte-identical results across Linux, macOS and Windows, and a digest that
-    differed by checkout platform would silently break that claim.
+    The repository claims byte-identical results across Linux, macOS and Windows,
+    which a digest varying with the checkout platform would break.
     """
     return hash_bytes(text.replace("\r\n", "\n").encode("utf-8"))
 
@@ -79,10 +72,9 @@ def hash_file(path: Path | str, *, text: bool = False) -> str:
 def hash_floats(values: Iterable[float]) -> str:
     """SHA-256 over the raw binary64 bit patterns.
 
-    Not over a decimal rendering. A digest taken over ``repr`` would depend on
-    the interpreter's float formatting, and -- worse -- could collide two values
-    that differ in the last bit, which is exactly the difference this project
-    exists to detect.
+    A digest over ``repr`` would depend on the interpreter's float formatting and
+    could collide two values differing in the last bit, the difference this
+    project exists to detect.
     """
     digest = hashlib.sha256()
     for value in values:
@@ -103,8 +95,8 @@ def hash_json(payload: Any) -> str:
     """SHA-256 over a canonical JSON rendering.
 
     Sorted keys, no incidental whitespace, and ``ensure_ascii=False`` so a
-    non-ASCII token digests the same whether or not it was escaped on the way
-    in. Two configs differing only in key order therefore have one digest.
+    non-ASCII token digests the same whether or not it arrived escaped. Two
+    configs differing only in key order share a digest.
     """
     blob = json.dumps(
         payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str
@@ -115,8 +107,8 @@ def hash_json(payload: Any) -> str:
 def short(digest: str, length: int = 12) -> str:
     """A truncated digest, for log lines and filenames.
 
-    Never for identity comparison: 12 hex characters is 48 bits, which is fine
-    for a human to eyeball and far too few to rely on.
+    Never for identity comparison: 12 hex characters is 48 bits, enough to
+    eyeball and far too few to rely on.
     """
     return digest[:length]
 

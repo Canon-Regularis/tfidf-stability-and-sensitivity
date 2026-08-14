@@ -1,7 +1,7 @@
 % Implementation report.
 %
 % This is NOT a copy of README.md. The README is the specification; this reports
-% what implementing it found -- the resolutions of underspecified points, the
+% what implementing it found: the resolutions of underspecified points, the
 % measurements, and the places where a claim had to be weakened or corrected.
 %
 % Build:  latexmk -pdf main.tex     (or: pdflatex, bibtex, pdflatex x2)
@@ -50,21 +50,21 @@
 \maketitle
 
 \begin{abstract}
-This report accompanies the specification in \code{README.md}. It records what
-building the system established that the specification did not state, and what
-had to be corrected. Three results are structural rather than incidental. First,
-the numerical noise floor is roughly six orders of magnitude below the smallest
-observed score separation, so floating-point error cannot reorder two
-distinctly-scored documents; every ranking instability in the unperturbed
-pipeline arises from \emph{exact} ties, and therefore from the tie-break.
-Second, the tolerance $\tau$ admits no single principled value, but it does admit
-a derived \emph{band} across which the reported tie structure is provably
-invariant. Third, a fine near-tie cannot be manufactured by editing document
-text, because term-frequency normalisation makes a single-token edit a relative
-perturbation of order $1/L$; the case study of \S7.4 must therefore identify a
-near-tie rather than construct one. Twenty-three addenda are recorded in
-\code{docs/spec\_addenda.md}; this report summarises those that change what may
-be claimed.
+This report accompanies the specification in \code{README.md} and records what
+building the system established that the specification did not state, together
+with what had to be corrected. Three results are structural rather than
+incidental. First, the numerical noise floor sits roughly six orders of
+magnitude below the smallest observed score separation, so floating-point error
+cannot reorder two distinctly-scored documents; every ranking instability in the
+unperturbed pipeline arises from \emph{exact} ties, and therefore from the
+tie-break. Second, the tolerance $\tau$ admits no single principled value, but it
+does admit a derived \emph{band} across which the reported tie structure is
+provably invariant. Third, a fine near-tie cannot be manufactured by editing
+document text, because term-frequency normalisation makes a single-token edit a
+relative perturbation of order $1/L$; the case study of \S7.4 must therefore
+identify a near-tie rather than construct one. Twenty-three addenda are recorded
+in \code{docs/spec\_addenda.md}; this report summarises those that change what
+may be claimed.
 \end{abstract}
 
 \section{Two implementations, one definition of correctness}
@@ -76,7 +76,7 @@ The \textbf{Python reference is normative}. It defines correctness, has no
 compiled dependency, and every published number is defined by what it produces.
 The \textbf{C++ core is an optimisation} required to be bit-identical, which the
 test suite enforces by comparing raw bit patterns rather than tolerances. A
-tolerance would silently admit precisely the divergence under study.
+tolerance would silently admit the divergence under study.
 
 Bit-identity is asserted across four reduction policies, two scoring kernels
 (term-at-a-time and document-at-a-time) and three ranking operators. For a
@@ -92,8 +92,8 @@ is not fast-math.
 \code{math.log} is not correctly rounded, and \addendum{13} records the
 consequence: it differs from the correctly-rounded value in $15.16\%$ of IDF
 entries, and UCRT, glibc and Apple libm disagree with one another. Left alone,
-Linux and Windows produce different weights, norms, scores and rankings, and the
-reproducibility claim is simply false.
+Linux and Windows produce different weights, norms, scores and rankings, which
+falsifies the reproducibility claim.
 
 IDF is therefore computed once in Python via \code{decimal.Decimal.ln()} at
 60~digits and rounded once to binary64. The C++ core never sees a logarithm; it
@@ -103,28 +103,27 @@ conforming platform must agree.
 
 \subsection{The tie-break}
 
-The same move is applied to ordering. Tie-break attributes are rank-encoded to
+The same move applies to ordering. Tie-break attributes are rank-encoded to
 dense \code{int32} once per corpus, with direction and missing-value placement
-baked into the rank rather than applied per comparison. Floating point is thereby
-removed from the tie-break \emph{entirely} --- not by being careful with it, but
-by there being none left --- and NaN cannot enter through the tie-break at all,
-as a type-level guarantee.
+baked into the rank rather than applied per comparison. No floating point
+survives in the tie-break, so NaN cannot enter through it at all: a type-level
+guarantee.
 
 \section{The measured noise floor, and the derivation of \texorpdfstring{$\tau$}{tau}}
 
 \S7.1 asks that $\tau$ ``exceed floating-point noise while remaining small
-relative to typical score separations''. That is a two-sided qualitative
-constraint: it defines an interval, not a value, and gives no procedure. Deriving
-a single number from it would manufacture precision the specification does not
-contain.
+relative to typical score separations''. The constraint is two-sided and
+qualitative: it delimits an interval and supplies no procedure for choosing a
+point inside it. Deriving a single number from it would manufacture precision the
+specification does not contain.
 
 \subsection{The lower endpoint}
 
-$\tau$'s job is to decide whether $|s_i - s_j| \le \tau$ is evidence of a real
-difference. The quantity to bound is therefore the error in a \emph{margin}, not
-in a score. If each score carries error at most $\eta$, the margin carries at
-most $2\eta$ and both signs are attainable, so $\tau_{\text{floor}} = 2\eta$. The
-factor is exact, and is the same factor as in $\varepsilon_k^{\text{flip}} =
+$\tau$ decides whether $|s_i - s_j| \le \tau$ is evidence of a real difference.
+The quantity to bound is therefore the error in a \emph{margin} rather than the
+error in a score. If each score carries error at most $\eta$, the margin carries
+at most $2\eta$ and both signs are attainable, so $\tau_{\text{floor}} = 2\eta$.
+The factor is exact, and is the same factor as in $\varepsilon_k^{\text{flip}} =
 m_k/2$.
 
 $\eta$ is measured against \code{Reduction.EXACT}, an exact-summation
@@ -148,11 +147,11 @@ dot product and norms               & $42.54\%$ & $1.665\times10^{-16}$ \\
 \end{table}
 
 Two incidental observations. Neumaier
-summation~\cite{neumaier1974rundungsfehler} was exactly correctly-rounded on all
+summation~\cite{neumaier1974rundungsfehler} was correctly rounded on all
 $37{,}500$ comparisons. Pairwise summation was bit-identical to the naive fold,
-because its block size is 128 and no summation here is that long --- so a
-reduction-policy sweep over short queries measures nothing while appearing
-informative.
+its block size being 128 and no summation here being that long; a
+reduction-policy sweep over short queries therefore measures nothing while
+appearing informative.
 
 \subsection{The upper endpoint, and why the band is provable}
 
@@ -173,19 +172,19 @@ gaps.
 \end{proof}
 
 Consequently, if $[\tau_{\text{floor}}, g_{\min})$ contains no observed gap, every
-$\tau$ within it yields bit-identical tie structure --- by argument, not by
-sampling. Measured: $\eta = 1.665\times10^{-16}$, $\tau_{\text{floor}} =
-3.331\times10^{-16}$, $g_{\min} = 6.958\times10^{-10}$, a band of $6.32$ decades
-containing zero observed gaps.
+$\tau$ within it yields bit-identical tie structure. That follows from the
+argument above rather than from sampling. Measured: $\eta =
+1.665\times10^{-16}$, $\tau_{\text{floor}} = 3.331\times10^{-16}$, $g_{\min} =
+6.958\times10^{-10}$, a band of $6.32$ decades containing zero observed gaps.
 
 This is not circular: $\tau_{\text{floor}}$ comes from arithmetic and $g_{\min}$
 from the score lattice, and neither is a function of $\tau$.
 
 \begin{finding}\label{find:plateau}
-Invariance across the band reflects \emph{emptiness of the score lattice}, not
-robustness of the tie-break mechanism. The plateau must always be reported with
-its cause. Stating it alone would invite the stronger reading, which the data do
-not support.
+Invariance across the band reflects \emph{emptiness of the score lattice}; it is
+no evidence that the tie-break mechanism is robust. The plateau must always be
+reported with its cause, since stating it alone invites the stronger reading,
+which the data do not support.
 \end{finding}
 
 \section{A1: margins govern stability}
@@ -193,9 +192,9 @@ not support.
 \S4.4 gives a sufficient condition: if every score moves by less than $m_k/2$,
 the top-$k$ set is unchanged. Two facts about that bound are easy to conflate.
 
-\paragraph{Tight in the worst case.} A witness built from dyadic rationals ---
-scores $0.5$ and $0.25$, $m = 0.25$, $\varepsilon = 0.125 + 2^{-30}$, so that
-every step is exact in binary64 --- flips the pair. The bound cannot be improved.
+\paragraph{Tight in the worst case.} A witness built from dyadic rationals flips
+the pair: scores $0.5$ and $0.25$, $m = 0.25$, $\varepsilon = 0.125 + 2^{-30}$,
+every step exact in binary64. The bound cannot be improved.
 
 \paragraph{Conservative on average.} Under random perturbation the adversarial
 configuration is a measure-zero corner of the perturbation cube.
@@ -207,7 +206,7 @@ configuration is a measure-zero corner of the perturbation cube.
 \toprule
 $\varepsilon / (m_k/2)$ & flip rate \\
 \midrule
-$0.25$--$0.99$ & $0.00\%$ \\
+$0.25$ to $0.99$ & $0.00\%$ \\
 $1.00$         & $0.00\%$ \\
 $1.10$         & $0.36\%$ \\
 $2.00$         & $22.14\%$ \\
@@ -217,8 +216,8 @@ $20.00$        & $88.21\%$ \\
 \end{tabular}
 \end{table}
 
-Reporting only the second understates the risk; only the first suggests rankings
-are far more fragile than they are.
+Reporting only the second understates the risk; reporting only the first
+suggests rankings are far more fragile than they are.
 
 The certificate is audited as a $2\times2$ table rather than an accuracy, since
 accuracy would reward a certificate that always declined. Certified-and-changed
@@ -228,8 +227,8 @@ $60\%$ of \emph{uncertified} perturbations left the top-$k$ unchanged regardless
 
 % reports/figures/ is gitignored: figures are regenerated from the recorded
 % experiment JSON rather than versioned, so a fresh clone does not have them.
-% Without this guard the report simply fails to build from a clean checkout,
-% which is a poor property for the document that is meant to be the deliverable.
+% Without this guard the report fails to build from a clean checkout, which is a
+% poor property for the document meant to be the deliverable.
 \begin{figure}[ht]\centering
 \IfFileExists{../figures/fig_transition.png}{%
   \includegraphics[width=0.78\textwidth]{../figures/fig_transition.png}%
@@ -249,36 +248,36 @@ falsify \S4.4 or the implementation.}
 The claim that tie-break effects are independent of numerical error is earned
 structurally. \code{rank\_all\_operators} shares one sorted-score object across
 $\pi$, $\pi_{\text{score}}$ and $\pi_{\text{alt}}$, so no arithmetic separates
-them and a disagreement admits exactly one cause. The runner verifies this with
+them and a disagreement admits a single cause. The runner verifies this with
 bit comparison before reporting anything, and aborts otherwise.
 
 Disagreement concentrates at $k=1$ ($20.0\%$ for $\pi$ against
 $\pi_{\text{alt}}$, $16.7\%$ against $\pi_{\text{score}}$), because the leading
-document frequently sits in an exact-tie block. That is the decision-level
-discontinuity, at the rank where a recommender's output is most visible.
+document frequently sits in an exact-tie block. The decision-level discontinuity
+therefore lands at the rank where a recommender's output is most visible.
 
 Three corrections belong here.
 
 \begin{enumerate}
 \item \textbf{The tie ball is not transitive}, so it is not a partition and
-      cannot be used as one. Three objects are provided --- ball, chain and
-      clique --- with the chain-inflation ratio $\rho$ relating them
-      (\addendum{1}). The dyadic ladder $s_i = i\cdot 2^{-20}$ is the witness.
-\item \textbf{The generalised Kendall distance $K^{(p)}$ is a near-metric, not a
-      metric}~\cite{fagin2003comparing}. An earlier claim that it satisfies the
-      triangle inequality at $p = 1/2$ was wrong; violations were measured at
-      every $p$ tested, and the implementation was verified against an
-      independently written reference. It is used on bias grounds
+      cannot be used as one. Three objects are provided (ball, chain and
+      clique), related by the chain-inflation ratio $\rho$ (\addendum{1}). The
+      dyadic ladder $s_i = i\cdot 2^{-20}$ is the witness.
+\item \textbf{The generalised Kendall distance $K^{(p)}$ is a near-metric rather
+      than a metric}~\cite{fagin2003comparing}. An earlier claim that it
+      satisfies the triangle inequality at $p = 1/2$ was wrong; violations were
+      measured at every $p$ tested, and the implementation was verified against
+      an independently written reference. It is used on bias grounds
       (\addendum{2}).
 \item \textbf{\S4.5 does not say which reordering $\pi_{\text{alt}}$ uses.} It is
       pinned to the reversal of $\pi$'s priority. This affects published rates
       and must be stated (\addendum{15}).
 \end{enumerate}
 
-\section{\texorpdfstring{\S7.4}{Section 7.4}: near-ties are identified, not constructed}
+\section{\texorpdfstring{\S7.4}{Section 7.4}: near-ties are identified rather than constructed}
 
 \S7.4 states that two documents are ``identified such that $|s_A - s_B| \le
-\tau$''. The word \emph{identified} is load-bearing.
+\tau$''. The choice of verb is forced.
 
 \begin{finding}\label{find:neartie}
 A fine near-tie cannot be manufactured by editing document text. \S2.2 normalises
@@ -288,11 +287,11 @@ applied to all coordinates at once. A separation of $10^{-9}$ would require a
 document of roughly $10^{9}$ tokens.
 \end{finding}
 
-What occurs instead is that adjacent gaps are either exactly zero (17--18\% of
-pairs) or above roughly $10^{-9}$; the interval between is empty. At fine $\tau$
-the near-tie regime therefore \emph{is} the exact-tie regime, and \S7.3's
-$m_k \le \tau$ stratum measures the tie-break rather than numerical error ---
-A2's regime, not A1's. Conflating them would misattribute the cause
+Adjacent gaps are instead either exactly zero (17\% to 18\% of pairs) or above
+roughly $10^{-9}$; the interval between is empty. At fine $\tau$ the near-tie
+regime therefore \emph{is} the exact-tie regime, so \S7.3's $m_k \le \tau$
+stratum measures the tie-break rather than numerical error, placing it in A2's
+regime and outside A1's. Conflating the two would misattribute the cause
 (\addendum{22}).
 
 \section{The scale separation}
@@ -316,9 +315,10 @@ Roughly thirteen orders of magnitude separate the numerical-error regime from th
 corpus-perturbation regime, and numerical error never came within six orders of
 closing a real gap. A1's bounded perturbations are therefore entirely about
 semantic perturbation; floating-point error is not a threat to ranking at any
-scale this system operates at. That is a positive result for the numerical design
-of \S6, and it is what makes A1 and A2 separable questions rather than two names
-for one effect.
+scale this system operates at. That is a positive result for the numerical
+design of \S6,
+and it is what leaves A1 and A2 as separable questions rather than two names for
+one effect.
 
 \section{Threats to validity}
 
@@ -332,8 +332,8 @@ its grid size, rather than as a proven bound.
 
 \paragraph{Corpus dependence.} The gap distribution shares vary with corpus size,
 vocabulary and query; an earlier draft quoted one configuration's table as
-canonical and was corrected. What does not vary --- and is enforced by test ---
-is that the interval $(0, 10^{-9})$ is empty.
+canonical and was corrected. What does not vary, and is enforced by test, is
+that the interval $(0, 10^{-9})$ is empty.
 
 \paragraph{Synthetic data.} The controlled results use a seeded generator.
 MovieLens supplies external validity but may not be redistributed, so results on

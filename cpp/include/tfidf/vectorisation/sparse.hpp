@@ -3,14 +3,13 @@
 // Two invariants make the native backend bit-identical to the Python reference,
 // and both are checked rather than assumed:
 //
-//   1. Indices are strictly ascending within every vector and every row. This
-//      fixes the order in which products are accumulated, and since binary64
-//      addition is not associative, a different order is a different number.
+//   1. Indices are strictly ascending within every vector and every row, which
+//      fixes the order products are accumulated in. binary64 addition is not
+//      associative, so a different order is a different number.
 //
-//   2. Structure-of-arrays layout. A packed {int32, double} struct would be 16
-//      bytes with padding -- 25% waste -- and would engage one prefetch stream
-//      instead of two. Separate index and value arrays are both smaller and
-//      faster to stream.
+//   2. Structure-of-arrays layout. A packed {int32, double} would be 16 bytes
+//      with padding (25% waste) and would engage one prefetch stream instead of
+//      two.
 #pragma once
 
 #include <tfidf/core/reduction.hpp>
@@ -25,8 +24,8 @@ namespace tfidf {
 
 /// A sparse vector: parallel arrays of strictly ascending indices and values.
 ///
-/// Non-owning by design. The Python layer owns every buffer, so nothing is
-/// allocated or freed across the language boundary.
+/// Non-owning. The Python layer owns every buffer, so nothing is allocated or
+/// freed across the language boundary.
 struct SparseView {
     std::span<const TermId> indices;
     std::span<const Real> values;
@@ -58,9 +57,9 @@ struct SparseView {
 
 /// Inner product, accumulated in ascending term-identifier order.
 ///
-/// A merge over the two ascending index lists. The order of accumulation is
-/// therefore identical to the Python reference's merge, which is what makes the
-/// two agree to the last bit rather than merely to within rounding.
+/// A merge over the two ascending index lists, so the accumulation order is the
+/// Python reference's merge order, and the two agree to the last bit rather
+/// than to within rounding.
 template <class Policy>
 [[nodiscard]] Real dot_with(const SparseView& u, const SparseView& v) noexcept {
     Policy acc{};
@@ -100,13 +99,13 @@ template <class Policy>
 
 /// Euclidean norm: sqrt of the sum of squares, in that order.
 ///
-/// No hypot-style rescaling. It would be more robust to overflow but would
-/// produce different digits, and README section 6 is explicit that no
-/// stabilising transformations are introduced.
+/// No hypot-style rescaling. It would be more robust to overflow and would
+/// produce different digits, and README section 6 forbids stabilising
+/// transformations.
 ///
-/// `sqrt` is safe to use freely here because IEEE-754 *mandates* that it be
-/// correctly rounded -- unlike `log`, which is why idf is computed on the
-/// Python side and passed in as data (spec_addenda G13).
+/// IEEE-754 mandates that `sqrt` be correctly rounded, unlike `log`, which is
+/// why idf is computed on the Python side and passed in as data
+/// (spec_addenda G13).
 template <class Policy>
 [[nodiscard]] Real l2_norm_with(const SparseView& v) noexcept {
     Policy acc{};
@@ -169,11 +168,11 @@ struct CsrView {
     }
 };
 
-/// Compressed sparse column -- the inverted index.
+/// Compressed sparse column: the inverted index.
 ///
-/// Owns its storage, because it is derived rather than supplied. Column `t`
-/// holds the postings list of term `t`: the documents containing it, in
-/// ascending document order.
+/// Owns its storage, being derived rather than supplied. Column `t` holds the
+/// postings list of term `t`: the documents containing it, in ascending
+/// document order.
 struct Csc {
     std::vector<Offset> colptr;  ///< size n_cols + 1
     std::vector<DocId> rowidx;   ///< size nnz, ascending within each column
@@ -194,10 +193,10 @@ struct Csc {
 
 /// Transpose CSR to CSC by counting sort: O(nnz + n_cols), deterministic.
 ///
-/// Because the source rows are visited in ascending document order and each
-/// column's entries are appended in that order, every postings list comes out
-/// ascending in document id for free -- no sort, and no dependence on any
-/// tie-breaking within the sort.
+/// Source rows are visited in ascending document order and each column's
+/// entries are appended in that order, so every postings list comes out
+/// ascending in document id with no sort, and no dependence on a sort's
+/// tie-breaking.
 [[nodiscard]] inline Csc transpose(const CsrView& csr) {
     Csc out;
     out.n_rows = csr.n_rows;

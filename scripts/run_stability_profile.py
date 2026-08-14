@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""E1/E2 -- derive tau, then measure A1 (margins govern ranking stability).
+"""E1/E2: derive tau, then measure A1 (margins govern ranking stability).
 
-Runs three things in one pass, because they share a corpus fit and a query grid:
+Three things in one pass, since they share a corpus fit and a query grid:
 
-**E0, the tau derivation.** Measures the arithmetic noise floor against exact
+E0, the tau derivation. Measures the arithmetic noise floor against exact
 summation, sandwiches tau between it and the smallest observed score gap, and
 verifies the tie structure is invariant across the whole band. See
 ``analysis/noise_floor.py`` and ``docs/spec_addenda.md#g23``.
 
-**E1, the margin distribution.** The distribution of ``m_k`` across queries at
-each ``k``. Degenerate queries are excluded per G3; the exclusion count is
-reported, never silently applied.
+E1, the margin distribution. ``m_k`` across queries at each ``k``. Degenerate
+queries are excluded per G3, with the exclusion count reported.
 
-**E2, the stability transition.** The empirical top-k flip rate as a function of
+E2, the stability transition. Empirical top-k flip rate against
 ``eps / (m_k / 2)``, plus a soundness/conservatism audit of section 4.4's
 certificate.
 
@@ -70,23 +69,16 @@ def _margin_distributions(
             continue
         sorted_vectors = [sorted(v, reverse=True) for v in scores_by_query]
         margins = [boundary_margin(s, k) for s in sorted_vectors]
-        # Section 7.2 asks for BOTH margins. They constrain disjoint sets of
-        # gaps -- m_k is the gap at the boundary, m_min^top the smallest gap
-        # inside the top-k -- so neither bounds the other and reporting only one
-        # would leave the ordering guarantee unquantified.
+        # Section 7.2 asks for both margins. They constrain disjoint sets of gaps
+        # (m_k at the boundary, m_min^top the smallest gap inside the top-k), so
+        # neither bounds the other.
         interior = [min_adjacent_margin_top(s, k) for s in sorted_vectors]
 
-        # G3: degenerate queries are excluded from margin distributions. Counted
-        # and reported, so the exclusion is auditable rather than assumed.
-        #
-        # BOTH lists are counted. The counter used to be
-        # ``len(margins) - len(usable)``, over the boundary margins alone --
-        # which are defined whenever ``k < n``, already guaranteed above, so it
-        # was structurally zero. The exclusions actually happen in the interior
-        # list: G16 leaves ``m_min^top`` undefined at ``k = 1``, where the
-        # minimum is over an empty set. So at k=1 all 40 queries were dropped
-        # from that distribution while the published field read 0 -- precisely
-        # the silent exclusion this comment promises does not happen.
+        # G3: degenerate queries are excluded here, counted so the exclusion is
+        # auditable. Both lists are counted: the counter once covered the boundary
+        # margins alone, which are defined whenever k < n (guaranteed above), so
+        # it read a structural zero while G16 left m_min^top undefined at k = 1
+        # and all 40 queries dropped out of the interior distribution.
         usable = [m.value for m in margins if m.defined]
         usable_top = [m.value for m in interior if m.defined]
         excluded[f"k{k}"] = {
@@ -119,17 +111,13 @@ def _rank_trajectories(
 ) -> dict:
     """Each document's rank as a function of eps, along one fixed direction.
 
-    The direction is drawn **once** and scaled, rather than redrawn at every
-    eps. That is the whole design: independent draws would make each column an
-    unrelated sample, and joining them would draw a path that no single
-    perturbation ever traced. With one direction scaled up, the columns are a
-    genuine one-parameter family, so a crossing in the picture is a crossing
-    that actually happens as eps grows.
+    The direction is drawn once and scaled. Redrawing at every eps would make
+    each column an unrelated sample, and joining them would draw a path no single
+    perturbation ever traced; scaling one direction gives a one-parameter family,
+    so a crossing in the picture is a crossing that happens as eps grows.
 
-    Ranks are integers, so nothing here is projected or approximated -- the
-    quantity plotted is the quantity the study is about. Recorded against
-    ``eps / (m_k / 2)`` so the certified radius sits at 1.0, matching
-    ``fig_transition``: section 4.4 forbids any crossing left of it.
+    Recorded against ``eps / (m_k / 2)`` so the certified radius sits at 1.0,
+    matching ``fig_transition``: section 4.4 forbids any crossing left of it.
     """
     import random
 
@@ -139,7 +127,7 @@ def _rank_trajectories(
     margin = boundary_margin(sorted_scores, k)
     if not margin.defined or margin.value <= 0.0:
         # An exact tie at the boundary: the radius is zero, so eps/(m_k/2) is
-        # undefined and there is no transition to trace. A2's regime, not A1's.
+        # undefined and there is no transition to trace. A2's regime.
         return {}
     radius = margin.value / 2.0
 
@@ -154,7 +142,7 @@ def _rank_trajectories(
     for ratio in ratios:
         eps = radius * ratio
         perturbed = [s + eps * d for s, d in zip(scores, direction, strict=True)]
-        # The realised movement, not the intended one -- fl(s + d) rounds.
+        # The realised movement; fl(s + d) rounds, so it differs from the intent.
         realised.append(max(abs(p - s) for p, s in zip(perturbed, scores, strict=True)) / radius)
         order = rank_top_k(perturbed, table, k=len(perturbed)).order
         where = {doc: i for i, doc in enumerate(order)}
@@ -214,9 +202,8 @@ def main() -> int:
     documents = [model.document(i) for i in range(model.n_documents)]
 
     # Section 7.1's protocol: user-profile or leave-one-out queries, each with
-    # its own candidate set. Document prefixes would be a different and much
-    # easier protocol -- a prefix always retrieves its own source document -- so
-    # using them would change every A1 number.
+    # its own candidate set. Document prefixes are a much easier protocol (a
+    # prefix always retrieves its source document) and would move every A1 number.
     grid = evaluate(
         build_query_grid(
             data.interactions,
@@ -304,9 +291,9 @@ def main() -> int:
             file=sys.stderr,
         )
     elif not audit.is_conclusive:
-        # Soundness is "the certified cell holds no failures", which is also true
-        # when it holds nothing at all. Reporting that as a pass is how a gate
-        # comes to certify a theorem it never exercised.
+        # Soundness is "the certified cell holds no failures", which also holds
+        # when the cell is empty. Reporting that as a pass is how a gate comes to
+        # certify a theorem it never exercised.
         print(
             "\n    THE AUDIT WAS VACUOUS. No perturbation landed inside the certified\n"
             "    radius, so section 4.4 was never exercised and its soundness here is\n"

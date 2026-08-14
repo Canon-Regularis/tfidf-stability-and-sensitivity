@@ -1,10 +1,10 @@
 // Sparse structures and query scoring.
 //
-// The centrepiece is `taat == daat` bit-for-bit. Those two algorithms share no
-// data structure and no loop nesting: TAAT walks postings lists out of an
-// inverted index into a dense accumulator, DAAT merges each document's row
-// against the query independently. Getting identical binary64 output from both
-// is a far stronger statement than either one matching a recorded expectation.
+// The centrepiece is `taat == daat` bit-for-bit. The two share no data
+// structure and no loop nesting: TAAT walks postings lists out of an inverted
+// index into a dense accumulator, DAAT merges each document's row against the
+// query independently. Identical binary64 from both says more than either one
+// matching a recorded expectation.
 #include <tfidf/core/reduction.hpp>
 #include <tfidf/similarity/scoring.hpp>
 #include <tfidf/vectorisation/sparse.hpp>
@@ -131,8 +131,8 @@ TEST_CASE("sparse: transpose is a faithful inverted index") {
 }
 
 TEST_CASE("sparse: postings lists come out ascending in document id") {
-    // Free, because the counting sort visits rows in ascending document order.
-    // Relied upon by the scoring loops, so asserted rather than assumed.
+    // Free, since the counting sort visits rows in ascending document order.
+    // The scoring loops rely on it, so it is asserted rather than assumed.
     const Corpus c = random_corpus(60, 20, 6, 4242);
     const Csc csc = transpose(c.view());
     for (TermId t = 0; t < csc.n_cols; ++t) {
@@ -146,8 +146,7 @@ TEST_CASE("sparse: postings lists come out ascending in document id") {
 // Scoring
 // -----------------------------------------------------------------------------
 TEST_CASE("scoring: TAAT and DAAT agree bit for bit") {
-    // The strongest correctness signal in the native suite: two structurally
-    // unrelated traversals producing identical bits.
+    // Two structurally unrelated traversals producing identical bits.
     for (const std::uint64_t seed : {1u, 2u, 3u, 17u, 20260811u}) {
         const Corpus c = random_corpus(120, 45, 12, seed);
         const CsrView csr = c.view();
@@ -188,8 +187,8 @@ TEST_CASE("scoring: TAAT and DAAT agree bit for bit") {
 }
 
 TEST_CASE("scoring: reusing scratch across queries changes nothing") {
-    // The touched-list reset must fully clear state; a stale accumulator would
-    // silently contaminate the next query.
+    // The touched-list reset must clear every slot; a stale accumulator would
+    // contaminate the next query.
     const Corpus c = random_corpus(80, 30, 10, 555);
     const CsrView csr = c.view();
     const Csc csc = transpose(csr);
@@ -229,11 +228,11 @@ TEST_CASE("scoring: the zero-vector convention of section 2.3") {
     // A zero query scores 0 against everything and must not produce NaN.
     //
     // Poisoned first, and compared on bits. `std::vector<Real> out(n)` value-
-    // initialises to 0.0, so the previous form passed unchanged if score_taat
-    // wrote *nothing at all* -- it could not tell "correctly wrote zeros" from
-    // "never ran". And `s == 0.0` is true of -0.0, which this repository treats
-    // as a distinct value everywhere else (ranking/margins.py reasons that -0.0
-    // cannot occur, and every score comparison elsewhere is bitwise).
+    // initialises to 0.0, so the previous form also passed when score_taat wrote
+    // nothing at all: it could not tell "wrote zeros" from "never ran". And
+    // `s == 0.0` is true of -0.0, which this repository treats as a distinct
+    // value everywhere else (ranking/margins.py reasons that -0.0 cannot occur,
+    // and every score comparison elsewhere is bitwise).
     std::fill(out.begin(), out.end(), std::numeric_limits<Real>::quiet_NaN());
     const SparseView zero{{}, {}, csr.n_cols};
     score_taat(zero, csc, norms, 0.0, out, scratch, Reduction::Naive);

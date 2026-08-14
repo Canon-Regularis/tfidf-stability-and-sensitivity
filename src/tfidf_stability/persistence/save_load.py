@@ -2,20 +2,19 @@
 
 Why a custom format
 -------------------
-The obvious choices are all non-deterministic in ways that would break the
-reproducibility snapshot:
+The obvious choices break the reproducibility snapshot:
 
-* ``numpy.savez`` writes a **zip**, and a zip embeds a modification timestamp
-  per member. Two saves of the identical model produce different bytes.
-* ``pickle`` is version-sensitive, insecure to load, and its output depends on
-  Python's object layout rather than on the data.
-* JSON cannot carry a ``double`` without either losing bits or bloating the file
-  with 17-digit decimal renderings whose parse-back is a separate risk.
+* ``numpy.savez`` writes a zip, and a zip embeds a per-member modification
+  timestamp, so two saves of the same model differ in bytes.
+* ``pickle`` is version-sensitive, insecure to load, and its output tracks
+  Python's object layout rather than the data.
+* JSON cannot carry a ``double`` without losing bits or bloating the file with
+  17-digit decimals whose parse-back is a separate risk.
 
-``.tfsx`` is therefore a plain uncompressed container: a fixed-width header,
-then raw little-endian arrays, then a UTF-8 token block. Saving the same model
-twice gives byte-identical output, and a one-ulp change anywhere changes the
-file. That is exactly the property ``test_reproducibility_snapshot.py`` needs.
+``.tfsx`` is a plain uncompressed container: fixed-width header, raw
+little-endian arrays, UTF-8 token block. Saving the same model twice gives
+identical bytes and a one-ulp change anywhere changes the file, which is what
+``test_reproducibility_snapshot.py`` needs.
 
 Layout
 ------
@@ -44,9 +43,8 @@ parsing::
     tokens    utf-8, LF-separated, n_terms entries
     doc_ids   utf-8, LF-separated, n_docs entries
 
-A JSON sidecar carries the same metadata in readable form. It is written
-alongside, never inside: keeping it out of the container is what lets the
-container stay byte-stable while the sidecar carries whatever a human wants.
+A JSON sidecar carries the same metadata in readable form, written alongside and
+never inside, so the container stays byte-stable whatever the sidecar gains.
 """
 
 from __future__ import annotations
@@ -88,8 +86,8 @@ _HEADER = struct.Struct("<8sIIIQIIQQ2I")
 _FLAG_CORRECTLY_ROUNDED_LOG: Final[int] = 1 << 0
 #: Every flag bit this version defines. Bits outside the mask are rejected
 #: rather than ignored: ignoring them would let two different files decode to
-#: the same model, and the reproducibility snapshot rests on the container being
-#: a bijection between models and byte strings.
+#: one model, and the reproducibility snapshot rests on the container being a
+#: bijection between models and byte strings.
 _FLAG_MASK: Final[int] = _FLAG_CORRECTLY_ROUNDED_LOG
 _LINE_SEP: Final[bytes] = b"\n"
 
@@ -98,11 +96,10 @@ class TfsxFormatError(DataIntegrityError, ValueError):
     """The file is not a readable ``.tfsx`` container.
 
     Both bases carry weight. ``DataIntegrityError`` puts container corruption in
-    the same typed hierarchy as every other deliberate failure, so a caller that
-    guards a load with ``except TfidfStabilityError`` catches it -- and so the
-    fuzz harness can state its property as "nothing but a package exception ever
-    escapes". ``ValueError`` is kept for callers written against the original
-    signature.
+    the package hierarchy, so ``except TfidfStabilityError`` around a load
+    catches it and the fuzz harness can state its property as "nothing but a
+    package exception ever escapes". ``ValueError`` is kept for callers written
+    against the original signature.
     """
 
 
@@ -121,8 +118,8 @@ def _unpack_floats(data: bytes, offset: int, count: int) -> tuple[tuple[float, .
 
 
 def _encode_strings(items: list[str], what: str) -> bytes:
-    """Join with LF. Tokens cannot contain LF -- normalisation strips control
-    characters -- so the encoding is unambiguous."""
+    """Join with LF. Normalisation strips control characters, so no token holds an
+    LF and the encoding is unambiguous."""
     for item in items:
         if "\n" in item:
             raise TfsxFormatError(f"{what} contains a newline: {item!r}")
@@ -139,13 +136,11 @@ def _check_csr(
 ) -> None:
     """Reject index arrays that do not describe a canonical CSR matrix.
 
-    Canonical here means what ``build`` produces and what every consumer -- the
-    reference scorer, the native core, ``row()`` -- assumes without re-checking:
-    one more offset than rows, starting at zero, non-decreasing, ending at
-    ``nnz``, and column indices in range and strictly increasing within a row.
-    Strictly increasing is the load-bearing one: it is what makes a row's
-    support a *set*, so a duplicate column would double-count a term in every
-    dot product.
+    Canonical means what ``build`` produces and what the reference scorer, the
+    native core and ``row()`` assume without re-checking: one more offset than
+    rows, starting at zero, non-decreasing, ending at ``nnz``, and column indices
+    in range and strictly increasing within a row. Strict increase makes a row's
+    support a set; a duplicate column double-counts a term in every dot product.
     """
     if len(indptr) != n_rows + 1:
         raise TfsxFormatError(
@@ -177,8 +172,8 @@ def _check_csr(
 def model_bytes(model: TfidfModel) -> bytes:
     """Serialise a model to the ``.tfsx`` byte string.
 
-    Deterministic: the same model always produces the same bytes, with nothing
-    from the environment in them.
+    The same model always produces the same bytes, with nothing from the
+    environment in them.
     """
     vocab = model.vocabulary
     tokens = _encode_strings(list(vocab.tokens), "token")
@@ -221,8 +216,8 @@ def model_bytes(model: TfidfModel) -> bytes:
 def save_model(model: TfidfModel, path: Path | str, *, sidecar: bool = True) -> dict[str, str]:
     """Write a model to ``path`` atomically, optionally with a JSON sidecar.
 
-    Returns a small provenance dict -- the container's digest and the model's own
-    -- suitable for embedding in a run manifest.
+    Returns the provenance dict (container digest and model digest) for
+    embedding in a run manifest.
     """
     target = Path(path)
     payload = model_bytes(model)
@@ -298,10 +293,9 @@ def _read_header(data: bytes) -> _Header:
 def _decode_block(block: bytes, count: int, what: str) -> tuple[str, ...]:
     """Decode one LF-separated string block and check it holds ``count`` entries.
 
-    An empty block is ``count == 0`` entries, not one empty string, so the two
-    cases have to be distinguished before splitting -- and a non-empty block
-    under ``count == 0`` is bytes the format has no way to reproduce, so it is
-    rejected rather than dropped.
+    Splitting an empty block yields one empty string, so ``count == 0`` is
+    settled before the split. A non-empty block under ``count == 0`` carries
+    bytes the format cannot reproduce; rejected rather than dropped.
     """
     try:
         text = block.decode("utf-8")
@@ -325,23 +319,23 @@ def load_model(path: Path | str) -> TfidfModel:
 def model_from_bytes(data: bytes) -> TfidfModel:
     """Parse a ``.tfsx`` container, or raise.
 
-    Every length is taken from the header and checked against the file size
+    Every length comes from the header and is checked against the file size
     before any slice is taken, so a truncated or corrupt file raises rather than
-    silently yielding a model built from adjacent bytes. This parser is the one
-    piece of the project that reads untrusted input, and it is the fuzz target
-    of ``tests/test_fuzz_parsers.py``, which holds it to two properties:
+    yielding a model built from adjacent bytes. This is the only parser here that
+    reads untrusted input, and the fuzz target of ``tests/test_fuzz_parsers.py``,
+    which holds it to two properties:
 
     * anything it accepts re-serialises to the identical bytes, so the container
-      is a bijection and no two files decode to the same model;
+      is a bijection and no two files decode to one model;
     * anything it rejects raises a
       :class:`~tfidf_stability.utils.validation.TfidfStabilityError`, never a
       ``struct.error``, ``IndexError`` or ``UnicodeDecodeError`` from the
       internals.
 
-    The second property is why the structural checks below are here rather than
-    left to the first caller that trips over them. A CSR matrix whose ``indices``
-    point outside the vocabulary is not a model that scores badly; it is a model
-    that raises ``IndexError`` somewhere unrelated, hours later.
+    The second property is why the structural checks below live here rather than
+    with the first caller to trip over them. A CSR matrix whose ``indices`` point
+    outside the vocabulary raises ``IndexError`` somewhere unrelated, hours
+    later.
     """
     head = _read_header(data)
     offset = _HEADER.size
@@ -360,10 +354,10 @@ def model_from_bytes(data: bytes) -> TfidfModel:
         + len(_LINE_SEP)
         + head.doc_id_bytes
     )
-    # Exact, not a lower bound. The document-id block is last, so an open-ended
-    # slice would accept a truncated file and silently yield a model whose final
-    # identifier had lost its trailing bytes -- a corruption that passes every
-    # count check. Requiring equality also rejects trailing garbage.
+    # Equality, since the document-id block is last: a lower bound would accept a
+    # truncated file and yield a model whose final identifier had lost its
+    # trailing bytes, which passes every count check. Equality also rejects
+    # trailing garbage.
     if len(data) != expected:
         raise TfsxFormatError(
             f"file is {len(data)} bytes but the header describes exactly {expected}"
@@ -381,12 +375,10 @@ def model_from_bytes(data: bytes) -> TfidfModel:
     token_block = data[offset : offset + head.token_bytes]
     offset += head.token_bytes
 
-    # Checked, not merely stepped over. Both block lengths are already fixed by
-    # the header, so this byte carries no information -- which is precisely why
-    # accepting any value for it breaks the bijection between models and byte
-    # strings that this module's docstring, ``_FLAG_MASK`` and the whole
-    # reproducibility snapshot rest on. Measured before the check existed: all
-    # 255 other values decoded to a byte-identical model.
+    # The header fixes both block lengths, so this byte carries no information
+    # and accepting any value for it breaks the model-to-bytes bijection.
+    # Before the check existed, all 255 other values decoded to a byte-identical
+    # model.
     separator = data[offset : offset + len(_LINE_SEP)]
     if separator != _LINE_SEP:
         raise TfsxFormatError(
@@ -395,28 +387,24 @@ def model_from_bytes(data: bytes) -> TfidfModel:
     offset += len(_LINE_SEP)
     doc_id_block = data[offset : offset + head.doc_id_bytes]
 
-    # Through the guarded helper, never `bytes.decode` directly: a single flipped
-    # byte in either block can make it invalid UTF-8, and a bare
-    # UnicodeDecodeError escaping tells a caller nothing and cannot be handled
-    # alongside every other container failure. Found by fuzzing -- one byte set
-    # to 0x80 inside the token block was enough.
+    # Through the guarded helper rather than `bytes.decode`: one flipped byte
+    # makes a block invalid UTF-8, and a bare UnicodeDecodeError cannot be
+    # handled alongside the other container failures. Fuzzing found it with a
+    # single 0x80 in the token block.
     tokens = _decode_block(token_block, head.n_terms, "token")
     doc_ids = _decode_block(doc_id_block, head.n_docs, "document id")
 
-    # Semantic validation, not merely structural. Every check above confirms the
-    # container is *shaped* correctly; these confirm its contents could have come
-    # from a real fit. A corrupt or hostile file can satisfy every count and
-    # still carry NaN weights or repeated identifiers, and both would produce a
-    # plausible-looking ranking rather than an error -- duplicate ids silently
-    # destroy the strict total order the ranking operator depends on, and a NaN
-    # in a sort key is undefined behaviour for the sort, not a wrong answer.
-    # The CSR arrays are read as three independent blocks whose *lengths* the
-    # header already fixes, so every check so far can pass while the arrays do
-    # not describe a matrix at all. Fuzzing put numbers on it: of 2715 mutated
-    # containers this parser accepted, 425 carried an indptr that was
-    # non-monotonic or did not start at zero. Nothing downstream re-checks --
-    # CsrMatrix is a frozen dataclass with no __post_init__ -- so the model was
-    # returned intact and misbehaved later, far from the file that caused it.
+    # Semantic validation: the checks above confirm the container is shaped
+    # right, these that its contents could have come from a real fit. A file can
+    # satisfy every count and still carry NaN weights (undefined behaviour for
+    # the sort) or repeated ids (which destroy the ranking operator's strict
+    # total order), both of which produce a plausible-looking ranking rather than
+    # an error. The three CSR arrays are read independently with only their
+    # lengths fixed by the header: of 2715 mutated containers this parser
+    # accepted, 425 carried an indptr that was non-monotonic or did not start at
+    # zero. Nothing downstream re-checks (CsrMatrix is frozen with no
+    # __post_init__), so such a model was returned intact and misbehaved far from
+    # its cause.
     _check_csr(indptr, indices, values, n_rows=head.n_docs, n_cols=head.n_terms)
 
     try:

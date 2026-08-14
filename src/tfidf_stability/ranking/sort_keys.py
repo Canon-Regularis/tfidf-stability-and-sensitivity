@@ -7,24 +7,19 @@
 The key is ``(-score, rank_1, ..., rank_m, id_rank)``, compared ascending and
 lexicographically.
 
-Two things about that shape are load-bearing.
+Negating a binary64 flips the sign bit and never rounds, so ``-s`` is exact and
+order-reversing, and Python's tuple ``<`` and C++'s ``operator<`` are then the
+same relation: one comparator to reason about instead of two.
 
-**Score descending via exact negation.** Negating a binary64 flips the sign bit
-and never rounds, so ``-s`` is exact and order-reversing. Using it rather than a
-reversed comparator means Python's tuple ``<`` and C++'s ``operator<`` are
-literally the same relation, so there is one comparator to reason about instead
-of two.
+Identifiers are unique and terminate every key, so the key is injective and the
+comparator is a strict total order. Move the identifier or drop it and the order
+stops being total, at which point the sorted permutation is no longer unique.
+See :func:`assert_strict_total_order`.
 
-**The identifier terminates every key and is never permutable.** Because
-identifiers are unique, the key is *injective*, and therefore the comparator is
-a strict **total** order. Move the identifier -- or drop it -- and the order stops
-being total, at which point the sorted permutation is no longer unique and every
-claim this layer makes collapses. See :func:`assert_strict_total_order`.
-
-``pi_score`` is the empty-priority special case of ``pi``, not a separate code
-path (``spec_addenda.md`` G15 note). One honest consequence: it agrees with
-``pi`` whenever the attributes happen not to discriminate, which slightly
-weakens the ablation but is the correct reading of section 4.5.
+``pi_score`` is the empty-priority case of ``pi`` rather than a separate code
+path (``spec_addenda.md`` G15). It therefore agrees with ``pi`` whenever the
+attributes fail to discriminate, which weakens the ablation slightly and is the
+correct reading of section 4.5.
 """
 
 from __future__ import annotations
@@ -63,11 +58,11 @@ class SortKeySpec:
     priority: tuple[str, ...] = ()
 
     def digest(self, table: AttributeTable) -> str:
-        """Identity of this operator *as applied to this table*.
+        """Identity of this operator as applied to this table.
 
-        Binding the table's digest matters: the same priority over a different
-        attribute table is a different ranking function, and a manifest that
-        recorded only the priority could not tell the two apart.
+        The table's digest is folded in: the same priority over a different
+        attribute table is a different ranking function, and a manifest carrying
+        only the priority could not distinguish them.
         """
         h = hashlib.sha256()
         h.update(f"{self.name}|{'>'.join(self.priority)}\n".encode())
@@ -82,10 +77,10 @@ PI: Final = SortKeySpec("pi", ("popularity", "rating", "engagement"))
 #: identifier, so any difference from PI is attributable to the attributes.
 PI_SCORE: Final = SortKeySpec("pi_score", ())
 
-#: Section 4.5's alternate priority. The paper says only "reordered" without
-#: saying which of the 3! orderings; this is pinned to the *reversal* -- the
-#: canonical antipode, maximising distance from PI's priority. Proposed as
-#: addendum G15; the full permutation sweep is available as an ablation.
+#: Section 4.5's alternate priority. The paper says "reordered" without naming
+#: which of the 3! orderings; pinned here to the reversal, the antipode that
+#: maximises distance from PI's priority. Proposed as addendum G15; the full
+#: permutation sweep is available as an ablation.
 PI_ALT: Final = SortKeySpec("pi_alt", ("engagement", "rating", "popularity"))
 
 OPERATORS: Final[tuple[SortKeySpec, ...]] = (PI, PI_SCORE, PI_ALT)
@@ -100,7 +95,7 @@ def build_keys(
 
     Args:
         scores: Similarity scores, index-aligned to the table's documents.
-            Must be finite -- the caller checks, once, before reaching here.
+            Must be finite; the caller checks that once, before reaching here.
         table: The rank-encoded attribute table.
         spec: Which operator.
 
@@ -131,12 +126,12 @@ def build_keys(
 def assert_strict_total_order(keys: Sequence[SortKey]) -> None:
     """Verify the comparator axioms and key injectivity.
 
-    A self-test of the *comparator*, not of the data: it is what catches the
-    classic "sorted by score only" bug, in which the key stops being injective
-    and the sorted permutation stops being unique.
+    A self-test of the comparator rather than of the data: it catches the classic
+    "sorted by score only" bug, where the key stops being injective and the
+    sorted permutation stops being unique.
 
-    Intended for tests and for an opt-in debug mode; never on the published
-    path, since the transitivity check is O(n^3).
+    For tests and an opt-in debug mode; never on the published path, since the
+    transitivity check is O(n^3).
 
     Raises:
         AssertionError: If any axiom fails.
@@ -157,7 +152,7 @@ def assert_strict_total_order(keys: Sequence[SortKey]) -> None:
                 raise AssertionError(f"not asymmetric at ({a}, {b})")
             if not ab and not ba:
                 raise AssertionError(f"not trichotomous at ({a}, {b}): keys compare equal")
-    if n <= 40:  # O(n^3); only worth doing on the small cases tests use
+    if n <= 40:  # O(n^3), so only at the sizes tests use
         for a in range(n):
             for b in range(n):
                 for c in range(n):

@@ -1,9 +1,9 @@
 """Shared fixtures and test configuration.
 
-The Hypothesis profiles here matter for the project's verification strategy: the
-`ci` profile runs enough examples to be a useful gate on every pull request, and
-the `nightly` profile runs enough to be a serious adversarial search for
-violations of the inequalities in README section 4.
+Hypothesis profiles, selected by ``HYPOTHESIS_PROFILE`` and defaulting to
+``dev``: ``dev`` 50 examples, ``ci`` 1,000 (the per-PR gate), ``nightly``
+100,000 (adversarial search for violations of the README section 4
+inequalities).
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-# The package is importable from src/ without installation, which keeps the
-# test suite runnable before the native backend has ever been built.
+# src/ on sys.path: the suite runs with no install, and before the native
+# backend has ever been built.
 _SRC = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
@@ -70,11 +70,11 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
 
 @pytest.fixture(scope="session")
 def mini_corpus() -> list[dict[str, object]]:
-    """Six hand-written documents exercising the interesting degenerate cases.
+    """Six hand-written documents covering the degenerate cases.
 
-    Includes an exact-duplicate pair (d3/d4, which tie exactly), a near-duplicate
-    pair (d1/d2), and an all-stopword document (d5, which embeds to the zero
-    vector). Every golden value in ``tests/golden/`` is derived from this corpus.
+    Exact-duplicate pair d3/d4 (they tie exactly), near-duplicate pair d1/d2,
+    all-stopword document d5 (embeds to the zero vector). Every golden value in
+    ``tests/golden/`` derives from this corpus.
     """
     return _read_jsonl(FIXTURES / "mini_corpus.jsonl")
 
@@ -114,8 +114,8 @@ def mini_attributes(mini_corpus: list[dict[str, object]]) -> AttributeTable:
     """Tie-break attributes for the mini corpus.
 
     The fixture file already carries ``popularity``, ``rating_sum2``,
-    ``rating_count`` and ``engagement`` -- it was written to G8's exact-pair
-    representation, so the loader honours it rather than reshaping it.
+    ``rating_count`` and ``engagement`` in G8's exact-pair representation, so
+    the loader takes them as written rather than reshaping them.
     """
     return AttributeTable.from_records(mini_corpus)
 

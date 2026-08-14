@@ -1,27 +1,25 @@
-"""Reference vs native for the ranking layer: **permutation identity**.
+"""Reference vs native for the ranking layer: permutation identity.
 
-"Bit-exact" means something different here. A score is a ``double`` and the
-scoring tests compare bit patterns; a ranking is a sequence of ``int32``, so the
-claim degenerates to element-by-element equality of the two orders. Margins and
-sorted scores are floats again, and go back to the ordinary bitwise standard.
+A ranking is a sequence of ``int32``, so the claim here is element-by-element
+equality of the two orders. Margins and sorted scores are floats again and go
+back to the bitwise standard.
 
-Permutation identity holds given four conditions, each separately testable:
+Permutation identity holds under four separately testable conditions:
 
-1. the sort key is **injective** -- identifier ranks are a bijection, which the
-   native constructor validates and refuses to proceed without;
-2. the key *inputs* are identical -- scores are already proven bit-exact by the
-   scoring differential tests, and the integer ranks cross the boundary as data
-   rather than being re-derived on the native side;
-3. the comparison relation is the same in both languages -- IEEE ``<`` on finite
+1. the sort key is injective: identifier ranks are a bijection, which the native
+   constructor validates and refuses to proceed without;
+2. the key inputs are identical: scores are bit-exact by the scoring
+   differential tests, and the integer ranks cross the boundary as data with no
+   re-derivation on the native side;
+3. the comparison relation is the same in both languages: IEEE ``<`` on finite
    doubles, with negation (a sign-bit flip) the only arithmetic applied;
-4. the build is not fast-math, which ``test_build_is_reproducible`` asserts.
+4. the build is not fast-math, per ``test_build_is_reproducible``.
 
-One trap governs how every test here is written. **A uniform-random double
-vector contains a tie with probability approximately zero**, so a differential
-test over random scores would exercise none of the tie-break and would pass
-happily with a completely broken attribute table. Scores are therefore drawn
-from a small discrete alphabet, with a large all-zero block standing in for the
-zero-norm documents that short-text corpora produce in bulk.
+A uniform-random double vector contains a tie with probability near zero, so a
+differential test over random scores exercises none of the tie-break and passes
+with a completely broken attribute table. Scores here come from a small discrete
+alphabet, with a large all-zero block standing in for the zero-norm documents
+short-text corpora produce in bulk.
 """
 
 from __future__ import annotations
@@ -79,11 +77,10 @@ def tie_heavy(rng: random.Random, n: int) -> tuple[list[float], AttributeTable]:
 
 
 def native_ranker(table: AttributeTable, priority: tuple[str, ...]):  # type: ignore[no-untyped-def]
-    """Build a NativeRanker from the very ranks the reference will use.
+    """Build a NativeRanker from the same ranks the reference will use.
 
-    Nothing is recomputed on the native side -- this is the point of the
-    rank-encoding design, and it is what turns a semantic question about
-    rational comparison into an integer equality.
+    Nothing is recomputed natively: the rank encoding turns a question about
+    comparing rationals into integer equality.
     """
     flat: list[int] = []
     for name in ATTRS:
@@ -132,8 +129,8 @@ def test_the_inputs_really_do_contain_ties() -> None:
 def test_all_native_selection_strategies_agree() -> None:
     """The ranking analogue of ``TAAT == DAAT``: unrelated algorithms, one answer.
 
-    Sound because the key is injective, so no two documents ever compare equal
-    and the "stable" clause is vacuous.
+    Sound because the key is injective: no two documents compare equal, so the
+    "stable" clause is vacuous.
     """
     rng = random.Random(777)
     scores, table = tie_heavy(rng, 90)
@@ -276,17 +273,15 @@ def test_native_ranker_rejects_an_unknown_attribute() -> None:
 def test_the_two_backends_disagree_only_on_invalid_k_and_only_in_kind() -> None:
     """Pin the one place the backends part company: ``k = 0``.
 
-    For every *valid* k the two agree bit-for-bit, which the tests above
-    establish. At ``k = 0`` they differ in kind rather than in value: the
-    reference raises ``KOutOfRangeError`` -- ``resolve_k`` rejects a non-positive
-    k in BOTH strict and lenient modes, because zero is a nonsensical rank
-    rather than a degenerate grid point -- while the native margin functions
-    return an undefined margin.
+    For every valid k they agree bit-for-bit, per the tests above. At ``k = 0``
+    they differ in kind: the reference raises ``KOutOfRangeError`` (``resolve_k``
+    rejects non-positive k in strict and lenient modes alike, treating zero as a
+    nonsensical rank), while the native margin functions return an undefined
+    margin.
 
-    Nothing in the package passes k = 0, so this is latent. It is pinned here
-    because the asymmetry is exactly the shape that turns into a silent wrong
-    answer if it ever widens: the reference would refuse and the native path
-    would hand back a NaN that serialises to ``null`` in a results file.
+    Nothing in the package passes k = 0, so the divergence is latent. Pinned
+    because if it widened, the reference would refuse while the native path
+    returned a NaN that serialises to ``null`` in a results file.
     """
     scores = np.array([1.0, 0.5, 0.25], dtype=np.float64)
 

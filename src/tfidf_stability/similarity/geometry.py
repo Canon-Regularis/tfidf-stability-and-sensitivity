@@ -4,10 +4,9 @@ Section 4.3 states that
 
     |cos(u', v') - cos(u, v)| <= C (||u' - u|| + ||v' - v||)
 
-"for a constant C depending on lower and upper bounds on the norms", and then
-leaves ``C`` unspecified. An unspecified constant cannot be computed, tested or
-used, so this module makes it explicit and proves it. See
-``docs/spec_addenda.md#g4``.
+"for a constant C depending on lower and upper bounds on the norms" and leaves
+``C`` unspecified, which cannot be computed, tested or used. This module pins it
+and proves it. See ``docs/spec_addenda.md#g4``.
 
 **Theorem.** For non-zero ``u, v, u', v'`` and ``L = min(||u||, ||v||, ||u'||, ||v'||)``,
 
@@ -24,18 +23,18 @@ used, so this module makes it explicit and proves it. See
 3. ``||u|| + ||u'|| >= 2L``, so ``||u_hat - u_hat'|| <= ||u - u'|| / L``; likewise
    for ``v``. []
 
-A tighter, non-uniform form is also provided, and -- more usefully -- a bound
-that depends only on the corpus and not on the perturbation at all:
+A tighter non-uniform form is also provided, and a bound depending only on the
+corpus, with no reference to the perturbation:
 
     C <= sqrt(max nnz)
 
-which follows because ``idf >= 1`` and ``||tf||_1 = 1`` force ``||w_i|| >=
-1/sqrt(nnz_i)``. That turns section 6's qualitative remark that "cosine
-similarity becomes unstable for low-norm vectors" into a quantitative statement,
-and localises the instability to *short documents*.
+which follows because ``idf >= 1`` and ``||tf||_1 = 1`` force
+``||w_i|| >= 1/sqrt(nnz_i)``. That turns section 6's remark that "cosine
+similarity becomes unstable for low-norm vectors" into a quantitative statement
+and localises the instability to short documents.
 
 Every bound here is checked by an adversarial property test that searches for a
-violation rather than merely confirming a few examples.
+violation rather than confirming a few examples.
 """
 
 from __future__ import annotations
@@ -91,23 +90,23 @@ class LipschitzBound:
     constant: float
     #: ``L = min`` of the four norms.
     min_norm: float
-    #: ``C * (||du|| + ||dv||)`` -- the bound as section 4.3 writes it.
+    #: ``C * (||du|| + ||dv||)``: the bound as section 4.3 writes it.
     uniform: float
     #: The tighter per-vector form.
     tight: float
-    #: The quantity actually being bounded, for reporting tightness.
+    #: The quantity being bounded, for reporting tightness.
     observed: float
 
     @property
     def holds(self) -> bool:
-        """Whether both bounds are respected, with a small allowance for the
-        rounding incurred while *evaluating* the bound itself."""
+        """Whether both bounds are respected, allowing for the rounding incurred
+        while evaluating the bound itself."""
         slack = 1e-12 * max(1.0, self.uniform) + 1e-15
         return self.observed <= self.uniform + slack and self.observed <= self.tight + slack
 
     @property
     def tightness(self) -> float:
-        """``observed / tight`` -- how close the bound comes to being attained."""
+        """``observed / tight``: how close the bound comes to being attained."""
         return self.observed / self.tight if self.tight > 0.0 else 0.0
 
 
@@ -121,12 +120,12 @@ def lipschitz_constant(
     """Evaluate the section 4.3 bound for a concrete perturbation.
 
     Returns a :class:`LipschitzBound` carrying the uniform constant, both bound
-    values, and the observed change, so that a caller can assert the inequality
-    *and* report how tight it was.
+    values and the observed change, so a caller can assert the inequality and
+    report how tight it was.
 
     Raises:
-        ValueError: If any of the four vectors is zero, for which the bound is
-            vacuous -- cosine is defined by convention there, not by geometry.
+        ValueError: If any of the four vectors is zero, where the bound is
+            vacuous: cosine is defined there by convention rather than geometry.
     """
     nu, nv = l2_norm(u, policy), l2_norm(v, policy)
     nup, nvp = l2_norm(u_prime, policy), l2_norm(v_prime, policy)
@@ -157,8 +156,8 @@ def lipschitz_constant(
 def norm_lower_bound(nnz: int) -> float:
     """``||w_i||_2 >= 1 / sqrt(nnz_i)`` for a TF-IDF vector.
 
-    Since ``||tf_i||_1 = 1`` exactly by construction, Cauchy-Schwarz gives
-    ``||tf_i||_2 >= 1/sqrt(nnz_i)``; and ``idf >= 1`` termwise can only increase
+    ``||tf_i||_1 = 1`` exactly, so Cauchy-Schwarz gives
+    ``||tf_i||_2 >= 1/sqrt(nnz_i)``, and ``idf >= 1`` termwise can only increase
     the norm. Returns ``0.0`` for an empty support, where the vector is zero.
     """
     return 0.0 if nnz <= 0 else 1.0 / math.sqrt(nnz)
@@ -167,10 +166,10 @@ def norm_lower_bound(nnz: int) -> float:
 def corpus_lipschitz_bound(nnz_values: Sequence[int]) -> float:
     """``C <= sqrt(max nnz)``: a Lipschitz constant computable from the corpus alone.
 
-    Requires no reference to any perturbation, which makes it usable as an a
-    priori conditioning number for the whole pipeline. Because it grows with the
-    largest support, and because ``C = 1/L`` blows up as norms shrink, it also
-    identifies *short documents* as the source of section 6's instability.
+    Needs no perturbation, so it serves as an a priori conditioning number for
+    the whole pipeline. It grows with the largest support and ``C = 1/L`` blows
+    up as norms shrink, so it identifies short documents as the source of section
+    6's instability.
     """
     m = max((n for n in nnz_values if n > 0), default=0)
     return math.sqrt(m) if m > 0 else math.inf
@@ -188,13 +187,12 @@ def three_term_bound(
         ||w' - w|| <= ||dtf|| ||idf||_inf + ||tf|| ||didf||_inf
                       + ||dtf|| ||didf||_inf
 
-    separating a *local* document edit, a *global* corpus change, and their
+    separating a local document edit, a global corpus change, and their
     interaction.
 
-    Note that this presupposes a common index set. Under a corpus perturbation
-    the vocabulary itself changes, and the paper does not say how ``didf`` is
-    then defined; this project resolves it on the union vocabulary. See
-    ``docs/spec_addenda.md#g5``.
+    Presupposes a common index set. A corpus perturbation changes the vocabulary
+    and the paper does not say how ``didf`` is defined then; this project
+    resolves it on the union vocabulary. See ``docs/spec_addenda.md#g5``.
     """
     n_dtf = l2_norm(delta_tf, policy)
     n_tf = l2_norm(tf, policy)

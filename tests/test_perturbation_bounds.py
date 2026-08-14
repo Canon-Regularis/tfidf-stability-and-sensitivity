@@ -1,10 +1,7 @@
 """Every inequality in README section 4, handed to Hypothesis to break.
 
-The distinction that matters here: these are not examples confirming the bounds,
-they are adversarial searches for counterexamples. A bound that has survived a
-directed search is worth considerably more than one that has been spot-checked,
-and for a paper whose whole subject is perturbation behaviour, "we checked the
-theorems hold" is the substantive claim.
+These are adversarial searches for counterexamples rather than examples that
+confirm the bounds.
 
 Four inequalities are under test:
 
@@ -13,8 +10,8 @@ Four inequalities are under test:
 * **section 4.2** the three-term decomposition bounds ``||w' - w||``;
 * **section 4.3** ``|delta cos| <= C (||du|| + ||dv||)`` with the explicit
   ``C = 1/L`` of ``spec_addenda.md#g4``;
-* **section 4.4** ``eps < m_k/2`` guarantees the top-k set -- and, going beyond
-  the paper, is *exactly* the radius rather than merely a safe one.
+* **section 4.4** ``eps < m_k/2`` guarantees the top-k set, and (beyond the
+  paper) is the radius itself rather than a safe under-estimate.
 """
 
 from __future__ import annotations
@@ -101,7 +98,7 @@ def test_add_and_remove_change_the_corpus_size() -> None:
 
 
 def test_duplicate_produces_an_identical_document() -> None:
-    """The perturbation that manufactures an exact tie by construction."""
+    """The perturbation that manufactures an exact tie."""
     corpus = (("a",), (("x", "y"),))
     new_corpus, rec = duplicate_document(corpus, "a", "a_copy")
     assert new_corpus[1][0] == new_corpus[1][1]
@@ -119,7 +116,7 @@ def test_editing_an_unknown_document_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Section 4.1 -- IDF perturbation
+# Section 4.1: IDF perturbation
 # ---------------------------------------------------------------------------
 def test_delta_idf_captures_the_two_competing_effects() -> None:
     """Section 4.1's point: N and df push in opposite directions."""
@@ -144,8 +141,8 @@ def test_delta_idf_equals_the_difference_of_idf_values(n: int, df: int, df2: int
 def test_adding_a_document_moves_every_idf() -> None:
     """Even tokens whose df is unchanged move, because N moved.
 
-    Section 4.1 says this explicitly, and it is the reason a corpus edit cannot
-    be treated as a purely local perturbation.
+    Section 4.1 says so explicitly; a corpus edit is never a purely local
+    perturbation.
     """
     rng = random.Random(0)
     corpus = corpus_of(rng, 8)
@@ -184,14 +181,14 @@ def test_alignment_partitions_the_union_vocabulary() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Section 4.2 -- the three-term bound
+# Section 4.2: the three-term bound
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("seed", range(12))
 def test_three_term_bound_is_never_violated_under_a_real_edit(seed: int) -> None:
     """The inequality, evaluated against actual corpus perturbations.
 
-    Randomised over all four edit kinds. The vocabulary genuinely churns here,
-    which is the case section 4.2 does not cover and G5 resolves.
+    Randomised over all four edit kinds. The vocabulary churns here, the case
+    section 4.2 does not cover and G5 resolves.
     """
     rng = random.Random(seed)
     corpus = corpus_of(rng, rng.randint(4, 10))
@@ -236,11 +233,11 @@ def test_an_unperturbed_corpus_moves_nothing() -> None:
 
 
 def test_a_local_edit_leaves_untouched_documents_moved_only_globally() -> None:
-    """Editing one document still moves the others -- through ``idf`` alone.
+    """Editing one document still moves the others, through ``idf`` alone.
 
-    A clean instance of section 4.2's separation: for every document except the
-    edited one, ``dtf`` is zero, so the local and interaction terms vanish and
-    the entire bound is the global term.
+    Section 4.2's separation: for every document but the edited one ``dtf`` is
+    zero, so the local and interaction terms vanish and the bound is the global
+    term.
     """
     rng = random.Random(4)
     corpus = corpus_of(rng, 8)
@@ -256,9 +253,8 @@ def test_a_local_edit_leaves_untouched_documents_moved_only_globally() -> None:
             assert result.bound.dominant_term == "global"
             assert result.bound.local == pytest.approx(0.0, abs=1e-12)
             asserted += 1
-    # Without this the test passes vacuously the moment every non-edited document
-    # happens to see a zero shift -- it would still report success having checked
-    # nothing at all.
+    # Without this the test passes vacuously whenever every non-edited document
+    # happens to see a zero shift.
     assert asserted > 0, "no document was actually examined"
 
 
@@ -272,7 +268,7 @@ def test_analyse_vector_shift_refuses_a_document_missing_from_one_side() -> None
 
 
 # ---------------------------------------------------------------------------
-# Section 4.3 -- the Lipschitz bound (G4)
+# Section 4.3: the Lipschitz bound (G4)
 # ---------------------------------------------------------------------------
 nonneg = st.floats(min_value=0.0, max_value=1e3, allow_nan=False, allow_infinity=False)
 sparse_map = st.dictionaries(st.integers(0, DIM - 1), nonneg, min_size=0, max_size=DIM)
@@ -289,9 +285,9 @@ def test_lipschitz_bound_survives_an_adversarial_search(
 ) -> None:
     """``C = 1/L`` where ``L`` is the smallest of the four norms (G4).
 
-    Vectors with a tiny norm are excluded, not because the bound fails there but
-    because evaluating it in binary64 becomes dominated by its own rounding --
-    the same low-norm regime documented as G18.
+    Tiny-norm vectors are excluded because evaluating the bound in binary64 gets
+    dominated by its own rounding there (the low-norm regime of G18). The bound
+    itself still holds.
     """
     u, v, up, vp = sv(a), sv(b), sv(c), sv(d)
     assume(min(l2_norm(x) for x in (u, v, up, vp)) > 1e-6)
@@ -325,7 +321,7 @@ def test_lipschitz_bound_applies_to_a_real_corpus_perturbation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Section 4.4 -- certificates, and that the radius is exact
+# Section 4.4: certificates, and that the radius is exact
 # ---------------------------------------------------------------------------
 def test_certificate_is_half_the_margin() -> None:
     s = (1.0, 0.75, 0.5, 0.25)
@@ -336,8 +332,8 @@ def test_certificate_is_half_the_margin() -> None:
 
 
 def test_certificate_at_an_exact_tie_is_no_radius_at_all() -> None:
-    """``0`` here is categorically different from a small radius: membership is
-    already decided entirely by the tie-break."""
+    """``0`` differs in kind from a small radius: the tie-break already decides
+    membership."""
     cert = certified_radius((0.5, 0.5, 0.1), 1)
     assert cert.exact_tie is True
     assert cert.set_radius == 0.0
@@ -352,16 +348,15 @@ def test_certificate_is_undefined_at_the_end_of_the_ranking() -> None:
 
 
 def test_neither_radius_dominates_the_other() -> None:
-    """The two conditions of section 4.4 constrain **disjoint** sets of gaps.
+    """The two conditions of section 4.4 constrain disjoint sets of gaps.
 
-    ``m_min^top`` minimises over the gaps strictly *inside* the top-k (ranks
-    1->2 through (k-1)->k); ``m_k`` is the gap *at the boundary* (k->k+1). So
-    neither radius bounds the other, and it is easy to construct rankings where
-    each is the tighter one in turn.
+    ``m_min^top`` minimises over the gaps strictly inside the top-k (ranks 1->2
+    through (k-1)->k); ``m_k`` is the boundary gap (k->k+1). Neither radius
+    bounds the other, and rankings where each is the tighter one in turn are
+    easy to build.
 
-    Worth pinning, because "preserving the order is harder than preserving the
-    set" is an intuitive-sounding claim that happens to be false, and a
-    certificate quoted without saying which invariant it certifies is ambiguous.
+    So "preserving the order is harder than preserving the set" is false, and a
+    certificate quoted without naming its invariant is ambiguous.
     """
     # Tight cluster at the top, wide boundary -> the order radius binds.
     tight_top = (1.00, 0.99, 0.20)
@@ -411,11 +406,10 @@ def test_a_certified_perturbation_never_changes_the_top_k_set(
 ) -> None:
     """Section 4.4's sufficiency, as an adversarial search.
 
-    The ``assume`` is on the **realised** deltas rather than the drawn ``eps``:
-    the theorem is over the reals, but ``fl(s + d)`` rounds, so the realised
-    perturbation can exceed ``|d|`` by up to half an ulp. Assuming on the drawn
-    value would make this test flaky for reasons that have nothing to do with
-    the mathematics.
+    The ``assume`` is on the realised deltas rather than the drawn ``eps``: the
+    theorem is over the reals, but ``fl(s + d)`` rounds, so the realised
+    perturbation can exceed ``|d|`` by up to half an ulp and assuming on the
+    drawn value makes the test flaky for non-mathematical reasons.
     """
     n = len(scores)
     assume(k < n)
@@ -437,8 +431,8 @@ def test_a_certified_perturbation_never_changes_the_top_k_set(
 def test_the_flip_witness_shows_the_radius_is_exact() -> None:
     """Necessity, which section 4.4 does not address.
 
-    Dyadic throughout, so the construction has no rounding of its own: the
-    margin is 0.25, the radius 0.125, and the witness sits one ``2^-30`` beyond.
+    Dyadic throughout, so the construction contributes no rounding: margin 0.25,
+    radius 0.125, witness one ``2^-30`` beyond.
     """
     scores = [1.0, 0.5, 0.25, 0.0]
     table = table_of(4)
@@ -491,10 +485,10 @@ def test_no_witness_beyond_the_end_of_the_ranking() -> None:
 
 
 def test_a_perturbation_can_preserve_membership_while_reordering_it() -> None:
-    """The two guarantees are genuinely different properties.
+    """The two guarantees are different properties.
 
-    With a tight gap at the top and a wide one at the boundary, there is a band
-    of ``eps`` for which the top-k *set* is certified but its *ordering* is not.
+    With a tight gap at the top and a wide one at the boundary there is a band
+    of ``eps`` where the top-k set is certified and its ordering is not.
     """
     s = (1.0, 0.9, 0.2)
     cert = certified_radius(s, 2)

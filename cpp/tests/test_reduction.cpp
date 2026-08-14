@@ -1,10 +1,9 @@
 // Reduction policies.
 //
-// The policies must differ from each other in the right way and agree with each
-// other in the right way, and both directions matter. If they never differed,
-// the noise-floor measurement that derives tau (section 7.1) would be measuring
-// nothing; if they disagreed on exactly representable inputs, one of them would
-// simply be wrong.
+// The policies must differ in the right way and agree in the right way. If they
+// never differed, the noise-floor measurement that derives tau (section 7.1)
+// would be measuring nothing; if they disagreed on exactly representable
+// inputs, one of them would be wrong.
 #include <tfidf/core/reduction.hpp>
 
 #include <doctest.h>
@@ -19,8 +18,8 @@ using namespace tfidf;
 
 namespace {
 
-/// Bit-level equality: the property we actually mean by "bit-exact".
-/// `==` would conflate -0.0 with 0.0 and call two NaNs unequal.
+/// Bit-level equality, which is what "bit-exact" means here. `==` would
+/// conflate -0.0 with 0.0 and call two NaNs unequal.
 bool same_bits(Real a, Real b) {
     return std::memcmp(&a, &b, sizeof(Real)) == 0;
 }
@@ -55,8 +54,8 @@ TEST_CASE("reduce: the empty and singleton sums") {
 }
 
 TEST_CASE("reduce: Naive is exactly a left-to-right fold") {
-    // This is the normative policy, so it must match the literal reading of the
-    // formula and nothing cleverer.
+    // The normative policy, so it must match the literal reading of the formula
+    // and nothing cleverer.
     std::mt19937_64 rng(20260811);
     std::uniform_real_distribution<Real> mag(-1.0, 1.0);
     std::uniform_int_distribution<int> exp10(-12, 3);
@@ -82,8 +81,7 @@ TEST_CASE("reduce: compensation recovers what the naive fold discards") {
     CHECK(naive == 1.0);
     CHECK(exact > naive);
     CHECK(neumaier > naive);
-    // Exact is correctly rounded, so it is the ground truth the others are
-    // measured against.
+    // Exact is correctly rounded, hence the ground truth for the others.
     CHECK(std::abs(exact - (1.0 + 100 * 1e-17)) <= std::numeric_limits<Real>::epsilon());
 }
 
@@ -94,8 +92,7 @@ TEST_CASE("reduce: Exact recovers a result naive arithmetic destroys") {
     //   1e100 - 1e100  -> 0
     //   0 + 1.0        -> 1.0     (the second 1.0 survives, having arrived
     //                              after the cancellation)
-    // so naive returns 1.0, not 0.0 -- only *one* of the two units is lost.
-    // The exact answer is 2.0.
+    // so naive returns 1.0: one of the two units is lost. The exact sum is 2.0.
     const std::vector<Real> v{1e100, 1.0, -1e100, 1.0};
     CHECK(reduce::sum(v, Reduction::Exact) == 2.0);
     CHECK(reduce::sum(v, Reduction::Naive) == 1.0);
@@ -110,8 +107,8 @@ TEST_CASE("reduce: Exact reproduces the documented fsum half-even case") {
 }
 
 TEST_CASE("reduce: Exact is order-independent") {
-    // A correctly-rounded sum depends only on the multiset, never on order --
-    // which is exactly why it can serve as ground truth.
+    // A correctly-rounded sum depends only on the multiset, never on order,
+    // which is what lets it serve as ground truth.
     std::mt19937_64 rng(7);
     std::vector<Real> v;
     for (int i = 0; i < 400; ++i) {
@@ -123,9 +120,8 @@ TEST_CASE("reduce: Exact is order-independent") {
 }
 
 TEST_CASE("reduce: Naive is NOT order-independent") {
-    // The counterpart of the previous test. If this ever became order
-    // independent, the summation-order sensitivity the paper studies would have
-    // silently disappeared.
+    // Counterpart of the previous test. If this became order independent, the
+    // summation-order sensitivity the paper studies would have disappeared.
     std::vector<Real> v{1.0};
     v.insert(v.end(), 100, 1e-17);
     const Real small_first = [&] {
@@ -145,11 +141,10 @@ TEST_CASE("reduce: Pairwise beats Naive on a long uniform sum") {
 }
 
 TEST_CASE("reduce: overflow follows IEEE-754 and is not silently papered over") {
-    // {1e308, 1e308, ...} overflows on the very first addition. That is the
-    // correct IEEE result, and README section 6 is explicit that no stabilising
-    // transformation is applied -- so `inf` is what the specification calls for,
-    // not a defect. Asserted so nobody later "fixes" it into a rescaled sum and
-    // silently changes every published digit.
+    // {1e308, 1e308, ...} overflows on the first addition. That is the correct
+    // IEEE result, and README section 6 applies no stabilising transformation,
+    // so `inf` is what the specification calls for. Asserted so a later rescaled
+    // sum cannot change every published digit unnoticed.
     const std::vector<Real> overflowing{1e308, 1e308, -1e308, -1e308};
     CHECK(std::isinf(reduce::sum(overflowing, Reduction::Naive)));
 

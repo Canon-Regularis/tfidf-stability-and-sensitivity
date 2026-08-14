@@ -1,15 +1,11 @@
 """Score-separation margins and flip radii (README sections 2.3.2 and 4.4).
 
-The centrepiece is the pair of tests on section 4.4's stability condition.
-
-The paper states ``eps < m_k / 2`` as **sufficient** for top-k invariance and
-never addresses whether it is tight. Both directions are established here:
-perturbations below the radius provably never change the top-k set, and an
-explicit adversarial witness just above it provably does. The witness is built
-from dyadic rationals so that every intermediate value is exactly representable
-in binary64 -- the test therefore has no floating-point slack at all, and
-demonstrates that ``m_k / 2`` is the *exact* flip radius rather than merely a
-safe under-estimate.
+The paper gives ``eps < m_k / 2`` as sufficient for top-k invariance and says
+nothing about tightness. Both directions are covered here: below the radius the
+top-k set never moves, and a witness just above it flips. The witness is dyadic,
+so every intermediate value is exact in binary64 and the test carries no
+floating-point slack; the bound is attained, so ``m_k / 2`` is the flip radius
+and no smaller number will do.
 """
 
 from __future__ import annotations
@@ -93,24 +89,24 @@ def test_margins_are_non_negative(mini_model) -> None:  # type: ignore[no-untype
 
 
 # ---------------------------------------------------------------------------
-# Tie-break independence -- what makes A1 and A2 separate questions
+# Tie-break independence: why A1 and A2 are separate questions
 # ---------------------------------------------------------------------------
 def test_margins_are_identical_under_all_three_operators(
     mini_attributes: AttributeTable,
 ) -> None:
-    """``m_k`` depends only on the score *multiset*, never on the tie-break.
+    """``m_k`` depends only on the score multiset, never on the tie-break.
 
-    The paper does not state this, and it is what makes research questions A1
-    (margins) and A2 (tie-breaking) independent rather than confounded.
+    Unstated in the paper. It is what keeps A1 (margins) and A2 (tie-breaking)
+    independent instead of confounded.
     """
     scores = [0.9, 0.9, 0.5, 0.5, 0.0, 0.2]
     rankings = rank_all_operators(scores, mini_attributes)
 
-    # Structural: one shared array object, so it cannot drift.
+    # Structural: every operator returns the same array object.
     arrays = [r.sorted_scores for r in rankings.values()]
     assert all(a is arrays[0] for a in arrays)
 
-    # And bitwise, when computed independently of that sharing.
+    # And bitwise, recomputed without that sharing.
     independent = sorted_scores_desc(scores)
     for k in range(1, 6):
         reference = boundary_margin(independent, k).value
@@ -119,13 +115,13 @@ def test_margins_are_identical_under_all_three_operators(
 
 
 def test_no_negative_zero_in_scores(mini_model) -> None:  # type: ignore[no-untyped-def]
-    """The precondition for ``sorted_scores`` being bit-determined by the multiset.
+    """Precondition for ``sorted_scores`` being bit-determined by the multiset.
 
-    ``+0.0`` and ``-0.0`` are equal but not bit-identical, so if both could
-    occur, the sorted array's *bits* would depend on which copy landed where and
-    permutation identity would not imply array identity. Cosine returns a
-    literal ``0.0`` for the zero convention, and a quotient of non-negatives is
-    ``+0.0``, so this holds -- but it is asserted rather than assumed.
+    ``+0.0`` and ``-0.0`` compare equal but differ in bits, so with both present
+    the sorted array's bits would depend on which copy landed where, and equal
+    permutations would not give equal arrays. Cosine returns a literal ``0.0``
+    for the zero convention and a quotient of non-negatives is ``+0.0``;
+    asserted here rather than assumed.
     """
     from tfidf_stability.similarity.cosine import cosine_against_corpus
     from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
@@ -137,7 +133,7 @@ def test_no_negative_zero_in_scores(mini_model) -> None:  # type: ignore[no-unty
 
 
 # ---------------------------------------------------------------------------
-# G3 edge cases -- NaN plus a validity flag, never a coerced number
+# G3 edge cases: NaN plus a validity flag rather than a coerced number
 # ---------------------------------------------------------------------------
 def test_k_equals_n_gives_nan_and_a_validity_flag() -> None:
     s = (1.0, 0.5, 0.25)
@@ -145,8 +141,8 @@ def test_k_equals_n_gives_nan_and_a_validity_flag() -> None:
     assert math.isnan(m.value)
     assert m.defined is False
     assert m.reason
-    # Explicitly *not* coerced: 0 would look like an exact tie, and infinity
-    # would look like perfect stability. Both would corrupt a distribution.
+    # Uncoerced: 0 reads as an exact tie and infinity as perfect stability,
+    # and either would corrupt a summary distribution.
     assert m.value != 0.0
     assert not math.isinf(m.value)
     assert m.is_exact_tie is False
@@ -171,7 +167,7 @@ def test_non_positive_k_is_rejected_in_both_modes() -> None:
 
 
 def test_exact_tie_gives_a_defined_zero_margin() -> None:
-    """The interesting case, and it must be counted rather than dropped."""
+    """A tie is a defined margin of zero, so summaries count it rather than drop it."""
     m = boundary_margin((0.5, 0.5, 0.1), 1)
     assert m.defined is True
     assert m.value == 0.0
@@ -182,8 +178,8 @@ def test_exact_tie_gives_a_defined_zero_margin() -> None:
 def test_min_adjacent_margin_at_k_equals_one_is_nan() -> None:
     """An empty minimum. G3 does not cover it; addendum G16 adopts NaN.
 
-    ``+inf`` would be worse than wrong: it would silently claim "no constraint"
-    and would pollute every percentile summary it entered.
+    ``+inf`` would claim "no constraint" and pollute every percentile summary
+    it entered.
     """
     m = min_adjacent_margin_top((1.0, 0.5), 1)
     assert math.isnan(m.value)
@@ -226,7 +222,7 @@ def test_margin_profile_covers_the_paper_k_set() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Section 4.4 -- sufficiency
+# Section 4.4: sufficiency
 # ---------------------------------------------------------------------------
 @given(
     st.lists(st.sampled_from([0.0, 0.2, 0.4, 0.6, 0.8, 1.0]), min_size=6, max_size=25),
@@ -236,14 +232,12 @@ def test_margin_profile_covers_the_paper_k_set() -> None:
 def test_perturbation_below_half_the_margin_never_changes_the_top_k_set(
     scores: list[float], k: int, fraction: float
 ) -> None:
-    """Section 4.4: ``|ds_i| <= eps`` and ``eps < m_k / 2`` implies the top-k set
-    is invariant.
+    """Section 4.4: ``|ds_i| <= eps`` with ``eps < m_k / 2`` keeps the top-k set.
 
-    One detail decides whether this is a theorem check or a flaky annoyance. The
-    proof is over the reals, but ``fl(s_i + d_i)`` rounds, so the *realised*
-    perturbation can exceed the drawn ``eps`` by up to half an ulp. Drawing
-    ``eps`` just below ``m_k / 2`` would then fail spuriously. The assumption is
-    therefore made on the **realised** deltas.
+    The proof is over the reals, but ``fl(s_i + d_i)`` rounds, so the realised
+    perturbation can exceed the drawn ``eps`` by up to half an ulp and an
+    ``eps`` just under ``m_k / 2`` then fails spuriously. The assume() is on the
+    realised deltas.
     """
     n = len(scores)
     assume(k < n)
@@ -263,13 +257,13 @@ def test_perturbation_below_half_the_margin_never_changes_the_top_k_set(
 
 
 # ---------------------------------------------------------------------------
-# Section 4.4 -- necessity, which the paper does not address
+# Section 4.4: necessity, which the paper does not address
 # ---------------------------------------------------------------------------
 def test_the_flip_radius_bound_is_tight() -> None:
-    """An explicit witness just above ``m_k / 2`` that *does* flip the top-k.
+    """A witness just above ``m_k / 2`` that flips the top-k.
 
-    Every value is a dyadic rational, so every step below is exact in binary64
-    and the test carries no floating-point slack whatsoever:
+    Every value is dyadic, so every step below is exact in binary64 and the test
+    carries no floating-point slack:
 
         score(r_k)   = 0.5      score(r_{k+1}) = 0.25
         m            = 0.25     m / 2          = 0.125
@@ -277,10 +271,9 @@ def test_the_flip_radius_bound_is_tight() -> None:
         s'_a = 0.5  - eps = 0.375 - 2^-30
         s'_b = 0.25 + eps = 0.375 + 2^-30
 
-    ``|ds_i| <= eps`` holds for every document, yet ``s'_b > s'_a``, so ``b``
-    displaces ``a``. Therefore ``m_k / 2`` is the **exact** flip radius, not
-    merely a sufficient bound -- a statement the paper makes only in one
-    direction.
+    ``|ds_i| <= eps`` holds for every document, yet ``s'_b > s'_a`` and ``b``
+    displaces ``a``. So ``m_k / 2`` is attained, and the paper's one-directional
+    bound is tight.
     """
     scores = [1.0, 0.5, 0.25, 0.0]  # a = index 1, b = index 2
     table = table_of(4)
@@ -295,7 +288,7 @@ def test_the_flip_radius_bound_is_tight() -> None:
     perturbed[1] = scores[1] - eps
     perturbed[2] = scores[2] + eps
 
-    # Exactness of the construction -- no rounding anywhere.
+    # The construction is exact: nothing rounds.
     assert perturbed[1] == 0.375 - delta
     assert perturbed[2] == 0.375 + delta
     assert max(abs(p - s) for p, s in zip(perturbed, scores, strict=True)) == eps
@@ -312,9 +305,8 @@ def test_the_flip_radius_bound_is_tight() -> None:
 def test_at_exactly_half_the_margin_the_tie_break_decides() -> None:
     """The hinge between research questions A1 and A2.
 
-    At ``eps = m / 2`` exactly, the two scores become bit-identical, so the
-    margin has been consumed entirely and membership passes to the tie-break.
-    Reproducible to the bit because the construction is dyadic.
+    At ``eps = m / 2`` the two scores become bit-identical: the margin is spent
+    and membership passes to the tie-break. Dyadic, so reproducible to the bit.
     """
     scores = [1.0, 0.5, 0.25, 0.0]
     eps = 0.125
@@ -336,9 +328,9 @@ def test_zero_margin_flips_under_a_change_of_operator_alone(
 ) -> None:
     """Section 4.5 with ``ds = 0``: no numerical perturbation at all.
 
-    When ``m_k = 0`` the flip radius is not a small radius, it is *no* radius:
-    membership already depends only on the tie-break, so swapping the attribute
-    priority changes the outcome with the scores held bit-identical.
+    ``m_k = 0`` leaves no radius, so membership already rests on the tie-break;
+    swapping the attribute priority moves the top-k with the scores held
+    bit-identical.
     """
     scores = [0.0] * 6
     assert boundary_margin(sorted_scores_desc(scores), 3).value == 0.0
@@ -410,14 +402,11 @@ def _adversarial_table(n: int) -> AttributeTable:
 def test_no_certified_perturbation_ever_changes_the_top_k() -> None:
     """Section 4.4, attacked rather than sampled.
 
-    Random perturbation almost never finds the worst case: the adversarial
-    configuration -- drive the rank-k score down and the rank-(k+1) score up, both
-    by the largest amount strictly inside the radius -- is a measure-zero corner
-    of the perturbation cube. This constructs that corner directly, at every
-    ``(n, k)`` and over dyadic scores so no step introduces rounding of its own.
-
-    A single failure here falsifies the theorem or the implementation. It is the
-    strongest correctness claim in the repository.
+    The worst case (rank-k score down, rank-(k+1) up, each by the largest amount
+    strictly inside the radius) is a measure-zero corner of the perturbation
+    cube, so random sampling never reaches it. Constructed directly at every
+    ``(n, k)``, over dyadic scores so no step rounds. One failure falsifies
+    section 4.4 or the implementation.
     """
     violations = []
     applied = 0
@@ -435,20 +424,18 @@ def test_no_certified_perturbation_ever_changes_the_top_k() -> None:
 
             base = frozenset(rank_top_k(scores, table, k=k).order[:k])
             order = sorted(range(n), key=lambda i: (-scores[i], i))
-            # NOT nextafter(radius, 0): adding that to a dyadic score rounds
-            # straight back up to the radius, so the realised movement lands
-            # exactly *on* the boundary the theorem excludes and every trial is
-            # discarded. An earlier version of this attack made that mistake and
-            # reported thousands of "certified" perturbations, none of which were
-            # inside the radius at all. Backing off by 2^-30 keeps the realised
-            # delta strictly inside while staying as adversarial as possible.
+            # nextafter(radius, 0) fails here: added to a dyadic score it rounds
+            # back up, putting the realised movement on the boundary the theorem
+            # excludes. An earlier version did that and counted thousands of
+            # "certified" perturbations, none of them inside the radius. A 2^-30
+            # backoff stays strictly inside and still adversarial.
             eps = cert.set_radius * (1.0 - 2.0**-30)
 
             for direction in (+1, -1):
                 perturbed = list(scores)
                 for position, index in enumerate(order):
                     perturbed[index] = scores[index] + (-eps if position < k else eps) * direction
-                # The realised movement, not the intended one: fl(s + d) rounds.
+                # Realised movement rather than intended: fl(s + d) rounds.
                 realised = max(abs(a - b) for a, b in zip(perturbed, scores, strict=True))
                 if realised >= cert.set_radius:
                     continue
@@ -462,11 +449,10 @@ def test_no_certified_perturbation_ever_changes_the_top_k() -> None:
 
 @pytest.mark.slow
 def test_the_radius_is_tight_not_merely_conservative() -> None:
-    """Exactly *at* the radius the theorem does not apply, and pairs do flip.
+    """At the radius the theorem does not apply, and pairs do flip.
 
-    Without this, ``test_no_certified_perturbation_ever_changes_the_top_k``
-    would also pass against an absurdly small radius. This is what shows the
-    bound is the real one.
+    ``test_no_certified_perturbation_ever_changes_the_top_k`` would also pass
+    against an absurdly small radius, so this pins the radius from below.
     """
     flipped = total = 0
     for n, k in itertools.product((6, 12), (1, 2, 5)):

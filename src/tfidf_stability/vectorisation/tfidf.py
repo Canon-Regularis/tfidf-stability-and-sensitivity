@@ -1,14 +1,13 @@
 """The TF-IDF vectoriser (README section 2.2): ``w_i(t) = tf_i(t) * idf(t)``.
 
-This is the object the rest of the pipeline is built on. It holds the frozen
-vocabulary, the IDF vector, the document matrix in CSR form, and the precomputed
-row norms, and it exposes all of them -- section 1.2 requires that intermediate
-quantities stay inspectable rather than being abstracted away.
+Holds the frozen vocabulary, the IDF vector, the document matrix in CSR form and
+the precomputed row norms, and exposes all of them: section 1.2 requires
+intermediate quantities to stay inspectable.
 
-Queries are embedded with :meth:`TfidfVectoriser.transform_query`, which reuses
-**the same vocabulary and the same IDF mapping** as the corpus, as section 3
-requires. IDF is never recomputed for a query and the vocabulary is never
-extended; both are asserted rather than assumed (``spec_addenda.md#g12``).
+:meth:`TfidfVectoriser.transform_query` embeds queries with the same vocabulary
+and the same IDF mapping as the corpus, as section 3 requires. IDF is never
+recomputed for a query and the vocabulary is never extended; both are asserted
+rather than assumed (``spec_addenda.md#g12``).
 """
 
 from __future__ import annotations
@@ -35,11 +34,11 @@ __all__ = ["TfidfModel", "TfidfVectoriser"]
 def _exact_tf(weight: float, idf: float, length: int) -> float:
     """Recover the exact ``tf`` behind a stored weight.
 
-    ``tf`` is ``count / length`` for an integer ``count``, and ``weight`` is
+    ``tf`` is ``count / length`` for an integer ``count`` and ``weight`` is
     ``fl(tf * idf)``. Dividing the weight back by ``idf`` does not return ``tf``
-    -- two roundings do not cancel -- but it lands nowhere near half a unit away
-    from the integer count, so recovering the count and performing one
-    correctly-rounded division does. See the note at the call site.
+    (two roundings do not cancel), but it stays far inside half a unit of the
+    integer count, so recover the count and divide once. See the note at the call
+    site.
     """
     if idf == 0.0 or length == 0:
         return 0.0
@@ -48,7 +47,7 @@ def _exact_tf(weight: float, idf: float, length: int) -> float:
 
 @dataclass(frozen=True, slots=True)
 class TfidfModel:
-    """A fitted TF-IDF model, with every intermediate retained.
+    """A fitted TF-IDF model, retaining every intermediate.
 
     Attributes:
         vocabulary: The frozen vocabulary; identifiers are its byte-sorted order.
@@ -80,11 +79,10 @@ class TfidfModel:
     def zero_norm_documents(self) -> tuple[int, ...]:
         """Indices of documents that embed to the zero vector.
 
-        Never a silent condition. Section 2.3 gives these a similarity of 0
-        against every query, so they cluster at the bottom of every ranking and
-        form a large block of *exact* ties -- which is precisely the regime the
-        tie-break analysis of section 4.5 is about. Their count is reported in
-        every experiment.
+        Section 2.3 gives these a similarity of 0 against every query, so they
+        sit at the bottom of every ranking as one large block of exact ties,
+        which is the regime the tie-break analysis of section 4.5 covers. Their
+        count is reported in every experiment.
         """
         return tuple(i for i, n in enumerate(self.norms) if n == 0.0)
 
@@ -95,7 +93,7 @@ class TfidfModel:
     def intermediates(self, i: int) -> dict[str, Any]:
         """Every intermediate quantity for one document, keyed by token.
 
-        Exists to satisfy README section 1.2: "retaining access to intermediate
+        Satisfies README section 1.2: "retaining access to intermediate
         quantities that are typically abstracted away in higher-level libraries".
         """
         row = self.matrix.row(i)
@@ -109,20 +107,16 @@ class TfidfModel:
                     "term_id": t,
                     "df": self.vocabulary.df[t],
                     "idf": self.idf[t],
-                    # NOT ``w / idf``. That comment used to read "w = tf * idf,
-                    # so tf is recoverable exactly by division", which is false
-                    # in binary64: ``fl(fl(tf*idf)/idf)`` misses ``tf`` by an
-                    # ulp in 9.01% of a sweep over 184,080 realistic
-                    # (N, df, L, count) combinations -- e.g. N=100, df=1, L=6,
-                    # count=5 gives 0x1.aaaaaaaaaaaaap-1 for a true
-                    # 0x1.aaaaaaaaaaaabp-1. In a project that compares scores on
-                    # raw bit patterns, the one field this method reconstructs
-                    # was off by exactly the quantity under study, and `tfidf
-                    # inspect` printed it.
+                    # ``w / idf`` does not recover ``tf``: two roundings do not
+                    # cancel, and the round trip misses by an ulp in 9.01% of a
+                    # sweep over 184,080 realistic (N, df, L, count) cases
+                    # (N=100, df=1, L=6, count=5 gives 0x1.aaaaaaaaaaaaap-1 for
+                    # a true 0x1.aaaaaaaaaaaabp-1). `tfidf inspect` printed that
+                    # field, off by the quantity under study.
                     #
                     # ``tf`` is ``count / L`` for an integer count, so recover
-                    # the count -- the rounding is far below 0.5 -- and divide
-                    # once. Exact on all 184,080 of those cases.
+                    # the count (the rounding is far below 0.5) and divide once.
+                    # Exact on all 184,080 of those cases.
                     "tf": _exact_tf(w, self.idf[t], self.lengths[i]),
                     "weight": w,
                 }
@@ -133,9 +127,9 @@ class TfidfModel:
     def digest(self) -> str:
         """SHA-256 over the vocabulary, IDF and every weight, byte-exactly.
 
-        Uses the raw binary64 bit patterns rather than a decimal rendering, so
-        the digest changes if any value changes by a single ulp. This is the
-        backbone of the reproducibility snapshot test.
+        Hashes the raw binary64 bit patterns rather than a decimal rendering, so
+        a single-ulp change anywhere moves the digest. Backbone of the
+        reproducibility snapshot test.
         """
         h = hashlib.sha256()
         h.update(self.vocabulary.digest().encode())
@@ -157,10 +151,10 @@ class TfidfVectoriser:
 
     Args:
         vocabulary_config: ``min_df`` / ``max_df`` / ``max_features`` options.
-        log_impl: Which logarithm to use for IDF. The default is the
+        log_impl: Which logarithm to use for IDF. Defaults to the
             correctly-rounded one; see ``spec_addenda.md#g13``.
-        reduction: The summation policy for norms. The default is the plain
-            left-to-right fold that section 2.3 specifies.
+        reduction: Summation policy for norms. Defaults to the left-to-right
+            fold section 2.3 specifies.
     """
 
     vocabulary_config: VocabularyConfig = field(default_factory=VocabularyConfig)
@@ -177,7 +171,7 @@ class TfidfVectoriser:
         Args:
             documents: One preprocessed feature sequence per document.
             doc_ids: Stable identifiers, defaulting to ``"0"``, ``"1"``, ...
-                These are *not* the ranking tie-break identifiers; those live in
+                Separate from the ranking tie-break identifiers, which live in
                 the attribute table.
 
         Returns:
@@ -225,9 +219,9 @@ class TfidfVectoriser:
 
         Section 3: query vectors are "embedded using the same vocabulary V and
         IDF mapping as the corpus documents, ensuring that all similarity
-        computations take place in a common vector space". No IDF is recomputed
-        and the vocabulary is not extended -- out-of-vocabulary query terms are
-        simply dropped, exactly as for documents.
+        computations take place in a common vector space". No IDF is recomputed,
+        the vocabulary is not extended, and out-of-vocabulary query terms are
+        dropped as they are for documents.
         """
         tf, _ = term_frequencies(features, model.vocabulary)
         return SparseVector(

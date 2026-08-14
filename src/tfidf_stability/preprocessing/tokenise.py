@@ -1,8 +1,8 @@
 """Tokenisation: normalised text to a token stream (section 2).
 
-The tokeniser pattern is data, not code: it is stored in the config, hashed into
-every run manifest, and can be swapped without touching this module. That matters
-because the pattern determines the vocabulary, and hence every number downstream.
+The tokeniser pattern is data: stored in the config, hashed into every run
+manifest, and swappable without touching this module. It determines the
+vocabulary, and hence every number downstream.
 """
 
 from __future__ import annotations
@@ -16,14 +16,14 @@ __all__ = ["GAP", "Token", "TokenisationConfig", "tokenise", "tokenise_with_offs
 #: Sentinel marking a position where a token was removed (a stopword) or a hard
 #: boundary occurred (end of a field or sentence). N-grams must never span one.
 #:
-#: Without this, removing the stopword from "king of pop" would yield the bigram
-#: "king pop" -- a feature that appears in no document, manufactured purely by
-#: the preprocessing order. See ``docs/spec_addenda.md#g7``.
+#: Without it, removing the stopword from "king of pop" yields the bigram "king
+#: pop", a feature that appears in no document and is manufactured by the
+#: preprocessing order. See ``docs/spec_addenda.md#g7``.
 GAP: Final[str] = "\x00"
 
 #: Unicode word pattern: runs of letters or digits. Apostrophes and hyphens are
-#: deliberately *not* included, so "don't" tokenises as ("don", "t"). That is a
-#: choice, not an oversight; it is pinned here and hashed into the manifest.
+#: excluded, so "don't" tokenises as ("don", "t"). Pinned here and hashed into
+#: the manifest.
 DEFAULT_PATTERN: Final[str] = r"[^\W_]+"
 
 #: ASCII-only alternative, for the restricted profile used in fuzzing where
@@ -44,9 +44,8 @@ class TokenisationConfig:
 class Token:
     """A token together with its span in the normalised source text.
 
-    Offsets are retained because README section 1.2 requires intermediate
-    quantities to remain inspectable: without them there is no way to trace a
-    surprising vocabulary entry back to the text that produced it.
+    Offsets are retained for README section 1.2: without them a surprising
+    vocabulary entry cannot be traced back to the text that produced it.
     """
 
     text: str
@@ -77,18 +76,16 @@ def tokenise(text: str, config: TokenisationConfig | None = None) -> list[str]:
 
     Returns:
         Tokens in order of appearance. Length filters are applied here rather
-        than downstream so that the length bounds are part of the tokenisation
-        contract and get hashed with it.
+        than downstream, so the bounds are part of the tokenisation contract and
+        are hashed with it.
 
-    A consequence worth stating, because it surprises: a length-filtered run
-    leaves **no gap sentinel**, so an n-gram closes over it. ``"king <66 z's>
-    pop"`` and ``"king pop"`` produce identical features, including the bigram
-    ``king|pop``. That is deliberate and consistent -- an underscore, a comma
-    and any other pattern-excluded run behave the same way, because the pattern
-    and the bounds together define what a token *is*. Only stopword removal
-    inserts a gap (``spec_addenda.md#g7``), and only because it deletes
-    something that was already a token. The collision is reachable in
-    configuration rather than merely in theory: at ``min_token_length: 2``,
+    A length-filtered run leaves no gap sentinel, so an n-gram closes over it:
+    ``"king <66 z's> pop"`` and ``"king pop"`` produce identical features,
+    including the bigram ``king|pop``. Underscores, commas and any other
+    pattern-excluded run behave the same way, since the pattern and the bounds
+    together define what a token is. Only stopword removal inserts a gap
+    (``spec_addenda.md#g7``), because only it deletes something that was already
+    a token. Reachable in configuration: at ``min_token_length: 2``,
     ``"vitamin c deficiency"`` and ``"vitamin deficiency"`` become the same
     document.
     """
@@ -100,7 +97,7 @@ def tokenise(text: str, config: TokenisationConfig | None = None) -> list[str]:
 
 
 def tokenise_with_offsets(text: str, config: TokenisationConfig | None = None) -> list[Token]:
-    """As :func:`tokenise`, but retaining source spans for provenance."""
+    """As :func:`tokenise`, retaining source spans for provenance."""
     cfg = config or _DEFAULT
     lo, hi = cfg.min_token_length, cfg.max_token_length
     return [

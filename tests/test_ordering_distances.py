@@ -1,18 +1,14 @@
 """Ordering distances (README sections 4.5 and 7.3, ``spec_addenda.md#g2``).
 
-Two things get established here that are easy to assume and wrong.
+The generalised Kendall distance is not a metric at any penalty. An earlier
+draft of G2 claimed ``p = 1/2`` made it one;
+:func:`test_fks_is_a_near_metric_not_a_metric` pins the counterexample. The
+penalty is chosen on bias grounds: ``1/2`` is the unbiased contribution for a
+pair whose relative order a list says nothing about.
 
-First, the generalised Kendall distance **is not a metric** at any penalty. An
-earlier draft of G2 claimed ``p = 1/2`` made it one; measurement says otherwise,
-and :func:`test_fks_is_a_near_metric_not_a_metric` pins the counterexample so the
-claim cannot quietly come back. The penalty is chosen on *bias* grounds instead:
-``1/2`` is the unbiased contribution for a pair about whose relative order a list
-says nothing.
-
-Second, ``K_int`` -- Kendall restricted to the intersection -- is structurally
-blind to membership change, which is the entire effect section 7.3 measures. It
-is therefore never reported alone, and
-:func:`test_intersection_kendall_is_blind_to_membership_change` demonstrates why.
+``K_int`` (Kendall restricted to the intersection) is blind to membership
+change, which is the effect section 7.3 measures, so it is never reported alone.
+See :func:`test_intersection_kendall_is_blind_to_membership_change`.
 """
 
 from __future__ import annotations
@@ -79,7 +75,7 @@ def test_kendall_tau_is_zero_below_two_elements() -> None:
 
 
 def test_kendall_tau_refuses_differing_sets() -> None:
-    """Not a tolerated input: it is the signal that FKS is the right function."""
+    """Differing sets are the signal to reach for FKS, so this raises."""
     with pytest.raises(ValueError, match="same set"):
         kendall_tau_distance([1, 2], [1, 3])
 
@@ -140,7 +136,7 @@ def test_singleton_disjoint_lists_are_maximally_distant() -> None:
     """A case the obvious ``if k < 2: return 0`` guard gets wrong.
 
     Two disjoint one-element lists still contribute a case-3 pair, so the
-    maximum is 1 and the normalised distance is 1.0 -- not 0.0.
+    maximum is 1 and the normalised distance is 1.0.
     """
     assert fks_max(1) == 1.0
     assert kendall_fks([1], [2]) == 1.0
@@ -158,14 +154,13 @@ def test_fks_stays_within_zero_and_one(a: list[int], b: list[int]) -> None:
 def test_fks_is_a_near_metric_not_a_metric() -> None:
     """Pins the correction to G2.
 
-    An earlier draft claimed ``p = 1/2`` makes ``K^(p)`` a genuine metric. It
-    does not, at any penalty. This is the concrete witness: ``A`` and ``C`` are
-    disjoint, so their distance is the maximum, while ``B`` shares one element
-    with each -- and the triangle inequality fails by a wide margin.
+    An earlier draft claimed ``p = 1/2`` makes ``K^(p)`` a metric. It does not,
+    at any penalty. Witness: ``A`` and ``C`` are disjoint so their distance is
+    maximal, ``B`` shares one element with each, and the triangle inequality
+    fails by 4 (12 against 6 + 2).
 
-    The property that *does* hold is bounded distortion, which is enough for
-    reporting disagreement rates but means the quantity must never be clustered
-    on or treated as a norm.
+    Bounded distortion does hold, which suffices for reporting disagreement
+    rates, but the quantity must never be clustered on or treated as a norm.
     """
     a, b, c = [3, 1, 0], [5, 3, 4], [5, 4, 2]
     d_ab = kendall_fks(a, b, normalise=False)
@@ -188,10 +183,10 @@ def test_no_penalty_value_restores_the_triangle_inequality(penalty: float) -> No
 
 
 def test_the_penalty_is_the_neutral_choice() -> None:
-    """``p = 1/2`` sits exactly between the optimistic and pessimistic readings.
+    """``p = 1/2`` sits midway between the optimistic and pessimistic readings.
 
-    ``p = 0`` assumes an unseen pair agrees and so understates disagreement --
-    the wrong bias for a study of instability. ``p = 1`` overstates it.
+    ``p = 0`` assumes an unseen pair agrees and understates disagreement, the
+    wrong bias for a study of instability; ``p = 1`` overstates it.
     """
     a, b = [1, 2], [3, 4]  # disjoint, so only cases 3 and 4 arise
     optimistic = kendall_fks(a, b, 0.0, normalise=False)
@@ -204,9 +199,9 @@ def test_the_penalty_is_the_neutral_choice() -> None:
 def test_fks_case_two_penalises_the_absent_element_ranked_first() -> None:
     """Case 2, worked by hand.
 
-    ``a = [x, y]``, ``b = [x]``. In ``b``, the present ``x`` counts as ranked
-    above the absent ``y``. ``a`` agrees, so there is no disagreement. Reversing
-    ``a`` to ``[y, x]`` puts the absent element first, and the pair now counts.
+    ``a = [x, y]``, ``b = [x]``. In ``b`` the present ``x`` counts as ranked
+    above the absent ``y``, and ``a`` agrees, so nothing is counted. Reversing
+    ``a`` to ``[y, x]`` puts the absent element first and the pair counts.
     """
     assert kendall_fks([1, 2], [1], normalise=False) == 0.0
     assert kendall_fks([2, 1], [1], normalise=False) == 1.0
@@ -249,10 +244,10 @@ def test_compare_top_k_on_identical_lists() -> None:
 def test_intersection_kendall_is_blind_to_membership_change() -> None:
     """Why ``K_int`` is never reported alone.
 
-    These two lists share only their first element and differ completely below
-    it, yet the intersection Kendall is undefined -- fewer than two shared
-    elements -- and would read as "no reordering" to a careless consumer. The
-    set indicator and the FKS distance both see the change.
+    These two lists share only their first element, so the intersection Kendall
+    is undefined (fewer than two shared elements) and reads as "no reordering"
+    to a careless consumer. The set indicator and the FKS distance both see the
+    change.
     """
     c = compare_top_k([1, 2, 3], [1, 4, 5], 3)
     assert math.isnan(c.kendall_intersection)

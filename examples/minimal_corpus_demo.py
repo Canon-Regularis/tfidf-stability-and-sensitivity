@@ -1,31 +1,26 @@
 #!/usr/bin/env python3
 """The whole pipeline of README sections 2 and 3, on seven documents, in one file.
 
-This is the smallest object the study is actually about. Not "a TF-IDF tutorial":
-the point is that a ranking is never just a list of documents. It is a list of
-documents *together with the margins that say how far it stands from being a
-different list*, and those margins are what sections 4.4 and 4.5 reason about.
-Printing a top-k without them is precisely the artefact this repository argues is
-misleading.
+A ranking is a list of documents together with the margins that say how far it
+stands from being a different list, and those margins are what sections 4.4 and
+4.5 reason about; a top-k printed without them is the artefact this repository
+argues is misleading.
 
-Seven inline documents turn out to be enough to contain **both** regimes the
-paper separates, side by side in a single ranking:
+Seven inline documents are enough to contain both regimes the paper separates,
+side by side in a single ranking:
 
 * a boundary with a small but strictly positive margin, which certifies a
-  tolerance -- any uniform perturbation below ``m_k / 2`` leaves the top-k set
+  tolerance: any uniform perturbation below ``m_k / 2`` leaves the top-k set
   alone (section 4.4, research question A1); and
-* a boundary with a margin of exactly zero, where the scores certify nothing at
-  all and membership is settled entirely by the deterministic tie-break, with no
+* a boundary with a margin of exactly zero, where the scores certify nothing and
+  membership is settled entirely by the deterministic tie-break, with no
   numerical error involved (section 4.5, research question A2).
 
-That the two regimes co-occur at this scale is why they must be studied
-separately rather than as one notion of "stability" -- and it is why no dataset
-is needed to see the phenomenon.
+The two co-occurring at this scale is why they are studied separately rather than
+as one notion of "stability", and why no dataset is needed to see the phenomenon.
 
-The run also prints every intermediate quantity section 1.2 requires -- tf, df,
-idf, weight, norm -- for one document, because the claim that these stay
-inspectable rather than abstracted away is load-bearing for the entire study and
-is cheapest to verify here.
+The run also prints every intermediate quantity section 1.2 requires (tf, df,
+idf, weight, norm) for one document.
 
 Nothing is loaded from disk. Run it with::
 
@@ -57,10 +52,10 @@ from tfidf_stability.vectorisation.idf import LogImpl, smoothed_idf_one  # noqa:
 from tfidf_stability.vectorisation.sparse import SparseVector, l2_norm  # noqa: E402
 from tfidf_stability.vectorisation.tfidf import TfidfModel, TfidfVectoriser  # noqa: E402
 
-# The corpus, written out here rather than loaded, so that every number below can
-# be traced back to text visible on this page. The three secondary attributes are
-# the tuple of section 2.3.1; `rating` is carried as G8's exact integer pair
-# (2 * sum of ratings, count) so that no float ever enters the tie-break.
+# Written out rather than loaded, so every number below traces back to text
+# visible on this page. The three secondary attributes are section 2.3.1's tuple;
+# `rating` is carried as G8's exact integer pair (2 * sum of ratings, count), so
+# no float enters the tie-break.
 CORPUS: Final[tuple[dict[str, Any], ...]] = (
     {
         "doc_id": "d1",
@@ -94,16 +89,11 @@ CORPUS: Final[tuple[dict[str, Any], ...]] = (
         "rating_count": 4,
         "engagement": 2,
     },
-    # The last three share no term with the query and therefore score exactly 0.
-    # That is not padding: it is where the exact-tie block comes from, and short
-    # documents with no in-vocabulary overlap are the common case in real
-    # catalogues, not a contrivance.
-    #
-    # Their attributes are deliberately mutually disagreeing -- popularity,
-    # identifier and engagement each induce a different order on the three -- so
-    # that the block exhibits what section 4.5 is about rather than merely
-    # permitting it. Any three values would still be *a* decision; these make the
-    # decision visible.
+    # The last three share no term with the query and score exactly 0, the source
+    # of the exact-tie block; short documents with no in-vocabulary overlap are
+    # the common case in real catalogues. Their attributes disagree: popularity,
+    # identifier and engagement each induce a different order on the three, so the
+    # block exhibits section 4.5 rather than merely permitting it.
     {
         "doc_id": "d5",
         "text": "Ranking documents by cosine similarity scores",
@@ -155,9 +145,8 @@ def rule(title: str) -> None:
 def para(text: str) -> None:
     """Print a commentary paragraph, rewrapped.
 
-    Rewrapped rather than hand-wrapped because several of these embed measured
-    values whose width is not known until the run: a hand-wrapped string would
-    go ragged the moment a number changed.
+    Several embed measured values whose width is unknown until the run, so a
+    hand-wrapped string goes ragged the moment a number changes.
     """
     print("\n" + textwrap.fill(" ".join(text.split()), width=WIDTH))
 
@@ -178,8 +167,8 @@ def print_corpus() -> None:
 def print_preprocessing(doc: PreprocessedDocument) -> None:
     rule("1. The fixed preprocessing map (section 2)")
     print("normalise -> tokenise -> drop stopwords -> lemmatise -> n-grams, applied to d1:\n")
-    # The gap count is broken out because a stopword leaves a sentinel behind: the
-    # lemma stream is not shorter than the token stream, it is punctured.
+    # A stopword leaves a sentinel behind, so the lemma stream is punctured
+    # rather than shortened; hence the separate gap count.
     n_gaps = sum(1 for t in doc.lemmas if t == GAP)
     rows = (
         ("raw tokens", f"({len(doc.raw_tokens)})", doc.raw_tokens),
@@ -211,8 +200,8 @@ def print_vocabulary(model: TfidfModel) -> None:
         "constant, so no term is ever annihilated -- not even at df = N."
     )
 
-    # log is the one transcendental in the whole pipeline, and IEEE-754 does not
-    # require it to be correctly rounded, so this is measured rather than assumed.
+    # log is the one transcendental in the pipeline and IEEE-754 leaves it free to
+    # round however the libm likes, so the disagreement is measured here.
     disagree = [
         df
         for df in range(N + 1)
@@ -253,10 +242,9 @@ def print_intermediates(model: TfidfModel, i: int) -> None:
             f"{t['tf']:>10.6f} {t['weight']:>12.6f}"
         )
 
-    # The identity anchoring the table: L is an exact occurrence count, so the tf
-    # column sums to 1 in the reals. Shown under both the left-to-right fold that
-    # section 2.3 specifies and exact summation, because addition is not
-    # associative and the two are not guaranteed to agree.
+    # L is an exact occurrence count, so the tf column sums to 1 in the reals.
+    # Shown under both the left-to-right fold of section 2.3 and exact summation;
+    # binary64 addition is non-associative, so the two may disagree.
     naive_tf = sum(t["tf"] for t in terms)
     exact_tf = math.fsum(t["tf"] for t in terms)
     print(f"\n  sum of tf   {naive_tf!r} left to right, {exact_tf!r} exact  (1 in the reals)")
@@ -299,9 +287,9 @@ def print_ranking(model: TfidfModel, ranking: Ranking, scores: list[float]) -> N
     print(f"  {'rank':>4} {'doc':<4} {'score':<16} {'m_k':>14} {'flip radius m_k/2':>19}")
     for j, d in enumerate(ranking.order, start=1):
         margin = boundary_margin(ranking.sorted_scores, j, mode=ranking.strict_mode)
-        # An undefined margin prints as the module's own stated reason rather than
-        # as a number: G3 forbids coercing it to 0, which would read as an exact
-        # tie, or to infinity, which would read as perfect stability.
+        # An undefined margin prints its stated reason rather than a number: G3
+        # forbids coercing it to 0, which reads as an exact tie, or to infinity,
+        # which reads as perfect stability.
         cells = (
             f"{margin.value:>14.6e} {margin.flip_radius:>19.6e}"
             if margin.defined
@@ -334,8 +322,8 @@ def print_reading(model: TfidfModel, rankings: dict[str, Ranking]) -> None:
         "is ambiguous."
     )
 
-    # The other regime, in the same ranking. An exact tie is not a small margin
-    # but the absence of one, and no amount of numerical care recovers it.
+    # The other regime, in the same ranking: an exact tie is the absence of a
+    # margin, and no amount of numerical care recovers one.
     lowest = ranking.sorted_scores[-1]
     tied = [d for d in range(model.n_documents) if ranking.scores[d] == lowest]
     if len(tied) > 1:
@@ -350,8 +338,8 @@ def print_reading(model: TfidfModel, rankings: dict[str, Ranking]) -> None:
         print()
         for name, other in rankings.items():
             print(f"  {name:<9} {[model.doc_ids[d] for d in other.order_within(tied)]}")
-        # Counted rather than asserted, so the sentence cannot go stale if the set
-        # of operators or the attribute values ever change.
+        # Counted rather than asserted, so the sentence stays true if the set of
+        # operators or the attribute values change.
         distinct = len({other.order_within(tied) for other in rankings.values()})
         para(
             f"Identical scores, to the last bit; {distinct} distinct orders from "

@@ -1,10 +1,9 @@
 # The pull-request gate.
 #
-# Shaped by one architectural fact: the pure-Python reference is **normative**
-# and needs no compiler. So the Python suite runs on every OS and every
-# supported interpreter without a toolchain, and the native jobs are additive.
-# A contributor with no C++ compiler can still run and pass the whole normative
-# suite.
+# The pure-Python reference is normative and needs no compiler. So the Python
+# suite runs on every OS and every supported interpreter with no toolchain, and
+# the native jobs are additive. A contributor without a C++ compiler can still
+# run and pass the whole normative suite.
 
 name: ci
 
@@ -19,14 +18,14 @@ permissions:
 
 # bash on every runner, including Windows, where the default is pwsh.
 #
-# This is not a style preference. GitHub runs bash with `set -eo pipefail`, so a
-# failed command aborts the step; its pwsh wrapper sets `$ErrorActionPreference`
-# (which governs cmdlets) and then checks only `$LASTEXITCODE` at the *end* of
-# the block, so a native command failing mid-block is ignored. In the `native`
-# job that combines badly with a suite whose native tests are skipif-guarded: a
-# failed `pip install -e .` would leave the extension unimportable, every
-# differential test would skip, pytest would exit 0, and the job would report
-# green having tested nothing. Two multi-line blocks there were exposed.
+# GitHub runs bash with `set -eo pipefail`, so a failed command aborts the step.
+# Its pwsh wrapper sets `$ErrorActionPreference` (which governs cmdlets) and
+# then checks `$LASTEXITCODE` only at the end of the block, so a native command
+# failing mid-block is ignored. In the `native` job that combines badly with a
+# suite whose native tests are skipif-guarded: a failed `pip install -e .`
+# leaves the extension unimportable, every differential test skips, pytest exits
+# 0, and the job reports green having tested nothing. Two multi-line blocks
+# there were exposed.
 defaults:
   run:
     shell: bash
@@ -43,21 +42,20 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          # The oldest interpreter we support, deliberately, because [tool.mypy]
-          # sets python_version = "3.11" and the two have to agree. numpy 2.5
+          # The oldest interpreter we support, because [tool.mypy] sets
+          # python_version = "3.11" and the two have to agree. numpy 2.5
           # requires 3.12 and its stubs use PEP 695 `type` statements, which
-          # mypy refuses to parse while targeting 3.11 -- so on a 3.12 runner
-          # the job type-checks against a numpy no 3.11 user can install, and
-          # dies in numpy's own .pyi. Resolving the dependencies on 3.11 gets
-          # the numpy a 3.11 user actually has.
+          # mypy refuses to parse while targeting 3.11; on a 3.12 runner the job
+          # then type-checks against a numpy no 3.11 user can install and dies
+          # inside numpy's own .pyi. Resolving the dependencies on 3.11 gets the
+          # numpy a 3.11 user has.
           python-version: "3.11"
-      # ruff and mypy are pinned in requirements-dev.txt; see the note there for
-      # why. Installing them by name here would reintroduce exactly the drift
-      # the pins exist to stop.
+      # ruff and mypy are pinned in requirements-dev.txt; see the note there.
+      # Installing them by name here reintroduces the drift the pins stop.
       - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
-      # examples/ is included deliberately: it is the first thing a reader
-      # runs, so a broken example is a worse failure than a broken internal
-      # module. The documented local gate covers it; CI did not.
+      # examples/ is included: it is the first thing a reader runs, so a broken
+      # example is a worse failure than a broken internal module. The documented
+      # local gate covers it; CI did not.
       - run: python -m ruff check src tests scripts examples
       - run: python -m ruff format --check src tests scripts examples
       - run: python -m mypy
@@ -87,8 +85,8 @@ jobs:
         env:
           HYPOTHESIS_PROFILE: ci
       - name: PYTHONHASHSEED must not reach any number
-        # Dictionary ordering leaking into the vocabulary would be invisible to
-        # a single-process run, since the seed is fixed at interpreter start-up.
+        # Dictionary ordering leaking into the vocabulary is invisible to a
+        # single-process run: the seed is fixed at interpreter start-up.
         run: python -m pytest tests/ -q -k "hash_seed or determinism or reproducib"
         env:
           PYTHONHASHSEED: random
@@ -106,12 +104,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      # Pinned to a commit, not a tag and certainly not @master. A tag can be
-      # moved; @master cannot be reproduced at all, and it is currently ahead of
-      # the v6 release. An unpinned third-party action also means a CI run is not
-      # a function of this repository's contents -- which is the one thing this
-      # project claims about everything else it does. It has already bitten once:
-      # a determinism run failed when the action's own download step errored.
+      # Pinned to a commit hash. A tag can be moved; @master cannot be
+      # reproduced at all, and is currently ahead of the v6 release. An unpinned
+      # third-party action also makes a CI run something other than a function
+      # of this repository's contents, which is the one claim this project makes
+      # about everything else it does. It has bitten once already: a determinism
+      # run failed when the action's own download step errored.
       - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: Build the native backend and its tests
@@ -121,57 +119,56 @@ jobs:
       - name: C++ unit tests
         run: ctest --test-dir build-tests --output-on-failure --no-tests=error
       - name: Install the extension
-        # Build isolation ON -- pip's default -- deliberately.
+        # Build isolation ON, which is pip's default.
         #
         # This step used `--no-build-isolation`, which resolves the build
         # backend from the ambient environment. On windows-latest it could not:
         #     BackendUnavailable: Cannot import 'scikit_build_core.build'
-        # reproduced on a Windows machine where the isolated install succeeds
+        # Reproduced on a Windows machine where the isolated install succeeds
         # and the non-isolated one fails, with scikit-build-core installed in
-        # both cases. It had been failing for a long time invisibly: the command
+        # both cases. It had been failing invisibly for a long time: the command
         # sat at the top of a multi-line block running under pwsh, which does
         # not abort mid-block, so pytest ran anyway, every native test skipped
         # on its skipif guard, and the job reported success.
         #
         # Isolation is also the more faithful test. pip builds in a clean
-        # environment containing exactly `[build-system] requires`, which is
-        # what someone installing this package actually gets;
-        # `--no-build-isolation` exercises a configuration no user has.
+        # environment holding only `[build-system] requires`, which is what
+        # someone installing this package gets; `--no-build-isolation`
+        # exercises a configuration no user has.
         run: python -m pip install -e .
 
-      # Ordered before the import check on purpose. This guard is the one that
-      # can *explain* an import failure -- a .pyd linked against a GCC runtime
-      # DLL fails to load with a bare "DLL load failed" and nothing else. It
-      # used to run after the test step, so when the import check fired the
-      # diagnosis never ran.
+      # Ordered before the import check. This guard is the one that can explain
+      # an import failure: a .pyd linked against a GCC runtime DLL fails to load
+      # with a bare "DLL load failed" and nothing else. It used to run after the
+      # test step, so when the import check fired the diagnosis never ran.
       - name: The extension must be self-contained (Windows)
         # A MinGW-built .pyd that depends on libwinpthread-1.dll fails to import
         # with a bare "DLL load failed", because CPython's search path does not
-        # include the GCC runtime. -static is what prevents that.
+        # include the GCC runtime. -static prevents that.
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          # Both preconditions are asserted rather than assumed. In the previous
-          # form, `command -v objdump >/dev/null && objdump -p "$pyd" | grep -q`
-          # reported success in the two cases that matter most: when no .pyd had
-          # been built at all (find matches nothing, objdump errors on the empty
-          # path, grep matches nothing, step exits 0 announcing the extension is
-          # self-contained), and when objdump was simply absent from the runner,
-          # which short-circuits the condition to false. A guard that cannot run
-          # must say so instead of passing.
+          # Both preconditions are asserted rather than assumed. The previous
+          # form, `command -v objdump >/dev/null && objdump -p "$pyd" | grep -q`,
+          # reported success in the two cases that matter most: no .pyd built at
+          # all (find matches nothing, objdump errors on the empty path, grep
+          # matches nothing, step exits 0 announcing the extension is
+          # self-contained), and objdump absent from the runner, which
+          # short-circuits the condition to false. A guard that cannot run must
+          # say so instead of passing.
           pyd=$(find src -name "_tfidf_native*.pyd" | head -1)
           [ -n "$pyd" ] || { echo "::error::no _tfidf_native*.pyd was built"; exit 1; }
           echo "checking $pyd"
           command -v objdump >/dev/null \
             || { echo "::error::objdump unavailable; this guard cannot run"; exit 1; }
-          # Must be the import table, not a byte scan of the file. A -static
-          # MinGW build still contains the literal string "libgcc_s_dw2-1.dll"
-          # -- the unwinder's runtime LoadLibrary fallback -- even though it
-          # imports nothing of the sort, so scanning the bytes reports a
+          # Read the import table; a byte scan of the file gives wrong answers.
+          # A -static MinGW build still contains the literal string
+          # "libgcc_s_dw2-1.dll" (the unwinder's runtime LoadLibrary fallback)
+          # while importing nothing of the sort, so scanning the bytes reports a
           # self-contained extension as broken. Verified against a real build.
           deps=$(objdump -p "$pyd" | grep -i "DLL Name:" || true)
           # Every PE imports something (KERNEL32, pythonXY). No names at all
-          # means the inspection failed, not that the extension is clean.
+          # means the inspection failed rather than a clean extension.
           [ -n "$deps" ] || { echo "::error::no DLL imports read from $pyd"; exit 1; }
           echo "$deps"
           if echo "$deps" | grep -qi "libwinpthread\|libstdc++\|libgcc"; then

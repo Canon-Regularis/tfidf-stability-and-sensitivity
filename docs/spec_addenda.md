@@ -8,14 +8,14 @@ well-defined in the case that matters.
 
 Each is recorded here with a stable identifier, the ambiguity, and the resolution
 adopted. Code that depends on one of these decisions cites its identifier in the
-docstring, so the reasoning is never more than one grep away.
+docstring, so the reasoning is one grep away.
 
 Nothing here contradicts the paper. Where the paper is definite, the paper wins;
 these entries only fill gaps or make an abstract quantity concrete.
 
 | ID | Area | Summary |
 |---|---|---|
-| [G1](#g1)  | §2.3.3 | Tie groups are balls, not equivalence classes |
+| [G1](#g1)  | §2.3.3 | Tie groups are balls rather than equivalence classes |
 | [G2](#g2)  | §4.5, §7.3 | Kendall distance is undefined when top-*k* sets differ |
 | [G3](#g3)  | §2, §4 | Edge cases with no defined behaviour |
 | [G4](#g4)  | §4.3 | The Lipschitz constant `C` is left abstract |
@@ -27,7 +27,7 @@ these entries only fill gaps or make an abstract quantity concrete.
 | [G10](#g10)| §7.1 | Leave-one-out protocol has five unstated decisions |
 | [G11](#g11)| §7.1 | Profile aggregation: text or vectors? |
 | [G12](#g12)| §3 | Query IDF mapping (already specified; asserted in code) |
-| [G13](#g13)| §2.1 | `log` is not correctly rounded — breaks cross-platform bit-exactness |
+| [G13](#g13)| §2.1 | `log` is not correctly rounded, which breaks cross-platform bit-exactness |
 | [G14](#g14)| §7.1 | Query and user counts deferred to "dataset configuration" |
 | [G15](#g15)| §4.5 | Which reordering `π_alt` uses is unspecified |
 | [G16](#g16)| §2.3.2 | `m_min^top` is undefined at *k* = 1 |
@@ -37,17 +37,17 @@ these entries only fill gaps or make an abstract quantity concrete.
 | [G20](#g20)| §7.1 | Profile aggregation is order-sensitive |
 | [G21](#g21)| §7.1 | `vector_sum` and `vector_mean` give identical similarities |
 | [G22](#g22)| §7.4 | A fine near-tie cannot be manufactured; §7.4 must *identify* one |
-| [G23](#g23)| §7.0 | τ is derived as a *band*, not chosen as a value |
+| [G23](#g23)| §7.0 | τ is derived as a *band* rather than chosen as a value |
 | [G24](#g24)| §6 | `cos ∈ [0, 1]` is true in exact arithmetic and false in binary64 |
 | [G25](#g25)| §7.1 | The query protocol is not interchangeable, and it changes every number |
 | [G26](#g26)| §4.2 | The interaction term never dominates |
 | [G27](#g27)| §4.2 | The bound holds; *testing* it in binary64 needs three preconditions |
-| [G28](#g28)| §7.1 | Profile aggregation joins features, not text, so there are no seams |
+| [G28](#g28)| §7.1 | Profile aggregation joins features rather than text, so there are no seams |
 
 ---
 
 <a id="g1"></a>
-## G1 — Tie groups are balls, not equivalence classes
+## G1. Tie groups are balls rather than equivalence classes
 
 **Paper.** §2.3.3 defines `G_τ(j) = { i : |sᵢ − score(r_j)| ≤ τ }` and states that
 "documents within a tie group are indistinguishable at the level of similarity
@@ -55,21 +55,21 @@ scores up to numerical tolerance".
 
 **Ambiguity.** The relation `|sᵢ − s_j| ≤ τ` is reflexive and symmetric but **not
 transitive**: for scores `{0, τ, 2τ}` the first and second are related, and the
-second and third are related, but the first and third are not. Consequently
-`G_τ(j)` is a *ball* around `score(r_j)`, not an equivalence class. Balls overlap,
-they do not partition the corpus, "the tie group of document *i*" is not
-well-defined, and two members of one ball may differ by as much as `2τ` — so the
+second and third are related, while the first and third are not. Consequently
+`G_τ(j)` is a *ball* around `score(r_j)` and fails to be an equivalence class.
+Balls overlap; they do not partition the corpus; "the tie group of document *i*" is not
+well-defined; and two members of one ball may differ by as much as `2τ`. The
 quoted sentence is not strictly true as written.
 
 **Resolution.** Implement three separately named objects and never conflate them:
 
-1. **`tie_ball(j, τ)`** — verbatim §2.3.3. Two binary searches on the descending
+1. **`tie_ball(j, τ)`**: verbatim §2.3.3. Two binary searches on the descending
    sorted score array, `O(log N)`. **This remains the primary reported object**,
-   because it is what the paper defines.
-2. **`tie_chains(τ)`** — the transitive closure: maximal runs whose *adjacent*
+   being what the paper defines.
+2. **`tie_chains(τ)`**: the transitive closure, i.e. maximal runs whose *adjacent*
    gaps are all `≤ τ` (single-linkage). `O(N)`. This *is* an equivalence relation
    and is the correct object wherever a partition is required.
-3. **`tie_cliques(τ)`** — maximal intervals of *diameter* `≤ τ` (complete
+3. **`tie_cliques(τ)`**: maximal intervals of *diameter* `≤ τ` (complete
    linkage), i.e. the sets in which every pair really is mutually
    indistinguishable. `O(N)`, overlapping.
 
@@ -89,26 +89,26 @@ the corpus."*
 ---
 
 <a id="g2"></a>
-## G2 — Ordering distance when the top-*k* sets differ
+## G2. Ordering distance when the top-*k* sets differ
 
 **Paper.** §4.5 asks for "a distance between orderings restricted to **tie
 groups**"; §7.3 asks for "**within-top-k** reordering: an ordering distance
 restricted to tie-affected subsets". These are two different problems, and only
 one of them is ill-posed.
 
-**Resolution — split them.**
+**Resolution: split them.**
 
 **(a) Restricted to a tie group.** Well-posed. A tie group is defined on the score
-vector, which `π`, `π_score` and `π_alt` all share, so both orderings contain
-*exactly the same set*. Plain normalised Kendall τ distance applies:
+vector, which `π`, `π_score` and `π_alt` all share, so both orderings contain the
+same set. Plain normalised Kendall τ distance applies:
 `K(σ,σ′) = #discordant / C(|G|,2)`, computed by merge-sort inversion count in
 `O(|G| log |G|)`.
 
 **(b) Restricted to top-*k* where `topk(π) ≠ topk(π′)`.** Ill-posed as stated,
-and this is precisely the interesting case. Adopt the **Fagin–Kumar–Sivakumar
-generalised Kendall distance** (*Comparing Top k Lists*, SIAM J. Discrete Math.
-17(1), 2003). Over the union `U = topk(π) ∪ topk(π′)`, each unordered pair
-`{a,b} ⊆ U` contributes:
+and this is the interesting case. Adopt the **Fagin-Kumar-Sivakumar generalised
+Kendall distance** (*Comparing Top k Lists*, SIAM J. Discrete Math. 17(1), 2003).
+Over the union `U = topk(π) ∪ topk(π′)`, each unordered pair `{a,b} ⊆ U`
+contributes:
 
 | case | condition | contribution |
 |---|---|---|
@@ -117,7 +117,7 @@ generalised Kendall distance** (*Comparing Top k Lists*, SIAM J. Discrete Math.
 | 3 | `a` in one list only, `b` in the other only | 1 |
 | 4 | both in one list, neither in the other | `p` |
 
-Use **`p = ½`** — but for the right reason. It is the **neutral** choice: knowing
+Use **`p = ½`**, on the following grounds. It is the **neutral** choice: knowing
 nothing about the relative order of two elements absent from a list, they
 disagree with probability one half, so ½ is the unbiased estimate of the
 contribution. `p = 0` assumes the unseen pair agrees, biasing every measurement
@@ -140,11 +140,11 @@ biases upwards.
 > `d(A,B) = 6`, `d(B,C) = 2`, `d(A,C) = 12`. `A` and `C` are disjoint, so their
 > distance is the maximum, while `B` shares an element with each.
 >
-> `K⁽ᵖ⁾` is a **near-metric**: bounded distortion, not the triangle inequality.
-> The observed distortion constant is smallest at `p = 0` (≈ 4/3) and grows with
-> `p` (≈ 5/3 at ½). This is sufficient for reporting disagreement rates, which is
-> all §7.3 needs, but it means the quantity must never be clustered on or treated
-> as a norm — and `p` should be chosen on bias grounds, as above, not on a
+> `K⁽ᵖ⁾` is a **near-metric**: bounded distortion without the triangle
+> inequality. The observed distortion constant is smallest at `p = 0` (≈ 4/3) and
+> grows with `p` (≈ 5/3 at ½). This suffices for reporting disagreement rates,
+> which is all §7.3 needs, but the quantity must never be clustered on or treated
+> as a norm, and `p` must be chosen on bias grounds, as above, rather than on a
 > metric property it does not have.
 
 Normalise by the maximum, attained on disjoint top-*k* lists:
@@ -154,7 +154,7 @@ max K^(1/2) = k²  (case 3)  +  2·C(k,2)·½  (case 4)  =  k(3k − 1)/2
 ```
 
 so report `K̄ = K^(1/2) / (k(3k−1)/2) ∈ [0,1]`. Computed by direct `O(k²)` pair
-enumeration — at `k ≤ 50` that is ≤ 1225 pairs, and obvious correctness matters
+enumeration; at `k ≤ 50` that is ≤ 1225 pairs, and obvious correctness matters
 more here than asymptotics. Cross-checked in tests against an `O(k log k)`
 merge-sort implementation.
 
@@ -170,7 +170,7 @@ normalised `K^(1/2)` for "within-top-*k* reordering".
 ---
 
 <a id="g3"></a>
-## G3 — Edge cases
+## G3. Edge cases
 
 Two modes throughout: `strict` (raise) and `lenient` (flag and return `NaN`).
 The active mode is recorded in every run manifest.
@@ -179,36 +179,36 @@ The active mode is recorded in every run manifest.
 |---|---|
 | `k = N` | `m_k` undefined → `NaN` plus a validity flag. Never coerced to 0 or ∞; excluded from margin distributions but counted in `n_undefined`. |
 | `k > N` | Clamp to `N`, record `k_effective`, all boundary quantities `NaN`. `strict` raises `KOutOfRangeError`. Never a silent clamp. |
-| `score(r_k) == score(r_{k+1})` | `m_k = 0`, flip radius 0. **The interesting case** — membership is decided purely by tie-breaking. Counted, never dropped; `P(m_k = 0)` is a headline statistic. |
+| `score(r_k) == score(r_{k+1})` | `m_k = 0`, flip radius 0. **The interesting case**: membership is decided purely by tie-breaking. Counted, never dropped; `P(m_k = 0)` is a headline statistic. |
 | Zero-norm document | `w = 0`, `‖w‖ = 0`, `cos := 0` per §2.3. Remains rankable at score 0. Option `exclude_zero_norm_from_ranking` defaults **False** (paper-faithful); `n_zero_norm_docs` always reported. |
 | Zero query vector | All `sᵢ = 0`; ranking degenerates to the pure attribute order; `m_k = 0` ∀k. Flagged `query_degenerate`; excluded from margin distributions, **included** in tie-break ablations (it is the extreme case). |
-| Empty vocabulary | `EmptyVocabularyError` in `strict` — a configuration error, not data. |
+| Empty vocabulary | `EmptyVocabularyError` in `strict`: a configuration fault, never a data fault. |
 | All scores equal | `m_k = 0` ∀k; every ball is the whole corpus; `ρ(τ)` fires. |
-| `τ >` score range | Every ball is the whole corpus. Emits `TauExceedsScoreRange` carrying `τ/(s_max − s_min)`. **Not** an error — it is a legitimate point in the sweep — but tagged so plots can mark it. |
+| `τ >` score range | Every ball is the whole corpus. Emits `TauExceedsScoreRange` carrying `τ/(s_max − s_min)`. **Not** an error, since it is a legitimate point in the sweep, but tagged so plots can mark it. |
 | `τ = 0` | Legal and required: the exact-tie baseline of the sweep. `≤ 0` ⟺ equality. |
 | `N = 0` | Error on ranking. `N = 1`: all `m_k` are `NaN`. |
 | Duplicate identifiers | `DuplicateIdentifierError` at load. The strict-total-order guarantee **depends** on unique ids. |
-| `NaN`/`Inf` in scores or attributes | Rejected at load and re-checked before sorting. A `NaN` destroys the strict weak ordering, making `std::sort` undefined behaviour — a real out-of-bounds write, not merely a wrong answer. |
+| `NaN`/`Inf` in scores or attributes | Rejected at load and re-checked before sorting. A `NaN` destroys the strict weak ordering, making `std::sort` undefined behaviour: a real out-of-bounds write, worse than merely a wrong answer. |
 
 ---
 
 <a id="g4"></a>
-## G4 — An explicit Lipschitz constant for §4.3
+## G4. An explicit Lipschitz constant for §4.3
 
 **Paper.** §4.3 states `|cos(u′,v′) − cos(u,v)| ≤ C (‖u′−u‖₂ + ‖v′−v‖₂)` "for a
 constant `C` depending on lower and upper bounds on the norms", and leaves `C`
 unspecified. An unspecified constant cannot be computed, tested, or used.
 
-**Resolution — make it explicit and provable.**
+**Resolution: make it explicit and provable.**
 
 > **Theorem.** Let `u, v, u′, v′ ∈ ℝⁿ \ {0}` and `L := min(‖u‖, ‖v‖, ‖u′‖, ‖v′‖) > 0`.
 > Then `|cos(u′,v′) − cos(u,v)| ≤ (1/L)(‖u′−u‖₂ + ‖v′−v‖₂)`, i.e. **`C = 1/L`**.
 
 *Proof.* Write `û = u/‖u‖`.
 1. `|⟨û,v̂⟩ − ⟨û′,v̂′⟩| ≤ |⟨û−û′, v̂⟩| + |⟨û′, v̂−v̂′⟩| ≤ ‖û−û′‖ + ‖v̂−v̂′‖`
-   by the triangle inequality and Cauchy–Schwarz with unit vectors.
+   by the triangle inequality and Cauchy-Schwarz with unit vectors.
 2. In an inner-product space, `‖u/‖u‖ − u′/‖u′‖‖ ≤ 2‖u−u′‖/(‖u‖+‖u′‖)`
-   (Dunkl–Williams, with the sharp Hilbert-space constant 2).
+   (Dunkl-Williams, with the sharp Hilbert-space constant 2).
 3. `‖u‖ + ‖u′‖ ≥ 2L`, hence `‖û−û′‖ ≤ ‖u−u′‖/L`; identically for `v`. ∎
 
 The tighter non-uniform form is also implemented and tested:
@@ -221,12 +221,12 @@ The tighter non-uniform form is also implemented and tested:
 vectors as defined in §2.2:
 
 - `idf(t) ≥ 1` for every `t ∈ V`, since `df(t) ≤ N ⇒ (1+N)/(1+df) ≥ 1 ⇒ log ≥ 0`;
-- `‖tfᵢ‖₂ ≥ ‖tfᵢ‖₁/√nnzᵢ = 1/√nnzᵢ` by Cauchy–Schwarz, because `‖tfᵢ‖₁ = 1` exactly;
+- `‖tfᵢ‖₂ ≥ ‖tfᵢ‖₁/√nnzᵢ = 1/√nnzᵢ` by Cauchy-Schwarz, because `‖tfᵢ‖₁ = 1` exactly;
 - hence `‖wᵢ‖₂ ≥ 1/√nnzᵢ`, and `‖wᵢ‖₂ ≤ ‖idf‖_∞ = log((1+N)/2) + 1`.
 
 Therefore **`C ≤ √( max nnz )`** over the documents and queries involved. This
-also makes §6's qualitative claim — "cosine similarity becomes unstable for
-low-norm vectors" — quantitative, and localises it to *short documents*.
+also makes §6's qualitative claim ("cosine similarity becomes unstable for
+low-norm vectors") quantitative, and localises it to *short documents*.
 
 **Verification.** A Hypothesis property test asserts the bound is never violated
 over randomised non-negative sparse inputs, evaluated under exact summation, plus
@@ -235,13 +235,13 @@ a tightness search reporting the empirical `lhs/rhs` ratio.
 ---
 
 <a id="g5"></a>
-## G5 — The three-term bound assumes a fixed vocabulary
+## G5. The three-term bound assumes a fixed vocabulary
 
 **Paper.** §4.2 bounds `‖wᵢ′−wᵢ‖₂` by
 `‖Δtfᵢ‖₂‖idf‖_∞ + ‖tfᵢ‖₂‖Δidf‖_∞ + ‖Δtfᵢ‖₂‖Δidf‖_∞`.
 
-**Ambiguity.** This presupposes `w`, `w′`, `idf`, `idf′` share an index set. But
-under a corpus perturbation the **vocabulary itself changes**: tokens appear, and
+**Ambiguity.** This presupposes `w`, `w′`, `idf`, `idf′` share an index set. Under
+a corpus perturbation the **vocabulary itself changes**: tokens appear, and
 tokens fall below `min_df`. The paper never says how `Δidf` is defined when
 `V ≠ V′`.
 
@@ -266,7 +266,7 @@ figure for a mechanism the paper currently only asserts qualitatively.
 ---
 
 <a id="g6"></a>
-## G6 — `max_features` truncation rule (`TFIDF-SPEC-01`)
+## G6. `max_features` truncation rule (`TFIDF-SPEC-01`)
 
 **Paper.** §2.1 mentions "optionally, a maximum-feature constraint" and stops.
 
@@ -297,7 +297,7 @@ the paper's thesis to vocabulary construction.
 ---
 
 <a id="g7"></a>
-## G7 — Deterministic lemmatisation
+## G7. Deterministic lemmatisation
 
 **Paper.** §2 requires lemmatisation as part of a "fixed, deterministic
 preprocessing map".
@@ -307,20 +307,21 @@ a POS tagger; spaCy needs a statistical model whose output is not stable across
 versions. Neither is acceptable in an artefact claiming reproducibility, and
 neither ports to C++.
 
-**Resolution — a four-tier `Lemmatiser` protocol.**
+**Resolution: a four-tier `Lemmatiser` protocol.**
 
-- **Tier 0 `none`** — identity.
-- **Tier 1 `porter2`** *(default)* — the Snowball English stemmer: a complete
+- **Tier 0 `none`**: identity.
+- **Tier 1 `porter2`** *(default)*: the Snowball English stemmer. A complete
   published algorithmic specification, no data files, portable bit-identically to
-  both languages, and — decisively — with an official ~29 000-word
+  both languages, and, decisively, with an official ~29 000-word
   `voc.txt`/`output.txt` test-vector pair. Vendored with a recorded SHA-256, so
   the preprocessing step is itself machine-verified.
-  *Honesty requirement:* Porter2 is a **stemmer**, not a lemmatiser. The paper
-  should read "lemmatisation (implemented as Snowball English stemming; see G7)".
-- **Tier 2 `lookup`** — a bundled, hash-verified `surface⇥lemma` table consulted
+  *Honesty requirement:* Porter2 is a **stemmer** rather than a lemmatiser. The
+  paper should read "lemmatisation (implemented as Snowball English stemming;
+  see G7)".
+- **Tier 2 `lookup`**: a bundled, hash-verified `surface⇥lemma` table consulted
   before the rule-based fallback.
-- **Tier 3 `external_cached`** — NLTK/spaCy permitted, but **only through a
-  cache**: run once, emit a token stream plus a manifest recording tool version,
+- **Tier 3 `external_cached`**: NLTK/spaCy permitted, but **only through a
+  cache**. Run once, emit a token stream plus a manifest recording tool version,
   model version, and input/output hashes. The external tool is never invoked
   inside a reproducible run.
 
@@ -331,13 +332,13 @@ into the manifest; the stopword list is frozen, versioned and hash-verified;
 n-gram range defaults to `(1,2)`; the n-gram joiner is `\x1f` (ASCII Unit
 Separator, which cannot occur inside a token, keeping the token→n-gram encoding
 injective); and **stopword removal precedes n-gram generation, with n-grams
-forbidden from spanning a removed token** — otherwise "king of pop" silently
+forbidden from spanning a removed token**, since otherwise "king of pop" silently
 manufactures the bigram "king pop".
 
 ---
 
 <a id="g8"></a>
-## G8 — Attribute directions and missing values
+## G8. Attribute directions and missing values
 
 **Paper.** §2.3.1 gives the tuple `(popularity, rating, engagement, identifier)`
 but never a sort direction.
@@ -345,7 +346,7 @@ but never a sort direction.
 **Resolution.** Pin per attribute in config: `{name, direction, dtype,
 missing_policy}`. Defaults: `desc` for popularity/rating/engagement, `asc` for
 identifier. Missing values are represented by an explicit `has_value` bit and
-sort last — **never** `NaN`, which would break the ordering.
+sort last; **never** `NaN`, which would break the ordering.
 
 **Float attributes are themselves a determinism hazard.** A mean rating computed
 as `sum/count` in binary64 can make two genuinely equal means compare unequal in
@@ -356,7 +357,7 @@ a platform-dependent way. Since MovieLens ratings are quantised to 0.5, store th
 ---
 
 <a id="g9"></a>
-## G9 — Precision of `score(r_j)`
+## G9. Precision of `score(r_j)`
 
 The raw computed `double`, never rounded or quantised. The comparison is
 `|sᵢ − s_{r_j}| <= τ`, inclusive, exactly as written in §2.3.3.
@@ -364,42 +365,42 @@ The raw computed `double`, never rounded or quantised. The comparison is
 ---
 
 <a id="g10"></a>
-## G10 — Leave-one-out protocol
+## G10. Leave-one-out protocol
 
 §7.1 names the protocol but leaves five decisions unstated, each of which
 materially changes the margin distribution:
 
-1. **Which item is held out** — *every* interacted item in turn (all folds). Any
+1. **Which item is held out.** *Every* interacted item in turn (all folds). Any
    subsampling uses a seeded RNG whose seed is in the manifest.
-2. **Does the held-out item stay in the corpus?** — **Yes.** It must remain
+2. **Does the held-out item stay in the corpus?** **Yes.** It must remain
    scoreable; it is the target.
-3. **Are the user's remaining profile items excluded from the candidate set?** —
+3. **Are the user's remaining profile items excluded from the candidate set?**
    **Yes.** Otherwise they trivially occupy the top ranks, since they literally
    contributed the query text, and dominate the margin distribution. *This is the
    single most consequential unstated choice in §7.1.*
-4. **Eligibility** — users with ≥ 5 qualifying interactions; resulting counts
+4. **Eligibility.** Users with ≥ 5 qualifying interactions; resulting counts
    recorded (see G14).
-5. **What counts as an interaction** — for MovieLens, `rating ≥ 4.0`, pinned in
+5. **What counts as an interaction.** For MovieLens, `rating ≥ 4.0`, pinned in
    `configs/datasets.yaml`.
 
 ---
 
 <a id="g11"></a>
-## G11 — Profile aggregation
+## G11. Profile aggregation
 
 §7.1 says "aggregating **text** from a user's interacted items". Pinned as
 `profile_aggregation = "text_concat"`: concatenate token streams, then apply the
 standard embedding.
 
-Note the consequence, which is worth stating in the paper: concatenation makes
-`tf` a *length-weighted* average, so verbose items dominate the profile. Because
-that is itself an interesting stability axis, `"vector_mean"` and `"vector_sum"`
-are also implemented and offered as an ablation.
+The consequence should be stated in the paper: concatenation makes `tf` a
+*length-weighted* average, so verbose items dominate the profile. That is itself
+an interesting stability axis, so `"vector_mean"` and `"vector_sum"` are also
+implemented and offered as an ablation.
 
 ---
 
 <a id="g12"></a>
-## G12 — Query IDF mapping
+## G12. Query IDF mapping
 
 Already specified by §3 ("embedded using the same vocabulary and IDF mapping as
 the corpus"). No recomputation and no vocabulary extension for queries. Listed
@@ -408,7 +409,7 @@ here only because it is asserted explicitly in code rather than left implicit.
 ---
 
 <a id="g13"></a>
-## G13 — `log` is not correctly rounded
+## G13. `log` is not correctly rounded
 
 **This is the most consequential finding in the implementation.**
 
@@ -423,18 +424,18 @@ digits) for `N ∈ {100, 610, 9742, 20000, 50000}` across all valid `df`:
 
 Worst absolute difference `1.78e-15`. The two figures differ because adding 1
 shifts the value into a coarser binade, rounding away most 1-ulp disagreements.
-**The 15.16% figure is the load-bearing one**, since idf is what propagates
-downstream; the 44.5% figure is the sharper statement about `log` itself. Both
-are quoted so neither is mistaken for the other.
+**The 15.16% figure is the one that propagates**, since idf is what reaches
+downstream code; the 44.5% figure is the sharper statement about `log` itself.
+Both are quoted so neither is mistaken for the other.
 
 **Why it matters.** IEEE-754 does *not* require `log` to be correctly rounded,
 and UCRT, glibc, Apple libm and the various libstdc++ combinations each round
 differently. CPython's `math.log` delegates to the platform libm. So `idf` values
 differ by ~1 ulp across platforms in ~15% of entries, and that propagates into
 every weight, every norm and every score. **Cross-platform bit-reproducibility is
-broken by default — by the only transcendental function in the entire pipeline.**
+broken by default, by the only transcendental function in the entire pipeline.**
 
-**Resolution — two decisions, both cheap.**
+**Resolution: two decisions, both cheap.**
 
 1. **Compute `idf` once in Python and pass it into the native core as data.**
    It is `O(|V|)` values computed once, so there is no performance reason for C++
@@ -457,7 +458,7 @@ Measured: `log(a/b) ≠ log(a) − log(b)` in **94.53%** of cases at `N = 9742`.
 ---
 
 <a id="g14"></a>
-## G14 — Query and user counts
+## G14. Query and user counts
 
 §7.1 defers these to "the dataset configuration". Every run manifest therefore
 fixes: `n_users_eligible`, `n_queries`, `n_folds`, `n_docs`, `|V|`, `nnz`, all
@@ -467,32 +468,32 @@ filter thresholds, and the dataset SHA-256.
 
 ## Related
 
-- [`experiments.md`](experiments.md) — the reduction policies, the noise-floor
+- [`experiments.md`](experiments.md): the reduction policies, the noise-floor
   measurement, and the derivation of the `τ` band from it.
-- [`index.md`](index.md) — the determinism guarantees and how CI enforces them.
-- [`mathematical_formulation.md`](mathematical_formulation.md) — the
+- [`index.md`](index.md): the determinism guarantees and how CI enforces them.
+- [`mathematical_formulation.md`](mathematical_formulation.md): the
   floating-point guard and where floating point was removed rather than handled.
 
 ---
 
 <a id="g15"></a>
-## G15 — Which reordering does `π_alt` use?
+## G15. Which reordering does `π_alt` use?
 
 **Paper.** §4.5 defines the alternate tie-break ranking as
 `π_alt = Sort(sᵢ, aᵢ with reordered priority)` and says nothing further.
 
 **Ambiguity.** With three attributes there are 3! = 6 orderings, and §7.3's
-top-*k* disagreement rate is a different number for each. The choice is not
-cosmetic: it directly determines a published result.
+top-*k* disagreement rate is a different number for each. The choice directly
+determines a published result.
 
 **Resolution.** Pin `π_alt` to the **reversal** of `π`'s priority:
 
 > `π` = (popularity, rating, engagement) → `π_alt` = (engagement, rating, popularity)
 
-The reversal is the canonical choice — the antipode, maximally distant from `π`
-in the space of priority orderings — so it is the one that best exposes the
-sensitivity §4.5 is looking for. The full six-way sweep is available as an
-ablation in `configs/ablations.yaml` for anyone who wants the whole picture.
+The reversal is the antipode, maximally distant from `π` in the space of priority
+orderings, so it is the choice that best exposes the sensitivity §4.5 is looking
+for. The full six-way sweep is available as an ablation in
+`configs/ablations.yaml` for anyone who wants the whole picture.
 
 The identifier is **not** part of the permutable priority. It terminates every
 key implicitly, and moving it would stop the ordering being total, which would
@@ -503,22 +504,22 @@ priority that names it.
 ---
 
 <a id="g16"></a>
-## G16 — `m_min^top` at *k* = 1
+## G16. `m_min^top` at *k* = 1
 
 **Paper.** §2.3.2 defines `m_min^top = min over 1 ≤ j < k of (score(r_j) − score(r_{j+1}))`.
 
 **Ambiguity.** At `k = 1` the minimum is over an empty set.
 
 **Resolution.** `NaN` plus `defined = False`, consistent with G3's treatment of
-every other undefined margin. `+inf` — the conventional value for an empty
-minimum — would be actively harmful here: it would read as "no constraint on
-stability", which is the opposite of "the quantity does not apply", and it would
-propagate into percentile summaries as a finite-looking extreme.
+every other undefined margin. `+inf`, the conventional value for an empty
+minimum, would be actively harmful here: it reads as "no constraint on
+stability", the opposite of "the quantity does not apply", and it would propagate
+into percentile summaries as a finite-looking extreme.
 
 ---
 
 <a id="g17"></a>
-## G17 — Ranking an empty corpus
+## G17. Ranking an empty corpus
 
 **Paper.** G3 says `N = 0` is "an error on ranking" but names no exception.
 
@@ -530,14 +531,14 @@ an empty corpus is a *data* fault.
 ---
 
 <a id="g18"></a>
-## G18 — Where low-norm cosine instability actually begins
+## G18. Where low-norm cosine instability actually begins
 
 **Paper.** §6 states that "cosine similarity becomes unstable for low-norm
 vectors" and leaves it qualitative.
 
-**Measured.** The instability has a sharp, predictable onset, and it is not
-where the vector's magnitude becomes small — it is where the *square* of a
-coordinate does. `l2_norm` computes `sqrt(sum of squares)`, so a coordinate
+**Measured.** The instability has a sharp, predictable onset, and it arrives
+where the *square* of a coordinate becomes small rather than where the vector's
+own magnitude does. `l2_norm` computes `sqrt(sum of squares)`, so a coordinate
 below `sqrt(DBL_MIN)` ≈ 1.49e-154 squares into the subnormal range:
 
 | coordinate | `cos(u, unit)` | state |
@@ -549,16 +550,15 @@ below `sqrt(DBL_MIN)` ≈ 1.49e-154 squares into the subnormal range:
 
 The onset agrees with `sqrt(DBL_MIN)` to the digit.
 
-**Resolution: none — this is correct behaviour.** A hypot-style rescaled norm
-would avoid it entirely, and §6 explicitly forbids exactly that class of
-stabilising transformation. So the implementation is right, and what needed
-fixing was a *test* that asserted scale invariance without excluding the regime
-in which the specification's own stated limitation applies.
+**Resolution: none, since this is correct behaviour.** A hypot-style rescaled norm
+would avoid it entirely, and §6 forbids that class of stabilising transformation.
+The implementation is right; what needed fixing was a *test* that asserted scale
+invariance without excluding the regime in which the specification's own stated
+limitation applies.
 
-Worth stating in §6 as the concrete form of its own claim, and worth noting that
-real TF-IDF norms are bounded below by `1/sqrt(nnz)` (see [G4](#g4)), which is
-far above the threshold — so this bites only on synthetic inputs, never on the
-corpora this project studies.
+§6 should state this as the concrete form of its own claim. Real TF-IDF norms are
+bounded below by `1/sqrt(nnz)` (see [G4](#g4)), far above the threshold, so this
+bites only on synthetic inputs and never on the corpora this project studies.
 
 ### Refinement: scaling moves a vector *across* the threshold
 
@@ -566,9 +566,9 @@ The test fix described above was applied to only half of what needed it, and a
 100k-example search later found the other half.
 
 A scale-invariance test compares `cos(k·u, v)` against `cos(u, v)`. The guard
-excluded the underflow regime for the **scaled** vector alone — but multiplying
-by `k > 1` moves a vector *out* of the regime, so the original `u` can sit below
-the threshold while `k·u` sits above it. Both cosines appear in the assertion, so
+excluded the underflow regime for the **scaled** vector alone; multiplying by
+`k > 1` moves a vector *out* of the regime, so the original `u` can sit below the
+threshold while `k·u` sits above it. Both cosines appear in the assertion, so
 guarding one endpoint is not enough. The falsifying example:
 
     u = 8.389842684852489e-160     (below 1.49e-154)
@@ -579,41 +579,39 @@ guarding one endpoint is not enough. The falsifying example:
     cos(u,   v) = 0.9999994865255848
 
 They differ by 5e-7 against a 1e-12 tolerance, and the implementation is right in
-both cases — it is exhibiting exactly the instability tabulated above. The
-correct guard excludes the regime for **every vector the assertion touches**, not
-merely the one the test happens to construct.
+both cases: it is exhibiting the instability tabulated above. The correct guard
+excludes the regime for **every vector the assertion touches**.
 
 **Why it stayed hidden.** The three `assume()` calls reject about 41% of
 generated examples (measured: 697 invalid of 1697 at `max_examples=1000`), which
 sits close enough to Hypothesis's `filter_too_much` threshold that the health
-check fired on the CI runner and not locally. The health check was therefore
-masking a real defect: suppressing it — justified, since the filtering is
-deliberate — is what exposed the counterexample. A health check that fires
-intermittently is worth treating as a symptom rather than noise.
+check fired on the CI runner while staying silent locally. The health check was
+therefore masking a real defect; suppressing it, which the intended filtering
+justifies, is what exposed the counterexample. A health check that fires
+intermittently is a symptom to be investigated.
 
 ---
 
 ## Errata recorded during implementation
 
-**To G3 — "τ > score range" is off by one.** At `τ` *equal* to the range every
+**To G3: "τ > score range" is off by one.** At `τ` *equal* to the range every
 tie ball is already the whole corpus, so the degeneracy has begun. Adopt
-`τ >= s_max − s_min`, excluding the single case `range == 0 and τ == 0`, which is
-the legitimate exact-tie baseline rather than a degenerate configuration. The
-carried ratio `τ / (s_max − s_min)` is `0/0` when the range is zero; return
+`τ >= s_max − s_min`, excluding the single case `range == 0 and τ == 0`, the
+legitimate exact-tie baseline. The carried ratio `τ / (s_max − s_min)` is `0/0` when the range is zero; return
 `+inf` explicitly so a NaN never reaches a plot axis.
 
-**To G3 — "all scores equal ⇒ ρ(τ) fires" is incorrect.** With every score
-equal, chain and clique coincide, so `ρ = 1` — its *minimum*, not an extreme.
-What fires there is `TauExceedsScoreRangeWarning`, because the range is zero.
+**To G3: "all scores equal ⇒ ρ(τ) fires" is incorrect.** With every score
+equal, chain and clique coincide, so `ρ = 1`, its *minimum* value. What fires
+there is `TauExceedsScoreRangeWarning`, because the range is zero.
 
-**To G8 — the justification, not the resolution.** G8 argues that a mean stored
-as `sum/count` in binary64 "can make two genuinely equal means compare unequal
-in a platform-dependent way". That does not survive contact with the data: with
-0.5-quantised ratings and counts below 2^53 the sum is computed *exactly*, and
-IEEE-754 mandates correctly-rounded division, so equal means produce
-bit-identical doubles on every conforming platform.
+**To G8: the justification rather than the resolution.** G8 argues that a mean
+stored as `sum/count` in binary64 "can make two genuinely equal means compare
+unequal in a platform-dependent way". That does not survive contact with the
+data: with 0.5-quantised ratings and counts below 2^53 the sum is computed
+*exactly*, and IEEE-754 mandates correctly-rounded division, so equal means
+produce bit-identical doubles on every conforming platform.
 
-The hazard that *is* real is the opposite one — two genuinely **different** means
+The hazard that *is* real is the opposite one: two genuinely **different** means
 colliding onto the same double. `1/3` and `(10^17+1)/(3·10^17)` differ as reals
 and round to the same binary64; cross-multiplication separates them, and the
 products involved stay comfortably inside `int64`. That is information the
@@ -621,30 +619,29 @@ tie-break is entitled to and the float path destroys. The resolution stands; the
 reason needs restating.
 
 *Implementation note.* The overflow guard must bound `num_i * den_j` over
-**distinct** documents. Bounding by `max(num) * max(den)` across the column is a
-false positive whenever the largest numerator and the largest denominator belong
-to the same document — the normal case, since a large numerator usually
-accompanies a large denominator — because that product is never formed by any
+**distinct** documents. Bounding by `max(num) * max(den)` across the column gives
+a false positive whenever the largest numerator and the largest denominator
+belong to the same document (the normal case, since a large numerator usually
+accompanies a large denominator), because that product is never formed by any
 comparison.
 
-**Note under G9 — the only faithful implementation.** The obvious way to find a
+**Note under G9: the only faithful implementation.** The obvious way to find a
 tie ball is to binary-search for `S[j] ± τ`. Those bounds are themselves rounded,
 so the predicate actually evaluated is `S[i] <= fl(S[j] + τ)`, which differs from
-G9's pinned `|sᵢ − s_{r_j}| <= τ` precisely at the boundary — the only place tie
-groups are interesting. Search on the difference instead: `S[i] − S[j]` is
-non-increasing in `i` and `S[j] − S[i]` is non-decreasing, so both bounds remain
-binary-searchable while evaluating exactly the subtraction G9 specifies. The
-monotonicity holds in binary64, not merely in the reals, because IEEE subtraction
-is monotone.
+G9's pinned `|sᵢ − s_{r_j}| <= τ` at the boundary, the only place tie groups are
+interesting. Search on the difference instead: `S[i] − S[j]` is non-increasing in
+`i` and `S[j] − S[i]` is non-decreasing, so both bounds remain binary-searchable
+while evaluating the subtraction G9 specifies. The monotonicity holds in binary64
+as well as in the reals, because IEEE subtraction is monotone.
 
-**Note under §2.3.2 — margins are tie-break independent.** `m_k` depends only on
+**Note under §2.3.2: margins are tie-break independent.** `m_k` depends only on
 the score *multiset*: the non-increasing rearrangement of a multiset is unique,
 and all three operators use score-descending as their primary key. So `m_k` is
 identical under `π`, `π_score` and `π_alt`. The paper never states this, and it
-is what makes research questions A1 and A2 *independent* rather than confounded
-— which is the whole reason they can be answered separately.
+is what makes research questions A1 and A2 *independent* rather than confounded,
+hence separately answerable.
 
-**Note under §4.4 — the two conditions constrain disjoint sets of gaps.** §4.4
+**Note under §4.4: the two conditions constrain disjoint sets of gaps.** §4.4
 gives two guarantees and it is easy to read one as stronger than the other. They
 are not comparable. `m_min^top` minimises over the gaps *strictly inside* the
 top-*k* (ranks 1→2 through (k−1)→k); `m_k` is the gap *at the boundary*
@@ -660,25 +657,26 @@ Guaranteeing the top-*k* set **and** its ordering therefore requires
 `perturbation/score_bounds.py::StabilityCertificate.joint_radius` reports. A
 certificate quoted without saying which invariant it certifies is ambiguous.
 
-**Note under §4.4 — the bound is tight, not merely sufficient.** §4.4 gives
+**Note under §4.4: the bound is tight as well as sufficient.** §4.4 gives
 `ε < m_k/2` as a sufficient condition for top-*k* invariance and does not address
 necessity. It is in fact exact: perturbing `r_k` by `−ε` and `r_{k+1}` by `+ε`
-with `ε = m_k/2 + δ` flips the pair for any `δ > 0`, and at `ε = m_k/2` exactly
-the two scores become bit-identical and membership passes entirely to the
-tie-break. `tests/test_margins_and_flip_radii.py` constructs the witness in
-dyadic rationals so that every step is exact in binary64.
+with `ε = m_k/2 + δ` flips the pair for any `δ > 0`, and at `ε = m_k/2` the two
+scores become bit-identical and membership passes entirely to the tie-break.
+`tests/test_margins_and_flip_radii.py` constructs the witness in dyadic rationals
+so that every step is exact in binary64.
 
 ---
 
 <a id="g19"></a>
-## G19 — The candidate set varies per leave-one-out fold
+## G19. The candidate set varies per leave-one-out fold
 
 **Consequence of [G10](#g10)(3), which the paper does not draw out.**
 
-Excluding a user's remaining profile items from the candidate set — necessary, or
-those items retrieve themselves — means the number of rankable documents is
-`N − |profile| + 1`, not `N`. Since profile sizes differ between users, and by one
-within a user across folds, **`N` differs from query to query**.
+Excluding a user's remaining profile items from the candidate set is necessary,
+since otherwise those items retrieve themselves, and it means the number of
+rankable documents is `N − |profile| + 1` rather than `N`. Since profile sizes
+differ between users, and by one within a user across folds, **`N` differs from
+query to query**.
 
 Three things follow, all of which affect §7.2 and §7.3 as written:
 
@@ -706,14 +704,14 @@ size therefore varies, and report the spread with the query count.
 ---
 
 <a id="g20"></a>
-## G20 — Profile aggregation is order-sensitive
+## G20. Profile aggregation is order-sensitive
 
 **Paper.** §7.1 builds a profile "by aggregating text from a user's interacted
 items" and says nothing about the order of aggregation.
 
 **Ambiguity.** Concatenation is not commutative in its effect. The concatenated
-token stream differs under a different item order, and — because n-grams are
-generated over the *concatenated* stream — so does the set of features produced
+token stream differs under a different item order, and, because n-grams are
+generated over the *concatenated* stream, so does the set of features produced
 at the seams between items. Different orders therefore give different
 vocabularies, different `df`, and different scores.
 
@@ -733,55 +731,56 @@ preventing n-grams from spanning the seam. That is arguably the better
 construction, but it is not what §7.1 describes, so it is left as an available
 ablation rather than adopted silently.
 
-> **Correction.** The premise above — "n-grams are generated over the
-> *concatenated* stream" — is **not what this repository implements**, so the
+> **Correction.** The premise above, that "n-grams are generated over the
+> *concatenated* stream", is **not what this repository implements**, so the
 > order-sensitivity it describes does not occur and the ablation it proposes is
 > inert. `build_profile` joins *preprocessed feature streams*, by which point the
 > n-grams already exist and no pass runs over the join. Measured, and recorded in
 > full at [G27's sibling, G28](#g28). The canonicalisation resolved here is still
-> worth keeping — it makes the feature *tuple* reproducible, which the profile
-> digest depends on — but it is not what keeps scores stable, because nothing was
-> destabilising them.
+> worth keeping, since it makes the feature *tuple* reproducible and the profile
+> digest depends on that, but it is not what keeps scores stable, because nothing
+> was destabilising them.
 
 ---
 
 <a id="g21"></a>
-## G21 — `vector_sum` and `vector_mean` are indistinguishable by similarity
+## G21. `vector_sum` and `vector_mean` are indistinguishable by similarity
 
 Measured while implementing [G11](#g11)'s ablations. Summing a user's item
 vectors and averaging them differ by the positive scalar `1/n`, and cosine
-similarity is invariant under positive per-vector scaling — so the two
+similarity is invariant under positive per-vector scaling, so the two
 aggregations produce **identical similarity scores and identical rankings**.
 
 This is the same invariance that makes the scikit-learn cross-check possible
 (see [G8](#g8)'s neighbourhood and the note in
-[`tf.py`](../src/tfidf_stability/vectorisation/tf.py)), and it is worth stating
+[`tf.py`](../src/tfidf_stability/vectorisation/tf.py)), and it is stated
 explicitly for the same reason: it is easy to spend effort choosing between two
 options that cannot be distinguished by the metric being reported.
 
-They are *not* interchangeable everywhere, however. The **norms** differ by `n`,
-and §§4.2–4.3 state their perturbation bounds in terms of norms — so the two
+They are *not* interchangeable everywhere. The **norms** differ by `n`, and
+§§4.2 and 4.3 state their perturbation bounds in terms of norms, so the two
 aggregations give the same scores but different stability *certificates*. Both
 are therefore retained, and the choice is recorded in the manifest.
 
 ---
 
 <a id="g22"></a>
-## G22 — A fine near-tie cannot be manufactured; §7.4 must *identify* one
+## G22. A fine near-tie cannot be manufactured; §7.4 must *identify* one
 
 **Where:** §7.4 ("Case Study: Near-Tie Sensitivity"), §7.3 (stratification by margin).
 
 §7.4 says: *"Two documents A and B are **identified** such that |s_A − s_B| ≤ τ."*
-The word *identified* turns out to be load-bearing, and this addendum records why —
-because the natural reading, that one **constructs** such a pair by editing document
-text, is not achievable.
+The word *identified* carries the weight here, and this addendum records why: the
+natural reading, that one **constructs** such a pair by editing document text, is
+not achievable.
 
 ### Why editing text cannot produce a fine near-tie
 
 §2.2 defines `tf(t, d) = count(t, d) / L_d`. Adding or removing a single token
-therefore changes **every** term frequency in that document from `c/L` to `c/(L+1)`
-— a *relative* perturbation of `1/(L+1)` applied uniformly, not a small additive
-nudge to one coordinate. The induced score separation scales the same way, so:
+therefore changes **every** term frequency in that document from `c/L` to
+`c/(L+1)`: a *relative* perturbation of `1/(L+1)` applied uniformly, rather than
+a small additive nudge to one coordinate. The induced score separation scales the
+same way, so:
 
 | target separation | document length required |
 | --- | --- |
@@ -791,10 +790,10 @@ nudge to one coordinate. The induced score separation scales the same way, so:
 
 The twin-pair mechanism in `datasets/synthetic.py` (a duplicate plus one extra
 token, with the extra token's `df` chosen to tune the gap) works, but spans only
-about 1e−3 to 1e−1 — 36× across the whole `df` grid. This is a structural
-consequence of the normalisation in §2.2, not a limitation of the generator, and no
-choice of extra token can escape it. **The single-token edit is the finest
-text-level perturbation that exists**, so `1/L` is a floor.
+about 1e−3 to 1e−1, i.e. 36× across the whole `df` grid. This is a structural
+consequence of the normalisation in §2.2 rather than a limitation of the
+generator, and no choice of extra token can escape it. **The single-token edit is
+the finest text-level perturbation that exists**, so `1/L` is a floor.
 
 This is a real distinction from §5's perturbation model, which injects noise
 directly into scores or IDF weights and *can* reach any magnitude. Text-level and
@@ -818,7 +817,7 @@ score vector:
 Smallest strictly-positive gap: **2.0e−08**. 2524 of 3000 documents score above
 zero, so the exact-tie mass is not merely the zero block.
 
-**The shares are configuration-dependent, and so — it turns out — is the empty
+**The shares are configuration-dependent, and so, it turns out, is the empty
 interval.** Repeating this with a different corpus size, vocabulary or query
 moves every row of that table by a few percent.
 
@@ -836,7 +835,7 @@ folds, 114,504 adjacent pairs, under the **normative naive reduction**:
 | --- | --- | --- |
 | exactly 0 | 3129 | 2.73% |
 | **in (0, τ_floor = 4.44e−16)** | **197** | **0.172%** |
-| smallest strictly-positive gap | **8.67e−19** | — |
+| smallest strictly-positive gap | **8.67e−19** | n/a |
 
 The interval is not empty. It contains 197 pairs, and the smallest positive gap
 is nine orders of magnitude below the synthetic corpus's, and three orders
@@ -845,43 +844,43 @@ is nine orders of magnitude below the synthetic corpus's, and three orders
 ### Why, and why it matters more than the number
 
 Those gaps are not separations. Recomputed under `Reduction.EXACT` the same
-folds give a smallest positive gap of **1.4e−11** — the sub-femto gaps are
-manufactured by naive summation, not present in the data. So the normative
+folds give a smallest positive gap of **1.4e−11**: the sub-femto gaps are
+manufactured by naive summation and absent from the data. So the normative
 backend reports pairs of films as *distinctly scored* when the separation is
 smaller than its own error.
 
-That is precisely the situation τ exists to detect, and it means the two
-addenda interact on real data in a way they did not on synthetic:
+That is the situation τ exists to detect, and it means the two addenda interact
+on real data in a way they did not on synthetic:
 
 * G23's band is computed from `g_min` under **exact** arithmetic, and on
   MovieLens that still gives a valid 4.5-decade band.
 * But the gaps a *consumer* sees come from the **naive** backend, and 0.172% of
   those fall below `tau_floor`. Judged on those, `g_min < tau_floor` and the
-  band is **empty** — G23's own "this is a finding, not a bug" case.
+  band is **empty**: G23's own "a finding rather than an error" case.
 
-Which convention is correct is a question for the paper, not for the code, and
-it is not answered here. What is settled is that §7.4's regime cannot be
+Which convention is correct is a question for the paper rather than for the code,
+and it is not answered here. What is settled is that §7.4's regime cannot be
 described as "the interval is empty, so the near-tie regime is the exact-tie
-regime" on real data. On MovieLens the exact-tie share is 2.7%, not 17–18%, and
-there is a genuine population of sub-noise separations besides.
+regime" on real data. On MovieLens the exact-tie share is 2.7%, down from the
+synthetic 17 to 18%, and there is a genuine population of sub-noise separations
+besides.
 
 The regression test
 `tests/test_datasets.py::test_the_near_tie_interval_below_tau_is_empty` remains
-valid — it is scoped to the synthetic generator, where the property does hold —
-but it must not be read as establishing anything about real corpora.
+valid, scoped to the synthetic generator where the property does hold, but it
+must not be read as establishing anything about real corpora.
 
 Two consequences the paper should state:
 
 1. **The near-tie regime is, empirically, the exact-tie regime.** At τ ≈ 1e−9 the
    interval (0, τ) is *empty*, so essentially every within-τ pair has a gap of
-   exactly zero. §7.3's "m_k ≤ τ" stratum is therefore not measuring
-   near-ties-under-noise; it is measuring the exact-tie block, where the outcome
-   is decided entirely by the tie-break and the numerical error is irrelevant.
-   That is A2's regime, not A1's, and conflating the two would misattribute the
-   cause.
-2. **The exact-tie mass is structural, not an artefact.** It comes from the
-   zero-score block (queries share few terms with most documents) and from
-   genuine duplicates — both of which occur in real catalogues.
+   exactly zero. §7.3's "m_k ≤ τ" stratum therefore measures the exact-tie block
+   rather than near-ties-under-noise, and there the outcome is decided entirely
+   by the tie-break while the numerical error is irrelevant. That is A2's regime,
+   and conflating it with A1's would misattribute the cause.
+2. **The exact-tie mass is structural, never an artefact.** It comes from
+   the zero-score block (queries share few terms with most documents) and from
+   genuine duplicates, both of which occur in real catalogues.
 
 ### Resolution
 
@@ -891,12 +890,12 @@ included. §7.4's case study uses it to *identify* a pair at the finest magnitud
 corpus actually contains, and reports that magnitude rather than assuming τ.
 
 Where a specific τ *is* required, it must come from §5's score-level perturbation
-model — where any magnitude is reachable — and not from a text edit.
+model, where any magnitude is reachable, rather than from a text edit.
 
 ---
 
 <a id="g23"></a>
-## G23 — τ is derived as a *band*, not chosen as a value
+## G23. τ is derived as a *band* rather than chosen as a value
 
 **Where:** §7.1 ("τ is chosen to exceed floating-point noise while remaining
 small relative to typical score separations"), and every §7.3 result that is
@@ -913,21 +912,21 @@ what is done instead.
 
 τ's operational job is to decide whether `|s_i − s_j| ≤ τ` is evidence of a real
 difference or an artefact. The quantity to bound is therefore the error in a
-**margin**, not in a score. If each score carries error at most `η`, then
+**margin** rather than in a score. If each score carries error at most `η`, then
 `s_i − s_j` carries at most `2η`, and both signs are attainable, so
 
     τ_floor = 2η
 
 The factor 2 is exact, and it is the same 2 as in §4.4's `ε_k^flip = m_k / 2`.
 
-`η` is *measured*, not bounded a priori: the corpus is scored under
+`η` is *measured* rather than bounded a priori: the corpus is scored under
 `Reduction.{NAIVE, NEUMAIER, PAIRWISE}` against `Reduction.EXACT`
 (Shewchuk/`math.fsum`) as correctly-rounded ground truth.
 
 **A trap worth naming.** `TfidfModel.norms` is precomputed under the model's own
 reduction, so varying only the policy passed to the scorer holds the norms fixed
 and measures the dot product alone. That understates `η` by about **threefold**:
-a query dot product runs over a handful of shared terms (1–5 in the measured
+a query dot product runs over a handful of shared terms (1 to 5 in the measured
 corpus), whereas a norm sums the whole document vector (39 on average, up to 75),
 and the longer summation is where error accumulates. Measured both ways on the
 same 1500-document corpus × 25 queries:
@@ -938,17 +937,16 @@ same 1500-document corpus × 25 queries:
 | dot product and norms (**correct**) | 42.54% | 1.665e−16 |
 
 `Reduction.NEUMAIER` was **exactly correctly-rounded** on every one of the 37,500
-comparisons, and `PAIRWISE` was bit-identical to `NAIVE` — the pairwise block is
+comparisons, and `PAIRWISE` was bit-identical to `NAIVE`: the pairwise block is
 128 and no summation here is that long, so a reduction-policy sweep over short
-queries measures nothing. Worth stating, because it makes such a sweep look
-informative when it is vacuous.
+queries measures nothing, though such a sweep looks informative.
 
 ### The upper endpoint is the score lattice
 
 The smallest strictly-positive adjacent gap actually observed, `g_min`. Below it
 no pair of *distinctly* scored documents is within τ of each other.
 
-### The band can be *proved* invariant, not merely sampled
+### The band can be *proved* invariant rather than merely sampled
 
 Every τ-dependent object in the implementation is **piecewise constant in τ**,
 with breakpoints only at observed gap values: `tie_chains` cuts where an adjacent
@@ -957,10 +955,10 @@ diameter is a sum of gaps; `tie_ball(j, τ)` is delimited by `|s_i − s_j| ≤ 
 again a gap sum.
 
 So if the half-open band `[τ_floor, g_min)` contains **no** observed gap, every τ
-in it yields *bit-identical* tie structure — by argument, not by a sweep.
-`TauBand.is_invariant` reports exactly that condition, and
-`verify_band_invariance` recomputes the structure at eight logarithmically spaced
-probes as an independent check on the code.
+in it yields *bit-identical* tie structure, by argument rather than by a sweep.
+`TauBand.is_invariant` reports that condition, and `verify_band_invariance`
+recomputes the structure at eight logarithmically spaced probes as an independent
+check on the code.
 
 Measured (1500 documents, 25 queries):
 
@@ -985,16 +983,16 @@ lattice, and neither is a function of τ.
   and that the specific value is therefore immaterial.
 - **May not**: that this shows the *mechanism* is robust. The band is empty of
   margins (G22), so invariance across it reflects **emptiness of the score
-  lattice**, not insensitivity of the tie-break. The plateau statement must
-  always be paired with its cause.
+  lattice** rather than insensitivity of the tie-break. The plateau statement
+  must always be paired with its cause.
 - `TauBand.display_tau()` (the geometric midpoint) is a **presentation choice**
   so a caption can name a number. It is not a derived constant and must never be
   cited as one.
 
 ### If the band is ever empty
 
-`is_valid` is false when `τ_floor ≥ g_min` — arithmetic noise reaching the
-decision boundary. That is a **finding**, not an error: it would mean no τ
+`is_valid` is false when `τ_floor ≥ g_min`, i.e. arithmetic noise reaching the
+decision boundary. That is a **finding** rather than an error: it would mean no τ
 separates numerical error from tie structure on that corpus, that every §7.3
 result there is contaminated by A1's regime, and that the A1/A2 separation
 collapses. The code reports it and refuses to invent a value.
@@ -1021,13 +1019,13 @@ questions rather than two names for one effect.
 ---
 
 <a id="g24"></a>
-## G24 — `cos ∈ [0, 1]` is true in exact arithmetic and false in binary64
+## G24. `cos ∈ [0, 1]` is true in exact arithmetic and false in binary64
 
-**Where:** §2.3 — *"Since all coordinates are non-negative, it follows that
+**Where:** §2.3, *"Since all coordinates are non-negative, it follows that
 cos(u, v) ∈ [0, 1]."*
 
 The inference is valid over the reals and does not survive rounding. Measured
-over 40,000 random non-negative sparse vectors (2–40 non-zeros, values in
+over 40,000 random non-negative sparse vectors (2 to 40 non-zeros, values in
 [1e−3, 10]):
 
 | quantity | value |
@@ -1038,16 +1036,16 @@ over 40,000 random non-negative sparse vectors (2–40 non-zeros, values in
 | worst excess | 6.661e−16 (3 ulp) |
 
 The cause is straightforward: `cos = dot / (‖u‖ ‖v‖)` performs three independent
-roundings — the dot product, each norm, and the division — and nothing forces the
+roundings (the dot product, each norm, and the division), and nothing forces the
 numerator and denominator to round in the same direction. Self-similarity is the
-worst case precisely because the true value sits exactly on the boundary.
+worst case because the true value sits on the boundary.
 
 ### The implementation does not clamp, and should not
 
 `similarity/cosine.py` returns `dot(u, v, policy) / (nu * nv)` unmodified. That
 is correct under §6, which forbids stabilising transformations: clamping to
 `min(1.0, x)` would change published digits and would hide the very effect this
-study measures. It also would not be free — the clamp would have to be applied
+study measures. It would also not be free; the clamp would have to be applied
 consistently in the C++ mirror or the two backends would stop being bit-identical.
 
 ### What must therefore not be assumed downstream
@@ -1055,7 +1053,7 @@ consistently in the C++ mirror or the two backends would stop being bit-identica
 Any consumer treating the result as a cosine **in the mathematical sense** can
 fail. In particular `math.acos(1.0000000000000002)` raises `ValueError`, so
 converting a similarity to an angle without clamping at the call site is a
-latent crash. Nothing in this repository calls `acos` — verified — so there is no
+latent crash. Nothing in this repository calls `acos` (verified), so there is no
 live defect, but the guarantee a reader would reasonably infer from §2.3 does not
 hold and anything built on top of this code must clamp at its own boundary.
 
@@ -1068,19 +1066,19 @@ hold and anything built on top of this code must clamp at its own boundary.
 > clamping is applied, in keeping with §6.
 
 Related: [G18](#g18) records the other place the idealised cosine identities
-break down — scale invariance, which fails below `|x| ≈ √DBL_MIN`.
+break down: scale invariance, which fails below `|x| ≈ √DBL_MIN`.
 
 ---
 
 <a id="g25"></a>
-## G25 — the query protocol is not interchangeable, and it changes every number
+## G25. The query protocol is not interchangeable, and it changes every number
 
 **Where:** §7.1 ("Query set and evaluation setup"), and every §7.2/7.3 result.
 
 §7.1 specifies that experiments use **user-profile** queries and **leave-one-out**
 folds, with item-as-query implemented but explicitly "not evaluated in the present
 experiments". An earlier version of the experiment runners used **truncated
-document prefixes** instead — a different protocol, and a much easier one.
+document prefixes** instead: a different protocol, and a much easier one.
 
 This addendum records that the substitution is not benign.
 
@@ -1119,8 +1117,7 @@ Stratified by margin band (§7.3), π vs π_score at k = 1:
 A complete separation: every query with an exact tie at rank 1 disagreed between
 operators, and no query without one did. Combined with the bit-identity check
 (all three operators provably consume the same scores), this is A2 in its
-strongest form — the tie-break is not *a* factor in the disagreement, it is the
-*only* factor.
+strongest form: the tie-break is the *only* factor in the disagreement.
 
 ### The candidate set moves, and margins must follow it
 
@@ -1135,7 +1132,7 @@ query** (G19). Three consequences the implementation must honour, all in
    rank over non-candidates. `transition_curve` and `certificate_audit` therefore
    accept per-query tables.
 3. `k` can exceed a query's candidate count. Those queries are excluded and
-   counted, never clamped — a clamped `k` measures a different quantity.
+   counted, never clamped, since a clamped `k` measures a different quantity.
 
 ### What this means for reproduction
 
@@ -1146,9 +1143,9 @@ manifest via `QueryGrid.provenance()`.
 ---
 
 <a id="g26"></a>
-## G26 — the interaction term of §4.2 never dominates
+## G26. The interaction term of §4.2 never dominates
 
-**Where:** §4.2 — *"In sparse high-dimensional embeddings, the interaction
+**Where:** §4.2, *"In sparse high-dimensional embeddings, the interaction
 between local changes and globally shifting IDF weights is a natural mechanism
 for perturbation amplification."*
 
@@ -1156,7 +1153,7 @@ for perturbation amplification."*
 content changed), a **global** term (the IDF weights moved beneath it) and an
 **interaction** term, and singles out the third as a mechanism for
 amplification. `vector_perturb.py` exposes `ThreeTermBound.dominant_term`
-specifically so the claim can be checked rather than assumed.
+so the claim can be checked rather than assumed.
 
 Measured over 25 single-document edits on a 60-document corpus, 1500 per-document
 shifts in total:
@@ -1183,7 +1180,7 @@ content does.
   amplification is driven by the global IDF shift.
 
 This does not weaken §4.2's inequality; it corrects the informal reading attached
-to it. The bound holds — the attribution does not.
+to it. The bound holds; the attribution does not.
 
 ### Verified alongside it
 
@@ -1205,16 +1202,16 @@ The same adversarial pass confirmed, by execution rather than by reading:
 | §2.3.3 ball non-transitivity | 216 triples found in random data |
 
 The §4.4 attack is the one that matters: it drove the rank-`k` and rank-`(k+1)`
-scores together by the largest amount strictly inside the certified radius --
-the worst case the proof must survive, which random sampling would essentially
-never find -- and the bound held every time. The closest approach reached
+scores together by the largest amount strictly inside the certified radius, the
+worst case the proof must survive and one that random sampling would essentially
+never find, and the bound held every time. The closest approach reached
 `0.999999999` of the radius.
 
 **A methodological trap, recorded because the first version of this attack fell
 into it.** The obvious way to get "as close to the radius as possible" is
 `math.nextafter(radius, 0)`. On dyadic scores that value rounds straight back up
-when added, so the *realised* movement lands exactly **on** the boundary -- which
-the theorem explicitly excludes -- and every trial is silently discarded. The
+when added, so the *realised* movement lands exactly **on** the boundary, which
+the theorem explicitly excludes, and every trial is silently discarded. The
 first run reported thousands of "certified perturbations" of which **none** were
 actually inside the radius, and its zero-violation result was therefore vacuous.
 The guard is to count only perturbations whose realised delta is verified
@@ -1224,7 +1221,7 @@ strictly less than the radius, and to assert that count is large;
 ---
 
 <a id="g27"></a>
-## G27 — §4.2 holds; *testing* it in binary64 needs three preconditions
+## G27. §4.2 holds; *testing* it in binary64 needs three preconditions
 
 **Paper.** §4.2's decomposition (see [G5](#g5)) is a statement about real
 arithmetic. Nothing below contradicts it, and `three_term_bound` is a faithful
@@ -1232,15 +1229,15 @@ transcription of it.
 
 **Finding.** The nightly job at 100,000 examples falsified
 `test_three_term_bound_is_never_violated` three separate times, in three
-unrelated regimes. Each was a defect in *how the inequality was being checked*,
-not in the inequality. They are recorded because all three are easy to
-reintroduce, and because two of them make the test **silently weaker** rather
-than failing loudly.
+unrelated regimes. Each was a defect in *how the inequality was being checked*
+rather than in the inequality. They are recorded because all three are easy to
+reintroduce, and because two of them make the test **silently weaker** instead of
+failing loudly.
 
 **1. The perturbation realised is not the perturbation requested.** With
 `‖idf‖_∞ = 10` and `‖Δidf‖_∞ = 1e-15`, the test built `idf′` as
 `idf + Δidf`. But `ulp(10) = 1.776e-15`, so the step actually taken was a whole
-ulp — **1.776×** what was asked for. The bound was computed from the request and
+ulp: **1.776×** what was asked for. The bound was computed from the request and
 compared against an observation of the realisation:
 
 ```
@@ -1249,8 +1246,8 @@ observed 1.7015e-12  >  bound 6.8666e-13     (2.5x)
 
 This is the same trap as the §4.4 vacuous-attack correction above, in the
 opposite direction: there the realised delta was too *large* to certify, here it
-was too large to be *bounded*. The rule is one rule — **assume on the realised
-delta, never the drawn one** — and it applies to every perturbation this project
+was too large to be *bounded*. The rule is one rule (**assume on the realised
+delta, never the drawn one**) and it applies to every perturbation this project
 generates.
 
 **2. Below `sqrt(DBL_MIN)`, `l2_norm` is not a Euclidean norm.** At
@@ -1258,12 +1255,12 @@ generates.
 arithmetic. In binary64 the two sides differ by **0.54%**, because squaring the
 coordinate lands in the subnormal range and leaves **six significant bits**.
 This is [G18](#g18) reaching §4.2. No `u`-scaled tolerance can absorb it and none
-should: the defect is in the norm, not the decomposition.
+should: the defect lies in the norm rather than in the decomposition.
 
 **3. The difference vector underflows before its inputs do.** The subtlest of
 the three. `w′ − w` is smaller than `tf` by roughly `‖Δidf‖_∞`, so every input
 vector can sit above the threshold while the quantity actually being measured
-sits below it — found at `tf = sqrt(DBL_MIN)` exactly, with `Δidf = 1e-5`, giving
+sits below it. Found at `tf = sqrt(DBL_MIN)` exactly, with `Δidf = 1e-5`, giving
 a difference of `1.5e-159` whose square is subnormal. Guarding the three *input*
 norms is not enough; the **fourth** norm, the one on the left-hand side, needs
 the same guard.
@@ -1274,13 +1271,13 @@ the same guard.
 observed <= bound*(1 + 1e-9) + u*(‖idf‖_∞ + ‖Δidf‖_∞)*(‖tf‖ + ‖tf′‖)
 ```
 
-with `u = 2⁻⁵³`, restricted to inputs whose norms — *all four* — are either
-exactly zero or at or above `sqrt(DBL_MIN)`. The absolute slack is derived, not
-chosen: each `w_i` and `w′_i` carries up to `u|w_i|` of rounding that the
-real-arithmetic inequality does not model, and that is exactly the quantity
-above. The `1e-12` constant it replaces was unrelated to any magnitude in the
-problem — too loose for small vectors, and at ulp-scale perturbations larger
-than the bound it was slackening.
+with `u = 2⁻⁵³`, restricted to inputs whose norms (*all four*) are either
+exactly zero or at or above `sqrt(DBL_MIN)`. The absolute slack is derived rather
+than chosen: each `w_i` and `w′_i` carries up to `u|w_i|` of rounding that the
+real-arithmetic inequality does not model, and that is the quantity above. The
+`1e-12` constant it replaces was unrelated to any magnitude in the problem: too
+loose for small vectors, and at ulp-scale perturbations larger than the bound it
+was slackening.
 
 **Verification.** The assertion is mutation-tested: dropping any one of the
 three terms, halving the bound, or shaving the global term by 1% each still
@@ -1289,16 +1286,16 @@ fails the test, so the added tolerance has not made it vacuous.
 ---
 
 <a id="g28"></a>
-## G28 — Profile aggregation joins features, not text, so there are no seams
+## G28. Profile aggregation joins features rather than text, so there are no seams
 
 **Paper.** §7.1 builds a user profile "by aggregating text from a user's
 interacted items". [G20](#g20) read that as text concatenation and resolved the
 resulting order-sensitivity by canonicalising item order.
 
 **Finding.** The implementation does not concatenate text. `build_profile` takes
-`features_by_doc` — streams that have already been through
-`PreprocessingPipeline.preprocess` — so the n-grams exist *before* aggregation
-and no n-gram pass runs over the joined result. Three claims made in G20 and in
+`features_by_doc`, streams that have already been through
+`PreprocessingPipeline.preprocess`, so the n-grams exist *before* aggregation and
+no n-gram pass runs over the joined result. Three claims made in G20 and in
 `build_profile`'s own docstring are therefore false of the code:
 
 | claim | reality |
@@ -1311,15 +1308,15 @@ Measured on `"quick brown fox"` + `"lazy sleeping dog"`: text aggregation yields
 11 features including the seam bigram `fox|lazi`; this implementation yields the
 10-feature union and nothing spanning the join. The `mini_corpus` fixture hides
 the difference, because its documents happen to abut at boundaries the pipeline
-already breaks — which is why no existing test caught it.
+already breaks, which is why no existing test caught it.
 
-**Resolution — documented, not silently changed.** Switching to genuine text
-aggregation is a research decision rather than a repair: it adds one bigram per
-item boundary, changes every profile's length `L`, and therefore moves **every
-number in §7.1**. The behaviour is left as it is and stated accurately instead,
-in G20, in the docstring, and in `configs/default.yaml`. Three tests in
-`tests/test_profiles_and_loo.py` pin the actual semantics — no seam n-grams,
-order-insensitivity, and `separate_items` inert — so the gap cannot close in the
+**Resolution: documented, never silently changed.** Switching to genuine
+text aggregation is a research decision rather than a repair: it adds one bigram
+per item boundary, changes every profile's length `L`, and therefore moves
+**every number in §7.1**. The behaviour is left as it is and stated accurately
+instead, in G20, in the docstring, and in `configs/default.yaml`. Three tests in
+`tests/test_profiles_and_loo.py` pin the actual semantics (no seam n-grams,
+order-insensitivity, and `separate_items` inert), so the gap cannot close in the
 wrong direction unnoticed.
 
 **What G20's canonical ordering is still for.** It makes the feature *tuple*

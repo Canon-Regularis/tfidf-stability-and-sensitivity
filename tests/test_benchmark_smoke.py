@@ -1,16 +1,13 @@
-"""The benchmark is code, and untested code rots quietly.
+"""The benchmark harness, at a size where it cannot be slow.
 
-A benchmark rots more quietly than most: it prints numbers whatever happens, so
-a harness that has stopped measuring the right thing -- or stopped checking that
-the two backends agree -- still looks healthy. These tests run the whole thing at
-a size where it cannot be slow, and then attack the part that actually matters:
-the bit-identity guard that stands between a speedup and a wrong answer.
+A benchmark prints numbers whatever happens, so one that has stopped comparing
+the two backends still looks healthy. The target is the bit-identity guard
+between a speedup and a wrong answer.
 
-Nothing here asserts a *duration*. Wall-clock time is a property of the machine,
-so a threshold would be a flake generator on a loaded CI runner and would say
-nothing about the code. What is asserted is structure: that every path is
-measured, that the reference-only mode works, that speedups are only ever
-reported alongside a completed identity check, and that the check fires on a
+Nothing asserts a duration: wall-clock time is a property of the machine, so a
+threshold flakes on a loaded runner and says nothing about the code. Structure is
+asserted instead: every path measured, reference-only mode working, speedups
+reported only beside a completed identity check, and the check firing on a
 one-ulp divergence.
 """
 
@@ -40,10 +37,9 @@ from tfidf_stability.utils.io import canonical_json
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "benchmark.py"
 
-#: Small enough that a full run is a second or two, large enough that the
-#: generator still produces the exact duplicates and twin pairs the ranking rows
-#: need -- a benchmark over distinctly scored documents never reaches the
-#: tie-break at all.
+#: Small enough for a full run in a second or two, large enough that the
+#: generator still emits exact duplicates and twin pairs: over distinctly scored
+#: documents the ranking rows never reach the tie-break.
 TINY = Workload(n_docs=24, vocab_size=40, n_queries=2, query_length=4, k=3, seed=20260811)
 
 
@@ -55,11 +51,10 @@ def _names(report: object) -> list[str]:
 # The run itself
 # ---------------------------------------------------------------------------
 def test_reference_only_run_is_complete() -> None:
-    """The configuration of a contributor with no compiler, forced on purpose.
+    """The no-compiler configuration, forced.
 
-    Exercised even where the native backend exists, because otherwise the
-    no-compiler path would only ever be tested on machines that cannot report a
-    failure in it.
+    Runs even where the native backend exists; otherwise this path is exercised
+    only on machines that cannot report a failure in it.
     """
     report = run_benchmarks(TINY, repeats=1, use_native=False)
 
@@ -97,7 +92,7 @@ def test_timings_report_how_many_repeats_they_took_the_minimum_of() -> None:
 
 
 def test_report_survives_canonical_json() -> None:
-    """The runner can write the report to disk, so it has to be serialisable."""
+    """The runner writes the report to disk, so it has to be serialisable."""
     report = run_benchmarks(TINY, repeats=1, use_native=False)
     payload = json.loads(canonical_json(report.as_dict()))
 
@@ -118,7 +113,7 @@ def test_formatted_report_shows_the_check_beside_the_speedup() -> None:
 @pytest.mark.differential
 @pytest.mark.skipif(not native_available(), reason=unavailable_reason() or "no native backend")
 def test_native_speedups_are_reported_only_with_a_completed_check() -> None:
-    """Every native row must carry the evidence that licensed its ratio."""
+    """Every native row must carry the evidence licensing its ratio."""
     report = run_benchmarks(TINY, repeats=1)
 
     assert report.native is True
@@ -148,7 +143,7 @@ def test_a_one_ulp_divergence_is_caught() -> None:
 
 
 def test_signed_zero_divergence_is_caught() -> None:
-    """``-0.0 == 0.0`` is true, and their bit patterns differ -- bits win."""
+    """``-0.0 == 0.0`` is true and their bit patterns differ; bits win."""
     with pytest.raises(BitIdentityError):
         check_same_bits([0.0], [-0.0], "scores")
 
@@ -173,8 +168,7 @@ def test_identical_results_pass_and_say_what_was_checked() -> None:
 # The measurement primitive
 # ---------------------------------------------------------------------------
 def test_measure_runs_a_warm_up_and_every_requested_batch() -> None:
-    """Calls are counted rather than timed: the count is deterministic, the
-    duration is not."""
+    """Counts calls rather than timing them; only the count is deterministic."""
     calls = 0
 
     def counted() -> None:

@@ -1,47 +1,43 @@
 """A1: how score-separation margins govern ranking stability (sections 7.2, 7.3).
 
-Section 4.4 proves a *sufficient* condition: if every score moves by less than
-``m_k / 2`` then the top-k set is unchanged. This module measures what actually
-happens, which is a different question in two directions at once.
+Section 4.4 proves a sufficient condition: if every score moves by less than
+``m_k / 2`` the top-k set is unchanged. This module measures what happens, which
+differs from the bound in two directions at once.
 
-The two things that are easy to conflate
-----------------------------------------
-**Worst-case tightness.** Stage 4 built a dyadic witness showing ``m_k / 2`` is
-*exactly* the flip radius: there is a perturbation of size ``m_k / 2 + delta``
-that flips the pair. So the bound cannot be improved.
+**Worst case.** Stage 4's dyadic witness makes ``m_k / 2`` the flip radius: a
+perturbation of size ``m_k / 2 + delta`` flips the pair, so the bound cannot be
+improved.
 
-**Average-case behaviour.** Under *random* perturbation of size ``eps``, the flip
-rate stays at zero well past ``eps = m_k / 2``, because the adversarial
-configuration -- push the rank-k score down and the rank-(k+1) score up, both by
-the full ``eps`` -- is a measure-zero corner of the perturbation cube. Measured
-here, the flip rate is 0% at ``eps = m_k/2``, first becomes non-zero around
-``1.1 x``, and reaches roughly half around ``4 x``.
+**Average case.** Under random perturbation of size ``eps`` the flip rate stays
+at zero well past ``eps = m_k / 2``, since the adversarial configuration (push
+the rank-k score down and the rank-(k+1) score up, both by the full ``eps``) is a
+measure-zero corner of the perturbation cube. Measured here: 0% at
+``eps = m_k/2``, first non-zero around ``1.1 x``, roughly half around ``4 x``.
 
-Both are true and neither implies the other. A paper that reported only the
-second would understate the risk; one that reported only the first would suggest
-rankings are far more fragile than they are. :func:`transition_curve` measures
-the average case; :func:`certificate_audit` measures soundness and conservatism
-of the bound itself.
+Neither implies the other. Reporting only the second understates the risk;
+reporting only the first suggests rankings are far more fragile than they are.
+:func:`transition_curve` measures the average case, :func:`certificate_audit` the
+soundness and conservatism of the bound.
 
-Why the certificate is audited as a 2x2 table
----------------------------------------------
-``certified_stable`` is a *proof* when true and merely "not covered" when false,
-so accuracy is the wrong summary -- it would reward a certificate that always
-said no. The table separates the two error directions:
+The certificate as a 2x2 table
+------------------------------
+``certified_stable`` is a proof when true and merely "not covered" when false, so
+accuracy would reward a certificate that always said no. The table separates the
+two error directions:
 
-* **certified but changed** must be zero. Any non-zero entry falsifies section
-  4.4 and is a bug or a broken proof, not a statistic.
-* **uncertified but unchanged** is the conservatism, and it is expected to be
-  large. Reporting it is what stops "not certified" being read as "will break".
+* **certified but changed** must be zero. A non-zero entry falsifies section 4.4
+  and means a bug or a broken proof.
+* **uncertified but unchanged** is the conservatism and is expected to be large.
+  Reporting it stops "not certified" being read as "will break".
 
 The A1/A2 boundary
 ------------------
-Queries whose ``m_k`` is exactly zero are **excluded** from the transition curve
-and reported separately. At ``m_k = 0`` the boundary is an exact tie, no
-perturbation is needed to change the outcome, and the result is decided entirely
-by the tie-break. That is A2's regime; including it would let a tie-break effect
-be read as a numerical-stability effect. G3 requires this exclusion for margin
-distributions, and the same logic applies here.
+Queries whose ``m_k`` is zero are excluded from the transition curve and reported
+separately. At ``m_k = 0`` the boundary is an exact tie, no perturbation is
+needed to change the outcome, and the tie-break decides: A2's regime, where
+including it would let a tie-break effect read as a numerical-stability effect.
+G3 requires the exclusion for margin distributions and the same logic applies
+here.
 """
 
 from __future__ import annotations
@@ -84,10 +80,9 @@ class TransitionPoint:
     def within_certificate(self) -> bool:
         """Whether section 4.4 guarantees zero flips at this ratio.
 
-        Strict: the theorem is ``eps < m_k / 2``, so ``ratio == 1.0`` is the
-        boundary case and is *not* covered. It is sampled anyway, because a flip
-        appearing exactly at the boundary rather than beyond it would be the
-        interesting failure.
+        Strict: the theorem is ``eps < m_k / 2``, so ``ratio == 1.0`` sits on
+        the boundary and is uncovered. Sampled anyway, since a flip at the
+        boundary rather than beyond it is the interesting failure.
         """
         return self.ratio < 1.0
 
@@ -110,18 +105,16 @@ class CertificateAudit:
     uncertified_unchanged: int
     uncertified_changed: int
     n_undefined: int
-    #: Queries excluded because ``m_k`` is exactly zero -- A2's regime. Counted
-    #: rather than silently dropped, so the exclusion this module's header
-    #: promises is visible in the published record.
+    #: Queries excluded because ``m_k`` is zero (A2's regime). Counted rather
+    #: than dropped, so the exclusion is visible in the published record.
     n_exact_tie: int = 0
 
     @property
     def is_sound(self) -> bool:
         """Whether the certificate ever failed. Must be ``True``.
 
-        Read with :attr:`is_conclusive`, never alone: this is a statement about
-        the certified cell being empty of failures, and it is vacuously true
-        when that cell is empty of *everything*.
+        Read alongside :attr:`is_conclusive`: this says the certified cell holds
+        no failures, and is vacuously true when it holds nothing.
         """
         return self.certified_changed == 0
 
@@ -136,10 +129,10 @@ class CertificateAudit:
 
         ``is_sound`` is ``certified_changed == 0``, so an audit that drew no
         certified perturbation reports the theorem upheld having checked it zero
-        times. That is not hypothetical here: an earlier version of the section
-        4.4 attack reported thousands of "certified perturbations" of which
-        none were inside the radius, and its zero-violation result was vacuous.
-        A soundness claim is only worth reporting alongside the count behind it.
+        times. An earlier version of the section 4.4 attack reported thousands
+        of "certified perturbations" with none inside the radius, making its
+        zero-violation result vacuous. Report soundness with this count beside
+        it.
         """
         return self.n_certified > 0
 
@@ -181,8 +174,8 @@ def transition_curve(
     """Measure the empirical top-k flip rate against ``eps / (m_k / 2)``.
 
     Each trial perturbs every score independently and uniformly in
-    ``[-eps, +eps]``. That is the *random* case; the adversarial case is exactly
-    ``m_k / 2`` by the Stage 4 witness and needs no sampling.
+    ``[-eps, +eps]``: the random case. The adversarial case is ``m_k / 2`` by the
+    Stage 4 witness and needs no sampling.
 
     Args:
         score_vectors: One score vector per query, in document-index order.
@@ -195,15 +188,14 @@ def transition_curve(
         trials: Perturbations per (query, ratio) cell.
         tables: Per-query attribute tables, overriding ``table``. Required under
             section 7.1's protocol, where each query excludes its own profile
-            items and therefore ranks over a *different* candidate set (G19).
-            Ranking a restricted score vector against the full-corpus table
-            would let the tie-break consider documents the query was never
-            allowed to retrieve.
+            items and so ranks over a different candidate set (G19). A restricted
+            score vector against the full-corpus table would let the tie-break
+            consider documents the query could never retrieve.
 
     Returns:
-        ``(points, n_used, n_excluded)`` where ``n_excluded`` counts queries
-        dropped because ``m_k`` was undefined or exactly zero -- the A2 regime,
-        which must not be averaged into an A1 curve.
+        ``(points, n_used, n_excluded)``, where ``n_excluded`` counts queries
+        dropped because ``m_k`` was undefined or zero: the A2 regime, which must
+        not be averaged into an A1 curve.
     """
     rng = random.Random(seed)
     flips = dict.fromkeys(ratios, 0)
@@ -213,9 +205,9 @@ def transition_curve(
     for index, scores in enumerate(score_vectors):
         active = tables[index] if tables is not None else table
         if k >= len(scores):
-            # The candidate set varies per query under section 7.1, so k can
-            # exceed it. Excluded and counted rather than clamped: a clamped k
-            # measures a different quantity.
+            # Candidate sets vary per query under section 7.1, so k can exceed
+            # one. Counted rather than clamped: a clamped k measures a different
+            # quantity.
             n_excluded += 1
             continue
         margin = boundary_margin(sorted(scores, reverse=True), k)
@@ -249,9 +241,9 @@ def certificate_audit(
 ) -> CertificateAudit:
     """Audit section 4.4's certificate against observed top-k changes.
 
-    Perturbations are drawn across a range straddling the certified radius, so
-    both cells of each row are populated; drawing only tiny perturbations would
-    make the certificate look trivially sound.
+    Perturbations straddle the certified radius so both cells of each row are
+    populated; drawing only tiny ones would make the certificate look trivially
+    sound.
 
     Args:
         score_vectors: One score vector per query.
@@ -282,13 +274,11 @@ def certificate_audit(
         if not cert.defined or math.isnan(cert.set_radius):
             n_undefined += 1
             continue
-        # An exact tie is A2's regime, and this module's header already says such
-        # queries are excluded and reported separately. The audit was not doing
-        # it, and the omission was not neutral: at m_k = 0 the radius is 0.0, so
-        # eps is 0.0, `perturbed` is `scores` element for element, and `realised
-        # < 0.0` is false while "unchanged" is trivially true. Every trial landed
-        # in (uncertified, unchanged) -- inflating the published conservatism
-        # with cases where nothing was perturbed at all.
+        # Exact ties are A2's regime. The audit used to include them: at m_k = 0
+        # the radius is 0.0, so eps is 0.0, `perturbed` equals `scores` element
+        # for element, `realised < 0.0` is false and "unchanged" is trivially
+        # true. Every such trial landed in (uncertified, unchanged) and inflated
+        # the published conservatism with cases where nothing was perturbed.
         if cert.set_radius == 0.0:
             n_exact_tie += 1
             continue
@@ -296,9 +286,9 @@ def certificate_audit(
         for _ in range(trials):
             eps = cert.set_radius * rng.uniform(0.0, max_ratio)
             perturbed = [s + rng.uniform(-eps, eps) for s in scores]
-            # The realised delta, not the drawn eps. `fl(s + d)` rounds, so the
-            # actual movement can exceed |d| by up to half an ulp -- and the
-            # theorem is about the movement that happened, not the one intended.
+            # Measure the realised delta rather than the drawn eps: `fl(s + d)`
+            # rounds, so movement can exceed |d| by half an ulp, and the theorem
+            # is about the movement that happened.
             realised = max(
                 (abs(p - s) for p, s in zip(perturbed, scores, strict=True)), default=0.0
             )

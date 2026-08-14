@@ -1,21 +1,14 @@
 #!/usr/bin/env python3
 """Verify the C++ tree still mirrors the Python packages.
 
-``cpp/CMakeLists.txt`` states that ``cpp/include/tfidf/<sub>/`` corresponds
-one-for-one to ``src/tfidf_stability/<sub>/``, and that a CI check asserts it.
-This is that check.
+``cpp/CMakeLists.txt`` claims ``cpp/include/tfidf/<sub>/`` corresponds one-for-one
+to ``src/tfidf_stability/<sub>/`` and that CI asserts it. This is that check; an
+unchecked layout claim decays as modules are added on one side only.
 
-The claim is worth enforcing rather than merely stating: the whole differential
-architecture assumes a reader can find the C++ counterpart of a Python module by
-name, and a layout claim left unchecked decays silently as modules are added on
-one side only.
-
-``core`` is exempt in one direction -- it holds the numeric policy, the
-floating-point guard and the build configuration, which have no Python
-counterpart because the reference backend inherits those from the interpreter.
-Python subpackages without a C++ mirror are fine and expected: orchestration
-(``analysis``, ``cli``, ``datasets``, ``persistence``, ``profiles``) never needs
-one, because it is not on any hot path.
+``core`` is exempt in one direction: numeric policy, the floating-point guard and
+the build configuration, all of which the reference backend inherits from the
+interpreter. Python subpackages with no C++ mirror (``analysis``, ``cli``,
+``datasets``, ``persistence``, ``profiles``) are expected, none on a hot path.
 """
 
 from __future__ import annotations
@@ -25,7 +18,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-#: C++ directories with no Python counterpart, by design.
+#: C++ directories with no Python counterpart.
 _CPP_ONLY = {"core"}
 
 

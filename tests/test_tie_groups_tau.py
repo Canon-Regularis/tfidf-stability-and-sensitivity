@@ -1,16 +1,14 @@
 """Tie groups (README section 2.3.3, ``spec_addenda.md#g1``).
 
-G1's central claim is that section 2.3.3's tie group is a **ball**, not an
-equivalence class, and that conflating the two is a mistake with consequences.
-The claim is made executable here by the *adversarial ladder*
-``s_i = i * 2^-20``: every value and every difference is exactly representable
-in binary64, so the tests below have no floating-point content at all and
-demonstrate structure rather than rounding.
+G1's central claim: section 2.3.3's tie group is a ball rather than an
+equivalence class, and conflating the two has consequences. The adversarial
+ladder ``s_i = i * 2^-20`` makes the claim executable: every value and every
+difference is representable in binary64, so the tests below carry no
+floating-point content and demonstrate structure rather than rounding.
 
-On that ladder the ball relation is visibly non-transitive, a single chain
-swallows all six documents, and complete linkage sees only adjacent pairs -- the
-three objects disagree maximally, which is exactly what the ``rho`` diagnostic
-exists to flag.
+On that ladder the ball relation is non-transitive, a single chain swallows all
+six documents, and complete linkage sees only adjacent pairs. The three objects
+disagree maximally, which is what the ``rho`` diagnostic exists to flag.
 """
 
 from __future__ import annotations
@@ -48,17 +46,17 @@ def ball_members(scores, j, tau):  # type: ignore[no-untyped-def]
 
 
 def brute_force_ball(scores, j, tau):  # type: ignore[no-untyped-def]
-    """The predicate exactly as section 2.3.3 and G9 write it."""
+    """The predicate as section 2.3.3 and G9 write it."""
     return {i for i in range(len(scores)) if abs(scores[i] - scores[j]) <= tau}
 
 
 # ---------------------------------------------------------------------------
-# The adversarial ladder -- G1's witness
+# The adversarial ladder: G1's witness
 # ---------------------------------------------------------------------------
 def test_the_ladder_shows_the_ball_relation_is_not_transitive() -> None:
-    """Document 2 is within tau of 1, and 1 is within tau of 0, but 2 is not
-    within tau of 0. The relation is reflexive and symmetric but **not
-    transitive**, so tie groups genuinely do not partition the corpus."""
+    """Document 2 is within tau of 1 and 1 is within tau of 0, while 2 is not
+    within tau of 0. The relation is reflexive and symmetric and non-transitive,
+    so tie groups do not partition the corpus."""
     s = ladder(6)
     assert ball_members(s, 1, TAU) == {0, 1, 2}
     assert ball_members(s, 0, TAU) == {0, 1}
@@ -96,8 +94,8 @@ def test_the_ladder_triggers_the_chain_inflation_warning() -> None:
 def test_the_ladder_shatters_one_ulp_below_tau() -> None:
     """A one-ulp change in tau takes the largest chain from 6 to 1.
 
-    A decision discontinuity of exactly the kind the paper studies, arising here
-    in the diagnostic rather than in the ranking.
+    The kind of decision discontinuity the paper studies, arising here in the
+    diagnostic rather than in the ranking.
     """
     s = ladder(6)
     just_under = TAU - math.ulp(TAU)
@@ -107,7 +105,7 @@ def test_the_ladder_shatters_one_ulp_below_tau() -> None:
 
 
 # ---------------------------------------------------------------------------
-# tau = 0 -- the exact-tie baseline
+# tau = 0: the exact-tie baseline
 # ---------------------------------------------------------------------------
 def test_tau_zero_is_the_exact_tie_baseline() -> None:
     """At tau = 0 all three objects collapse onto exact-equality classes."""
@@ -138,10 +136,10 @@ def test_negative_tau_is_rejected() -> None:
 
 
 # ---------------------------------------------------------------------------
-# G9 -- the predicate must be the one the paper writes
+# G9: the predicate must be the one the paper writes
 # ---------------------------------------------------------------------------
 def test_the_ball_is_inclusive_at_exactly_tau() -> None:
-    """``<=``, not ``<``, and on dyadic values so the boundary is exact."""
+    """``<=`` rather than ``<``, on dyadic values so the boundary is exact."""
     s = (0.5, 0.25)
     assert ball_members(s, 0, 0.25) == {0, 1}
     assert ball_members(s, 0, 0.25 - math.ulp(0.25)) == {0}
@@ -157,17 +155,16 @@ def test_binary_search_agrees_with_a_linear_scan(
 ) -> None:
     """Certifies the monotone-difference search against the literal predicate.
 
-    This is the test that would catch the tempting-but-wrong implementation:
-    binary-searching for ``S[j] +/- tau`` evaluates ``S[i] <= fl(S[j] + tau)``,
-    which is a *different* test from G9's ``|s_i - s_j| <= tau`` and disagrees
-    precisely at the boundary -- the only place tie groups are interesting.
+    Catches the tempting wrong implementation: binary-searching for
+    ``S[j] +/- tau`` evaluates ``S[i] <= fl(S[j] + tau)``, a different test from
+    G9's ``|s_i - s_j| <= tau``, and the two disagree at the boundary, the only
+    place tie groups are interesting.
 
-    The rank is drawn *after* the list, from its actual length, rather than
-    drawn independently and filtered. Filtering here would reject most examples
-    (a rank up to 39 against a list as short as 1), which trips Hypothesis's
-    ``filter_too_much`` health check -- intermittently, because the example
-    database caches successful draws between runs. An intermittently failing
-    test is worse than a failing one.
+    The rank is drawn after the list, from its actual length, rather than drawn
+    independently and filtered. Filtering rejects most examples (a rank up to 39
+    against a list as short as 1) and trips Hypothesis's ``filter_too_much``
+    health check intermittently, since the example database caches successful
+    draws between runs.
     """
     s = sorted_scores_desc(scores)
     j = data.draw(st.integers(min_value=0, max_value=len(s) - 1), label="rank")
@@ -175,11 +172,11 @@ def test_binary_search_agrees_with_a_linear_scan(
 
 
 def test_the_naive_bound_shortcut_would_actually_differ() -> None:
-    """Evidence that the caution above is warranted, not theoretical.
+    """Evidence that the caution above is more than theoretical.
 
-    A value exists for which ``s - c <= tau`` and ``s <= c + tau`` disagree,
-    because ``c + tau`` rounds. If the implementation used the rounded bound it
-    would place this document in the wrong group.
+    A value exists for which ``s - c <= tau`` and ``s <= c + tau`` disagree
+    because ``c + tau`` rounds; the rounded bound would place that document in
+    the wrong group.
     """
     c = 0.1
     tau = 0.2
@@ -227,8 +224,8 @@ def test_maximal_cliques_match_brute_force(scores: list[float], tau: float) -> N
     """Validates the O(N) sweep against an O(N^2) enumerator.
 
     The sweep is complete only because the near-tie graph is an indifference
-    graph, so every maximal clique is a contiguous interval; this checks that
-    lemma empirically rather than trusting it.
+    graph, so every maximal clique is a contiguous interval. Checks that lemma
+    empirically rather than trusting it.
     """
     s = sorted_scores_desc(scores)
     n = len(s)
@@ -288,11 +285,12 @@ def test_out_of_range_rank_is_rejected() -> None:
 # Degenerate configurations (G3)
 # ---------------------------------------------------------------------------
 def test_tau_covering_the_score_range_warns_and_does_not_raise() -> None:
-    """A legitimate point at the top of a sweep, so a warning, not an error.
+    """A legitimate point at the top of a sweep, so a warning rather than an
+    error.
 
-    Note ">=" rather than ">": at tau exactly equal to the range every ball is
-    already the whole corpus, so the degeneracy has begun. That is an erratum to
-    G3, which says "tau > score range".
+    ">=" rather than ">": at tau equal to the range every ball is already the
+    whole corpus, so the degeneracy has begun. An erratum to G3, which says
+    "tau > score range".
     """
     s = (1.0, 0.6, 0.2)
     span = s[0] - s[-1]
@@ -305,9 +303,8 @@ def test_tau_covering_the_score_range_warns_and_does_not_raise() -> None:
 def test_all_equal_scores_gives_rho_one_not_an_inflation_warning() -> None:
     """An erratum to G3, which says rho "fires" here.
 
-    With every score equal, chain and clique coincide, so ``rho = 1`` -- its
-    *minimum*. What actually fires is the score-range warning, because the range
-    is zero.
+    With every score equal, chain and clique coincide, so ``rho = 1``, its
+    minimum. The score-range warning fires instead, the range being zero.
     """
     s = (0.5, 0.5, 0.5, 0.5)
     with pytest.warns(TauExceedsScoreRangeWarning):
@@ -319,7 +316,7 @@ def test_all_equal_scores_gives_rho_one_not_an_inflation_warning() -> None:
 
 def test_zero_range_with_zero_tau_is_the_legitimate_baseline() -> None:
     """The one exclusion from the ">= range" rule: exact ties at tau = 0 are the
-    intended baseline, not a degenerate configuration."""
+    intended baseline rather than a degenerate configuration."""
     import warnings
 
     with warnings.catch_warnings():
@@ -343,11 +340,11 @@ def test_empty_corpus_yields_no_groups() -> None:
 
 
 def test_the_zero_score_block_is_one_exact_tie_group(mini_model) -> None:  # type: ignore[no-untyped-def]
-    """Documents with no in-vocabulary tokens all score exactly 0.
+    """Documents with no in-vocabulary tokens all score 0.
 
-    They therefore form a single exact-tie group at the bottom of every ranking,
-    even at tau = 0 -- which is why section 7.3's "near-tie regime" is, on short
-    text, substantially an *exact*-tie regime.
+    They form one exact-tie group at the bottom of every ranking even at
+    tau = 0, so on short text section 7.3's "near-tie regime" is substantially
+    an exact-tie regime.
     """
     from tfidf_stability.similarity.cosine import cosine_against_corpus
     from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
@@ -396,12 +393,11 @@ def test_chain_of_returns_the_unique_containing_chain() -> None:
 def test_an_inadmissible_tau_is_rejected_by_every_tie_group_object(bad: float) -> None:
     """NaN slipped through a guard whose own message said non-negative.
 
-    The check was ``if tau < 0.0``, and every comparison with NaN is false. It
-    was not harmless: with ``tau = NaN`` both ``gap > tau`` and ``gap <= tau``
-    are false, so ``tie_chains`` returned a single group covering the corpus
-    while ``tie_cliques`` returned all singletons and ``rho`` reported N --
-    three mutually contradictory answers to the same question, with no error,
-    and ``rho`` at its maximum rather than a refusal.
+    The check was ``if tau < 0.0`` and every comparison with NaN is false. With
+    ``tau = NaN`` both ``gap > tau`` and ``gap <= tau`` are false, so
+    ``tie_chains`` returned a single group covering the corpus, ``tie_cliques``
+    returned all singletons and ``rho`` reported N: three contradictory answers
+    to one question, with no error and ``rho`` at its maximum.
     """
     scores = (1.0, 0.9, 0.5, 0.5, 0.1)
     for call in (tie_chains, tie_cliques, chain_inflation_ratio):

@@ -1,26 +1,22 @@
 """Lemmatisation (section 2), implemented as a set of interchangeable backends.
 
-README section 2 requires lemmatisation as part of a "fixed, deterministic
-preprocessing map". Meeting that literally is harder than it looks: NLTK's
-WordNet lemmatiser needs a downloaded, versioned corpus plus a POS tagger, and
-spaCy needs a statistical model whose output is not stable across releases.
-Neither is acceptable in an artefact whose central claim is reproducibility, and
-neither ports to C++.
+README section 2 requires lemmatisation inside a "fixed, deterministic
+preprocessing map". NLTK's WordNet lemmatiser needs a downloaded, versioned
+corpus plus a POS tagger; spaCy needs a statistical model whose output moves
+between releases. Neither is reproducible, and neither ports to C++.
 
-The default backend is therefore **Porter2** (the Snowball English algorithm),
-chosen for three reasons: it is a complete published algorithmic specification
-with no data files; the same upstream source generates both the Python and the C
-implementation, so the reference and native backends agree by construction; and
-snowballstem.org publishes a canonical 42 649-word test-vector pair, so the
-preprocessing step is machine-verified rather than merely asserted.
+The default backend is Porter2 (the Snowball English algorithm): a complete
+published algorithmic specification with no data files, one upstream source
+generating both the Python and the C implementation, and a canonical 42 649-word
+test-vector pair from snowballstem.org, so this step is machine-verified.
 
-The implementation is vendored rather than hand-written -- see
-:mod:`tfidf_stability.preprocessing._snowball` for the reasoning and provenance.
+The implementation is vendored; see
+:mod:`tfidf_stability.preprocessing._snowball` for reasoning and provenance.
 
-Porter2 is a **stemmer**, not a lemmatiser -- it produces "happi" from "happy",
-which is not a word. That is an honest limitation, recorded in
-``docs/spec_addenda.md#g7`` along with the proposed wording change to the paper.
-:class:`LookupLemmatiser` is provided for callers who need true lemmas.
+Porter2 is a stemmer, so it produces "happi" from "happy", which is not a word.
+That limitation is recorded in ``docs/spec_addenda.md#g7`` with the proposed
+wording change to the paper. :class:`LookupLemmatiser` serves callers who need
+true lemmas.
 """
 
 from __future__ import annotations
@@ -79,10 +75,9 @@ _STEMMER = EnglishStemmer()
 def porter2_stem(word: str) -> str:
     """Reduce an English word to its Porter2 (Snowball English) stem.
 
-    Expects an already-normalised, lowercase token.
-
-    Verified against the official ``voc.txt``/``output.txt`` vector pair
-    (42 649 words) by ``tests/test_preprocessing_determinism.py``.
+    Expects an already-normalised, lowercase token. Verified against the official
+    ``voc.txt``/``output.txt`` vector pair (42 649 words) by
+    ``tests/test_preprocessing_determinism.py``.
     """
     return str(_STEMMER.stemWord(word))
 
@@ -108,9 +103,8 @@ class Porter2Stemmer:
     name = "porter2"
 
     def __init__(self) -> None:
-        # Stemming is a pure function, so memoising cannot change any result --
-        # it only avoids re-deriving the stem of every repeated token. Corpora
-        # are Zipfian, so the hit rate is very high.
+        # Stemming is pure, so the memo cannot change a result. Corpora are
+        # Zipfian, so the hit rate is high.
         self._memo: dict[str, str] = {}
 
     def __call__(self, token: str) -> str:
@@ -127,9 +121,8 @@ class Porter2Stemmer:
 class LookupLemmatiser:
     """Table-driven true lemmatisation, falling back to a secondary backend.
 
-    The table is loaded from a frozen, hash-verified asset so the mapping is part
-    of the run's recorded provenance rather than an ambient property of the
-    machine.
+    The table comes from a frozen, hash-verified asset, so the mapping is part of
+    the run's recorded provenance instead of an ambient property of the machine.
     """
 
     name = "lookup"

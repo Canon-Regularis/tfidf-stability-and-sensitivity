@@ -2,38 +2,35 @@
 """Section 4.4's certificate, and the two ways it is misread (A1).
 
 Section 4.4 states one implication: ``|ds_i| <= eps`` for every document and
-``eps < m_k / 2`` together *guarantee* the top-k set is invariant. It is a
-sufficient condition, and a sufficient condition is routinely read as two things
-it does not say -- in opposite directions, by different readers, from the same
-sentence.
+``eps < m_k / 2`` together guarantee the top-k set is invariant. Being merely
+sufficient, it gets read as two stronger claims, in opposite directions by
+different readers, from the same sentence.
 
-Read as a prediction, "not certified" becomes "will break", and the certificate
+Read as a prediction, "not certified" becomes "will break" and the certificate
 turns into a false alarm: perturbations of many times the radius usually leave
-the top-k exactly where it was, because a flip needs a direction that scattered
-noise almost never takes. Read as a safety margin, "sufficient" becomes
-"conservative", and someone shaves the radius: but ``m_k / 2`` is *exact*, and
-the perturbation that breaks it at ``m_k / 2 + delta`` can be written down.
+the top-k where it was, since a flip needs a direction that scattered noise
+almost never takes. Read as a safety margin, "sufficient" becomes "conservative"
+and someone shaves the radius; but ``m_k / 2`` is exact, and the perturbation
+that breaks it at ``m_k / 2 + delta`` can be written down.
 
-Both misreadings are cheap to refute and expensive to leave standing. Section
-7.2 reports certified radii as "empirical certificates of stability", and the
-transition curve in ``analysis/stability_profile.py`` only becomes interpretable
-once the worst case and the average case have been separated. So this file
-exhibits all three cases on one hand-built ranking:
+Section 7.2 reports certified radii as "empirical certificates of stability",
+and the transition curve in ``analysis/stability_profile.py`` only becomes
+interpretable once worst case and average case have been separated. So all three
+cases are exhibited on one hand-built ranking:
 
-    1. below the radius, in the worst possible direction -- unchanged, provably;
-    2. four times the radius, scattered -- unchanged anyway, so the converse of
+    1. below the radius, in the worst possible direction: unchanged, provably;
+    2. four times the radius, scattered: unchanged anyway, so the converse of
        the theorem is false;
-    3. a hair above the radius, adversarially aimed -- flipped, so the bound is
-       tight rather than merely safe.
+    3. a hair above the radius, adversarially aimed: flipped, so the bound is
+       tight.
 
 Every score, perturbation and intermediate value is an integer multiple of
 2^-20 with magnitude below 2, so each occupies at most 21 significant bits of a
-53-bit binary64 significand. Nothing here rounds, and that is the point: a
-demonstration about the *decision* boundary must carry no floating-point story
-of its own, or a reader cannot tell which of the two effects they are looking
-at. It is the same dyadic construction ``tests/test_margins_and_flip_radii.py``
-uses, and the reason ``docs/spec_addenda.md`` states its tightness note in those
-terms.
+53-bit binary64 significand. Nothing here rounds; a demonstration about the
+decision boundary carrying its own floating-point story leaves a reader unable to
+tell the two effects apart. Same dyadic construction as
+``tests/test_margins_and_flip_radii.py``, and the terms in which
+``docs/spec_addenda.md`` states its tightness note.
 
 Run::
 
@@ -61,15 +58,15 @@ from tfidf_stability.ranking.ranker import rank, sorted_scores_desc  # noqa: E40
 from tfidf_stability.ranking.sort_keys import SortKeySpec  # noqa: E402
 from tfidf_stability.utils.numerics import same_bits  # noqa: E402
 
-#: Six documents whose scores are dyadic by construction. Hand-built rather than
-#: fitted: a real TF-IDF score is a quotient of sums and would drag its own
-#: rounding into a demonstration that is not about rounding.
+#: Six documents with dyadic scores. Hand-built rather than fitted: a real
+#: TF-IDF score is a quotient of sums and would drag its own rounding into a
+#: demonstration about the decision boundary.
 DOC_IDS: tuple[str, ...] = ("d0", "d1", "d2", "d3", "d4", "d5")
 SCORES: tuple[float, ...] = (0.75, 0.25, 1.0, 0.5, 0.125, 0.0)
 
 #: The only tie-break attribute, so the closing exact-tie case has a single
-#: visible cause. d1 -- the document just outside the top-k -- is the popular
-#: one, so it wins any tie it is given.
+#: visible cause. d1 sits just outside the top-k and is the popular one, so it
+#: wins any tie it is given.
 POPULARITY: tuple[int, ...] = (50, 90, 40, 10, 30, 20)
 
 K = 3
@@ -85,8 +82,7 @@ _THIN = "-" * 74
 def _require(condition: bool, message: str) -> None:
     """Fail loudly rather than print a claim the run did not establish.
 
-    Not ``assert``: this file exists to be run, and its claims must survive
-    ``python -O`` intact.
+    ``assert`` would vanish under ``python -O``, and this file exists to be run.
     """
     if not condition:
         raise AssertionError(message)
@@ -127,8 +123,8 @@ def _report(
     deltas = [p - s for s, p in zip(SCORES, perturbed, strict=True)]
     _require(_is_exact(deltas) and _is_exact(perturbed), f"{title}: left the dyadic grid")
 
-    # The movement that actually happened, which is what section 4.4 bounds --
-    # not the eps someone intended to apply.
+    # Section 4.4 bounds the movement that happened; the eps someone intended to
+    # apply never enters.
     eps = max(abs(d) for d in deltas)
     radius = certified_radius(sorted_scores_desc(SCORES), K).set_radius
     certified = is_top_k_stable(sorted_scores_desc(SCORES), K, eps)
@@ -227,7 +223,7 @@ def _case_certified(table: AttributeTable, base_order: tuple[int, ...]) -> None:
 
 
 def _case_uncertified_but_unchanged(table: AttributeTable, base_order: tuple[int, ...]) -> None:
-    """Above the radius, but not aimed at the boundary. The converse is false."""
+    """Above the radius, aimed away from the boundary. The converse is false."""
     deltas = (-0.375, +0.0625, -0.5, +0.5, +0.125, +0.125)
     perturbed = tuple(s + d for s, d in zip(SCORES, deltas, strict=True))
     top = _report(

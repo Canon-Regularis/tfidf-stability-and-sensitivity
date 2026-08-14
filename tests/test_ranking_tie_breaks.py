@@ -1,15 +1,13 @@
 """The ranking operator and its tie-break (README sections 2.3.1 and 4.5).
 
-The central claim under test is that the comparator is a **strict total order**,
-from which everything else follows: the sorted permutation is unique, sort
-stability is irrelevant, and the reference and native backends can be required
-to agree exactly rather than approximately.
+The claim under test: the comparator is a strict total order. Everything else
+follows from it. The sorted permutation is unique, sort stability is irrelevant,
+and the two backends can be required to agree exactly.
 
-The most valuable test here is
-:func:`test_all_distinct_scores_makes_the_three_operators_identical`. It
-establishes the premise of research question A2 -- that any disagreement between
-pi, pi_score and pi_alt is attributable to *ties alone* -- without which the
-whole tie-break ablation would be measuring something else.
+:func:`test_all_distinct_scores_makes_the_three_operators_identical` establishes
+the premise of research question A2, that any disagreement between pi, pi_score
+and pi_alt is attributable to ties alone. Without it the tie-break ablation
+would be measuring something else.
 """
 
 from __future__ import annotations
@@ -68,8 +66,8 @@ def table_of(n: int, **cols: list[int]) -> AttributeTable:
 # Construction and validation
 # ---------------------------------------------------------------------------
 def test_duplicate_identifiers_are_rejected() -> None:
-    """Not hygiene: unique ids are the precondition of the strict total order,
-    and therefore of every uniqueness claim this layer makes."""
+    """Unique ids are the precondition of the strict total order, and so of
+    every uniqueness claim this layer makes."""
     with pytest.raises(DuplicateIdentifierError):
         AttributeTable.from_records(
             [{"doc_id": "a", "popularity": 1}, {"doc_id": "a", "popularity": 2}],
@@ -86,21 +84,19 @@ def test_non_finite_float_attribute_is_rejected() -> None:
 
 
 def test_the_exact_pair_separates_means_that_binary64_collides() -> None:
-    """The test that proves G8's exact representation is not decoration.
+    """Why G8 keeps ratings as exact pairs.
 
     ``1/3`` and ``(10^17+1)/(3*10^17)`` are different reals that round to the
-    *same* binary64. A float mean would call them equal and let the ordering
-    fall through to the identifier; cross-multiplication separates them, which
-    is information the tie-break is entitled to.
+    same binary64. A float mean calls them equal and drops the ordering through
+    to the identifier; cross-multiplication separates them.
     """
     a_num, a_den = 1, 3
     b_num, b_den = 10**17 + 1, 3 * 10**17
     assert a_num / a_den == b_num / b_den, "the premise: binary64 collides them"
     assert ratio_less(a_num, a_den, b_num, b_den), "but they are genuinely ordered"
 
-    # The cross-products that a comparison actually forms are int64-safe, even
-    # though the denominators are large: the small denominator pairs with the
-    # large numerator and vice versa.
+    # The cross-products a comparison forms stay int64-safe despite the large
+    # denominators: small denominator against large numerator and vice versa.
     assert max(a_num * b_den, b_num * a_den) < (1 << 63) - 1
 
     table = AttributeTable.from_records(
@@ -148,8 +144,8 @@ def test_forbidden_missing_value_raises() -> None:
 def test_ratio_overflow_is_rejected_for_the_native_mirror() -> None:
     """Python cannot overflow; C++ can, so the guard lives at construction.
 
-    The overflowing product must be one that a *comparison* would actually
-    form -- a numerator from one document against a denominator from another.
+    The overflowing product has to be one a comparison forms: a numerator from
+    one document against a denominator from another.
     """
     spec = (AttributeSpec("rating", Direction.DESC, AttributeDType.RATIO_I64),)
     with pytest.raises(TfidfStabilityError, match="overflows int64"):
@@ -174,10 +170,10 @@ def test_the_overflow_guard_does_not_reject_a_single_document() -> None:
 def test_the_overflow_guard_is_not_over_conservative() -> None:
     """A false positive the naive bound would produce.
 
-    Bounding by ``max(num) * max(den)`` over the whole column would reject this
-    table, because document ``b`` holds both the largest numerator *and* the
-    largest denominator -- a pairing that no comparison ever forms. The products
-    that actually occur here are both about 3e17, comfortably int64-safe.
+    Bounding by ``max(num) * max(den)`` over the whole column rejects this
+    table: ``b`` holds the largest numerator and the largest denominator, a
+    pairing no comparison ever forms. The products that do occur are both about
+    3e17, comfortably int64-safe.
     """
     spec = (AttributeSpec("rating", Direction.DESC, AttributeDType.RATIO_I64),)
     table = AttributeTable.from_records(
@@ -228,7 +224,7 @@ def test_five_selection_algorithms_agree(
 
 
 def test_ranking_is_invariant_to_input_document_order() -> None:
-    """The stronger corollary, and the better test.
+    """The stronger check.
 
     A non-total comparator (score-only, say) can pass the five-algorithm check
     by luck on a small input; it cannot survive a permutation of the input.
@@ -249,7 +245,7 @@ def test_ranking_is_invariant_to_input_document_order() -> None:
         AttributeTable.from_records([records[i] for i in perm], specs),
         PI_SCORE,
     )
-    # Compare by document identity, not by position.
+    # Compare by document identity rather than by position.
     assert [f"d{i}" for i in forward.order] == [f"d{perm[i]}" for i in shuffled.order]
 
 
@@ -261,10 +257,9 @@ def test_all_distinct_scores_makes_the_three_operators_identical(
 ) -> None:
     """Validates the premise of research question A2.
 
-    With no ties, the attribute tuple is never consulted, so pi, pi_score and
-    pi_alt must coincide. Any disagreement observed in the section 7.3 ablation
-    is therefore attributable to ties alone -- which is exactly what that
-    experiment claims to measure.
+    With no ties the attribute tuple is never consulted, so pi, pi_score and
+    pi_alt coincide. Any disagreement in the section 7.3 ablation is then
+    attributable to ties alone, which is what that experiment claims to measure.
     """
     scores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]
     rankings = rank_all_operators(scores, mini_attributes)
@@ -304,12 +299,12 @@ def test_score_dominates_every_attribute(mini_attributes: AttributeTable) -> Non
 def test_non_finite_score_is_rejected_before_sorting(
     mini_attributes: AttributeTable, mode: StrictMode, bad: float
 ) -> None:
-    """Rejected in **lenient mode too**.
+    """Rejected in lenient mode too.
 
-    G3 lists non-finite scores among the *rejected* inputs, not among the
+    G3 lists non-finite scores among the rejected inputs rather than the
     legitimate degenerate grid points. In the native backend a NaN in a sort key
-    is undefined behaviour -- a genuine out-of-bounds write in libstdc++'s final
-    insertion pass -- rather than merely a wrong answer.
+    is undefined behaviour: an out-of-bounds write in libstdc++'s final
+    insertion pass, beyond merely a wrong answer.
     """
     scores = [0.5, bad, 0.1, 0.2, 0.3, 0.4]
     with pytest.raises(TfidfStabilityError, match="not finite"):
@@ -353,7 +348,8 @@ def test_truncated_ranking_refuses_whole_corpus_questions(
 def test_sorted_scores_is_complete_even_when_the_order_is_truncated(
     mini_attributes: AttributeTable,
 ) -> None:
-    """The load-bearing asymmetry: truncate documents, never the score array."""
+    """The asymmetry that margins depend on: truncate the order, never the
+    score array."""
     r = rank_top_k([0.9, 0.8, 0.7, 0.6, 0.5, 0.4], mini_attributes, PI, k=2)
     assert len(r.sorted_scores) == 6
     assert len(r.order) == 3
@@ -370,12 +366,11 @@ def test_operator_identity_and_digest_are_recorded(mini_attributes: AttributeTab
 
 
 def test_key_digest_binds_the_attribute_table_not_just_the_priority() -> None:
-    """The digest identifies the *ranking function*, not the raw values.
+    """The digest identifies the ranking function rather than the raw values.
 
-    It is taken over the integer ranks, so two tables that induce identical
-    orderings for every score vector share a digest -- which is the useful
-    property, since the digest exists to certify that a published ranking is
-    reproducible. Tables that order documents differently must differ.
+    Taken over the integer ranks, so two tables that induce identical orderings
+    for every score vector share a digest, which is what certifying a published
+    ranking needs. Tables that order documents differently must differ.
     """
     same_order_a = table_of(2, popularity=[1, 2])
     same_order_b = table_of(2, popularity=[5, 6])  # different values, same ranks
@@ -428,12 +423,13 @@ def test_sorted_scores_desc_is_a_sorted_permutation(scores: list[float]) -> None
 # Equal means must share a rank (regression)
 # ---------------------------------------------------------------------------
 def test_equal_means_written_differently_receive_the_same_rank() -> None:
-    """G8's exact comparison has to survive rank-encoding, not just `ratio_less`.
+    """G8's exact comparison has to survive rank-encoding as well as
+    `ratio_less`.
 
     `_order_distinct` deduplicates with `dict.fromkeys`, which uses tuple
-    equality, so (14, 2) and (21, 3) both survive -- yet they are the same mean,
-    3.5, and `_ratio_cmp` says so. Numbering the survivors positionally gave them
-    two different ranks, which silently un-tied a rating that G8 requires to tie.
+    equality, so (14, 2) and (21, 3) both survive despite being the same mean of
+    3.5, which `_ratio_cmp` reports. Numbering the survivors positionally gave
+    them two ranks and un-tied a rating G8 requires to tie.
     """
     table = AttributeTable.from_records(
         [
@@ -467,9 +463,9 @@ def test_a_rating_tie_falls_through_to_the_next_attribute() -> None:
 def test_the_ranking_does_not_depend_on_the_order_records_were_supplied_in() -> None:
     """The property section 2.3.1's total-order argument rests on.
 
-    This is the shape the earlier bug actually took: `dict.fromkeys` preserves
-    *insertion* order, so which of two equal representations sorted first
-    depended on the corpus order, and the whole ranking moved with it.
+    The shape the earlier bug took: `dict.fromkeys` preserves insertion order,
+    so which of two equal representations sorted first depended on the corpus
+    order, and the ranking moved with it.
     """
     a = {"doc_id": "a", "popularity": 1, "rating_sum2": 14, "rating_count": 2, "engagement": 5}
     b = {"doc_id": "b", "popularity": 1, "rating_sum2": 21, "rating_count": 3, "engagement": 9}

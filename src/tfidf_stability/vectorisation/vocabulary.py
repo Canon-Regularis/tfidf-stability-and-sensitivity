@@ -1,7 +1,7 @@
 """Vocabulary construction (README section 2.1).
 
-This module carries the project's **determinism guarantee**, and a bug here would
-silently invalidate every published number:
+This module carries the project's determinism guarantee; a bug here silently
+invalidates every published number:
 
     The vocabulary, the identifier assignment, and therefore every document
     frequency, IDF value, weight, norm, score and ranking are pure functions of
@@ -9,17 +9,17 @@ silently invalidate every published number:
     presentation order, to hash seeds, to dictionary iteration order, to
     ``PYTHONHASHSEED``, and to thread count.
 
-That is achieved by separating two phases. During accumulation any hash map will
-do, because nothing about its iteration order escapes. At *freeze* time the
-surviving tokens are sorted into **UTF-8 byte order** and identifiers assigned by
-position, so the mapping from token to identifier depends only on the token set.
+Two phases give that. During accumulation any hash map will do, since nothing
+about its iteration order escapes. At freeze time the surviving tokens are sorted
+into UTF-8 byte order and identifiers assigned by position, so token to
+identifier depends only on the token set.
 
-Byte order specifically -- not locale collation, and not Unicode collation, whose
-tailorings vary by ICU version and platform. Since tokens are NFKC-normalised
-upstream, byte order is well defined on a canonical form and is trivially
-reproducible in C++ via ``memcmp``.
+Byte order in preference to locale collation or Unicode collation, whose
+tailorings vary by ICU version and platform. Tokens are NFKC-normalised upstream,
+so byte order is well defined on a canonical form and reproducible in C++ via
+``memcmp``.
 
-The ``max_features`` truncation rule is left unspecified by the paper; see
+The paper leaves the ``max_features`` truncation rule unspecified; see
 ``docs/spec_addenda.md#g6`` for the total order adopted here (``TFIDF-SPEC-01``).
 """
 
@@ -51,8 +51,8 @@ class MaxFeaturesPolicy(str, Enum):
     DF_DESC = "df_desc"
     #: (cf desc, df desc, token bytes asc). Ranks by total occurrences instead.
     CF_DESC = "cf_desc"
-    #: scikit-learn's rule, provided solely so the differential test against
-    #: sklearn can be run with a matching criterion.
+    #: scikit-learn's rule, so the differential test against sklearn can run
+    #: with a matching criterion.
     SKLEARN_COMPAT = "sklearn_compat"
 
     def __str__(self) -> str:  # pragma: no cover - trivial
@@ -68,7 +68,7 @@ class VocabularyConfig:
             in (0, 1] is a proportion of the corpus. Section 2.1's "minimum
             document-frequency threshold".
         max_df: Maximum document frequency, same convention. ``None`` disables.
-            Not required by the paper, but standard and harmless when unset.
+            Absent from the paper; standard, and inert when unset.
         max_features: Retain at most this many tokens. ``None`` disables.
         max_features_policy: Which total order decides the cut (see G6).
     """
@@ -84,27 +84,25 @@ def _resolve_threshold(
 ) -> int:
     """Turn an absolute-or-proportional threshold into an absolute document count.
 
-    Proportions are resolved exactly, because this threshold decides vocabulary
-    membership and vocabulary membership decides every number downstream.
+    Proportions are resolved exactly: this threshold decides vocabulary
+    membership, and membership decides every number downstream.
 
-    ``limit_denominator`` is the load-bearing half of that, not a tidy-up.
-    ``Fraction(0.1)`` is the *exact* binary64 value
-    ``3602879701896397/36028797018963968``, a shade above one tenth, so
-    ``Fraction(0.1) * 30`` exceeds 3 and ceils to **4** -- a stricter filter than
-    the ``0.1`` the caller wrote. Snapping to ``1/10`` first gives 3. Remove the
+    ``limit_denominator`` does that work. ``Fraction(0.1)`` is the exact binary64
+    value ``3602879701896397/36028797018963968``, a shade above one tenth, so
+    ``Fraction(0.1) * 30`` exceeds 3 and ceils to 4, a stricter filter than the
+    ``0.1`` the caller wrote. Snapping to ``1/10`` first gives 3. Drop the
     ``limit_denominator`` and ``min_df=0.1`` silently changes the vocabulary.
 
     (An earlier version of this note justified the Fraction by claiming
     ``0.3 * 10`` is ``2.9999999999999996`` and ``0.1 * 30`` is
-    ``3.0000000000000004``. Both are exactly ``3.0`` in binary64, so the hazard
-    it described does not exist and the one above went unrecorded.)
+    ``3.0000000000000004``. Both are ``3.0`` in binary64, so that hazard does not
+    exist and the real one went unrecorded.)
 
-    The rounding direction depends on which end is being pinned, so it is a
-    parameter rather than shared. ``min_df`` keeps ``df >= p*n`` and rounds
-    **up**; ``max_df`` keeps ``df <= p*n`` and must round **down**. Rounding an
-    upper bound up admits exactly what the caller asked to exclude: at ``p=0.5,
-    n=3`` it keeps a token present in 2 of 3 documents (66.7%), and at
-    ``p=0.95, n=7`` it resolves to 7 and filters nothing at all.
+    Rounding direction is a parameter because the two ends differ. ``min_df``
+    keeps ``df >= p*n`` and rounds up; ``max_df`` keeps ``df <= p*n`` and must
+    round down. Rounding an upper bound up admits what the caller asked to
+    exclude: at ``p=0.5, n=3`` it keeps a token present in 2 of 3 documents
+    (66.7%), and at ``p=0.95, n=7`` it resolves to 7 and filters nothing.
     """
     if isinstance(value, float):
         if not 0.0 < value <= 1.0:
@@ -123,8 +121,8 @@ class Vocabulary:
     """A frozen, lexicographically ordered vocabulary.
 
     ``tokens[i]`` is the token with identifier ``i``, and ``tokens`` is sorted in
-    ascending UTF-8 byte order. Identifiers are therefore a deterministic
-    function of the token set alone.
+    ascending UTF-8 byte order, so identifiers are a deterministic function of
+    the token set alone.
     """
 
     tokens: tuple[str, ...]
@@ -132,7 +130,7 @@ class Vocabulary:
     df: tuple[int, ...]
     #: Collection frequency (total occurrences), indexed by identifier.
     cf: tuple[int, ...]
-    #: Number of documents the vocabulary was built from -- N in section 2.1.
+    #: Number of documents the vocabulary was built from: N in section 2.1.
     n_documents: int
     #: Tokens seen during accumulation but discarded by filtering.
     n_discarded: int
@@ -160,8 +158,8 @@ class Vocabulary:
     def digest(self) -> str:
         """SHA-256 over the canonical ``token\\tdf\\tcf`` listing.
 
-        Recorded in every run manifest. Because the listing is in identifier
-        order and identifiers are byte-sorted, the digest is a complete and
+        Recorded in every run manifest. The listing is in identifier order and
+        identifiers are byte-sorted, so the digest is a complete,
         order-independent fingerprint of the vocabulary.
         """
         h = hashlib.sha256()
@@ -173,8 +171,8 @@ class Vocabulary:
     def is_sorted(self) -> bool:
         """Whether identifiers really are in ascending UTF-8 byte order.
 
-        The determinism guarantee rests on this; it is asserted at construction
-        and re-checked by the reproducibility tests rather than assumed.
+        The determinism guarantee rests on this, so it is asserted at
+        construction and re-checked by the reproducibility tests.
         """
         encoded = [t.encode("utf-8") for t in self.tokens]
         return all(a < b for a, b in pairwise(encoded))
@@ -183,9 +181,9 @@ class Vocabulary:
 def _byte_key(token: str) -> bytes:
     """Sort key giving UTF-8 byte order.
 
-    Python's default string ordering is by code point, which for UTF-8 happens to
-    coincide with byte order -- but encoding explicitly documents the intent and
-    guarantees the C++ ``memcmp`` implementation agrees.
+    Python's default string ordering is by code point, which for UTF-8 coincides
+    with byte order; encoding explicitly states the intent and guarantees the C++
+    ``memcmp`` implementation agrees.
     """
     return token.encode("utf-8")
 
@@ -206,8 +204,8 @@ def build_vocabulary(
 
     Raises:
         EmptyVocabularyError: If filtering removes every token. Treated as a
-            configuration error rather than a property of the data, since it
-            almost always means ``min_df`` is too high for the corpus size.
+            configuration error: it almost always means ``min_df`` is too high
+            for the corpus size.
     """
     cfg = config or VocabularyConfig()
 
@@ -227,12 +225,10 @@ def build_vocabulary(
 
     n_seen = len(df_counter)
 
-    # Validated here because the sibling thresholds are, and because the failure
-    # is silent rather than loud: ``survivors[:-1]`` is a legal slice, so
-    # ``max_features=-1`` quietly dropped the lowest-ranked token instead of
-    # raising. ``-1`` is the plausible typo for "unlimited", which this codebase
-    # spells ``null``. ``max_features=0`` already failed, via
-    # ``EmptyVocabularyError``, so the negative case was the only quiet one.
+    # ``survivors[:-1]`` is a legal slice, so ``max_features=-1`` quietly dropped
+    # the lowest-ranked token instead of raising. ``-1`` is the plausible typo
+    # for "unlimited", which this codebase spells ``null``. ``max_features=0``
+    # already failed via ``EmptyVocabularyError``.
     if cfg.max_features is not None and cfg.max_features < 0:
         raise ValueError(f"max_features must be non-negative or None, got {cfg.max_features}")
 
@@ -251,8 +247,7 @@ def build_vocabulary(
 
         # All three keys share one shape so the sort is a single total order.
         # sklearn ranks by collection frequency alone and breaks ties by term;
-        # the constant middle component leaves that ordering unchanged while
-        # keeping the three keys mutually comparable.
+        # the constant middle component leaves that ordering unchanged.
         def rank(t: str) -> tuple[int, int, bytes]:
             if policy is MaxFeaturesPolicy.CF_DESC:
                 return (-cf_counter[t], -df_counter[t], _byte_key(t))
@@ -283,6 +278,6 @@ def build_vocabulary(
         n_discarded=n_seen - len(tokens),
         _index=index,
     )
-    # Cheap, and it is the guarantee the whole project rests on.
+    # O(|V|), and it is the invariant everything downstream assumes.
     assert vocab.is_sorted(), "vocabulary identifiers are not in UTF-8 byte order"
     return vocab

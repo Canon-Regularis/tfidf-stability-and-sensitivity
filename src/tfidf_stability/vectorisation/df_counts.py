@@ -2,15 +2,14 @@
 
     df(t) = |{ i : t appears at least once in d_i }|
 
-Document frequency counts *documents*, not occurrences; collection frequency
-counts occurrences. The paper uses only ``df``, but ``cf`` is needed as the
-secondary key of the ``max_features`` truncation rule (``spec_addenda.md#g6``)
-and is cheap to accumulate in the same pass.
+``df`` counts documents; ``cf`` counts occurrences. The paper uses only ``df``,
+but ``cf`` is the secondary key of the ``max_features`` truncation rule
+(``spec_addenda.md#g6``) and accumulates in the same pass.
 
-:func:`~tfidf_stability.vectorisation.vocabulary.build_vocabulary` computes both
-during its accumulation phase, so these functions exist mainly for inspecting
-intermediates (README section 1.2) and for the perturbation analysis of section
-4.1, which needs ``df`` before and after a corpus edit.
+:func:`~tfidf_stability.vectorisation.vocabulary.build_vocabulary` computes both,
+so these functions exist for inspecting intermediates (README section 1.2) and
+for the perturbation analysis of section 4.1, which needs ``df`` before and after
+a corpus edit.
 """
 
 from __future__ import annotations
@@ -28,8 +27,8 @@ __all__ = [
 def document_frequencies(documents: Iterable[Sequence[str]]) -> dict[str, int]:
     """Document frequency of every feature.
 
-    Each document contributes at most 1 per distinct feature, which is what
-    ``set(features)`` enforces.
+    ``set(features)`` caps each document's contribution at 1 per distinct
+    feature.
     """
     df: Counter[str] = Counter()
     for features in documents:
@@ -52,15 +51,14 @@ def df_after_edit(
 ) -> dict[str, int]:
     """Document frequency after replacing one document's features.
 
-    Only the features of the edited document can change, so this is
-    ``O(nnz of the edited document)`` rather than ``O(nnz)`` -- which is what
-    makes the corpus-perturbation experiments of section 4.1 tractable at scale.
+    Only the edited document's features can change, so this costs
+    ``O(nnz of the edited document)`` rather than ``O(nnz)``, which is what makes
+    the corpus-perturbation experiments of section 4.1 tractable at scale.
 
-    Note that the *corpus size* ``N`` is unchanged by an edit but changes under
-    an addition or removal, and ``idf`` depends on both. Callers must therefore
-    pass the correct ``N`` to
-    :func:`~tfidf_stability.vectorisation.idf.smoothed_idf` separately; this
-    function deliberately does not guess.
+    ``N`` is unchanged by an edit but changes under an addition or removal, and
+    ``idf`` depends on both. Callers pass ``N`` to
+    :func:`~tfidf_stability.vectorisation.idf.smoothed_idf` themselves; this
+    function does not guess.
 
     Args:
         df: Document frequencies before the edit. Not mutated.

@@ -1,11 +1,8 @@
 """Shared scalar type aliases.
 
-Mirrors ``cpp/include/tfidf/core/types.hpp`` one-for-one, so the claim that the
-Python package and the C++ tree have the same shape holds at the level of names
-as well as directories. The aliases are documentation rather than enforcement --
-Python will not check them at run time -- but they make the *width* the native
-side uses visible at every Python call site, which is what matters when a value
-is about to cross the boundary.
+Mirrors ``cpp/include/tfidf/core/types.hpp`` one-for-one. Python does not check
+these at run time; they record the width the native side uses wherever a value
+crosses the boundary.
 """
 
 from __future__ import annotations
@@ -29,14 +26,13 @@ TermId: TypeAlias = int
 #: A document's row index in the corpus matrix. ``int32`` in C++.
 DocIndex: TypeAlias = int
 
-#: A document's stable external identifier -- the final tie-break key. Distinct
-#: from :data:`DocIndex`, which is positional and changes if the corpus is
-#: reordered.
+#: A document's stable external identifier, and the final tie-break key.
+#: :data:`DocIndex` is positional and moves when the corpus is reordered.
 DocId: TypeAlias = str
 
-#: A 1-indexed position in a ranking, matching the paper's ``r_1 ... r_n``.
-#: Ranks are 1-indexed in the public API and 0-indexed in the arrays beneath it;
-#: every function that takes one says which it means.
+#: A 1-indexed position in a ranking, matching the paper's ``r_1 ... r_n``. The
+#: arrays beneath the public API are 0-indexed; every function taking a rank
+#: says which convention it means.
 Rank: TypeAlias = int
 
 #: Offset into a sparse structure's flat arrays. ``int64`` in C++, because total

@@ -1,10 +1,9 @@
 """Document frequency and smoothed IDF (README section 2.1).
 
-The golden values here are *derived*, not recorded: each is computed
-independently in exact arithmetic (:class:`~decimal.Decimal` at 80 digits) from
-the formula as written in the paper, then compared bit-for-bit against the
-implementation. A recorded snapshot would only catch regressions; a derivation
-also catches an error that has been present since the first commit.
+Every golden value is derived: computed in exact arithmetic
+(:class:`~decimal.Decimal` at 80 digits) from the formula as written in the paper,
+then compared bit for bit against the implementation. A snapshot catches
+regressions; a derivation also catches an error present since the first commit.
 """
 
 from __future__ import annotations
@@ -72,7 +71,7 @@ def test_vocabulary_is_invariant_to_document_order() -> None:
 
 
 # ---------------------------------------------------------------------------
-# IDF -- against the exact derivation
+# IDF: against the exact derivation
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("n", [1, 2, 3, 10, 610, 9742])
 def test_idf_matches_exact_derivation_bitwise(n: int) -> None:
@@ -91,12 +90,10 @@ def test_idf_is_strictly_decreasing_in_df(n: int) -> None:
 
 @pytest.mark.parametrize("n", [1, 7, 100, 9742])
 def test_idf_is_at_least_one(n: int) -> None:
-    """Strict positivity, and in fact ``idf >= 1``.
-
-    Section 2.1 claims only positivity, but ``df <= N`` forces the ratio to be
-    at least 1 and hence the logarithm non-negative. The stronger bound is what
-    makes the corpus-level Lipschitz constant of spec_addenda G4 computable, so
-    it is asserted rather than assumed.
+    """Section 2.1 claims only positivity, but ``df <= N`` forces the ratio to at
+    least 1 and hence the logarithm non-negative, giving ``idf >= 1``. The
+    corpus-level Lipschitz constant of spec_addenda G4 needs the stronger bound,
+    so it is asserted here.
     """
     for df in range(0, n + 1):
         assert smoothed_idf_one(df, n) >= 1.0
@@ -116,14 +113,12 @@ def test_idf_rejects_out_of_range_df() -> None:
 
 
 # ---------------------------------------------------------------------------
-# G13 -- the platform logarithm is not correctly rounded
+# G13: the platform logarithm is not correctly rounded
 # ---------------------------------------------------------------------------
 def test_platform_log_differs_from_correctly_rounded() -> None:
-    """Pins the finding that motivates the exact-logarithm default.
-
-    If this test ever *fails* -- that is, if the platform libm becomes correctly
-    rounded -- the exact-log machinery could be retired. Until then it is load
-    bearing, and this test keeps the reason visible.
+    """Pins the finding that motivates the exact-logarithm default. A failure here
+    means the platform libm has become correctly rounded and the exact-log
+    machinery can be retired.
     """
     n = 9742
     differing = sum(
@@ -134,13 +129,14 @@ def test_platform_log_differs_from_correctly_rounded() -> None:
             smoothed_idf_one(df, n, LogImpl.PLATFORM),
         )
     )
-    # Measured at ~15% on the reference machine; the bound is deliberately loose
-    # so the test asserts "materially different", not a machine-specific figure.
+    # Measured at ~15% on the reference machine. The loose bound asserts
+    # "materially different" rather than a machine-specific figure.
     assert differing > 0.05 * n, f"only {differing}/{n} entries differ"
 
 
 def test_division_before_log_is_not_the_same_as_difference_of_logs() -> None:
-    """Section 2.1 writes ``log((1+N)/(1+df))``; the form is load-bearing."""
+    """Section 2.1 writes ``log((1+N)/(1+df))``; the two forms disagree on over
+    half of df in 1..9742."""
     n = 9742
     differing = sum(
         1
@@ -173,7 +169,7 @@ def test_delta_idf_is_zero_for_an_unchanged_corpus() -> None:
 
 
 def test_delta_idf_matches_the_difference_of_idf_values() -> None:
-    """The ``+1`` cancels, so delta must equal the difference of the idf values."""
+    """The ``+1`` cancels, so delta equals the difference of the idf values."""
     got = delta_idf(2, 3, 10, 11)
     exp = smoothed_idf_one(3, 11) - smoothed_idf_one(2, 10)
     assert abs(got - exp) <= 4 * math.ulp(max(abs(got), abs(exp), 1.0))
@@ -198,9 +194,9 @@ def test_min_df_filters_rare_tokens() -> None:
 def test_min_df_as_a_proportion_is_resolved_exactly() -> None:
     """``Fraction(0.1) * 30`` exceeds 3 and would ceil to 4, excluding b.
 
-    It is ``limit_denominator`` that snaps 0.1 to one tenth and returns 3, so
-    this test fails if that call is dropped as cosmetic. (A previous version of
-    this docstring said ``0.1 * 30`` is 3.0000000000000004; it is exactly 3.0.)
+    ``limit_denominator`` snaps 0.1 to one tenth and returns 3, so dropping that
+    call as cosmetic fails this test. (An earlier version of this docstring said
+    ``0.1 * 30`` is 3.0000000000000004; it is 3.0.)
     """
     docs = [["a"] for _ in range(27)] + [["a", "b"] for _ in range(3)]
     vocab = build_vocabulary(docs, VocabularyConfig(min_df=0.1))
@@ -214,12 +210,12 @@ def test_max_df_filters_ubiquitous_tokens() -> None:
 
 
 def test_a_proportional_max_df_never_admits_more_than_the_proportion() -> None:
-    """An upper bound must round *down*, unlike ``min_df``.
+    """An upper bound must round down, unlike ``min_df``.
 
-    Both thresholds once shared one ceiling, which is right for the lower bound
-    and inverts the upper one: at ``p=0.5, n=3`` the cap resolved to 2 and kept
-    a token present in 2 of 3 documents, and at ``p=0.95, n=7`` it resolved to 7
-    and filtered nothing at all.
+    Both thresholds once shared one ceiling, which suits the lower bound and
+    inverts the upper one: at ``p=0.5, n=3`` the cap resolved to 2 and kept a token
+    present in 2 of 3 documents; at ``p=0.95, n=7`` it resolved to 7 and filtered
+    nothing.
     """
     docs = [["a", "b"], ["a", "c"], ["d"]]
     vocab = build_vocabulary(docs, VocabularyConfig(max_df=0.5))
@@ -227,8 +223,8 @@ def test_a_proportional_max_df_never_admits_more_than_the_proportion() -> None:
     for token in ("b", "c", "d"):
         assert token in vocab, f"{token} has df 1/3 and must survive"
 
-    # The degenerate end: a cap below 1/n admits nothing, which is the honest
-    # answer rather than silently keeping everything.
+    # The degenerate end: a cap below 1/n admits nothing rather than keeping
+    # everything.
     ubiquitous = [["a", "b"] for _ in range(7)]
     with pytest.raises(EmptyVocabularyError):
         build_vocabulary(ubiquitous, VocabularyConfig(max_df=0.95))
@@ -242,7 +238,7 @@ def test_empty_vocabulary_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
-# max_features -- TFIDF-SPEC-01 (spec_addenda G6)
+# max_features: TFIDF-SPEC-01 (spec_addenda G6)
 # ---------------------------------------------------------------------------
 def test_max_features_keeps_the_highest_df_tokens() -> None:
     docs = [["a", "b", "c"], ["a", "b"], ["a"]]  # df: a=3, b=2, c=1
@@ -251,10 +247,10 @@ def test_max_features_keeps_the_highest_df_tokens() -> None:
 
 
 def test_max_features_tie_break_is_total_and_order_invariant() -> None:
-    """The rule must not depend on which document happened to arrive first.
+    """The rule must not depend on which document arrived first.
 
-    Every token here has df=1 and cf=1, so the outcome rests entirely on the
-    final byte-order key. Without it the result would be arbitrary.
+    Every token here has df=1 and cf=1, so the outcome rests on the final
+    byte-order key; without it the result is arbitrary.
     """
     docs = [["z"], ["y"], ["x"], ["w"]]
     a = build_vocabulary(docs, VocabularyConfig(max_features=2))
@@ -313,11 +309,9 @@ def test_fitting_is_deterministic_across_repeats(mini_features, mini_corpus) -> 
 def test_a_negative_max_features_is_rejected_not_silently_applied() -> None:
     """``survivors[:-1]`` is a legal slice, so the failure was silent.
 
-    ``max_features=-1`` quietly dropped the lowest-ranked token instead of
-    raising, while ``min_df=-1`` and ``max_df=-1`` both rejected. ``-1`` is the
-    plausible typo for "unlimited", which this codebase spells ``null``, and
-    ``max_features=0`` already failed loudly -- so the negative case was the
-    only quiet one.
+    ``max_features=-1`` dropped the lowest-ranked token instead of raising, while
+    ``min_df=-1``, ``max_df=-1`` and ``max_features=0`` all rejected. ``-1`` is
+    the plausible typo for "unlimited", which this codebase spells ``null``.
     """
     docs = [["a", "b", "c"], ["a", "b"], ["a"], ["b", "d"]]
     assert build_vocabulary(docs, VocabularyConfig()).tokens == ("a", "b", "c", "d")

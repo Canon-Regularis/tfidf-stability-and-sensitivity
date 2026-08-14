@@ -1,13 +1,12 @@
 """Stopword removal, backed by a frozen and hash-verified word list.
 
 The stopword set determines the vocabulary and therefore every document
-frequency, idf value and score in this repository. It is consequently treated as
-*data with an identity*: a versioned file whose SHA-256 is verified at load and
-recorded in every run manifest, never a library default that can change under us
-between releases.
+frequency, idf value and score in this repository, so it is treated as data with
+an identity: a versioned file whose SHA-256 is verified at load and recorded in
+every run manifest, never a library default that can shift between releases.
 
-Removed tokens are replaced by a :data:`~tfidf_stability.preprocessing.tokenise.GAP`
-sentinel rather than deleted, so that n-gram construction cannot bridge the hole
+Removed tokens become a :data:`~tfidf_stability.preprocessing.tokenise.GAP`
+sentinel rather than disappearing, so n-gram construction cannot bridge the hole
 they leave. See ``docs/spec_addenda.md#g7``.
 """
 
@@ -27,7 +26,7 @@ __all__ = ["StopwordSet", "load_stopwords", "remove_stopwords"]
 #: Repository-relative location of the frozen assets.
 _ASSET_DIR: Final = Path(__file__).resolve().parents[3] / "data" / "assets"
 
-#: The recorded digests. Same format ``scripts/check_vendored.py`` parses, so
+#: The recorded digests, in the format ``scripts/check_vendored.py`` parses, so
 #: the asset is covered both at load and by the repository-wide gate.
 _MANIFEST: Final = _ASSET_DIR / "MANIFEST.sha256"
 
@@ -48,9 +47,8 @@ def _recorded_digest(asset: str) -> str:
 class StopwordSet:
     """An immutable, identified set of stopwords.
 
-    The ``digest`` is what makes this reproducible: it goes into the run manifest
-    so that a result can always be traced back to the exact word list that
-    produced it.
+    ``digest`` goes into the run manifest, so a result traces back to the word
+    list that produced it.
     """
 
     __slots__ = ("_words", "digest", "name")
@@ -95,10 +93,10 @@ class StopwordSet:
 def load_stopwords(asset: str = DEFAULT_STOPWORD_ASSET) -> StopwordSet:
     """Load a frozen stopword asset from ``data/assets``.
 
-    The digest is taken over the **raw file bytes**, not the parsed set, so that
-    a change to a comment or to the ordering is still visible in the manifest.
-    Cached because the result is immutable and the file cannot change within a
-    run without invalidating the run's own provenance.
+    The digest covers the raw file bytes rather than the parsed set, so a changed
+    comment or reordering still shows in the manifest. Cached: the result is
+    immutable, and the file cannot change within a run without invalidating the
+    run's own provenance.
 
     Args:
         asset: File name within ``data/assets``.
@@ -110,11 +108,11 @@ def load_stopwords(asset: str = DEFAULT_STOPWORD_ASSET) -> StopwordSet:
         FileNotFoundError: If the asset is missing.
         DataIntegrityError: If the asset has no recorded digest, or its bytes do
             not match it. This module's header, the asset's own header and
-            ``configs/default.yaml`` have always said the list is "verified at
-            load"; until ``data/assets/MANIFEST.sha256`` existed, nothing was.
-            Editing one word silently changed every df, idf and score, and the
-            reproducibility snapshot could not catch it because it compares runs
-            against each other rather than against a pinned value.
+            ``configs/default.yaml`` all said the list was "verified at load"
+            while nothing verified it, until ``data/assets/MANIFEST.sha256``
+            existed. Editing one word silently changed every df, idf and score;
+            the reproducibility snapshot compares runs against each other rather
+            than against a pinned value, so it could not catch that.
     """
     path = _ASSET_DIR / asset
     raw = path.read_bytes()
@@ -147,15 +145,15 @@ def remove_stopwords(
     Args:
         tokens: Token stream.
         stopwords: The set to remove.
-        insert_gaps: When ``True`` (the normative setting) each removed token is
-            replaced by :data:`GAP` so that n-grams cannot span it. When
-            ``False`` tokens are simply dropped, which lets "king of pop" produce
-            the spurious bigram "king pop" -- available only as an ablation.
+        insert_gaps: When ``True`` (the normative setting) each removed token
+            becomes a :data:`GAP` so n-grams cannot span it. When ``False``
+            tokens are dropped, letting "king of pop" produce the spurious bigram
+            "king pop"; ablation only.
 
     Returns:
-        The filtered token stream. Consecutive gaps are collapsed, and leading
-        and trailing gaps are dropped, so the result is canonical: two inputs
-        differing only in stopword runs produce identical output.
+        The filtered token stream. Consecutive gaps are collapsed and leading and
+        trailing gaps dropped, so two inputs differing only in their stopword
+        runs give identical output.
     """
     out: list[str] = []
     for t in tokens:

@@ -1,14 +1,13 @@
 // The ranking operator: turn scores plus tie-break ranks into a permutation.
 //
-// Five selection strategies are provided, and they must all produce the
-// *identical* permutation. That is not redundancy for its own sake -- it is the
-// ranking analogue of the `TAAT == DAAT` check in the scoring layer, and it is
-// the operational content of the claim that sort stability cannot matter here.
+// All five selection strategies must produce the identical permutation, the
+// ranking analogue of the `TAAT == DAAT` check in the scoring layer, and the
+// operational content of the claim that sort stability cannot matter here.
 //
 // The claim holds because the key is injective (identifier ranks are a
-// bijection), so no two documents ever compare equal, so the "elements that
-// compare equal keep their input order" clause quantifies over the empty set
-// and every correct algorithm satisfies it vacuously.
+// bijection), so no two documents ever compare equal, so "elements that compare
+// equal keep their input order" quantifies over the empty set and every correct
+// algorithm satisfies it vacuously.
 #pragma once
 
 #include <tfidf/core/types.hpp>
@@ -62,18 +61,17 @@ inline void rank_full(std::span<SortKey> keys,
 
 /// Select the `m` best documents, in order, leaving the rest unspecified.
 ///
-/// Two things about the standard algorithms are easy to get wrong and are
-/// handled explicitly here:
+/// Two hazards in the standard algorithms, handled explicitly here:
 ///
-///   * `nth_element` says nothing about the contents of the remainder, and
-///     different standard libraries partition differently, so `[m, n)` must
-///     never be read;
-///   * `nth_element` does not order the selected prefix either, so it has to be
-///     sorted afterwards.
+///   * `nth_element` says nothing about the contents of the remainder and
+///     standard libraries partition it differently, so `[m, n)` must never be
+///     read;
+///   * `nth_element` leaves the selected prefix unordered, so it is sorted
+///     afterwards.
 ///
-/// The implementation-independent postcondition -- every key before `m`
-/// compares less than every key after it -- is what `partition_is_valid`
-/// checks in the test build.
+/// The implementation-independent postcondition (every key before `m` compares
+/// less than every key after it) is what `partition_is_valid` checks in the
+/// test build.
 inline void select_top(std::span<SortKey> keys,
                        std::size_t m,
                        std::span<DocId> out,
@@ -93,7 +91,7 @@ inline void select_top(std::span<SortKey> keys,
             break;
         default:
             // Every other strategy degenerates to ranking everything and taking
-            // a prefix. Correct, and the agreement test relies on it.
+            // a prefix; the agreement test relies on that.
             std::sort(keys.begin(), keys.end(), key_less);
             break;
     }
@@ -123,9 +121,9 @@ inline void select_top(std::span<SortKey> keys,
 
 /// Scores in non-increasing order.
 ///
-/// Sorted as raw doubles, independently of any ranking: this array is shared by
-/// every operator, every `k` and every `tau`, and it is what makes margins
-/// provably independent of the tie-break.
+/// Sorted as raw doubles, independently of any ranking. One array serves every
+/// operator, every `k` and every `tau`, which is what makes margins provably
+/// independent of the tie-break.
 [[nodiscard]] inline std::vector<Real> sorted_scores_desc(std::span<const Real> scores) {
     std::vector<Real> out(scores.begin(), scores.end());
     std::sort(out.begin(), out.end(), std::greater<>());

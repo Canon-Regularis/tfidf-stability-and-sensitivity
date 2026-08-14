@@ -4,24 +4,22 @@
     m_min^top   = min over 1 <= j < k of (score(r_j) - score(r_{j+1}))
     eps_k^flip  = m_k / 2
 
-Every function here takes a **sorted score array, not a Ranking**. That
-dependency direction is deliberate and is what makes the following true
-structurally rather than by assertion:
+Every function here takes a sorted score array rather than a ``Ranking``, which
+makes the following structural:
 
-    m_k depends only on the score *multiset*. The non-increasing rearrangement
-    of a multiset is unique, and all three ranking operators use score-descending
-    as their primary key, so pi, pi_score and pi_alt have identical score
-    sequences even though their document sequences differ.
+    m_k depends only on the score multiset. The non-increasing rearrangement of
+    a multiset is unique, and all three ranking operators use score-descending as
+    their primary key, so pi, pi_score and pi_alt have identical score sequences
+    with differing document sequences.
 
-That fact is what makes research questions A1 (margins) and A2 (tie-breaking)
-*independent*, and the paper never states it. It is proposed as a note under
-section 2.3.2.
+That is what makes research questions A1 (margins) and A2 (tie-breaking)
+independent. The paper never states it; proposed as a note under section 2.3.2.
 
 Undefined margins follow ``spec_addenda.md#g3``: ``NaN`` plus an explicit
-validity flag, never coerced to 0 or infinity, and always *counted* rather than
-silently dropped. Whether a degenerate query is then included in a reported
-distribution is a policy question belonging to ``analysis/stability_profile.py``;
-this module reports the truth so the raw margins stay auditable regardless.
+validity flag, never coerced to 0 or infinity, and counted rather than silently
+dropped. Whether a degenerate query then enters a reported distribution is a
+policy question for ``analysis/stability_profile.py``; this module reports the
+truth so the raw margins stay auditable.
 """
 
 from __future__ import annotations
@@ -53,10 +51,9 @@ class Margin:
         k: The requested ``k``.
         k_effective: After lenient clamping; equal to ``k`` in strict mode.
         value: The margin, or ``NaN`` when undefined.
-        defined: Whether ``value`` is meaningful. An undefined margin is
-            excluded from distributions but counted in ``n_undefined`` -- never
-            coerced to 0 (which would look like an exact tie) or to infinity
-            (which would look like perfect stability).
+        defined: Whether ``value`` is meaningful. An undefined margin is excluded
+            from distributions but counted in ``n_undefined``; coercing it to 0
+            would look like an exact tie, and to infinity like perfect stability.
         reason: Why it is undefined; empty when defined.
     """
 
@@ -72,7 +69,7 @@ class Margin:
         """``eps_k^flip = m_k / 2`` (section 2.3.2).
 
         Exact: division by a power of two only shifts the exponent, so
-        ``2 * flip_radius`` recovers ``value`` bit-for-bit.
+        ``2 * flip_radius`` recovers ``value`` bit for bit.
         """
         return self.value / 2.0
 
@@ -80,9 +77,9 @@ class Margin:
     def is_exact_tie(self) -> bool:
         """A defined margin of exactly zero.
 
-        Not an edge case to be tidied away -- it is the interesting case. Top-k
-        membership is then decided purely by the tie-break, which is what
-        section 4.5 is about, and ``P(m_k = 0)`` is a headline statistic.
+        The interesting case: top-k membership is then decided purely by the
+        tie-break, the subject of section 4.5, and ``P(m_k = 0)`` is a headline
+        statistic.
         """
         return self.defined and self.value == 0.0
 
@@ -91,7 +88,7 @@ def adjacent_gaps(sorted_scores: Sequence[float]) -> tuple[float, ...]:
     """Gaps between consecutive ranks: ``S[j] - S[j+1]`` for each ``j``.
 
     Length ``N - 1``. Shared with :mod:`~tfidf_stability.ranking.tie_groups`,
-    where single-linkage chains are exactly the runs of gaps ``<= tau``.
+    where single-linkage chains are the runs of gaps ``<= tau``.
     """
     return tuple(a - b for a, b in pairwise(sorted_scores))
 
@@ -132,12 +129,11 @@ def min_adjacent_margin_top(
     *,
     mode: StrictMode = StrictMode.STRICT,
 ) -> Margin:
-    """``m_min^top``, governing the *ordering* within the top-k.
+    """``m_min^top``, governing the ordering within the top-k.
 
     Undefined at ``k = 1``: the minimum is over an empty set. G3 does not cover
-    this case; ``NaN`` is adopted (proposed as addendum G16) rather than
-    ``+inf``, which would silently claim "no constraint" and would pollute any
-    percentile summary it entered.
+    this case, so ``NaN`` is adopted (proposed as addendum G16). ``+inf`` would
+    claim "no constraint" and pollute any percentile summary it entered.
     """
     n = len(sorted_scores)
     k_eff = resolve_k(k, n, mode)
@@ -157,11 +153,10 @@ def margin_profile(
     *,
     mode: StrictMode = StrictMode.LENIENT,
 ) -> tuple[Margin, ...]:
-    """Boundary margins at each ``k`` -- the k-set of section 7.1.
+    """Boundary margins at each ``k``: the k-set of section 7.1.
 
-    Defaults to lenient, because a sweep over ``k in {5, 10, 20, 50}`` on a
-    corpus smaller than 50 is a legitimate grid point, not a configuration
-    error.
+    Lenient by default, since a sweep over ``k in {5, 10, 20, 50}`` on a corpus
+    smaller than 50 is a legitimate grid point rather than a misconfiguration.
     """
     return tuple(boundary_margin(sorted_scores, k, mode=mode) for k in ks)
 
@@ -178,11 +173,11 @@ class MarginSummary:
 
     @property
     def p_exact_tie(self) -> float:
-        """Fraction of *defined* margins that are exactly zero.
+        """Fraction of defined margins that are exactly zero.
 
-        G3 calls this a headline statistic, and on short-text corpora it is
-        large: documents with no in-vocabulary tokens all score exactly 0, so
-        they form one enormous exact-tie block.
+        G3 calls this a headline statistic. On short-text corpora it is large:
+        documents with no in-vocabulary tokens all score exactly 0 and form one
+        enormous exact-tie block.
         """
         return self.n_exact_tie / self.n_defined if self.n_defined else math.nan
 
@@ -193,9 +188,9 @@ def summarise(
 ) -> MarginSummary:
     """Percentile summary over defined margins, counting the undefined ones.
 
-    Uses the nearest-rank definition rather than an interpolating one: margin
-    distributions have an atom at exactly zero, and interpolating across it
-    would invent values that no query produced.
+    Nearest-rank rather than interpolating: margin distributions have an atom at
+    exactly zero, and interpolating across it would invent values no query
+    produced.
     """
     defined = sorted(m.value for m in margins if m.defined)
     pct: list[tuple[float, float]] = []

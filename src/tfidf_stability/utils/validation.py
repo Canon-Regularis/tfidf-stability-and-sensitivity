@@ -1,19 +1,19 @@
 """Typed exceptions, warnings and validators.
 
-Every condition that ``docs/spec_addenda.md#g3`` gives defined behaviour for has
-a named exception or warning here. Two modes are supported throughout:
+Every condition ``docs/spec_addenda.md#g3`` gives defined behaviour for has a
+named exception or warning here. Two modes run throughout:
 
 ``strict``
     Raise. The default for interactive and CLI use, where an unexpected corpus
-    shape is far more likely to be a mistake than an intention.
+    shape is more likely a mistake than an intention.
 
 ``lenient``
     Emit a diagnostic and return ``NaN``. The default inside experiment sweeps,
     where degenerate points (``tau`` larger than the score range, say) are
     legitimate members of the grid and must not abort the run.
 
-The active mode is recorded in every run manifest, because it changes which
-queries contribute to a reported distribution.
+The active mode goes into every run manifest: it changes which queries
+contribute to a reported distribution.
 """
 
 from __future__ import annotations
@@ -58,24 +58,23 @@ class StrictMode(str, Enum):
 # Exceptions
 # ---------------------------------------------------------------------------
 class TfidfStabilityError(Exception):
-    """Base class for every error this package raises deliberately."""
+    """Base class for every error this package raises on purpose."""
 
 
 class EmptyVocabularyError(TfidfStabilityError):
     """The vocabulary is empty after filtering.
 
-    Treated as a configuration error rather than a property of the data: it
-    almost always means ``min_df`` is too high for the corpus size.
+    A configuration error rather than a property of the data: it almost always
+    means ``min_df`` is too high for the corpus size.
     """
 
 
 class DuplicateIdentifierError(TfidfStabilityError):
     """Two documents share an identifier.
 
-    Fatal rather than cosmetic. The ranking operator of section 2.3.1 is a
-    *strict total order* only because the final tie-break key is unique; with
-    duplicate ids the sorted order stops being uniquely determined and results
-    become dependent on the sorting algorithm.
+    Fatal. The ranking operator of section 2.3.1 is a strict total order only
+    because the final tie-break key is unique; with duplicate ids the sorted
+    order stops being determined and falls to the sorting algorithm.
     """
 
 
@@ -94,11 +93,10 @@ class EmptyCorpusError(TfidfStabilityError):
 class ConfigError(TfidfStabilityError):
     """A configuration key is unrecognised, or its value is not admissible.
 
-    Unrecognised keys are fatal rather than ignored. Every value in
-    ``configs/default.yaml`` "can move a published number", and the whole file
-    is hashed into the run manifest -- so a key that is recorded but not read
-    makes the manifest claim something the run did not do. A typo in
-    ``n_max`` silently yielding the default is exactly that failure.
+    Unrecognised keys are fatal. Every value in ``configs/default.yaml`` can move
+    a published number and the whole file is hashed into the run manifest, so a
+    key recorded but never read makes the manifest claim something the run did
+    not do: a typo in ``n_max`` would silently take the default.
     """
 
 
@@ -117,31 +115,30 @@ class AbiVersionMismatchError(TfidfStabilityError):
 class DataIntegrityError(TfidfStabilityError):
     """An input dataset is absent, corrupt, or not the pinned version.
 
-    Raised rather than warned deliberately. A dataset that silently changed
-    underneath a published result is the failure this catches, and GroupLens
-    updates ``ml-latest-small`` in place at a stable URL -- so the mismatch is
-    both plausible and invisible unless it aborts.
+    Raised rather than warned: GroupLens updates ``ml-latest-small`` in place at
+    a stable URL, so a dataset changing underneath a published result is
+    plausible and invisible unless it aborts.
     """
 
 
 # ---------------------------------------------------------------------------
-# Warnings -- diagnostics that tag a result rather than abort it
+# Warnings: diagnostics that tag a result rather than abort it
 # ---------------------------------------------------------------------------
 class TauExceedsScoreRangeWarning(UserWarning):
     """``tau`` is at least as large as the whole score range.
 
-    Every tie ball then covers the entire corpus. This is a legitimate point at
-    the top of a tau sweep, so it is a warning rather than an error, but results
-    at this point are degenerate and plots should mark them.
+    Every tie ball then covers the whole corpus. A legitimate point at the top of
+    a tau sweep, hence a warning, but the results there are degenerate and plots
+    should mark them.
     """
 
 
 class ChainInflationWarning(UserWarning):
     """Transitive chaining is inflating tie groups (see ``spec_addenda.md#g1``).
 
-    Raised when the largest single-linkage chain is much larger than the largest
-    clique, meaning the reported groups are held together by a sequence of small
-    steps rather than by mutual indistinguishability.
+    Raised when the largest single-linkage chain far exceeds the largest clique:
+    the reported groups are then held together by a sequence of small steps
+    rather than by mutual indistinguishability.
     """
 
 
@@ -164,9 +161,9 @@ def check_finite(values: Sequence[float], what: str) -> None:
 def check_non_negative(values: Sequence[float], what: str) -> None:
     """Raise if any value is negative.
 
-    TF-IDF vectors live in the non-negative orthant (section 2.2), and cosine
-    similarity is guaranteed to lie in [0, 1] only because of it. A negative
-    coordinate means something upstream is wrong, and the guarantee is void.
+    TF-IDF vectors live in the non-negative orthant (section 2.2), which is the
+    only reason cosine similarity lies in [0, 1]. A negative coordinate voids
+    that guarantee and means something upstream is wrong.
     """
     for i, v in enumerate(values):
         if v < 0.0:
@@ -191,9 +188,9 @@ def check_unique_ids(ids: Sequence[object]) -> None:
 def resolve_k(k: int, n: int, mode: StrictMode = StrictMode.STRICT) -> int:
     """Validate ``k`` against a corpus of ``n`` rankable documents.
 
-    Returns the effective ``k``. In lenient mode an over-large ``k`` is clamped
-    to ``n`` and the caller is expected to record ``k_effective``; in strict mode
-    it raises. See ``docs/spec_addenda.md#g3``.
+    Returns the effective ``k``. Strict mode raises on an over-large ``k``;
+    lenient mode clamps to ``n``, and the caller is then expected to record
+    ``k_effective``. See ``docs/spec_addenda.md#g3``.
     """
     if k <= 0:
         raise KOutOfRangeError(f"k must be positive, got {k}")

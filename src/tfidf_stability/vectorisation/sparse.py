@@ -1,18 +1,17 @@
 """Sparse vector and matrix primitives.
 
-Everything here is index-ordered and reduction-policy-aware, because those two
-properties together are what make the reference and native backends bit-identical.
+Index order and reduction policy together are what make the reference and native
+backends bit-identical.
 
-*Index order.* A :class:`SparseVector` always stores its indices in strictly
-ascending order. That is not merely tidy: it fixes the order in which terms are
-accumulated in a dot product, and floating-point addition is not associative, so
-a different order is a different number. The native backend's term-at-a-time
-scoring loop is bit-identical to :func:`dot` precisely because it also visits
-terms in ascending identifier order.
+*Index order.* A :class:`SparseVector` stores its indices strictly ascending,
+which fixes the order terms accumulate in a dot product; floating-point addition
+is not associative, so a different order is a different number. The native
+backend's term-at-a-time scoring loop also visits terms in ascending identifier
+order, so it matches :func:`dot` bit for bit.
 
 *Reduction policy.* Every sum takes an explicit
-:class:`~tfidf_stability.utils.numerics.Reduction`. The default is ``NAIVE``, the
-plain left-to-right fold that section 2.3 literally specifies.
+:class:`~tfidf_stability.utils.numerics.Reduction`. The default ``NAIVE`` is the
+plain left-to-right fold section 2.3 specifies.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ class SparseVector:
         indices: Term identifiers, strictly ascending.
         values: Parallel values.
         dim: Ambient dimension (``|V|``), retained so operations can check
-            compatibility rather than silently producing nonsense.
+            compatibility instead of silently producing nonsense.
     """
 
     indices: tuple[int, ...]
@@ -61,8 +60,8 @@ class SparseVector:
     def is_canonical(self) -> bool:
         """Whether indices are strictly ascending and within range.
 
-        Checked in tests rather than on every construction, since it is O(nnz)
-        and the constructors below establish it by design.
+        O(nnz), so it is checked in tests rather than on every construction; the
+        constructors below establish it.
         """
         return all(a < b for a, b in pairwise(self.indices)) and all(
             0 <= i < self.dim for i in self.indices
@@ -79,9 +78,9 @@ class SparseVector:
     def from_mapping(cls, mapping: Mapping[int, float], dim: int) -> SparseVector:
         """Build from ``{term_id: value}``, sorting indices ascending.
 
-        Sorting here is what guarantees canonical order regardless of the
-        mapping's iteration order -- the point at which dictionary ordering stops
-        being able to influence any downstream number.
+        The sort gives canonical order whatever the mapping's iteration order:
+        the point at which dictionary ordering stops being able to influence any
+        downstream number.
         """
         items = sorted(mapping.items())
         return cls(
@@ -99,10 +98,9 @@ class SparseVector:
 def dot(u: SparseVector, v: SparseVector, policy: Reduction = Reduction.NAIVE) -> float:
     """Inner product of two sparse vectors.
 
-    Implemented as a merge over the two ascending index lists, so products are
-    accumulated in ascending term-identifier order. The native backend's
-    postings-list loop produces the identical sequence, which is why the two
-    agree to the last bit.
+    A merge over the two ascending index lists, so products accumulate in
+    ascending term-identifier order. The native backend's postings-list loop
+    produces the identical sequence, hence the identical bits.
     """
     if u.dim != v.dim:
         raise ValueError(f"dimension mismatch: {u.dim} vs {v.dim}")
@@ -128,9 +126,8 @@ def l2_norm(v: SparseVector, policy: Reduction = Reduction.NAIVE) -> float:
     """Euclidean norm.
 
     ``sqrt`` of the sum of squares, in that order and with no rescaling. A
-    hypot-style scaled formulation would be more robust to overflow but would
-    produce different digits, and section 6 is explicit that no stabilising
-    transformations are applied.
+    hypot-style scaled formulation resists overflow better but produces different
+    digits, and section 6 forbids stabilising transformations.
     """
     return sqrt(reduce_sum([x * x for x in v.values], policy))
 
@@ -145,14 +142,13 @@ def cosine_of(
 ) -> float:
     """Cosine similarity, with the zero-vector convention of section 2.3.
 
-    Precomputed norms may be supplied; passing them changes nothing numerically,
-    since they are the same value computed by the same policy, and it is what
-    makes scoring a whole corpus ``O(nnz)`` rather than ``O(nnz * queries)``.
+    Precomputed norms may be supplied: same value, same policy, so nothing
+    changes numerically, and scoring a whole corpus becomes ``O(nnz)`` instead of
+    ``O(nnz * queries)``.
 
-    The expression is ``dot / (nu * nv)`` -- deliberately *not* ``(dot / nu) / nv``
-    and *not* ``dot * (1 / (nu * nv))``. Those are all algebraically equal and
-    numerically different; the form here is pinned so that the native backend can
-    match it exactly.
+    The expression is pinned as ``dot / (nu * nv)``. ``(dot / nu) / nv`` and
+    ``dot * (1 / (nu * nv))`` are algebraically equal and numerically different;
+    the native backend matches this form.
     """
     nu = l2_norm(u, policy) if u_norm is None else u_norm
     nv = l2_norm(v, policy) if v_norm is None else v_norm
@@ -165,8 +161,8 @@ def cosine_of(
 class CsrMatrix:
     """Compressed sparse row matrix: one row per document.
 
-    Column indices within each row are strictly ascending, mirroring the layout
-    the native backend uses so that the two can be compared directly.
+    Column indices within each row are strictly ascending, mirroring the native
+    backend's layout so the two can be compared directly.
     """
 
     indptr: tuple[int, ...]

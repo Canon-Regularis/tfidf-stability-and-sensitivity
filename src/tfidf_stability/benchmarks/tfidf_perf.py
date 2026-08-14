@@ -1,34 +1,29 @@
 """Timing the native backend against the normative reference.
 
-The architecture rests on a bargain: the C++20 core exists *only* as an
-optimisation, and earns its complexity by being fast while staying
-bit-identical. The differential suite enforces the bit-identical half. Nothing
-enforced the other half, which left "fast" as an assertion. This module measures
-it.
+The C++20 core exists as an optimisation, so it has to be fast while staying
+bit-identical. The differential suite enforces bit-identity; nothing enforced
+speed, which left "fast" as an assertion. This module measures it.
 
 Four rules shape the design.
 
-**A benchmark is never a correctness escape hatch.** Every comparison proves the
-two backends produced bit-identical results *before* it is allowed to report a
-ratio, and raises :class:`BitIdentityError` otherwise. A benchmark is exactly
-where a divergence would go unnoticed, because nobody reads timing output
-looking for wrong answers -- and a speedup on a wrong answer is worthless.
+A benchmark is never a correctness escape hatch. Every comparison proves the two
+backends produced bit-identical results before it may report a ratio, and raises
+:class:`BitIdentityError` otherwise. Nobody reads timing output looking for wrong
+answers.
 
-**The minimum, not the mean.** See :func:`measure`.
+The minimum rather than the mean. See :func:`measure`.
 
-**Reference-only is a first-class mode.** A contributor with no compiler must
-still be able to run this, so an absent native backend yields reference-only
-timings rather than an error, matching the rule the rest of the package follows.
+Reference-only is a first-class mode: a contributor with no compiler gets
+reference-only timings rather than an error.
 
-**Like-for-like, or say so.** Two of the comparisons here pair operations that
-are not identical in scope -- the native index constructor builds an inverted
-index the reference has no counterpart for. Those carry an explicit note giving
-the direction of the bias, rather than a bare ratio.
+Like-for-like, or say so. Two comparisons pair operations of different scope (the
+native index constructor also builds an inverted index the reference has no
+counterpart for) and carry a note giving the direction of the bias.
 
 The workload is the seeded synthetic corpus, which contains exact duplicates and
-twin pairs by construction. That matters for the ranking rows: on distinctly
-scored documents the tie-break is never consulted, so a benchmark over random
-scores would time the comparator's first component and nothing else.
+twin pairs. The ranking rows need those: on distinctly scored documents the
+tie-break is never consulted, so random scores would time the comparator's first
+component and nothing else.
 """
 
 from __future__ import annotations
@@ -62,14 +57,14 @@ __all__ = [
     "run_benchmarks",
 ]
 
-#: Timed batches per measurement. Seven is enough for the minimum to have seen a
+#: Timed batches per measurement. Seven gives the minimum a fair chance of a
 #: quiet interval on a loaded machine without making a full run tedious.
 DEFAULT_REPEATS: Final[int] = 7
 
 #: Batches shorter than this are not trusted. ``perf_counter`` resolves to about
-#: 100 ns on Windows, and the Python call overhead around the operation is tens
-#: of nanoseconds, so a batch has to be several orders of magnitude longer than
-#: either before the ratio of two of them means anything.
+#: 100 ns on Windows and the Python call overhead is tens of nanoseconds, so a
+#: batch must run orders of magnitude longer than either before the ratio of two
+#: of them means anything.
 _MIN_BATCH_SECONDS: Final[float] = 0.02
 
 #: Ceiling on the auto-scaled inner repetition count, so a mistakenly trivial
@@ -82,8 +77,8 @@ _REDUCTIONS: Final[tuple[Reduction, ...]] = tuple(Reduction)
 class BitIdentityError(TfidfStabilityError):
     """The native backend disagreed with the reference inside a benchmark.
 
-    A subclass of the package's own error rather than :class:`AssertionError`,
-    because this is a genuine finding about the build and must survive ``-O``.
+    A package error rather than :class:`AssertionError`: a finding about the
+    build must survive ``-O``.
     """
 
 
@@ -127,10 +122,8 @@ class Timing:
 def _time_batch(fn: Callable[[], object], inner: int) -> float:
     """Wall-clock seconds for ``inner`` consecutive calls, with the collector off.
 
-    The cyclic collector is disabled for the duration because a collection is
-    charged to whichever call happens to trigger it, which is unrelated to that
-    call's cost and is precisely the kind of one-sided contamination the minimum
-    is meant to exclude.
+    A collection is charged to whichever call happens to trigger it, unrelated to
+    that call's cost.
     """
     was_enabled = gc.isenabled()
     gc.disable()
@@ -151,22 +144,18 @@ def measure(
     backend: str,
     repeats: int = DEFAULT_REPEATS,
 ) -> Timing:
-    """Time ``fn`` and report the **minimum** per-call cost over ``repeats`` batches.
+    """Time ``fn`` and report the minimum per-call cost over ``repeats`` batches.
 
-    The minimum rather than the mean, because timing noise is one-sided: a run
-    interrupted by another process, a page fault or a cache eviction can only be
-    slower than an uninterrupted one, never faster. The mean therefore estimates
-    the true cost *plus* a machine-dependent noise term whose size says more
-    about the machine than about the code, while the minimum estimates the cost
-    itself -- it is the sample closest to the interference-free execution we are
-    actually asking about. The price is that the minimum is a biased-low
-    estimator of what a user experiences on a busy machine, which is the right
-    trade here: this benchmark compares two implementations, and a shared,
-    machine-dependent additive term would only obscure the difference.
+    Timing noise is one-sided: a run interrupted by another process, a page fault
+    or a cache eviction can only be slower. The mean therefore estimates the true
+    cost plus a machine-dependent noise term, while the minimum is the sample
+    closest to interference-free execution. It is biased low against what a user
+    sees on a busy machine, which is the right trade when comparing two
+    implementations, where a shared additive term only obscures the difference.
 
-    A warm-up call precedes everything, so first-call costs -- lazy imports, a
-    cold branch predictor, freshly allocated arenas -- are excluded from the
-    measurement rather than assigned arbitrarily to the first batch.
+    A warm-up call precedes everything, so lazy imports, a cold branch predictor
+    and freshly allocated arenas land outside the measurement rather than on the
+    first batch.
     """
     if repeats < 1:
         raise ValueError(f"repeats must be at least 1, got {repeats}")
@@ -187,10 +176,9 @@ def measure(
 def check_same_bits(reference: Sequence[float], native: Sequence[float], what: str) -> str:
     """Verify two float sequences are bit-identical, or raise.
 
-    Bit patterns, never tolerances or ``==``: the same standard the differential
-    suite holds the native backend to. ``==`` would call ``-0.0`` and ``0.0``
-    equal, and a tolerance would permit exactly the divergence this project
-    exists to detect.
+    Bit patterns, the standard the differential suite holds the native backend
+    to: ``==`` calls ``-0.0`` and ``0.0`` equal, and a tolerance permits the
+    divergence this project exists to detect.
 
     Returns a short description of what was checked, for the report.
     """
@@ -213,9 +201,9 @@ def check_same_bits(reference: Sequence[float], native: Sequence[float], what: s
 def check_same_order(reference: Sequence[int], native: Sequence[int], what: str) -> str:
     """Verify two permutations are identical, or raise.
 
-    A ranking is a sequence of ``int32``, so "bit-identical" degenerates to
-    element-by-element equality here. The float half of the ranking layer --
-    the sorted score array -- goes back through :func:`check_same_bits`.
+    A ranking is a sequence of ``int32``, so bit-identity degenerates to
+    element-by-element equality. The float half of the ranking layer, the sorted
+    score array, goes through :func:`check_same_bits` instead.
     """
     if len(reference) != len(native):
         raise BitIdentityError(
@@ -237,7 +225,7 @@ def check_same_order(reference: Sequence[int], native: Sequence[int], what: str)
 @dataclass(frozen=True, slots=True)
 class Comparison:
     """One operation timed on both backends, with the identity check that
-    licensed the ratio.
+    licensed its ratio.
 
     Attributes:
         name: The operation.
@@ -245,8 +233,8 @@ class Comparison:
         native: Native timing, or ``None`` when the backend is unavailable or
             the operation has no native counterpart.
         verified: What was proven identical before timing.
-        note: Why the two sides are not strictly like-for-like, when they are
-            not, including the direction of the resulting bias.
+        note: Where the two sides differ in scope, with the direction of the
+            resulting bias.
     """
 
     name: str
@@ -277,8 +265,8 @@ class Comparison:
 class Workload:
     """The corpus and query set the timings are measured on.
 
-    Recorded in full beside the numbers, because a speedup without its problem
-    size is not a measurement.
+    Recorded in full beside the numbers: a speedup without its problem size says
+    nothing.
     """
 
     n_docs: int = 2000
@@ -291,9 +279,9 @@ class Workload:
     def spec(self) -> SyntheticSpec:
         """The generator spec, with duplicates and twins scaled to ``n_docs``.
 
-        Scaled rather than fixed so that a tiny smoke-test workload still
-        contains the exact ties the ranking rows exist to exercise, instead of
-        failing the generator's "too small for that many duplicates" guard.
+        Scaled rather than fixed so a tiny smoke-test workload still holds the
+        exact ties the ranking rows exercise, instead of tripping the generator's
+        "too small for that many duplicates" guard.
         """
         return SyntheticSpec(
             seed=self.seed,
@@ -301,8 +289,8 @@ class Workload:
             vocab_size=self.vocab_size,
             n_exact_duplicates=max(1, self.n_docs // 20),
             n_twin_pairs=max(1, self.n_docs // 20),
-            # Interactions belong to the profile experiments and would only add
-            # generation time here.
+            # Interactions belong to the profile experiments; here they would add
+            # generation time and nothing else.
             n_users=0,
         )
 
@@ -348,7 +336,7 @@ class BenchmarkReport:
 # ---------------------------------------------------------------------------
 @dataclass(slots=True)
 class _Fixture:
-    """Everything both backends operate on, built once and never timed."""
+    """Everything both backends operate on. Built once, never timed."""
 
     workload: Workload
     features: list[list[str]]
@@ -370,9 +358,9 @@ def _build_fixture(workload: Workload) -> _Fixture:
     model = TfidfVectoriser().fit(features, doc_ids)
     documents = [model.document(i) for i in range(model.n_documents)]
 
-    # Queries are drawn from the corpus at a fixed stride, so they hit terms that
-    # actually exist: a query of unseen tokens embeds to the zero vector and
-    # would time the degenerate early return instead of the scoring kernel.
+    # Queries are drawn from the corpus at a fixed stride so their terms exist: a
+    # query of unseen tokens embeds to the zero vector and would time the
+    # degenerate early return instead of the scoring kernel.
     stride = max(1, len(features) // max(1, workload.n_queries))
     query_features = [
         features[i * stride][: workload.query_length]
@@ -409,9 +397,9 @@ class _NativeFixture:
 def _build_native_fixture(fixture: _Fixture) -> _NativeFixture:
     """Marshal the fixture for the native backend.
 
-    numpy is imported here rather than at module scope on purpose: the reference
-    backend is stdlib-only by design, and this file has to stay importable and
-    runnable on the reference-only install.
+    numpy is imported here rather than at module scope: the reference backend is
+    stdlib-only, and this file has to stay importable on an install with no
+    compiler and no numpy.
     """
     import numpy as np
 
@@ -432,9 +420,9 @@ def _build_native_fixture(fixture: _Fixture) -> _NativeFixture:
         int(module.REDUCTION[Reduction.NAIVE.value]),
     )
 
-    # The attribute ranks cross the boundary as data and are never recomputed on
-    # the native side -- that is the whole point of the rank encoding, and it is
-    # why permutation identity is an integer question rather than a semantic one.
+    # Attribute ranks cross the boundary as data and are never recomputed on the
+    # native side, which keeps permutation identity an integer question rather
+    # than a semantic one.
     names = table.names()
     flat: list[int] = []
     for row in table.rank_matrix(names):
@@ -475,9 +463,7 @@ def _compare(
 ) -> Comparison:
     """Time one operation on both backends, refusing to time a divergent one.
 
-    The verification runs *first*, and its failure aborts the comparison before
-    any number is produced. Ordering it that way is the whole guarantee: there
-    is no code path on which a ratio is computed and only afterwards checked.
+    Verification runs first, so no path computes a ratio and checks afterwards.
     """
     if native_call is None or verify is None:
         verified = reference_only_reason or "reference only"
@@ -496,11 +482,11 @@ def _compare(
 
 
 def _fit_comparison(fixture: _Fixture, repeats: int) -> Comparison:
-    """Fitting: reference only, and that is a design decision rather than a gap.
+    """Fitting: reference only.
 
-    The delicate part of fitting is the logarithm, which is evaluated once in
-    exact decimal arithmetic in Python precisely so the native core never sees a
-    transcendental (G13). There is therefore nothing to compare against.
+    The logarithm is evaluated once in exact decimal arithmetic in Python so the
+    native core never sees a transcendental (G13), leaving nothing to compare
+    against.
     """
     features, doc_ids = fixture.features, fixture.doc_ids
     return _compare(
@@ -559,7 +545,7 @@ def _index_comparison(fixture: _Fixture, native: _NativeFixture | None, repeats:
 def _scoring_comparison(
     fixture: _Fixture, native: _NativeFixture | None, repeats: int, algorithm: str
 ) -> Comparison:
-    """Scoring the whole query set against the whole corpus -- the hot path."""
+    """Scoring the whole query set against the whole corpus: the hot path."""
     model, documents, queries = fixture.model, fixture.documents, fixture.queries
     norms = model.norms
     name = f"score {len(queries)} queries x {model.n_documents} docs ({algorithm.upper()})"
@@ -606,9 +592,9 @@ def _reduction_comparison(
 ) -> Comparison:
     """One reduction policy over every stored weight in the corpus.
 
-    Real weights rather than random floats, because the policies differ only in
-    how they handle cancellation and magnitude spread, and a synthetic vector
-    would be timing a distribution this project never actually sums.
+    Real weights rather than random floats: the policies differ only in how they
+    handle cancellation and magnitude spread, so a synthetic vector would time a
+    distribution this project never sums.
     """
     values = fixture.values
     name = f"reduce {len(values)} values ({policy})"
@@ -659,10 +645,10 @@ def _rank_comparison(fixture: _Fixture, native: _NativeFixture | None, repeats: 
     module, ranker, array = native.module, native.ranker, native.scores
     selection = int(module.SELECTION["full_sort"])
 
-    # `rank` returns the permutation *and* the sorted score array; the native
-    # permutation kernel returns only the former. Pairing it with the native
-    # sort of the scores keeps the two sides doing the same work, and buys a
-    # second bit-identity check on the float half of the result.
+    # `rank` returns the permutation and the sorted score array; the native
+    # permutation kernel returns only the former. Pairing it with the native sort
+    # keeps both sides doing the same work and adds a bit-identity check on the
+    # float half of the result.
     def native_call() -> object:
         return ranker.rank(array, selection), module.sorted_scores_desc(array)
 
@@ -741,14 +727,13 @@ def run_benchmarks(
     Args:
         workload: Corpus and query sizes. Defaults to :class:`Workload`.
         repeats: Timed batches per measurement; the minimum is reported.
-        use_native: Set ``False`` to force the reference-only path even where
-            the compiled backend exists. Not a convenience -- it is how the
-            no-compiler install's benchmark is exercised on a machine that does
-            have a compiler.
+        use_native: Set ``False`` to force the reference-only path even where the
+            compiled backend exists, which is how the no-compiler install's
+            benchmark is exercised on a machine that has a compiler.
 
     Raises:
         BitIdentityError: If any native result differs from the reference. No
-            timing is reported in that case, deliberately.
+            timing is reported in that case.
     """
     workload = workload or Workload()
     fixture = _build_fixture(workload)
@@ -799,9 +784,8 @@ def _format_seconds(seconds: float) -> str:
 def format_report(report: BenchmarkReport) -> str:
     """Render a report as a plain-text table.
 
-    The verification column is not decoration: a row with an empty check is a
-    row whose speedup means nothing, and putting the two side by side is what
-    stops the ratio from being read on its own.
+    The check sits beside the ratio: a row whose check is empty has a speedup
+    that means nothing.
     """
     w = report.workload
     lines = [
@@ -834,8 +818,8 @@ def format_report(report: BenchmarkReport) -> str:
         )
 
     # Deduplicated: the four reduction rows share one caveat, and repeating it
-    # four times would bury the two that are specific to a single row. Every
-    # note is still carried per row in `as_dict`.
+    # would bury the two notes specific to a single row. `as_dict` still carries
+    # every note per row.
     seen: dict[str, str] = {}
     for c in report.comparisons:
         if c.note:

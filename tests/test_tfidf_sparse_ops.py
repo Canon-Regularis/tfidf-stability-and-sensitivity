@@ -1,23 +1,20 @@
 """TF-IDF construction, sparse primitives, and the scikit-learn cross-check.
 
-The scikit-learn tests are the project's *external oracle*: an independent
-implementation of the same weighting scheme, written by other people. Agreeing
-with it rules out a whole class of shared-misreading errors that comparing our
-own two backends against each other never could.
+scikit-learn is the external oracle: an independent implementation of the same
+weighting scheme, which rules out the shared-misreading errors that comparing
+our own two backends against each other cannot.
 
-The algebra that makes the comparison possible is worth stating, because the
-paper does not. scikit-learn uses raw counts where section 2.2 uses
-``count / L``, and L2-normalises rows where section 2.2 does not normalise at
-all. Both differences are *positive per-vector scalings*, and cosine similarity
+The algebra the paper leaves out. scikit-learn uses raw counts where section 2.2
+uses ``count / L``, and L2-normalises rows where section 2.2 does not normalise
+at all. Both differences are positive per-vector scalings, and cosine similarity
 is invariant under those. So:
 
 * ``idf`` must agree exactly (``smooth_idf=True`` is literally section 2.1);
 * the **vectors must differ**, by the scalar ``1 / L_i``;
 * the **similarities must agree**.
 
-The middle point is asserted as a guard: if our norms ever came out equal to
-sklearn's, it would mean we had accidentally implemented sklearn rather than the
-paper.
+The middle point is asserted as a guard: norms equal to sklearn's would mean we
+had implemented sklearn rather than the paper.
 """
 
 from __future__ import annotations
@@ -110,7 +107,8 @@ def test_tf_sums_to_one_over_in_vocabulary_tokens(mini_model) -> None:  # type: 
             continue
         total = Fraction(0)
         for tid, w in zip(row.indices, row.values, strict=True):
-            # w = tf * idf, so tf = w / idf recovers the ratio.
+            # w = tf * idf; dividing back recovers tf to within the rational
+            # limit imposed below, which is all this total needs.
             total += Fraction(w / mini_model.idf[tid]).limit_denominator(10**9)
         assert abs(total - 1) < Fraction(1, 10**9)
 
@@ -125,7 +123,7 @@ def test_zero_in_vocabulary_document_is_the_zero_vector(mini_model) -> None:  # 
 
 
 def test_identical_documents_produce_bit_identical_rows(mini_model) -> None:  # type: ignore[no-untyped-def]
-    """d3 and d4 have identical text, so they must tie *exactly*, not nearly."""
+    """d3 and d4 have identical text, so they must tie bitwise."""
     a = mini_model.matrix.row(mini_model.doc_ids.index("d3"))
     b = mini_model.matrix.row(mini_model.doc_ids.index("d4"))
     assert a.indices == b.indices
@@ -161,8 +159,8 @@ def test_doc_ids_length_is_validated(mini_features) -> None:  # type: ignore[no-
 def test_duplicating_a_document_leaves_tf_exactly_unchanged() -> None:
     """``(2c)/(2L)`` and ``c/L`` are the same rational, so the same double.
 
-    Exact because ``L`` is an integer sum and the division is correctly rounded.
-    A test that had to allow a tolerance here would be hiding a real defect.
+    ``L`` is an integer sum and the division is correctly rounded, so the
+    equality is exact and a tolerance here would be hiding a defect.
     """
     doc = ["a", "b", "b", "c"]
     m1 = TfidfVectoriser().fit([doc, ["a"], ["b"]])
@@ -173,8 +171,8 @@ def test_duplicating_a_document_leaves_tf_exactly_unchanged() -> None:
 
 
 def test_renaming_tokens_order_preservingly_leaves_scores_unchanged() -> None:
-    """An order-preserving bijection cannot change identifiers' relative order,
-    so every summation order -- and hence every bit -- is preserved."""
+    """An order-preserving bijection leaves the identifiers' relative order
+    alone, so every summation order, and hence every bit, is preserved."""
     docs = [["aa", "bb"], ["bb", "cc"], ["aa", "cc", "cc"]]
     renamed = [[{"aa": "am", "bb": "bm", "cc": "cm"}[t] for t in d] for d in docs]
     a = TfidfVectoriser().fit(docs)
@@ -194,7 +192,7 @@ def test_corpus_reordering_leaves_every_document_bit_identical() -> None:
 
 
 # ---------------------------------------------------------------------------
-# scikit-learn -- the external oracle
+# scikit-learn: the external oracle
 # ---------------------------------------------------------------------------
 @pytest.mark.sklearn
 def test_vocabulary_matches_sklearn(random_corpus: list[list[str]]) -> None:
@@ -207,11 +205,11 @@ def test_vocabulary_matches_sklearn(random_corpus: list[list[str]]) -> None:
 def test_idf_matches_sklearn_exactly_under_the_platform_log(
     random_corpus: list[list[str]],
 ) -> None:
-    """Proof that our formula *is* sklearn's.
+    """Our formula is sklearn's.
 
-    Under ``LogImpl.PLATFORM`` the agreement must be perfect. Any residual
-    difference under the default is therefore attributable to the deliberate
-    correctly-rounded logarithm (spec_addenda G13), not to a different formula.
+    Under ``LogImpl.PLATFORM`` the agreement is bitwise, so any difference under
+    the default comes from the correctly-rounded logarithm (spec_addenda G13)
+    rather than from a different formula.
     """
     sk = TfidfVectorizer(analyzer=_IDENTITY_ANALYSER, smooth_idf=True).fit(random_corpus)
     ours = TfidfVectoriser(log_impl=LogImpl.PLATFORM).fit(random_corpus)
@@ -274,12 +272,11 @@ def test_cosine_similarities_match_sklearn(random_corpus: list[list[str]]) -> No
 
 @pytest.mark.sklearn
 def test_our_vectors_are_not_l2_normalised(random_corpus: list[list[str]]) -> None:
-    """Guard against having accidentally implemented sklearn instead of the paper.
+    """Guard against having implemented sklearn instead of the paper.
 
-    Section 2.2 applies no vector normalisation, and section 6 is explicit that
-    none is introduced. If every norm were 1 we would have silently adopted
-    sklearn's convention and the section 4.2/4.3 bounds would be measuring the
-    wrong geometry.
+    Section 2.2 applies no vector normalisation and section 6 says none is
+    introduced. Norms of 1 everywhere would mean sklearn's convention had been
+    adopted and the section 4.2/4.3 bounds were measuring the wrong geometry.
     """
     ours = TfidfVectoriser().fit(random_corpus)
     assert all(abs(n - 1.0) > 1e-9 for n in ours.norms)
@@ -297,7 +294,7 @@ def test_model_builds_under_every_reduction_policy(mini_features, policy: Reduct
 
 
 def test_reduction_policy_affects_norms_but_not_weights(mini_features) -> None:  # type: ignore[no-untyped-def]
-    """Weights are products, not sums, so only the norms can depend on the policy."""
+    """Weights are products rather than sums, so only the norms see the policy."""
     a = TfidfVectoriser(reduction=Reduction.NAIVE).fit(list(mini_features))
     b = TfidfVectoriser(reduction=Reduction.EXACT).fit(list(mini_features))
     assert a.matrix.values == b.matrix.values
@@ -306,12 +303,11 @@ def test_reduction_policy_affects_norms_but_not_weights(mini_features) -> None: 
 def test_intermediates_reports_the_tf_that_was_actually_used() -> None:
     """``inspect`` must not print a tf one ulp from the one behind the weight.
 
-    The field was computed as ``weight / idf`` under a comment asserting the
-    division is exact. It is not: two roundings do not cancel, and over a sweep
-    of 184,080 realistic ``(N, df, L, count)`` combinations the round trip
-    missed by an ulp in 9.01% of them. This project compares scores on raw bit
-    patterns, so a reported intermediate that is off by exactly the quantity
-    under study is worse than no intermediate.
+    The field was computed as ``weight / idf`` under a comment claiming that
+    division is exact. Two roundings do not cancel: over a sweep of 184,080
+    realistic ``(N, df, L, count)`` combinations the round trip missed by an ulp
+    in 9.01% of them. Scores here are compared on raw bit patterns, so the
+    reported intermediate was off by the quantity under study.
     """
     from tfidf_stability.vectorisation.idf import smoothed_idf_one
     from tfidf_stability.vectorisation.tfidf import _exact_tf

@@ -1,34 +1,29 @@
 """Distribution summaries, and the experiment-result envelope.
 
-Two responsibilities that belong together because they share one constraint:
-**everything published must be reproducible from what is written down.**
+Two responsibilities under one constraint: everything published must be
+reproducible from what is written down.
 
 Percentiles without a library
 -----------------------------
-The normative backend is standard-library only, so percentiles are computed
-here rather than taken from NumPy. The method is nearest-rank on the sorted
-sample -- ``p50`` of an even-length sample is the *lower* of the two central
-values, not their mean.
+The normative backend is standard-library only, so percentiles are computed here
+rather than taken from NumPy. Nearest-rank on the sorted sample, so ``p50`` of an
+even-length sample is the lower of the two central values.
 
-That is a deliberate choice, not a simplification. Interpolating invents a value
-that no query produced, and every quantity summarised here is a measured
-floating-point observation whose exact bit pattern is meaningful elsewhere in the
-study (margins, flip radii, score gaps). A reported ``p50`` that is not any
-observed margin cannot be looked up, cannot be reproduced by inspection, and
-would not be ``same_bits``-comparable against the raw data. NumPy's default
-linear interpolation would do exactly that. The convention is recorded in the
-output so a reader is never left guessing which one was used.
+Interpolation would invent a value no query produced, and every quantity
+summarised here is a measured floating-point observation whose bit pattern
+matters elsewhere in the study (margins, flip radii, score gaps). An interpolated
+``p50`` cannot be looked up in the raw data, cannot be reproduced by inspection,
+and is not ``same_bits``-comparable against it; NumPy's default linear
+interpolation does that. The convention is recorded in the output.
 
 The result envelope
 -------------------
-:class:`ExperimentResult` is what every runner script writes. It carries the
-payload, the provenance of the data it was computed from, and the environment --
-and its :meth:`~ExperimentResult.digest` is taken over the payload **after
-volatile fields are stripped**, so two runs of the same experiment on the same
-data produce the same digest even though their timestamps differ.
-
-That is the property that makes a published number checkable: a reader can rerun
-the experiment and compare one hex string, rather than eyeballing a table.
+:class:`ExperimentResult` is what every runner script writes: the payload, the
+provenance of the data it was computed from, and the environment. Its
+:meth:`~ExperimentResult.digest` is taken over the payload after volatile fields
+are stripped, so two runs of the same experiment on the same data agree despite
+differing timestamps, and a reader checks a published number by comparing one hex
+string instead of eyeballing a table.
 """
 
 from __future__ import annotations
@@ -56,13 +51,13 @@ DEFAULT_PERCENTILES: tuple[int, ...] = (0, 1, 5, 25, 50, 75, 95, 99, 100)
 def percentile(sorted_values: Sequence[float], p: float) -> float:
     """Nearest-rank percentile of an already-sorted sample.
 
-    Returns an element of the sample, never an interpolated value. See the module
-    docstring for why that matters here.
+    Returns a sample element and never interpolates; the module docstring says
+    why that matters here.
 
     Args:
-        sorted_values: Non-decreasing sample. Not sorted internally, because the
-            callers already hold a sorted array and re-sorting per percentile
-            would be the dominant cost.
+        sorted_values: Non-decreasing sample. Sorting is the caller's job: they
+            already hold a sorted array, and re-sorting per percentile would be
+            the dominant cost.
         p: Percentile in ``[0, 100]``.
 
     Example:
@@ -97,11 +92,11 @@ class Distribution:
 
     @property
     def share_zero(self) -> float:
-        """Share of observations that are exactly zero.
+        """Share of observations equal to zero.
 
-        Broken out because for margins this is G3's headline statistic -- the
-        exact-tie rate -- and it is invisible in any percentile summary once it
-        exceeds 50%, where it would simply make several percentiles read 0.
+        For margins this is G3's headline statistic, the exact-tie rate. A
+        percentile summary hides it: past 50% it only makes several percentiles
+        read 0.
         """
         return self.n_zero / self.n if self.n else math.nan
 
@@ -128,10 +123,10 @@ def summarise_values(
 ) -> Distribution:
     """Summarise a sample, keeping NaN out of the statistics but not the record.
 
-    NaN marks an *undefined* quantity here -- ``m_min^top`` at ``k = 1`` (G16),
-    or a margin on a degenerate query -- and is never a measurement. It is
-    excluded from the statistics and counted, so a summary computed over mostly
-    undefined values is visibly that rather than silently thin.
+    NaN marks an undefined quantity here (``m_min^top`` at ``k = 1`` (G16), or a
+    margin on a degenerate query) and is never a measurement. Excluded from the
+    statistics and counted, so a summary over mostly undefined values is visibly
+    thin.
     """
     collected = list(values)
     finite = sorted(v for v in collected if not math.isnan(v))
@@ -170,15 +165,15 @@ class ExperimentResult:
     payload: dict[str, Any]
     #: The dataset's provenance block, verbatim from :class:`LoadedDataset`.
     data_provenance: dict[str, Any] = field(default_factory=dict)
-    #: Configuration actually in force, not the file it came from.
+    #: Configuration actually in force, rather than the file it came from.
     parameters: dict[str, Any] = field(default_factory=dict)
 
     def digest(self) -> str:
-        """Identity of the *result*, independent of when it was produced.
+        """Identity of the result, independent of when it was produced.
 
-        Over the payload and parameters with volatile fields stripped -- so a
-        rerun on the same data gives the same string, and a reader can verify a
-        published number by comparing one hex value.
+        Over payload and parameters with volatile fields stripped, so a rerun on
+        the same data gives the same string and a reader can verify a published
+        number by comparing one hex value.
         """
         return hash_text(
             canonical_json(

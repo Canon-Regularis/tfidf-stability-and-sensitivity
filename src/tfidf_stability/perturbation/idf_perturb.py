@@ -7,19 +7,17 @@ Section 4.1 gives
 and observes that it "makes explicit the competing effects of changes in corpus
 size and document-frequency distribution".
 
-**The gap this module closes.** That expression, and the bound of section 4.2
-built on it, silently presuppose that ``idf`` and ``idf'`` are vectors over a
-*common index set*. Under a real corpus perturbation the vocabulary itself moves:
-tokens appear, and tokens fall below ``min_df`` and vanish. The paper never says
-what ``delta_idf`` means then.
+That expression, and the section 4.2 bound built on it, presuppose that ``idf``
+and ``idf'`` are vectors over a common index set. Under a real corpus
+perturbation the vocabulary itself moves: tokens appear, and tokens fall below
+``min_df`` and vanish. The paper never says what ``delta_idf`` means then.
 
-The resolution (G5) is to align everything on the **union vocabulary**
-``V u V'``, with coordinates set to zero outside the respective vocabulary. For a
-token ``t`` in ``V' \\ V`` this makes ``delta_idf(t) = idf'(t)``, which is large
--- so the section 4.2 bound stays *valid but loose*. That looseness is real and
-is reported rather than hidden: :class:`Alignment` also exposes the exact
-Pythagorean split, so a caller can see how much of the movement is genuine
-coordinate change and how much is vocabulary churn.
+G5 aligns everything on the union vocabulary ``V u V'``, with coordinates zero
+outside the respective vocabulary. For ``t`` in ``V' \\ V`` this makes
+``delta_idf(t) = idf'(t)``, which is large, so the section 4.2 bound stays valid
+and loose. :class:`Alignment` exposes the exact Pythagorean split, so a caller
+can see how much of the movement is genuine coordinate change and how much is
+vocabulary churn.
 """
 
 from __future__ import annotations
@@ -37,9 +35,9 @@ __all__ = ["Alignment", "IdfPerturbation", "align_models", "analyse_idf_shift"]
 class Alignment:
     """Two models expressed over their union vocabulary.
 
-    Every array here is indexed by position in :attr:`tokens`, which is the
-    union in ascending UTF-8 byte order -- the same ordering rule the vocabulary
-    itself uses, so alignment introduces no new ordering convention.
+    Every array here is indexed by position in :attr:`tokens`, the union in
+    ascending UTF-8 byte order, which is the vocabulary's own ordering rule, so
+    alignment introduces no new convention.
     """
 
     tokens: tuple[str, ...]
@@ -55,17 +53,17 @@ class Alignment:
 
     @property
     def shared(self) -> tuple[int, ...]:
-        """Indices of ``V n V'`` -- where a coordinate genuinely changed."""
+        """Indices of ``V n V'``, where a coordinate genuinely changed."""
         return tuple(i for i in range(self.n_tokens) if self.in_before[i] and self.in_after[i])
 
     @property
     def gained(self) -> tuple[int, ...]:
-        """Indices of ``V' \\ V`` -- tokens the perturbation created."""
+        """Indices of ``V' \\ V``: tokens the perturbation created."""
         return tuple(i for i in range(self.n_tokens) if self.in_after[i] and not self.in_before[i])
 
     @property
     def lost(self) -> tuple[int, ...]:
-        """Indices of ``V \\ V'`` -- tokens the perturbation destroyed."""
+        """Indices of ``V \\ V'``: tokens the perturbation destroyed."""
         return tuple(i for i in range(self.n_tokens) if self.in_before[i] and not self.in_after[i])
 
     @property
@@ -98,7 +96,7 @@ def align_models(before: TfidfModel, after: TfidfModel) -> Alignment:
 
     The union is sorted in ascending UTF-8 byte order, matching
     :mod:`~tfidf_stability.vectorisation.vocabulary`, so the alignment is a pure
-    function of the two token sets and introduces no ordering of its own.
+    function of the two token sets.
     """
     tokens = tuple(
         sorted(
@@ -129,10 +127,10 @@ class IdfPerturbation:
     alignment: Alignment
     n_before: int
     n_after: int
-    #: ``||delta_idf||_inf`` over the union -- the quantity section 4.2's bound uses.
+    #: ``||delta_idf||_inf`` over the union: what section 4.2's bound uses.
     linf: float
     #: The same, restricted to shared tokens. Smaller whenever the vocabulary
-    #: churned, and the gap between the two is exactly the looseness G5 warns of.
+    #: churned; the gap between the two is the looseness G5 warns of.
     linf_shared: float
     #: The token that moved most, and by how much.
     worst_token: str
@@ -143,9 +141,8 @@ class IdfPerturbation:
         """``linf / linf_shared``: how much vocabulary churn inflates the bound.
 
         ``1.0`` means the vocabulary was stable and the section 4.2 bound is as
-        tight as it can be. Large values mean the bound is being driven by
-        tokens that simply did not exist on one side, and should be read with
-        that in mind.
+        tight as it gets. Large values mean the bound is driven by tokens that
+        did not exist on one side, and should be read with that in mind.
         """
         if self.linf_shared == 0.0:
             return float("inf") if self.linf > 0.0 else 1.0
@@ -156,9 +153,9 @@ def analyse_idf_shift(before: TfidfModel, after: TfidfModel) -> IdfPerturbation:
     """Measure the IDF movement between two models (section 4.1).
 
     Section 4.1 notes that "tokens with low document frequency remain sensitive
-    to corpus perturbations even under smoothing". That is visible in the result:
-    the worst-moving token is almost always a rare one, because ``idf`` is
-    logarithmic in ``df`` and the derivative is steepest where ``df`` is small.
+    to corpus perturbations even under smoothing", which shows up here: the
+    worst-moving token is almost always a rare one, since ``idf`` is logarithmic
+    in ``df`` and steepest where ``df`` is small.
     """
     alignment = align_models(before, after)
     deltas = alignment.delta_idf()

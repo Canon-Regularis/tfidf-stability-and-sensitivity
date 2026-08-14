@@ -1,10 +1,9 @@
 // Core scalar types and enumerations.
 //
 // Widths are pinned rather than left to the platform. `int32_t` identifiers
-// support 2.1 billion documents and terms -- far beyond anything this project
-// will index -- while halving the memory traffic of the postings loops against
-// 64-bit alternatives, which is the dominant cost in term-at-a-time scoring.
-// `int64_t` offsets are used where a count can exceed 2^31 (total non-zeros).
+// reach 2.1 billion documents and terms and halve the postings-loop memory
+// traffic against 64-bit, which dominates term-at-a-time scoring. `int64_t`
+// offsets where a count can exceed 2^31 (total non-zeros).
 #pragma once
 
 #include <cstddef>
@@ -22,8 +21,8 @@ using DocId = std::int32_t;
 /// Offset into a sparse structure's flat index/value arrays.
 using Offset = std::int64_t;
 
-/// Every value this project computes is binary64. Named so the intent is
-/// explicit at every call site rather than implied by `double`.
+/// Every value this project computes is binary64. Named so the call sites say
+/// so rather than leaving it implied by `double`.
 using Real = double;
 
 /// A similarity score. Distinguished from Real purely for readability.
@@ -31,8 +30,8 @@ using Score = double;
 
 /// How a sum of floating-point numbers is accumulated.
 ///
-/// Mirrors `tfidf_stability.utils.numerics.Reduction` exactly, including the
-/// integer values, which cross the language boundary.
+/// Mirrors `tfidf_stability.utils.numerics.Reduction`, including the integer
+/// values, which cross the language boundary.
 enum class Reduction : std::int32_t {
     /// Plain left-to-right fold. The literal reading of the paper's formulas
     /// and the default for every published result.
@@ -45,8 +44,8 @@ enum class Reduction : std::int32_t {
     Exact = 3,
 };
 
-/// Which query-scoring algorithm to use. They must agree bit-for-bit under
-/// `Reduction::Naive`; see `scoring.hpp` for why, and the test suite for the
+/// Which query-scoring algorithm to use. The two must agree bit-for-bit under
+/// `Reduction::Naive`; `scoring.hpp` has the argument, the test suite the
 /// assertion.
 enum class ScoringAlgorithm : std::int32_t {
     /// Term-at-a-time over the inverted index. O(sum of df over query terms).
@@ -55,8 +54,8 @@ enum class ScoringAlgorithm : std::int32_t {
     Daat = 1,
 };
 
-/// Size of the pairwise-summation base case. Matches numpy's, so the
-/// `Pairwise` policy and the numpy cross-check agree.
+/// Size of the pairwise-summation base case. numpy's value, which does not by
+/// itself buy agreement with numpy: see the note on `reduce::Pairwise`.
 inline constexpr std::size_t kPairwiseBlock = 128;
 
 }  // namespace tfidf

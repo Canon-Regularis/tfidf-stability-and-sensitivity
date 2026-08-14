@@ -1,10 +1,9 @@
 """The Stage 11 experiment harness.
 
-These tests check that the harness **computes what it claims**, not that the
-results are interesting. A harness that always reported "no flips" would produce
-a beautiful A1 figure and prove nothing, so the tests here mostly construct
-inputs whose answer is known by hand and check the harness finds it -- including
-the cases where the correct answer is a failure.
+These check that the harness computes what it claims, saying nothing about
+whether the results are interesting: one always reporting "no flips" would
+produce a clean A1 figure and prove nothing. Most inputs here have an answer
+known by hand, including the cases where the correct answer is a failure.
 """
 
 from __future__ import annotations
@@ -46,11 +45,11 @@ def _floor(eta: float) -> NoiseFloor:
 # Percentiles
 # ---------------------------------------------------------------------------
 def test_percentiles_never_interpolate() -> None:
-    """Every reported percentile must be an observation that actually occurred.
+    """Every reported percentile must be an observation that occurred.
 
-    NumPy's default would return 2.5 for the median here. That value is not any
-    observed margin, so it could not be looked up in the raw data or compared
-    with `same_bits` -- see the module docstring in `analysis/summarise.py`.
+    NumPy's default returns 2.5 for this median. No observed margin equals it, so
+    it cannot be looked up in the raw data or compared with `same_bits`
+    (`analysis/summarise.py`'s module docstring).
     """
     sample = [1.0, 2.0, 3.0, 4.0]
     assert percentile(sample, 50) == 2.0
@@ -67,7 +66,7 @@ def test_percentile_of_an_empty_sample_is_nan() -> None:
 
 
 def test_nan_is_counted_not_averaged() -> None:
-    """NaN marks an *undefined* quantity (G16), never a measurement of zero."""
+    """NaN marks an undefined quantity (G16); zero is a measurement."""
     d = summarise_values("m", [1.0, 2.0, math.nan, 3.0])
     assert d.n == 3
     assert d.n_nan == 1
@@ -75,7 +74,7 @@ def test_nan_is_counted_not_averaged() -> None:
 
 
 def test_the_exact_tie_share_is_reported_separately() -> None:
-    """It is G3's headline statistic and vanishes into the percentiles otherwise."""
+    """G3's headline statistic; it vanishes into the percentiles otherwise."""
     d = summarise_values("m", [0.0, 0.0, 0.0, 1.0])
     assert d.share_zero == 0.75
     assert d.percentiles["p50"] == 0.0
@@ -92,7 +91,7 @@ def test_an_all_nan_sample_summarises_without_raising() -> None:
 # The tau band
 # ---------------------------------------------------------------------------
 def test_tau_floor_is_exactly_twice_eta() -> None:
-    """The factor 2 is the margin error e_i + e_j, not a safety fudge."""
+    """The factor 2 comes from the margin error e_i + e_j."""
     assert _floor(1e-16).tau_floor == 2e-16
 
 
@@ -114,9 +113,8 @@ def test_the_display_tau_lies_strictly_inside_the_band() -> None:
 
 def test_an_empty_band_is_reported_rather_than_papered_over() -> None:
     """If arithmetic noise reaches the decision boundary there is no valid tau.
-
-    That is a finding about the corpus -- A1's and A2's regimes are not separable
-    on it -- and the code must say so instead of returning a plausible number.
+    That is a finding about the corpus (A1's and A2's regimes do not separate on
+    it), so the code must report it instead of returning a plausible number.
     """
     # eta = 1.0, so tau_floor = 2.0, well above the 0.5 gap.
     band = tau_band(_floor(1.0), [[1.0, 0.5]])
@@ -137,12 +135,12 @@ def test_a_corpus_of_only_exact_ties_gives_an_infinite_ceiling() -> None:
 def test_the_noise_floor_varies_the_norms_not_only_the_dot_product(
     mini_features, mini_model
 ) -> None:
-    """The norm summation is the dominant error source and is easy to miss.
+    """The norm summation dominates the error and is easy to miss.
 
-    `TfidfModel.norms` is precomputed under the model's own reduction, so passing
-    a different policy to `cosine_against_corpus` alone would hold the norms
-    fixed. A dot product runs over a handful of shared terms; a norm runs over
-    the whole document vector. Measuring only the former understates the floor.
+    `TfidfModel.norms` is precomputed under the model's own reduction, so passing a
+    different policy to `cosine_against_corpus` alone holds the norms fixed. A dot
+    product runs over a handful of shared terms, a norm over the whole document
+    vector, so measuring only the dot product understates the floor.
     """
     query = TfidfVectoriser.transform_query(list(mini_features[0])[:4], mini_model)
     floor = measure_noise_floor(mini_model, [query])
@@ -180,17 +178,16 @@ def test_no_flip_ever_occurs_inside_the_certified_radius(a1_setup) -> None:
 
 
 def test_the_flip_rate_is_monotone_enough_to_be_a_transition(a1_setup) -> None:
-    """Not strictly monotone -- it is sampled -- but it must end above it starts."""
+    """Sampled, so not strictly monotone; it must still end above where it starts."""
     vectors, table = a1_setup
     points, _, _ = transition_curve(vectors, table, 2, seed=1, trials=25)
     assert points[-1].flip_rate >= points[0].flip_rate
 
 
 def test_exact_tie_queries_are_excluded_from_the_a1_curve(a1_setup) -> None:
-    """At m_k = 0 the outcome is decided by the tie-break: that is A2, not A1.
-
-    Averaging those queries into an A1 curve would let a tie-break effect be read
-    as a numerical-stability effect.
+    """At m_k = 0 the tie-break decides the outcome, which is A2's regime.
+    Averaging those queries into an A1 curve reads a tie-break effect as one of
+    numerical stability.
     """
     vectors, table = a1_setup
     zero_margin = [0.5] * len(vectors[0])  # every score identical
@@ -207,7 +204,7 @@ def test_the_transition_curve_is_reproducible_from_its_seed(a1_setup) -> None:
 
 
 def test_the_transition_curve_does_not_touch_the_global_generator(a1_setup) -> None:
-    """A local Random, so an experiment cannot be perturbed by unrelated code."""
+    """A local Random, so unrelated code cannot perturb an experiment."""
     import random
 
     vectors, table = a1_setup
@@ -235,7 +232,8 @@ def test_the_audit_populates_both_rows(a1_setup) -> None:
 
 
 def test_conservatism_is_reported_rather_than_accuracy(a1_setup) -> None:
-    """`False` from the certificate means "not covered", never "will change"."""
+    """`False` from the certificate means "not covered"; it claims nothing about
+    whether the ranking changes."""
     vectors, table = a1_setup
     audit = certificate_audit(vectors, table, 2, seed=3, trials=40)
     assert 0.0 <= audit.conservatism <= 1.0
@@ -283,13 +281,12 @@ def _strict_loads(text: str):
 
 
 def test_a_non_finite_value_does_not_produce_invalid_json() -> None:
-    """NaN and Infinity are not JSON, and both occur here for good reasons.
-
-    An undefined margin is reported as NaN rather than coerced to a number
-    (G16), and ``g_min`` is infinite when a corpus has no strictly-positive
-    score gap. Python's encoder emits bare ``NaN``/``Infinity`` tokens, which its
-    own loader accepts and every strict parser -- JavaScript, jq, Go, Rust --
-    rejects. Both real experiment result files were unparseable that way.
+    """NaN and Infinity are outside JSON, and both occur here: an undefined margin
+    is reported as NaN rather than coerced to a number (G16), and ``g_min`` is
+    infinite when a corpus has no strictly-positive score gap. Python's encoder
+    emits bare ``NaN``/``Infinity`` tokens, which its own loader accepts and every
+    strict parser (JavaScript, jq, Go, Rust) rejects. Both real experiment result
+    files were unparseable that way.
     """
     text = canonical_json({"undefined": math.nan, "unbounded": math.inf, "fine": 1.5})
     parsed = _strict_loads(text)
@@ -303,7 +300,7 @@ def test_non_finite_values_are_sanitised_at_every_depth() -> None:
 
 
 def test_a_full_experiment_result_serialises_to_strict_json() -> None:
-    """The end-to-end property: a written result must be machine-readable."""
+    """End to end: a written result must be machine-readable."""
     result = ExperimentResult(
         experiment="e",
         payload={"margins": summarise_values("m", [math.nan, math.nan]).as_dict()},
@@ -316,9 +313,9 @@ def test_a_full_experiment_result_serialises_to_strict_json() -> None:
 # Degenerate tau bands
 # ---------------------------------------------------------------------------
 def test_a_zero_noise_floor_does_not_crash_the_invariance_check() -> None:
-    """`tau_floor` is 0 whenever every reduction policy was exactly
-    correctly-rounded, which is measured behaviour for Neumaier -- not a
-    hypothetical. Taking log10 of it raised ValueError."""
+    """`tau_floor` is 0 whenever every reduction policy came out correctly
+    rounded, measured behaviour for Neumaier. Taking log10 of it raised
+    ValueError."""
     scores = [[1.0, 0.5, 0.25]]
     band = tau_band(_floor(0.0), scores)
     assert band.tau_floor == 0.0
@@ -328,8 +325,8 @@ def test_a_zero_noise_floor_does_not_crash_the_invariance_check() -> None:
 
 def test_an_unbounded_band_never_yields_an_infinite_tau() -> None:
     """With every score identical there is no positive gap, so `g_min` is
-    infinite. The geometric midpoint would be `inf`, and at `tau = inf` every
-    tie ball swallows the corpus -- an unusable tolerance to hand a caller."""
+    infinite. The geometric midpoint would be `inf`, and at `tau = inf` every tie
+    ball swallows the corpus."""
     scores = [[0.5, 0.5, 0.5]]
     band = tau_band(_floor(1e-16), scores)
     assert math.isinf(band.g_min)

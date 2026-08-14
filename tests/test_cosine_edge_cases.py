@@ -1,9 +1,7 @@
 """Cosine similarity: edge cases and the perturbation bounds of section 4.
 
-The property tests here do not merely confirm the inequalities of README section
-4 on a few examples -- they hand the inequality to Hypothesis and ask it to find
-a counterexample. A bound that has survived an adversarial search is worth
-considerably more than one that has been spot-checked.
+The property tests hand the README section 4 inequalities to Hypothesis and ask
+for a counterexample instead of spot-checking a few examples.
 """
 
 from __future__ import annotations
@@ -52,7 +50,7 @@ def test_disjoint_supports_give_exactly_zero() -> None:
 
 
 def test_self_similarity_is_one_to_within_a_few_ulp() -> None:
-    """Not exactly 1: dot/(n*n) rounds three times. The tolerance is derived."""
+    """dot/(n*n) rounds three times, so the result misses 1 by a few ulp."""
     a = sv({0: 1.0, 3: 2.0, 7: 0.5})
     assert abs(cosine(a, a) - 1.0) <= 4 * math.ulp(1.0)
 
@@ -107,56 +105,47 @@ def test_cosine_with_self_is_one_or_zero(a: dict[int, float]) -> None:
     assert c == 0.0 if l2_norm(v) == 0.0 else abs(c - 1.0) <= 8 * math.ulp(1.0)
 
 
-#: Below this magnitude a coordinate's *square* falls into the subnormal range,
-#: so ``sqrt(sum of squares)`` loses precision even though the value itself is
-#: perfectly representable. Measured onset agrees with the theory exactly.
+#: Below this magnitude a coordinate's square is subnormal, so
+#: ``sqrt(sum of squares)`` loses precision while the coordinate itself stays
+#: representable. The measured onset matches this threshold.
 NORM_UNDERFLOW_THRESHOLD = math.sqrt(sys.float_info.min)  # ~1.49e-154
 
 
-# Both suppressions are required, and the second is not redundant: a per-test
-# `settings` REPLACES the profile's `suppress_health_check` rather than adding
-# to it, so naming only `filter_too_much` would silently drop the `too_slow`
-# suppression the ci and nightly profiles set.
+# A per-test `settings` REPLACES the profile's `suppress_health_check`, so naming
+# only `filter_too_much` would drop the `too_slow` suppression the ci and nightly
+# profiles set.
 #
-# `filter_too_much` is suppressed because the filtering is the point. The three
-# `assume()` calls below exclude the low-norm regime deliberately -- G18 -- and
-# they reject about 41% of generated examples (measured: 697 invalid of 1697 at
-# max_examples=1000). That sits close enough to Hypothesis's threshold that the
-# check fires or not depending on the machine, the seed and the library version,
-# which is why this passed locally and failed on the runner.
-#
-# This cannot hide a counterexample: the health check only concerns how many
-# examples were rejected before the test ran, never the verdict of one that did.
+# The three `assume()` calls below exclude the low-norm regime (G18) and reject
+# about 41% of examples (697 invalid of 1697 at max_examples=1000), close enough
+# to Hypothesis's threshold that the check fires depending on machine, seed and
+# library version: it passed locally and failed on the runner. Suppressing it
+# cannot hide a counterexample, since rejections are counted before the test body
+# runs.
 @settings(suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow])
 @given(sparse_map, sparse_map, st.floats(min_value=1e-6, max_value=1e6))
 def test_cosine_is_invariant_under_positive_scaling(
     a: dict[int, float], b: dict[int, float], k: float
 ) -> None:
-    """The observation that makes the scikit-learn cross-check possible.
+    """What makes the scikit-learn cross-check possible.
 
-    The paper's tf normalisation rescales each document by a single positive
-    scalar, so it cannot change any similarity -- only the norms, and hence only
-    the bounds of sections 4.2 and 4.3.
+    The paper's tf normalisation rescales each document by one positive scalar,
+    so it can move only the norms, and hence only the bounds of sections 4.2 and
+    4.3.
 
     Scale invariance is a statement about the reals. In binary64 it holds only
-    while the coordinates' *squares* stay normal, so vectors scaled below
-    :data:`NORM_UNDERFLOW_THRESHOLD` are excluded -- not because the
-    implementation is wrong there, but because it is *correctly* exhibiting the
-    low-norm instability README section 6 describes. That regime has its own
-    test below.
+    while the coordinates' squares stay normal, so vectors scaled below
+    :data:`NORM_UNDERFLOW_THRESHOLD` are excluded; that regime is the low-norm
+    instability of README section 6, tested below.
     """
     u, v = sv(a), sv(b)
     assume(l2_norm(u) > 0 and l2_norm(v) > 0)
     scaled = SparseVector(u.indices, tuple(x * k for x in u.values), u.dim)
     assume(math.isfinite(l2_norm(scaled)))
-    # BOTH vectors have to clear the threshold, not just the scaled one. The
-    # assertion compares cos(scaled, v) against cos(u, v), so either side being
-    # in the underflow regime makes them disagree -- and scaling *up* moves a
-    # vector out of it, so guarding only `scaled` lets `u` stay in. Hypothesis
-    # found exactly that: u = 8.39e-160 (below the threshold) with k = 177795
-    # puts scaled at 1.49e-154 (above it), and the two cosines then differ by
-    # 5e-7 against a 1e-12 tolerance. The implementation is right; it is
-    # correctly exhibiting the instability G18 measures.
+    # Both vectors have to clear the threshold: the assertion compares
+    # cos(scaled, v) against cos(u, v), and scaling up can lift `scaled` clear
+    # while `u` stays under. Hypothesis found u = 8.39e-160 with k = 177795, where
+    # scaled lands at 1.49e-154 and the two cosines differ by 5e-7 against a
+    # 1e-12 tolerance (the instability G18 measures).
     for vector in (u, scaled):
         assume(min(abs(x) for x in vector.values if x != 0.0) > NORM_UNDERFLOW_THRESHOLD)
     assert cosine(scaled, v) == pytest.approx(cosine(u, v), abs=1e-12)
@@ -165,16 +154,11 @@ def test_cosine_is_invariant_under_positive_scaling(
 def test_cosine_degrades_for_vectors_whose_squares_underflow() -> None:
     """Section 6's "cosine becomes unstable for low-norm vectors", made concrete.
 
-    ``l2_norm`` is ``sqrt(sum of squares)``, so a coordinate below
-    ``sqrt(DBL_MIN)`` squares into the subnormal range and loses precision --
-    catastrophically so further down, where the square flushes to zero entirely
-    and a perfectly good vector reports a norm of 0.
-
-    A hypot-style rescaled norm would avoid this, and section 6 explicitly
-    forbids exactly that kind of stabilising transformation. So the behaviour is
-    correct with respect to the specification, and this test pins *where* the
-    specification's own limitation begins rather than pretending it does not
-    exist.
+    ``l2_norm`` is ``sqrt(sum of squares)``: a coordinate below ``sqrt(DBL_MIN)``
+    squares into the subnormal range and loses bits, and further down the square
+    flushes to zero, so a non-zero vector reports a norm of 0. A hypot-style
+    rescaled norm would avoid it; section 6 forbids that class of stabilising
+    transformation, so this pins where the specification's own limitation starts.
     """
     unit = sv({0: 1.0})
     assert pytest.approx(1.49e-154, rel=1e-2) == NORM_UNDERFLOW_THRESHOLD
@@ -200,7 +184,7 @@ def test_dot_product_is_symmetric(a: dict[int, float], b: dict[int, float]) -> N
 
 
 # ---------------------------------------------------------------------------
-# Section 4.3 -- the explicit Lipschitz bound (spec_addenda G4)
+# Section 4.3: the explicit Lipschitz bound (spec_addenda G4)
 # ---------------------------------------------------------------------------
 @given(sparse_map, sparse_map, sparse_map, sparse_map)
 def test_lipschitz_bound_is_never_violated(
@@ -208,8 +192,8 @@ def test_lipschitz_bound_is_never_violated(
 ) -> None:
     """Adversarial search for a counterexample to ``C = 1/L``.
 
-    Vectors with a tiny norm are excluded, not because the bound fails there but
-    because evaluating it in binary64 becomes dominated by its own rounding.
+    Tiny-norm vectors are excluded: evaluating the bound in binary64 there is
+    dominated by its own rounding.
     """
     u, v, up, vp = sv(a), sv(b), sv(c), sv(d)
     norms = [l2_norm(x) for x in (u, v, up, vp)]
@@ -223,11 +207,8 @@ def test_lipschitz_bound_is_never_violated(
 
 
 def test_lipschitz_bound_is_close_to_attained() -> None:
-    """A bound that is never tight would be useless; this one very nearly is.
-
-    Perturbing one vector slightly along a direction orthogonal to the other
-    makes the tight form near-attained.
-    """
+    """Perturbing one vector along a direction orthogonal to the other nearly
+    attains the tight form, so the bound is not vacuous."""
     u = sv({0: 1.0, 1: 1.0})
     v = sv({0: 1.0, 1: 1.0})
     best = 0.0
@@ -262,17 +243,16 @@ def test_corpus_lipschitz_bound_dominates_every_pairwise_constant(mini_model) ->
 
 
 # ---------------------------------------------------------------------------
-# Section 4.2 -- the three-term decomposition (spec_addenda G5)
+# Section 4.2: the three-term decomposition (spec_addenda G5)
 # ---------------------------------------------------------------------------
-#: Section 4.2 is an algebraic statement about *Euclidean norms*, and below
-#: ``NORM_UNDERFLOW_THRESHOLD`` ``l2_norm`` is not one: the coordinate squares
-#: land in the subnormal range and the result carries only a handful of bits
-#: (G18). Nightly found the tight case ``tf = 0`` at ``1.5e-161``, where the
-#: inequality holds with *equality* in exact arithmetic and the computed sides
-#: then differ by 0.5% -- six significant bits survive the squaring. That is a
-#: fact about the norm, not about the decomposition, and it is what
-#: ``test_cosine_degrades_for_vectors_whose_squares_underflow`` exists to pin
-#: down. Excluding the band here keeps this test about section 4.2.
+#: Section 4.2 is an algebraic statement about Euclidean norms, and below
+#: ``NORM_UNDERFLOW_THRESHOLD`` ``l2_norm`` fails to be one: the coordinate
+#: squares are subnormal and a handful of bits survive (G18). Nightly found the
+#: tight case ``tf = 0`` at ``1.5e-161``, where the inequality is an equality over
+#: the reals and the computed sides differ by 0.5%, six significant bits
+#: surviving the squaring. That is a fact about the norm, pinned by
+#: ``test_cosine_degrades_for_vectors_whose_squares_underflow``; excluding the
+#: band here keeps this test about section 4.2.
 above_underflow = st.one_of(
     st.just(0.0),
     st.floats(NORM_UNDERFLOW_THRESHOLD, 1e3, allow_nan=False, allow_infinity=False),
@@ -292,14 +272,13 @@ def test_three_term_bound_is_never_violated(
     """``||w' - w||`` must never exceed the section 4.2 decomposition.
 
     Constructed on a common index set with idf and idf' both bounded as given,
-    which is the setting the inequality is stated in.
+    the setting the inequality is stated in.
 
-    Section 4.2 is a real-arithmetic statement, so checking it in binary64
-    needs three preconditions, each of which the nightly job falsified this
-    test on before they were in place -- see ``docs/spec_addenda.md#g27``:
-    the bound must be computed from the *realised* idf perturbation, all four
-    norms involved must be outside the subnormal-square band, and the slack
-    must be the elementwise rounding of ``w`` rather than a fixed constant.
+    Checking a real-arithmetic statement in binary64 needs three preconditions,
+    each of which nightly falsified this test on before it was in place
+    (``docs/spec_addenda.md#g27``): compute the bound from the realised idf
+    perturbation, keep all four norms outside the subnormal-square band, and take
+    the slack as the elementwise rounding of ``w`` rather than a fixed constant.
     """
     tf = sv(tf_a)
     tf_prime = sv(tf_b)
@@ -311,23 +290,19 @@ def test_three_term_bound_is_never_violated(
         },
         DIM,
     )
-    # Subtraction can re-enter the underflow band the strategy excludes: two
-    # coordinates both above the threshold can differ by far less than it. The
-    # norms the inequality is stated in terms of have to be computable, so
-    # require each to be either exactly zero or faithfully representable.
+    # Subtraction re-enters the band the strategy excludes: two coordinates both
+    # above the threshold can differ by far less than it. Each norm must be zero
+    # or faithfully representable.
     for vec in (tf, tf_prime, delta_tf):
         norm = l2_norm(vec)
         assume(norm == 0.0 or norm >= NORM_UNDERFLOW_THRESHOLD)
 
-    # Realise a concrete idf/idf' pair respecting the supplied sup-norms. This
-    # has to happen *before* the bound is computed, because the perturbation
-    # that is realised is not always the one that was asked for: when
-    # ``didf_linf`` falls below half an ulp of ``idf_linf``, ``idf_linf +
-    # didf_linf`` steps a whole ulp instead. Nightly found this at 100k
-    # examples -- idf_linf=10, didf_linf=1e-15, ulp(10)=1.78e-15, so the
-    # realised step was 1.78x the request and a bound computed from the
-    # request was compared against an observation of something larger. The
-    # rule is docs/perturbation_notes.md's: assume on the realised delta.
+    # Realise the idf/idf' pair before computing the bound: the realised
+    # perturbation can exceed the one asked for. Below half an ulp of
+    # ``idf_linf`` the sum steps a whole ulp instead. Nightly found this at 100k
+    # examples: idf_linf=10, didf_linf=1e-15, ulp(10)=1.78e-15, so the step was
+    # 1.78x the request and the bound met a larger observation
+    # (docs/perturbation_notes.md: assume on the realised delta).
     idf = dict.fromkeys(range(DIM), idf_linf)
     idf_p = dict.fromkeys(range(DIM), idf_linf + didf_linf)
     didf_realised = max(abs(idf_p[i] - idf[i]) for i in range(DIM))
@@ -341,21 +316,18 @@ def test_three_term_bound_is_never_violated(
     )
     observed = difference_norm(w, w_p)
 
-    # ``w' - w`` is a *fourth* norm the comparison rests on, and the one that
-    # underflows most readily: it is smaller than ``tf`` by roughly the size of
-    # the idf perturbation, so ``tf`` can sit comfortably above the threshold
-    # while the difference does not. Nightly found tf = sqrt(DBL_MIN) with
-    # didf = 1e-5, where the difference is ~1.5e-159 and its square is
-    # subnormal even though every input vector is faithful.
+    # ``w' - w`` is a fourth norm the comparison rests on, and the first to
+    # underflow: it is smaller than ``tf`` by roughly the idf perturbation, so
+    # ``tf`` can sit above the threshold while the difference does not. Nightly
+    # found tf = sqrt(DBL_MIN) with didf = 1e-5, difference ~1.5e-159 with a
+    # subnormal square though every input vector is faithful.
     assume(observed == 0.0 or observed >= NORM_UNDERFLOW_THRESHOLD)
 
-    # Section 4.2 is a statement about real arithmetic, but ``observed`` is
-    # evaluated in binary64: every ``v * idf[i]`` rounds, so each component of
-    # ``w' - w`` carries up to ``u*(|w_i| + |w'_i|)`` of error that the
-    # inequality does not model. The allowance is that quantity, not a magic
-    # constant -- a fixed absolute slack is simultaneously too loose for small
-    # vectors and, at ulp-scale perturbations like the one above, unrelated to
-    # the magnitudes actually in play.
+    # ``observed`` is evaluated in binary64: every ``v * idf[i]`` rounds, so each
+    # component of ``w' - w`` carries up to ``u*(|w_i| + |w'_i|)`` of error the
+    # inequality does not model. The allowance is that quantity; a fixed absolute
+    # slack is too loose for small vectors and, at the ulp-scale perturbations
+    # above, unrelated to the magnitudes in play.
     u = 2.0**-53
     rounding = u * (idf_linf + didf_realised) * (l2_norm(tf) + l2_norm(tf_prime))
     assert observed <= bound * (1 + 1e-9) + rounding
@@ -373,17 +345,15 @@ def test_every_reduction_policy_agrees_on_an_exact_case(policy: Reduction) -> No
 
 
 def test_naive_and_exact_reductions_can_differ() -> None:
-    """The spread between policies is what measures the floating-point noise floor.
+    """The spread between policies is what measures the floating-point noise
+    floor, so an equality here would leave the tau derivation of section 7.0
+    measuring nothing.
 
-    If this ever became an equality the tau-derivation experiment of section 7.0
-    would be measuring nothing, so the difference is asserted, not tolerated.
-
-    The construction is deliberate: each addend is individually below half an ulp
-    of the running total, so the naive left-fold discards every one of them, but
-    their *exact* sum exceeds half an ulp and so survives correct rounding. Note
-    that ``n_small`` addends of size ``e`` only demonstrate this when
-    ``n_small * e > ulp(1)/2``; a smaller ``e`` would make both policies agree
-    and the test would be vacuous.
+    Each addend sits below half an ulp of the running total, so the naive
+    left-fold discards every one, while their exact sum exceeds half an ulp and
+    survives correct rounding. ``n_small`` addends of size ``e`` show this only
+    when ``n_small * e > ulp(1)/2``; a smaller ``e`` makes both policies agree and
+    the test vacuous.
     """
     n_small = DIM - 1
     small = 1e-17

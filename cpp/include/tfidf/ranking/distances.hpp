@@ -1,29 +1,28 @@
 // Ordering distances (README sections 4.5 and 7.3, `spec_addenda.md#g2`).
 //
 // The paper asks for "a distance between orderings" in two places, and they are
-// not the same problem:
+// different problems:
 //
-//   restricted to a tie group   both orderings rank the same elements, because a
+//   restricted to a tie group   both orderings rank the same elements, since a
 //                               tie group is defined on the score vector, so
 //                               plain normalised Kendall tau applies;
 //   restricted to top-k         they need not, and "the number of discordant
-//                               pairs" then has no meaning at all.
+//                               pairs" then has no meaning.
 //
 // The second is resolved by the Fagin-Kumar-Sivakumar generalised Kendall
 // distance `K^(p)` at `p = 1/2`. `K^(p)` is a NEAR-METRIC: the triangle
-// inequality genuinely fails, at every penalty, and G2 records the witness. The
-// tests pin that failure instead of tolerating it -- a later "fix" would move
-// every published number while looking like a bug fix.
+// inequality fails, at every penalty, and G2 records the witness. The tests pin
+// that failure, so a later "fix" cannot move every published number while
+// looking like a bug fix.
 //
-// This mirrors `ranking/distances.py`, which is NORMATIVE, and mirrors it
-// operation by operation rather than result by result. Two choices carry that:
-// the union is walked in first-appearance order, so the pair enumeration is the
-// same sequence `itertools.combinations` produces and the penalties accumulate
-// through the same sequence of additions; and every division is placed where the
-// reference places one, so the roundings coincide rather than merely agree to
-// within an ulp. At `p = 1/2` the addends are dyadic and the sums are exact
-// anyway, but nothing here depends on that -- the order alone is enough, which
-// is what keeps a non-default penalty bit-exact too.
+// Mirrors `ranking/distances.py`, which is NORMATIVE, operation by operation
+// rather than result by result. Two choices carry that: the union is walked in
+// first-appearance order, so pairs are enumerated in the sequence
+// `itertools.combinations` produces and the penalties accumulate through the
+// same additions; and every division sits where the reference puts one, so the
+// roundings coincide rather than agreeing to within an ulp. At `p = 1/2` the
+// addends are dyadic and the sums exact anyway, but nothing here depends on
+// that, which is what keeps a non-default penalty bit-exact too.
 #pragma once
 
 #include <tfidf/core/types.hpp>
@@ -43,11 +42,11 @@ namespace tfidf::ranking {
 
 /// The FKS penalty for a pair one list ranks and the other does not witness.
 ///
-/// `1/2` is the *unbiased* contribution, not a metric-preserving one: knowing
-/// nothing about the relative order of two elements absent from a list, they
-/// disagree with probability one half. `p = 0` assumes the unseen pair agrees
-/// and biases every measurement downwards -- the wrong direction for a study
-/// whose subject is instability -- and `p = 1` biases it upwards.
+/// `1/2` is the unbiased contribution (no metric is preserved at any p):
+/// knowing nothing about the relative order of two elements absent from a list,
+/// they disagree with probability one half. `p = 0` assumes the unseen pair
+/// agrees and biases every measurement downwards, the wrong direction for a
+/// study of instability; `p = 1` biases it upwards.
 inline constexpr Real kFksPenalty = 0.5;
 
 namespace detail {
@@ -67,9 +66,9 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
     std::size_t j = mid;
     std::size_t out = lo;
     while (i < mid && j < hi) {
-        // `<=` rather than `<`: equal elements are not an inversion, which is
-        // what makes the count agree with "pairs i < j with seq[i] > seq[j]"
-        // on sequences that repeat -- and rank vectors do repeat.
+        // `<=` rather than `<`: equal elements are no inversion, which makes the
+        // count agree with "pairs i < j with seq[i] > seq[j]" on sequences that
+        // repeat, and rank vectors do repeat.
         if (work[i] <= work[j]) {
             buffer[out] = work[i];
             ++i;
@@ -94,11 +93,10 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 
 /// `item -> index`, last occurrence winning.
 ///
-/// Last-wins is not a preference: it is what the reference's dict comprehension
-/// does. A ranking never repeats a document, so the case is unreachable through
-/// the pipeline -- but an unreachable case that the two implementations resolve
-/// differently is exactly the kind of divergence a differential suite is
-/// supposed to make impossible.
+/// Last-wins is what the reference's dict comprehension does. A ranking never
+/// repeats a document, so the case is unreachable through the pipeline; an
+/// unreachable case the two implementations resolve differently is the kind of
+/// divergence a differential suite exists to rule out.
 [[nodiscard]] inline std::unordered_map<DocId, std::int32_t> positions(
     std::span<const DocId> items) {
     std::unordered_map<DocId, std::int32_t> pos;
@@ -116,10 +114,9 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 // ---------------------------------------------------------------------------
 /// Pairs `i < j` with `sequence[i] > sequence[j]`, by merge sort in O(n log n).
 ///
-/// The naive O(n^2) enumeration would do for a top-k list of 50, but tie groups
-/// are not bounded by k -- on short-text corpora the zero-score block alone can
-/// reach a large fraction of the corpus -- so the asymptotics are load-bearing
-/// here even though they are not in `kendall_fks`.
+/// O(n^2) would do for a top-k list of 50, but tie groups are not bounded by k:
+/// on short-text corpora the zero-score block alone can reach a large fraction
+/// of the corpus. `kendall_fks` sees no such input and stays quadratic.
 [[nodiscard]] inline std::int64_t inversion_count(std::span<const std::int32_t> sequence) {
     std::vector<std::int32_t> work(sequence.begin(), sequence.end());
     std::vector<std::int32_t> buffer(work.size(), 0);
@@ -128,10 +125,9 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 
 /// Normalised Kendall tau between two orderings of the *same* set, best first.
 ///
-/// Throws `std::invalid_argument` when the two rank different sets. That is not
-/// a tolerable input: it is the signal that `kendall_fks` is the function
-/// actually wanted, and silently returning a number there would be a wrong
-/// answer rather than a missing one.
+/// Throws `std::invalid_argument` when the two rank different sets. That input
+/// is the signal `kendall_fks` is the function wanted; returning a number there
+/// would be a wrong answer rather than a missing one.
 [[nodiscard]] inline Real kendall_tau_distance(std::span<const DocId> a,
                                                std::span<const DocId> b) {
     const std::unordered_set<DocId> sa(a.begin(), a.end());
@@ -154,8 +150,8 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
     }
 
     // `n(n-1)/2` is exact in int64 and the product is even, so the conversion is
-    // the only rounding -- the same single rounding the reference incurs when it
-    // divides an exact Python integer by two.
+    // the only rounding, matching the single rounding the reference incurs when
+    // it divides an exact Python integer by two.
     const auto count = static_cast<std::int64_t>(n);
     const auto pairs = count * (count - 1) / 2;
     return static_cast<Real>(inversion_count(mapped)) / static_cast<Real>(pairs);
@@ -170,7 +166,7 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 /// one each) or case 4 (2 * C(k, 2) pairs, `p` each), giving
 /// `k^2 + p * k * (k - 1)`.
 ///
-/// `k = 1` is NOT degenerate: two disjoint singletons still contribute one
+/// `k = 1` is not degenerate: two disjoint singletons still contribute one
 /// case-3 pair, so the maximum is 1. An early guard of the form `if k < 2:
 /// return 0` normalised two entirely disjoint lists to distance zero.
 [[nodiscard]] inline Real fks_max(std::int32_t k, Real penalty = kFksPenalty) noexcept {
@@ -191,19 +187,18 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 ///   case 3  one element in each list alone    1
 ///   case 4  both in one, neither in the other `p`
 ///
-/// Cases 2 and 3 are the generalisation. They encode the reading that an element
-/// present in a list is ranked above one absent from it, so case 3 is an
-/// unavoidable disagreement and case 2 is a disagreement exactly when the list
-/// holding both puts the absent element first.
+/// Cases 2 and 3 are the generalisation. Both read an element present in a list
+/// as ranked above one absent from it, so case 3 is an unavoidable disagreement
+/// and case 2 is one when the list holding both puts the absent element first.
 ///
-/// Direct O(k^2) enumeration: at k <= 50 that is at most 4950 pairs, and being
-/// obviously correct by inspection is worth more here than the asymptotics.
+/// Direct O(k^2) enumeration: at k <= 50 that is at most 4950 pairs, so being
+/// checkable by inspection is worth more here than the asymptotics.
 [[nodiscard]] inline Real kendall_fks(std::span<const DocId> a,
                                       std::span<const DocId> b,
                                       Real penalty = kFksPenalty,
                                       bool normalise = true) {
-    // First-appearance order, a then b: the enumeration order below is part of
-    // the contract with the reference, not an implementation detail.
+    // First-appearance order, a then b. The enumeration order below is part of
+    // the contract with the reference.
     std::vector<DocId> uni;
     uni.reserve(a.size() + b.size());
     std::unordered_set<DocId> seen;
@@ -267,10 +262,10 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 // ---------------------------------------------------------------------------
 // Set-level measures
 // ---------------------------------------------------------------------------
-/// Whether the two top-k *sets* differ -- section 7.3's headline indicator.
+/// Whether the two top-k *sets* differ; section 7.3's headline indicator.
 ///
-/// About the set, not the order: a pure reordering within an unchanged set is a
-/// different phenomenon, and `kendall_fks` is what measures it.
+/// A pure reordering within an unchanged set is a different phenomenon, and
+/// `kendall_fks` is what measures it.
 [[nodiscard]] inline bool top_k_disagreement(std::span<const DocId> a, std::span<const DocId> b) {
     const std::unordered_set<DocId> sa(a.begin(), a.end());
     const std::unordered_set<DocId> sb(b.begin(), b.end());
@@ -297,10 +292,10 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 
 /// Every ordering measure for one pair of top-k lists at one `k`.
 ///
-/// Carried together because each is blind to something the others see. In
-/// particular `kendall_intersection` restricts to the shared elements and so
-/// cannot detect membership change at all -- the very effect section 7.3
-/// measures -- which is why `intersection_size` always travels beside it.
+/// Carried together because each is blind to something the others see:
+/// `kendall_intersection` restricts to the shared elements and so cannot detect
+/// the membership change section 7.3 measures, which is why `intersection_size`
+/// always travels beside it.
 struct TopKComparison {
     std::int32_t k = 0;
     /// 1[topk(a) != topk(b)].
@@ -308,8 +303,8 @@ struct TopKComparison {
     /// Normalised FKS `K^(1/2)` in [0, 1].
     Real fks = 0.0;
     /// Kendall tau on the intersection, NaN when fewer than two are shared.
-    /// NaN is a deliberate "undefined" here and is never a value: coercing it
-    /// to 0 would read as "no reordering", which is a claim, not an absence.
+    /// The NaN means undefined and is never a value: 0 would read as "no
+    /// reordering", which asserts something rather than withholding it.
     Real kendall_intersection = std::numeric_limits<Real>::quiet_NaN();
     std::int32_t intersection_size = 0;
     Real jaccard = 0.0;

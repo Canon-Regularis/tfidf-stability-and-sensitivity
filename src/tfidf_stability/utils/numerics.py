@@ -1,27 +1,22 @@
 """Reduction policies, exact logarithms and floating-point environment probes.
 
-This module is the Python half of the project's bit-exactness contract. Every
-function here has a counterpart in ``cpp/include/tfidf/core/`` that must produce
-*byte-identical* results, and the differential test suite asserts exactly that.
+The Python half of the bit-exactness contract: every function here has a
+counterpart in ``cpp/include/tfidf/core/`` that must produce byte-identical
+results, and the differential suite asserts that.
 
-Two ideas govern the design.
-
-**Summation order is part of the specification.** ``(a + b) + c`` and
-``a + (b + c)`` are different computations in binary64. README section 2 writes
-sums without bracketing, so the normative reading is a plain left-to-right fold,
-which is what :data:`Reduction.NAIVE` implements and what every published result
-uses. The other policies exist as *instruments*: the spread between them is a
-direct measurement of the floating-point noise floor, and the near-tie tolerance
-tau of section 7.1 is derived from that measurement rather than asserted. See
+Summation order is part of the specification: ``(a + b) + c`` and ``a + (b + c)``
+are different computations in binary64, and README section 2 writes sums without
+bracketing, so the normative reading is a left-to-right fold
+(:data:`Reduction.NAIVE`, used for every published result). The other policies
+are instruments; the spread between them measures the floating-point noise floor
+the near-tie tolerance tau of section 7.1 is derived from. See
 ``docs/spec_addenda.md#g13`` and ``docs/numerics.md``.
 
-**The only transcendental in the pipeline is a liability.** IEEE-754 mandates
-correct rounding for ``+ - * / sqrt`` but *not* for ``log``. Platform libms
-therefore disagree, and measurement on this project's reference machine found
-15.16% of idf entries differing from the correctly-rounded value. Since idf is
-computed once over the vocabulary and never in a hot loop, we pay a few
-microseconds for :func:`correctly_rounded_log_ratio` and obtain cross-platform
-bit-reproducibility in exchange.
+IEEE-754 mandates correct rounding for ``+ - * / sqrt`` but not for ``log``, so
+platform libms disagree: 15.16% of idf entries on this project's reference
+machine differ from the correctly-rounded value. idf is computed once over the
+vocabulary and never in a hot loop, so :func:`correctly_rounded_log_ratio` buys
+cross-platform bit-reproducibility for a few microseconds.
 """
 
 from __future__ import annotations
@@ -51,30 +46,34 @@ __all__ = [
     "ulps_between",
 ]
 
-#: Working precision for :func:`correctly_rounded_log_ratio`. 60 decimal digits is
-#: far beyond the ~17 needed to round binary64 correctly; verified empirically to
-#: agree with a 120-digit evaluation on the ratios this project produces.
+#: Working precision for :func:`correctly_rounded_log_ratio`. 60 decimal digits
+#: against the ~17 needed to round binary64 correctly; agrees with a 120-digit
+#: evaluation on every ratio this project produces.
 DECIMAL_LOG_PRECISION: Final[int] = 60
 
-#: Block size for :func:`pairwise_sum`. Matches numpy's, so the ``numpy`` backend
-#: and this policy agree, which makes the cross-check meaningful.
+#: Block size for :func:`pairwise_sum`, matching numpy's. Equal block sizes do
+#: not make the two agree: numpy unrolls its base case into eight accumulators,
+#: so its order departs from a straight fold well below the boundary, and the
+#: results differ at 208 of 262 sizes tried, first at n = 8. The contract is
+#: agreement with the C++ core, which holds bit for bit from n = 1 to 10,000.
 _PAIRWISE_BLOCK: Final[int] = 128
 
 
 class Reduction(str, Enum):
     """How a sum of floating-point numbers is accumulated.
 
-    The choice is never implicit: it is threaded explicitly through every API
-    that sums anything, and recorded in every run manifest.
+    Never implicit: threaded through every API that sums anything, and recorded
+    in every run manifest.
     """
 
     #: Plain left-to-right fold. The literal reading of the paper's formulas and
     #: the default for every published result.
     NAIVE = "naive"
     #: Kahan-Babuska-Neumaier compensated summation. More accurate than NAIVE,
-    #: and therefore *not* what the paper specifies -- an instrument, not a fix.
+    #: so it is an instrument rather than the policy the paper specifies.
     NEUMAIER = "neumaier"
-    #: Recursive pairwise summation with a 128-element base case; what numpy does.
+    #: Pairwise summation over 128-element blocks: numpy's block size, a
+    #: different tree (see :func:`pairwise_sum`).
     PAIRWISE = "pairwise"
     #: Correctly-rounded sum (``math.fsum``). Ground truth for error measurement.
     EXACT = "exact"
@@ -89,9 +88,9 @@ class Reduction(str, Enum):
 def naive_sum(values: Iterable[float]) -> float:
     """Sum left to right with no compensation.
 
-    This is the normative policy. It is *deliberately* the least accurate of the
-    four: the paper specifies plain sums, and silently improving on them would
-    mean publishing numbers that the stated mathematics does not produce.
+    The normative policy and the least accurate of the four: the paper specifies
+    plain sums, and improving on them would publish numbers the stated
+    mathematics does not produce.
     """
     total = 0.0
     for v in values:
@@ -103,8 +102,8 @@ def neumaier_sum(values: Iterable[float]) -> float:
     """Kahan-Babuska-Neumaier compensated summation.
 
     Tracks the rounding error lost at each step in a separate accumulator and
-    adds it back once at the end. Unlike plain Kahan, this variant is also
-    correct when the running total is smaller in magnitude than the addend.
+    adds it back once at the end. Unlike plain Kahan, this variant stays correct
+    when the running total is smaller in magnitude than the addend.
     """
     total = 0.0
     compensation = 0.0
@@ -121,21 +120,16 @@ def neumaier_sum(values: Iterable[float]) -> float:
 def pairwise_sum(values: Iterable[float]) -> float:
     """Pairwise summation; error grows as O(log n) rather than O(n).
 
-    Implemented in *streaming* form: values are accumulated into blocks of
-    :data:`_PAIRWISE_BLOCK`, and completed blocks are merged by a binary-counter
-    stack that combines equal-weight partials. This builds a balanced summation
-    tree without ever needing to know the input length in advance.
+    Streaming form: values accumulate into blocks of :data:`_PAIRWISE_BLOCK`, and
+    completed blocks merge through a binary-counter stack combining equal-weight
+    partials, giving a balanced tree without knowing the length in advance. The
+    dot-product kernel consumes products one at a time and cannot see the
+    intersection size up front, and the C++ core that must match this bit for bit
+    has the same constraint, so ``split at n // 2 and recurse`` is unavailable.
 
-    That last property is the reason for this formulation rather than the more
-    obvious ``split at n // 2 and recurse``. The dot-product kernel consumes
-    products one at a time and cannot see the intersection size up front, so a
-    length-aware algorithm could not be used there -- and the C++ core, which
-    must agree with this function bit-for-bit, has the same constraint.
-
-    The two formulations are *not* interchangeable: they build different trees
-    for any length that is not a power of two times the block size, and they
-    first disagree at n = 129. Both are legitimate pairwise schemes; this one is
-    the pinned specification.
+    The two formulations build different trees for any length that is not a power
+    of two times the block size, first disagreeing at n = 129. Both are
+    legitimate pairwise schemes; this one is the pinned specification.
     """
     partials: list[float] = []
     weights: list[int] = []
@@ -167,9 +161,8 @@ def pairwise_sum(values: Iterable[float]) -> float:
 def exact_sum(values: Iterable[float]) -> float:
     """Correctly-rounded sum: the exact real sum, rounded once.
 
-    Used as ground truth when measuring the absolute error of the other
-    policies, which is what turns section 7.1's qualitative statement about tau
-    into a measured quantity.
+    Ground truth for the absolute error of the other policies, which is how tau
+    in section 7.1 becomes a measured quantity.
     """
     return math.fsum(values)
 
@@ -194,10 +187,8 @@ def reduce_sum(values: Sequence[float], policy: Reduction = Reduction.NAIVE) -> 
 def sqrt(x: float) -> float:
     """Square root.
 
-    Trivial, but wrapped so the *reason* it is safe is recorded at the call site:
-    IEEE-754 mandates that ``sqrt`` be correctly rounded, so unlike ``log`` it is
-    identical on every conforming platform and may be used freely in the native
-    core.
+    IEEE-754 mandates correct rounding for ``sqrt``, so unlike ``log`` it agrees
+    on every conforming platform and the native core may call it freely.
     """
     return math.sqrt(x)
 
@@ -209,20 +200,16 @@ def correctly_rounded_log_ratio(numerator: int, denominator: int) -> float:
     """Return ``ln(numerator / denominator)``, correctly rounded to binary64.
 
     ``math.log`` delegates to the platform libm, which IEEE-754 does not require
-    to be correctly rounded. Measured across ``N`` in {100, 610, 9742, 20000,
-    50000} and all valid ``df``, the platform result differs from the correctly
-    rounded one in **15.16%** of cases. Left unaddressed, that makes idf -- and
-    hence every weight, norm and score downstream -- platform-dependent at the
-    1-ulp level, which would silently break the reproducibility claims this
-    project is built on.
+    to be correctly rounded. Over ``N`` in {100, 610, 9742, 20000, 50000} and all
+    valid ``df``, the platform result differs from the correctly rounded one in
+    15.16% of cases, leaving idf and every weight, norm and score below it
+    platform-dependent at the 1-ulp level. Evaluating the ratio in
+    :class:`~decimal.Decimal` at :data:`DECIMAL_LOG_PRECISION` digits and
+    rounding once costs a few microseconds per vocabulary entry.
 
-    Evaluating the ratio in :class:`~decimal.Decimal` at
-    :data:`DECIMAL_LOG_PRECISION` digits and rounding once removes the problem
-    for a cost of a few microseconds per vocabulary entry.
-
-    Note that the division is performed *before* the logarithm, matching section
-    2.1 exactly. This is not cosmetic: ``log(a/b)`` and ``log(a) - log(b)``
-    differ in 94.53% of the ratios arising at ``N = 9742``.
+    The division happens before the logarithm, matching section 2.1:
+    ``log(a/b)`` and ``log(a) - log(b)`` differ in 94.53% of the ratios arising
+    at ``N = 9742``.
 
     Args:
         numerator: Exact integer numerator (``1 + N`` in section 2.1).
@@ -243,22 +230,21 @@ def correctly_rounded_log_ratio(numerator: int, denominator: int) -> float:
 def platform_log_ratio(numerator: int, denominator: int) -> float:
     """``ln(numerator / denominator)`` using the platform libm.
 
-    Provided so the difference against :func:`correctly_rounded_log_ratio` can be
-    measured and reported rather than becoming folklore. Not used for published
-    results.
+    Here so the gap against :func:`correctly_rounded_log_ratio` can be measured
+    and reported. Never used for published results.
     """
     return math.log(numerator / denominator)
 
 
 # ---------------------------------------------------------------------------
-# Bit-level helpers -- the vocabulary of the differential tests
+# Bit-level helpers: the vocabulary of the differential tests
 # ---------------------------------------------------------------------------
 def bits_of(x: float) -> bytes:
     """The raw 8 little-endian bytes of a binary64 value.
 
-    Differential tests compare *these*, not the floats. ``==`` on floats would
-    conflate ``-0.0`` with ``0.0`` and would call two NaNs unequal; byte equality
-    is the property we actually mean by "bit-exact".
+    Differential tests compare these bytes: float ``==`` conflates ``-0.0`` with
+    ``0.0`` and calls two NaNs unequal, so byte equality is what "bit-exact"
+    means here.
     """
     return struct.pack("<d", x)
 
@@ -276,10 +262,8 @@ def ulp(x: float) -> float:
 def ulps_between(a: float, b: float) -> float:
     """Signed distance from ``a`` to ``b`` measured in units in the last place.
 
-    Returns ``inf`` if either argument is non-finite, or if the two straddle
-    zero in a way that makes the count meaningless. Used to express test
-    tolerances in a unit that is scale-free, rather than as an arbitrary
-    absolute epsilon.
+    ``inf`` if either argument is non-finite. Test tolerances are stated in this
+    scale-free unit rather than as an absolute epsilon.
     """
     if not (math.isfinite(a) and math.isfinite(b)):
         return math.inf
@@ -297,9 +281,9 @@ def ulps_between(a: float, b: float) -> float:
 def float_environment() -> dict[str, object]:
     """Describe the live floating-point environment, for the run manifest.
 
-    The Python-side counterpart of ``tfidf::fp::selftest``. It cannot read MXCSR
-    directly, so it probes behaviourally instead: if subnormals survive
-    arithmetic then flush-to-zero is not in effect.
+    Python-side counterpart of ``tfidf::fp::selftest``. MXCSR is unreadable from
+    here, so the probes are behavioural: a subnormal surviving arithmetic means
+    flush-to-zero is off.
     """
     tiny = sys.float_info.min
     subnormal_survives = (tiny / 2.0) > 0.0
@@ -323,11 +307,9 @@ def float_environment() -> dict[str, object]:
 def assert_sane_float_environment() -> None:
     """Raise if the interpreter's floating-point environment is untrustworthy.
 
-    Called at import. The failure this actually guards against is a numerical
-    library -- typically a BLAS behind numpy -- setting flush-to-zero
-    process-wide when it loads. In a project whose subject is near-tie margins,
-    silently flushing subnormal score differences to zero would corrupt exactly
-    the phenomenon under study.
+    Guards against a numerical library, usually a BLAS behind numpy, setting
+    flush-to-zero process-wide on load: subnormal score differences would then
+    flush to zero, destroying the near-tie margins under study.
     """
     env = float_environment()
     problems = []

@@ -13,17 +13,16 @@ then applies ``||a (*) b||_2 <= ||a||_2 ||b||_inf`` termwise to get
 separating a **local** document edit, a **global** corpus change, and their
 **interaction**.
 
-This module evaluates all three terms and, separately, the quantity they bound,
-so a caller can assert the inequality and report how tight it was. Which of the
-three dominates is also reported: section 4.2 claims the interaction term
-provides "a natural mechanism for perturbation amplification" but offers no
-evidence, and the decomposition is what turns that into something measurable.
+All three terms are evaluated here alongside the quantity they bound, so a caller
+can assert the inequality and report how tight it was. Which term dominates is
+also reported: section 4.2 claims the interaction term provides "a natural
+mechanism for perturbation amplification" and offers no evidence, and the
+decomposition makes that measurable.
 
-Everything is computed on the **union vocabulary** (``spec_addenda.md#g5``),
-because a corpus perturbation moves the vocabulary and the bound as stated
-presupposes a fixed index set. The exact Pythagorean split is reported
-alongside, so the part of the movement that is genuine coordinate change can be
-separated from the part that is vocabulary churn.
+Everything is computed on the union vocabulary (``spec_addenda.md#g5``), since a
+corpus perturbation moves the vocabulary while the bound as stated presupposes a
+fixed index set. The exact Pythagorean split is reported alongside, separating
+genuine coordinate change from vocabulary churn.
 """
 
 from __future__ import annotations
@@ -42,11 +41,11 @@ __all__ = ["ThreeTermBound", "VectorPerturbation", "analyse_vector_shift", "thre
 class ThreeTermBound:
     """Section 4.2's bound, with its three constituents kept apart."""
 
-    #: ``||dtf||_2 * ||idf||_inf`` -- the local document edit.
+    #: ``||dtf||_2 * ||idf||_inf``: the local document edit.
     local: float
-    #: ``||tf||_2 * ||didf||_inf`` -- the global corpus change.
+    #: ``||tf||_2 * ||didf||_inf``: the global corpus change.
     glob: float
-    #: ``||dtf||_2 * ||didf||_inf`` -- their interaction.
+    #: ``||dtf||_2 * ||didf||_inf``: their interaction.
     interaction: float
     #: What the bound is bounding.
     observed: float
@@ -59,23 +58,23 @@ class ThreeTermBound:
     def holds(self) -> bool:
         """Whether the inequality is respected.
 
-        The slack covers rounding incurred while *evaluating* the bound, not
-        slack in the mathematics: every term is a product of two norms, each of
-        which is itself a rounded square root.
+        The slack covers rounding incurred while evaluating the bound, and none
+        in the mathematics: every term is a product of two norms, each itself a
+        rounded square root.
         """
         return self.observed <= self.total * (1.0 + 1e-12) + 1e-15
 
     @property
     def tightness(self) -> float:
-        """``observed / total`` -- how close the bound comes to being attained."""
+        """``observed / total``: how close the bound comes to being attained."""
         return self.observed / self.total if self.total > 0.0 else 0.0
 
     @property
     def dominant_term(self) -> str:
         """Which of the three contributes most.
 
-        Section 4.2 asserts the interaction term matters without showing when.
-        This is the quantity that answers it.
+        Section 4.2 asserts the interaction term matters without showing when;
+        this is the quantity that answers it.
         """
         return max(
             (("local", self.local), ("global", self.glob), ("interaction", self.interaction)),
@@ -90,9 +89,9 @@ def three_term_terms(
     delta_idf_linf: float,
     observed: float,
     *,
-    # Keyword-only: the reduction chooses which summation order the two l2 calls
-    # below use, so it is the one argument here that changes the returned bits.
-    # A bare `Reduction.EXACT` trailing five floats would hide that.
+    # Keyword-only: the reduction picks the summation order for the two l2 calls
+    # below, so it is the one argument here that changes the returned bits. A
+    # bare `Reduction.EXACT` trailing five floats would hide that.
     policy: Reduction = Reduction.NAIVE,
 ) -> ThreeTermBound:
     """Assemble section 4.2's bound from its parts."""
@@ -113,11 +112,11 @@ class VectorPerturbation:
     doc_id: str
     bound: ThreeTermBound
     alignment: Alignment
-    #: ``||(w' - w) restricted to V n V'||`` -- genuine coordinate change.
+    #: ``||(w' - w) restricted to V n V'||``: genuine coordinate change.
     shared_shift: float
-    #: ``||w' restricted to V' \\ V||`` -- mass on tokens that did not exist before.
+    #: ``||w' restricted to V' \\ V||``: mass on tokens that did not exist before.
     gained_mass: float
-    #: ``||w restricted to V \\ V'||`` -- mass on tokens that ceased to exist.
+    #: ``||w restricted to V \\ V'||``: mass on tokens that ceased to exist.
     lost_mass: float
 
     @property
@@ -126,9 +125,9 @@ class VectorPerturbation:
 
             ||w' - w||^2 = shared^2 + gained^2 + lost^2
 
-        holds *exactly* in the reals. In binary64 it holds to rounding, and
-        checking it is a cheap guard against an alignment bug -- a misaligned
-        index would break this identity long before it broke any inequality.
+        holds exactly in the reals and to rounding in binary64. A cheap guard
+        against an alignment bug: a misaligned index breaks this identity long
+        before it breaks any inequality.
         """
         lhs = self.bound.observed**2
         rhs = self.shared_shift**2 + self.gained_mass**2 + self.lost_mass**2
@@ -139,8 +138,8 @@ class VectorPerturbation:
         """Share of the squared movement attributable to vocabulary churn.
 
         Zero when the vocabulary was stable. Large values mean the section 4.2
-        bound is being driven by tokens that exist on only one side, which is
-        the looseness G5 identifies.
+        bound is driven by tokens existing on one side only, the looseness G5
+        identifies.
         """
         total = self.bound.observed**2
         if total <= 0.0:
@@ -158,8 +157,8 @@ def analyse_vector_shift(
 
     Args:
         before, after: Models fitted on the unperturbed and perturbed corpora.
-        doc_id: A document present in *both* -- the section 4.2 bound compares a
-            document with itself, so a document that was added or removed has no
+        doc_id: A document present in both models. The section 4.2 bound compares
+            a document with itself, so one that was added or removed has no
             ``w' - w`` to bound.
         policy: Reduction policy for every norm.
 
@@ -181,8 +180,9 @@ def analyse_vector_shift(
     diff = [b - a for a, b in zip(w, w_prime, strict=True)]
     observed = l2(diff, policy)
 
-    # tf is recoverable exactly: w = tf * idf, and idf is never zero on a token
-    # that is in the vocabulary (idf >= 1 always -- see spec_addenda G4).
+    # w / idf recovers tf up to one rounding, which is enough for a norm of the
+    # difference. idf is never zero on an in-vocabulary token (idf >= 1, see
+    # spec_addenda G4), so the division is safe.
     def tf_of(weights: Sequence[float], idf: Sequence[float]) -> list[float]:
         return [
             (weight / scale) if scale != 0.0 else 0.0

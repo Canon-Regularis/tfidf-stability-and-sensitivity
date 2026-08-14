@@ -1,35 +1,33 @@
 // Query scoring: s_i = cos(q, w_i) for every document (README section 2.3).
 //
-// Two structurally different algorithms are provided, and they are required to
-// agree *bit for bit*. That is a strong correctness signal: two independent
-// traversals of the same data, with different memory access patterns and
-// different loop nesting, producing identical binary64 output leaves very
-// little room for a subtle indexing or accumulation bug to hide.
+// Two structurally different algorithms, required to agree bit for bit. Two
+// independent traversals of the same data, with different memory access
+// patterns and different loop nesting, emitting identical binary64 leaves
+// little room for an indexing or accumulation bug to hide in.
 //
 // --- Why they agree -----------------------------------------------------------
 //
-// TAAT determinism theorem. The outer loop runs over query terms in *ascending
-// term identifier*, and each term contributes at most one addition to any given
-// accumulator. So for document d the accumulation sequence is exactly
+// TAAT determinism theorem. The outer loop runs over query terms in ascending
+// term identifier and each term contributes at most one addition to any given
+// accumulator, so document d accumulates over
 //
 //     ascending term id over supp(q) INTERSECT supp(w_d), starting from 0.0
 //
-// which is precisely the sequence the merge-based dot product performs. Hence
-// TAAT is bit-identical to a naive row-wise dot product for any reduction that
-// is a pure left fold.
+// which is the sequence the merge-based dot product performs. Hence TAAT is
+// bit-identical to a naive row-wise dot product for any reduction that is a
+// pure left fold.
 //
-// This holds *only* because the outer loop ascends. Blocking or reordering the
-// term loop would break it, which is why no such optimisation is applied on the
-// normative path.
+// It holds only while the outer loop ascends. Blocking or reordering the term
+// loop breaks it, so no such optimisation is applied on the normative path.
 //
 // --- Cost ---------------------------------------------------------------------
 //
 //   TAAT   O(sum of df(t) over query terms) multiply-adds, plus O(|touched|)
-//          divisions -- not O(N) divisions, since untouched documents score 0.
+//          divisions rather than O(N), since untouched documents score 0.
 //   DAAT   O(sum of nnz(d) over candidate documents).
 //
-// TAAT wins when the query's terms are individually rare, which is the usual
-// case for a TF-IDF profile query. It is the default.
+// TAAT wins when the query's terms are individually rare, the usual case for a
+// TF-IDF profile query, and is the default.
 #pragma once
 
 #include <tfidf/core/reduction.hpp>
@@ -44,8 +42,8 @@
 
 namespace tfidf {
 
-/// Reusable scratch for TAAT. Allocated once and reused across queries so the
-/// hot loop performs no allocation at all.
+/// Reusable scratch for TAAT. Allocated once and reused across queries, so the
+/// hot loop allocates nothing.
 struct ScoringScratch {
     std::vector<Real> accumulator;  ///< dense, size n_docs
     std::vector<DocId> touched;     ///< which entries are live this query
@@ -56,8 +54,8 @@ struct ScoringScratch {
         touched.reserve(static_cast<std::size_t>(n_docs) / 8 + 16);
     }
 
-    /// Zero only the entries touched by the previous query -- O(|touched|)
-    /// rather than O(n_docs), which matters when queries are sparse.
+    /// Zero only the entries touched by the previous query: O(|touched|) rather
+    /// than O(n_docs), which matters when queries are sparse.
     void clear_touched() {
         for (const DocId d : touched) {
             accumulator[static_cast<std::size_t>(d)] = 0.0;
@@ -90,11 +88,11 @@ void score_taat_with(const SparseView& query,
     }
 
     // Compensation state is per-document, so a compensated policy needs one
-    // accumulator object per touched document. `Naive` carries no state beyond
-    // the running sum, which is why it can share the dense array directly.
+    // accumulator object per touched document. `Naive` holds no state beyond the
+    // running sum and can share the dense array directly.
     if constexpr (std::is_same_v<Policy, reduce::Naive>) {
-        // ASCENDING term id -- this is what makes the result bit-identical to
-        // the merge-based dot product. Do not reorder.
+        // Ascending term id: this is what makes the result bit-identical to the
+        // merge-based dot product. Do not reorder.
         for (std::size_t k = 0; k < query.nnz(); ++k) {
             const TermId t = query.indices[k];
             const Real qv = query.values[k];
@@ -103,6 +101,11 @@ void score_taat_with(const SparseView& query,
             for (std::size_t p = lo; p < hi; ++p) {
                 const DocId d = index.rowidx[p];
                 Real& slot = scratch.accumulator[static_cast<std::size_t>(d)];
+                // A slot that accumulated back to 0.0 would be pushed twice.
+                // Values are non-negative (TF-IDF lives in the non-negative
+                // orthant) and a stored value is never zero in a canonical
+                // sparse structure, so it cannot happen; the duplicate would
+                // only rewrite the same quotient. Asserted in the test suite.
                 if (slot == 0.0) {
                     scratch.touched.push_back(d);
                 }
@@ -132,20 +135,13 @@ void score_taat_with(const SparseView& query,
     for (const DocId d : scratch.touched) {
         const auto i = static_cast<std::size_t>(d);
         const Real dn = doc_norms[i];
-        // The expression is dot / (qn * dn). Not (dot/qn)/dn, and not
-        // dot * (1/(qn*dn)); those round differently and the Python reference
-        // pins this exact form.
+        // dot / (qn * dn), the form the Python reference pins. (dot/qn)/dn and
+        // dot * (1/(qn*dn)) round differently.
         out[i] = (dn == 0.0) ? 0.0 : scratch.accumulator[i] / (query_norm * dn);
     }
 }
 
-/// A `touched` slot can legitimately accumulate back to exactly 0.0, in which
-/// case the `slot == 0.0` test above would register it twice. Values here are
-/// non-negative (TF-IDF lives in the non-negative orthant), so a sum of
-/// products of non-negatives is zero only if every product is zero -- and a
-/// stored value is never zero in a canonical sparse structure. The duplicate
-/// would be harmless anyway: it only causes a redundant re-write of the same
-/// quotient. Asserted in the test suite.
+/// Term-at-a-time scoring under a policy chosen at run time.
 inline void score_taat(const SparseView& query,
                        const Csc& index,
                        std::span<const Real> doc_norms,
@@ -171,9 +167,9 @@ inline void score_taat(const SparseView& query,
 
 /// Document-at-a-time scoring: an independent merge per document.
 ///
-/// Structurally unrelated to TAAT -- it never builds an inverted index and
-/// never uses a dense accumulator -- yet must produce identical bits. That
-/// makes it the single most valuable test in the native suite.
+/// Shares no structure with TAAT (no inverted index, no dense accumulator) and
+/// must still produce identical bits, which is the strongest check in the
+/// native suite.
 inline void score_daat(const SparseView& query,
                        const CsrView& corpus,
                        std::span<const Real> doc_norms,

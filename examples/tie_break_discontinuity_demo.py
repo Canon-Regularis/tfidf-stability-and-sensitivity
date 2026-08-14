@@ -2,35 +2,31 @@
 """A2 in miniature: a ranking discontinuity with provably zero numerical error.
 
 Research question A2 asks whether deterministic tie-breaking induces
-decision-level discontinuities *independent* of numerical error. Every
-corpus-scale measurement of that question -- section 7.3's disagreement rates,
-section 7.4's case study -- is a rate over thousands of queries, and a rate can
-always be met with the objection that some of it is arithmetic noise leaking in.
-This file exists to remove that objection once, in a form small enough to read
-in full.
+decision-level discontinuities independent of numerical error. Every
+corpus-scale measurement of it (section 7.3's disagreement rates, section 7.4's
+case study) is a rate over thousands of queries, and a rate always invites the
+objection that some of it is arithmetic noise leaking in. This removes the
+objection once, small enough to read in full.
 
-The construction is six documents, three of which carry **one bit pattern**
-between them. Under that exact tie the three ranking operators of section 4.5
-produce three different answers, and the file *checks*, rather than asserts in
-prose, that all three consumed byte-identical scores. Numerical error is
-therefore not merely small here, it is exactly zero -- there is no arithmetic
-between the operators that could differ -- so the disagreement has exactly one
-available cause. That is the whole of A2, with the statistics removed.
+Six documents, three of which carry one bit pattern between them. Under that
+exact tie the three ranking operators of section 4.5 produce three different
+answers, and the file checks that all three consumed byte-identical scores. No
+arithmetic runs between the operators, so numerical error here is zero and the
+disagreement has one available cause.
 
-Two kinds of discontinuity appear, and they are not the same phenomenon. At
-k = 3 the tie straddles the boundary and the three operators return three
-different top-k *sets*; at k = 4 the boundary margin is a healthy 0.25 and all
-three return the same set in three different *orders*. The note under section 4.4
-in ``docs/spec_addenda.md`` explains why neither bounds the other: ``m_k``
-constrains the boundary, ``m_min^top`` constrains the interior, and the gap
-index sets are disjoint.
+Two kinds of discontinuity appear, and they are separate phenomena. At k = 3 the
+tie straddles the boundary and the three operators return three different top-k
+sets; at k = 4 the boundary margin is 0.25 and all three return the same set in
+three different orders. The note under section 4.4 in ``docs/spec_addenda.md``
+gives the reason neither bounds the other: ``m_k`` constrains the boundary,
+``m_min^top`` the interior, and the gap index sets are disjoint.
 
-The second half turns to G1. Section 2.3.3's tie group is a ball, the paper
-calls its members "indistinguishable", and the implementation carries three
-separately named objects because that word cannot be made to apply to a
-non-transitive relation. The dyadic ladder ``s_i = i * 2^-20`` at ``tau = 2^-20``
-is the standard witness, chosen because every score, gap and comparison in it is
-exact in binary64 -- so, again, nothing observed can be blamed on rounding.
+The second half turns to G1. Section 2.3.3's tie group is a ball and the paper
+calls its members "indistinguishable", but the relation is intransitive, so the
+implementation carries three separately named objects. The dyadic ladder
+``s_i = i * 2^-20`` at ``tau = 2^-20`` is the standard witness: every score, gap
+and comparison in it is exact in binary64, so nothing observed can be blamed on
+rounding.
 
 Run with::
 
@@ -62,18 +58,15 @@ WIDTH: Final[int] = 78
 
 #: ``(doc_id, score, popularity, rating_sum2, rating_count, engagement)``.
 #:
-#: The scores are dyadic rationals, so every one of them is exact in binary64 and
-#: the three at 0.5 are one bit pattern rather than three nearby ones. G22 is the
-#: reason they are written down rather than produced by scoring text: ``tf =
-#: count / L`` makes the finest possible text edit a ``1/L`` *relative*
-#: perturbation, so a corpus cannot be authored to land on a chosen separation.
-#: A2's regime is reached directly, exactly as G22 prescribes.
+#: Dyadic scores, so each is exact in binary64 and the three at 0.5 are one bit
+#: pattern rather than three nearby ones. Written down rather than scored from
+#: text because of G22: ``tf = count / L`` makes the finest text edit a ``1/L``
+#: relative perturbation, so no corpus can be authored onto a chosen separation.
 #:
-#: The attributes are chosen so that the three tied documents are ordered
-#: differently by each operator: popularity puts charlie first (pi), identifier
-#: byte order puts alpha first (pi_score), engagement puts charlie first but
-#: bravo second (pi_alt). Rating never fires -- it sits second in both
-#: priorities, and the leading attribute has already decided.
+#: Each operator orders the three tied documents differently: popularity puts
+#: charlie first (pi), identifier byte order alpha first (pi_score), engagement
+#: charlie first and bravo second (pi_alt). Rating never fires; it sits second in
+#: both priorities and the leading attribute has already decided.
 CORPUS: Final[tuple[tuple[str, float, int, int, int, int], ...]] = (
     ("doc-zulu", 0.75, 2, 12, 2, 2),
     ("doc-alpha", 0.5, 5, 18, 2, 1),
@@ -83,9 +76,9 @@ CORPUS: Final[tuple[tuple[str, float, int, int, int, int], ...]] = (
     ("doc-foxtrot", 0.125, 6, 10, 2, 6),
 )
 
-#: The ladder of G1's witness: ``s_i = i * 2^-20`` for ``i = 0 .. 5``, with
-#: ``tau = 2^-20`` exactly. Six rungs is the smallest length at which the chain
-#: is visibly wider than any clique while the whole ladder still prints.
+#: G1's witness: ``s_i = i * 2^-20`` for ``i = 0 .. 5``, with ``tau = 2^-20``
+#: exactly. Six rungs is the shortest ladder on which the chain is visibly wider
+#: than any clique while the whole thing still prints.
 LADDER_EXPONENT: Final[int] = -20
 LADDER_RUNGS: Final[int] = 6
 
@@ -101,9 +94,8 @@ def _rule(text: str) -> None:
 def _hex_bits(x: float) -> str:
     """The binary64 payload as a hex word.
 
-    Printed rather than the decimal value because "bit-identical" is a claim
-    about these sixteen digits, and two floats that print the same at repr
-    precision can still differ in the last place.
+    "Bit-identical" is a claim about these sixteen digits, and two floats that
+    print the same at repr precision can still differ in the last place.
     """
     return f"0x{int.from_bytes(bits_of(x), 'little'):016x}"
 
@@ -125,11 +117,10 @@ def _records() -> list[dict[str, Any]]:
 def _require_bit_identical_scores(rankings: dict[str, Ranking]) -> int:
     """Verify A2's premise and return the number of comparisons that verified it.
 
-    The premise is that the operators differ in their *tie-break* and in nothing
-    else. It holds structurally -- ``rank_all_operators`` builds one sorted score
-    array and hands the same object to each operator -- but structure is exactly
-    the kind of thing a refactor silently removes, so it is checked here against
-    the bit patterns themselves.
+    The premise is that the operators differ in their tie-break and in nothing
+    else. It holds structurally (``rank_all_operators`` builds one sorted score
+    array and hands the same object to each operator), but a refactor can remove
+    that silently, so it is checked against the bit patterns themselves.
 
     Raises:
         AssertionError: If any operator saw a score differing from ``pi``'s in a
@@ -266,9 +257,8 @@ def demonstrate_tie_group_objects() -> None:
     print("  Same tau, same scores, different centre, different answer -- which is why")
     print("  the ball is reported per-rank and never as 'the' group of a document.")
 
-    # The index emits G1's diagnostics from its constructor; capture them so the
-    # demo can show that the warning fires rather than letting it land on stderr
-    # out of sequence with the narrative.
+    # The constructor emits G1's diagnostics; captured so the warning prints in
+    # sequence instead of landing on stderr out of order with the narrative.
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         index = TieGroupIndex.build(ladder, tau)

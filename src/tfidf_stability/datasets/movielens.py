@@ -1,47 +1,42 @@
 """MovieLens ``ml-latest-small`` to a corpus, without ever redistributing it.
 
-The licence position, which shapes the whole module
----------------------------------------------------
-The MovieLens usage licence permits research use and **prohibits
-redistribution**. So the data cannot be committed, cannot be an test fixture, and
-cannot be in CI. What *is* committed is this parser, a pinned SHA-256, and the
-derived statistics -- everything needed to reproduce the numbers given a copy of
-the archive obtained from GroupLens directly.
+Licence, which shapes the whole module
+--------------------------------------
+The MovieLens licence permits research use and prohibits redistribution, so the
+data cannot be committed, cannot be a test fixture and cannot be in CI. What is
+committed is this parser, a pinned SHA-256 and the derived statistics: enough to
+reproduce the numbers given a copy of the archive obtained from GroupLens.
 
-GroupLens updates ``ml-latest-small`` **in place**, at the same URL. A pin is
-therefore not paranoia: without it the corpus underneath a published result can
-change silently. :func:`load` verifies the digest and refuses to proceed on a
-mismatch rather than warning, because a warning would be filtered out by the very
-scripts that need to see it.
+GroupLens updates ``ml-latest-small`` in place at the same URL, so without a pin
+the corpus underneath a published result can change silently. :func:`load`
+verifies the digest and refuses to proceed on a mismatch; a warning would be
+filtered out by the scripts that need to see it.
 
 Determinism on real data
 ------------------------
-Three specific hazards, all handled here rather than downstream:
+Three hazards, all handled here rather than downstream:
 
-1. **Row order.** CSV row order is an artefact of how GroupLens exported the
-   file. Everything is sorted by ``movieId`` as an integer, so document indices
-   are a property of the data rather than of the file.
-2. **Ratings are 0.5-quantised**, so ``2 * rating`` is always an exact integer.
-   That is what makes ``docs/spec_addenda.md#g8``'s exact ``(2*sum, count)``
-   representation available on real data -- the mean is never formed as a float,
-   so two equal means can never compare unequal and two distinct means can never
-   collide. Parsed via integer arithmetic on the decimal text, never through
-   ``float`` -- ``float("3.5") * 2`` is exact here, but relying on that is a
-   silent dependence on the input alphabet.
-3. **Unrated films exist.** ``movies.csv`` lists films that appear in no row of
-   ``ratings.csv``, so their mean rating is genuinely undefined. They become
-   ``has_value = False`` and sort last -- the missing-value path from G8
-   exercised on real data rather than on a constructed fixture. The count is
-   reported by ``scripts/fetch_data.py`` on first download rather than asserted
-   here, since this repository never holds the archive to check it against.
+1. **Row order.** CSV row order is an artefact of GroupLens' export. Everything
+   is sorted by ``movieId`` as an integer, so document indices are a property of
+   the data rather than of the file.
+2. **Ratings are 0.5-quantised**, so ``2 * rating`` is an exact integer. That
+   makes ``docs/spec_addenda.md#g8``'s exact ``(2*sum, count)`` representation
+   available on real data: the mean is never formed as a float, so equal means
+   cannot compare unequal and distinct means cannot collide. Parsed by integer
+   arithmetic on the decimal text; ``float("3.5") * 2`` is exact here, but
+   relying on that is a silent dependence on the input alphabet.
+3. **Unrated films exist.** ``movies.csv`` lists films appearing in no row of
+   ``ratings.csv``, so their mean rating is undefined. They become
+   ``has_value = False`` and sort last, exercising G8's missing-value path on
+   real data. ``scripts/fetch_data.py`` reports the count on first download,
+   since this repository never holds the archive to check against.
 
 Text
 ----
 ``title``, ``genres`` and the free-text ``tags`` are concatenated. Genres arrive
 pipe-separated (``Action|Sci-Fi``) and the release year is parenthesised in the
-title (``Heat (1995)``); both are split into tokens here rather than left for the
-tokeniser, since neither is natural language and the tokeniser should not have to
-know about this dataset's conventions.
+title (``Heat (1995)``); both are split into tokens here, since neither is
+natural language and the tokeniser should not know this dataset's conventions.
 """
 
 from __future__ import annotations
@@ -66,12 +61,12 @@ __all__ = [
     "parse_archive",
 ]
 
-#: Canonical source. GroupLens overwrites this URL in place -- hence the pin.
+#: Canonical source. GroupLens overwrites this URL in place, hence the pin.
 MOVIELENS_URL = "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip"
 
-#: Pinned digest of the archive these results were computed against. Recorded
-#: from a verified first download on 2026-08-12; a mismatch is an error, never a
-#: warning, because GroupLens replaces this file in place at a stable URL.
+#: Pinned digest of the archive these results were computed against, recorded
+#: from a verified first download on 2026-08-12. A mismatch is an error rather
+#: than a warning: GroupLens replaces this file in place at a stable URL.
 #:
 #: The archive it identifies: 9742 films, 100836 ratings, 610 users, 18 films
 #: with no rating at all.
@@ -114,11 +109,10 @@ def _double_rating(text: str) -> int:
     """``"3.5"`` to ``7``, in exact integer arithmetic.
 
     MovieLens ratings are quantised to halves, so twice a rating is an integer.
-    Going via ``float`` would happen to be exact for this alphabet, but that is a
-    property of the input rather than of the code, and it is the kind of accident
-    that stops holding when someone points this parser at ``ml-25m``. Doing it in
-    integers makes the guarantee structural, and the ``ValueError`` below is what
-    detects an input that breaks the assumption instead of silently rounding it.
+    Going via ``float`` is exact for this alphabet, but that is a property of the
+    input and stops holding the moment someone points this parser at ``ml-25m``.
+    The raise below catches an input that breaks the assumption instead of
+    rounding it silently.
     """
     whole, _, frac = text.strip().partition(".")
     doubled = int(whole) * 2
@@ -137,8 +131,8 @@ def _double_rating(text: str) -> int:
 def _title_tokens(title: str) -> str:
     """Split the parenthesised year off a title.
 
-    ``"Heat (1995)"`` to ``"Heat 1995"``. The tokeniser would otherwise have to
-    treat brackets as a dataset-specific convention, which it should not.
+    ``"Heat (1995)"`` to ``"Heat 1995"``, so the tokeniser need not treat
+    brackets as a dataset-specific convention.
     """
     return title.replace("(", " ").replace(")", " ")
 
@@ -149,9 +143,8 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
     Args:
         data: The raw ``ml-latest-small.zip`` bytes.
         min_weight: Rating at or above which a rating becomes a positive
-            interaction (G10 item 5). The threshold is compared in the doubled
-            integer domain, so ``4.0`` means exactly 4.0 and not
-            "4.0 give or take a rounding error".
+            interaction (G10 item 5). Compared in the doubled integer domain, so
+            ``4.0`` means 4.0 with no rounding slack.
     """
     digest = hash_bytes(data)
 
@@ -166,8 +159,8 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
 
         def rows(member: str) -> list[dict[str, str]]:
             with archive.open(names[member]) as handle:
-                # utf-8-sig: GroupLens ships a BOM, which would otherwise become
-                # part of the first column's *name* and break every lookup.
+                # GroupLens ships a BOM; without utf-8-sig it joins the first
+                # column's name and breaks every lookup.
                 text = io.TextIOWrapper(handle, encoding="utf-8-sig", newline="")
                 return list(csv.DictReader(text))
 
@@ -175,7 +168,7 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
         rating_rows = rows("ratings.csv")
         tag_rows = rows("tags.csv")
 
-    # -- ratings: exact sums, kept as integers throughout -----------------
+    # ratings: exact sums, kept as integers throughout ====================
     sum2: defaultdict[str, int] = defaultdict(int)
     count: defaultdict[str, int] = defaultdict(int)
     users: set[str] = set()
@@ -193,13 +186,13 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
         if doubled >= min_doubled:
             interactions.append((f"u{user}", f"m{movie}", doubled / 2.0))
 
-    # -- tags: text and the engagement attribute --------------------------
+    # tags: text and the engagement attribute =============================
     tags: defaultdict[str, list[str]] = defaultdict(list)
     for row in tag_rows:
         tags[row["movieId"]].append(row["tag"])
 
-    # Sorted by movieId as an *integer*, so ordering is a property of the data
-    # and not of CSV row order or of string collation ("10" before "9").
+    # movieId as an integer, so ordering is a property of the data rather than
+    # of CSV row order or string collation ("10" before "9").
     movie_rows.sort(key=lambda r: int(r["movieId"]))
 
     doc_ids: list[str] = []
@@ -223,18 +216,18 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
         attributes.append(
             {
                 "popularity": n,
-                # G8's exact pair. A film with no ratings has count 0, which is
-                # the missing case -- not a mean of zero, which would rank it
-                # alongside genuinely awful films rather than last.
+                # G8's exact pair. No ratings gives count 0, the missing case; a
+                # mean of zero would rank the film beside genuinely awful ones
+                # instead of last.
                 "rating_sum2": sum2[movie],
                 "rating_count": n,
                 "engagement": len(tags[movie]),
             }
         )
 
-    # Interaction order follows ratings.csv, which is grouped by user and sorted
-    # by timestamp within a user -- deterministic, but re-sorted anyway so the
-    # result does not depend on that continuing to hold.
+    # ratings.csv is grouped by user and sorted by timestamp within a user, so
+    # interaction order is already deterministic; re-sorted so the result does
+    # not depend on that continuing to hold.
     interactions.sort()
 
     return MovieLensCorpus(
@@ -259,8 +252,8 @@ def load(
 
     Args:
         archive: Path to ``ml-latest-small.zip``.
-        expect_sha256: Digest to require. ``None`` skips the check and is only
-            appropriate the first time, when the pin is being established.
+        expect_sha256: Digest to require. ``None`` skips the check, appropriate
+            only on the first download, when the pin is being established.
         min_weight: Positive-interaction threshold; see :func:`parse_archive`.
 
     Raises:

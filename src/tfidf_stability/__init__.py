@@ -1,9 +1,8 @@
 """Numerical stability and perturbation behaviour in TF-IDF similarity systems.
 
-The pure-Python `reference` implementation in this package is **normative**: it
-is a literal transcription of README sections 2-4 and defines what correct means.
-The compiled backend in :mod:`tfidf_stability._native` is an optional accelerator
-whose agreement with the reference is enforced bit-for-bit by the test suite.
+The pure-Python reference here is normative: a literal transcription of README
+sections 2-4. The compiled backend in :mod:`tfidf_stability._native` is an
+optional accelerator, held to bit-for-bit agreement with it by the test suite.
 """
 
 __version__ = "0.2.0"

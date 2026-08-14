@@ -1,9 +1,9 @@
 // The ranking layer: sort keys, selection strategies, margins and tie groups.
 //
-// The most valuable case here is that all five selection strategies emit the
-// identical permutation. Like `TAAT == DAAT` in the scoring layer, it pits
-// structurally unrelated algorithms against each other and demands byte
-// equality -- which leaves very little room for a comparator or indexing bug.
+// The central case is that all five selection strategies emit the identical
+// permutation. Like `TAAT == DAAT` in the scoring layer, it pits structurally
+// unrelated algorithms against each other and demands byte equality, which
+// leaves little room for a comparator or indexing bug.
 #include <tfidf/ranking/attributes.hpp>
 #include <tfidf/ranking/margins.hpp>
 #include <tfidf/ranking/ranker.hpp>
@@ -61,7 +61,7 @@ TEST_CASE("sort key: 32 bytes, two per cache line") {
 
 TEST_CASE("sort key: score negation is exact") {
     // A sign-bit flip never rounds, which is why Python's tuple `<` and this
-    // `operator<` are literally the same relation.
+    // `operator<` are the same relation.
     for (const Real s : {0.1, 0.3, 1e-300, 1e300, 0.0}) {
         CHECK(same_bits(-(-s), s));
     }
@@ -97,9 +97,8 @@ TEST_CASE("sort key: finiteness guard") {
 // -----------------------------------------------------------------------------
 TEST_CASE("ranker: all five selection strategies agree") {
     std::mt19937_64 rng(20260811);
-    // A small discrete alphabet, so exact ties are the rule rather than the
-    // exception. Uniform-random doubles would tie with probability ~0 and would
-    // exercise none of the tie-break.
+    // A small discrete alphabet, so exact ties are the rule. Uniform-random
+    // doubles tie with probability ~0 and exercise none of the tie-break.
     const std::vector<Real> alphabet{0.0, 0.25, 0.5, 0.75};
     std::uniform_int_distribution<int> pick(0, 3);
     std::uniform_int_distribution<int> attr(0, 2);
@@ -123,9 +122,8 @@ TEST_CASE("ranker: all five selection strategies agree") {
 }
 
 TEST_CASE("ranker: the order is independent of the input order") {
-    // The stronger corollary of totality, and the better test: a non-total
-    // comparator can pass the five-strategy check by luck, but cannot survive a
-    // permutation of the input.
+    // The stronger corollary of totality: a non-total comparator can pass the
+    // five-strategy check by luck, but cannot survive a permuted input.
     std::mt19937_64 rng(99);
     const std::size_t n = 40;
     std::vector<Real> scores(n);
@@ -258,8 +256,8 @@ TEST_CASE("margins: adjacent gaps") {
 // Tie groups
 // -----------------------------------------------------------------------------
 TEST_CASE("tie groups: the adversarial ladder is not transitive") {
-    // Every value and difference is exactly representable, so this test has no
-    // floating-point content at all -- it demonstrates structure.
+    // Every value and difference is exactly representable, so the case carries
+    // no floating-point content; it is about structure.
     constexpr Real kTau = 0x1p-20;
     std::vector<Real> s(6);
     for (std::size_t i = 0; i < s.size(); ++i) {
@@ -271,7 +269,7 @@ TEST_CASE("tie groups: the adversarial ladder is not transitive") {
     CHECK(lo1 == 0);
     CHECK(hi1 == 3);  // {0, 1, 2}
     CHECK(lo0 == 0);
-    CHECK(hi0 == 2);  // {0, 1} -- 2 is NOT here
+    CHECK(hi0 == 2);  // {0, 1}; 2 is absent
 }
 
 TEST_CASE("tie groups: a chain swallows the ladder, cliques see only pairs") {
@@ -370,8 +368,8 @@ TEST_CASE("tie groups: empty and singleton corpora") {
 // Exact rational comparison (used only by the native tests)
 // -----------------------------------------------------------------------------
 TEST_CASE("attributes: ratio_less separates means that binary64 collides") {
-    // 1/3 and (10^17+1)/(3*10^17) round to the same double but are different
-    // reals. The cross-products stay inside int64.
+    // 1/3 and (10^17+1)/(3*10^17) are different reals rounding to the same
+    // double. The cross-products stay inside int64.
     const std::int64_t a_num = 1;
     const std::int64_t a_den = 3;
     const std::int64_t b_num = 100000000000000001LL;

@@ -1,4 +1,4 @@
-# Experiments — running them, and reading the output
+# Experiments: running them, and reading the output
 
 Companion to README §7. Every number in the study is produced by one of the
 scripts below and written to a JSON file carrying its own digest.
@@ -20,8 +20,8 @@ Each runner writes an `ExperimentResult` envelope:
 
 `result_digest` is taken over the payload and parameters **with volatile fields
 stripped**, so two runs on the same data produce the same string even though
-their timestamps differ. That is what makes a published number checkable: rerun
-and compare one hex value rather than eyeballing a table. CI asserts it.
+their timestamps differ. A published number is then checked by rerunning and
+comparing one hex value rather than by eyeballing a table. CI asserts it.
 
 `data_provenance` records `"redistributable": false` for MovieLens, so a reader
 can see immediately that a given result cannot be reproduced from the repository
@@ -42,70 +42,70 @@ python scripts/run_similarity.py --dataset synthetic_tiny -o reports/
 # section 1.2's intermediates for one document, with raw bit patterns
 python scripts/export_intermediates.py --dataset synthetic_tiny --doc d000000 -o reports/
 
-# figures, rendered from the JSON above -- never from a live computation
+# figures, rendered from the JSON above; never from a live computation
 python scripts/make_figures.py --reports reports/
 ```
 
 `run_stability_profile.py` **exits non-zero** if any perturbation inside §4.4's
 certified radius flipped the top-k set. The theorem is therefore checked against
-data on every push, not merely asserted in a docstring.
+data on every push rather than asserted in a docstring.
 
 Scale up with `--dataset synthetic_small --queries 200`. For MovieLens, fetch it
 first (see [`data/README.md`](../data/README.md)) and pass `--archive`.
 
-## E0 — deriving τ
+## E0. Deriving τ
 
 §7.1's guidance is a two-sided *qualitative* constraint with no value and no
-procedure. Rather than invent a number, E0 measures both endpoints:
+procedure. E0 measures both endpoints instead of inventing a number:
 
 - **τ_floor = 2η**, where `η` is the worst per-score disagreement between a
-  reduction policy and exact summation. The factor 2 is exact — the error in a
-  *margin* is at most `e_i + e_j` — and it is the same 2 as in `ε_k^flip = m_k/2`.
+  reduction policy and exact summation. The factor 2 is exact (the error in a
+  *margin* is at most `e_i + e_j`) and it is the same 2 as in `ε_k^flip = m_k/2`.
 - **g_min**, the smallest strictly-positive adjacent score gap.
 
 Every τ-dependent object is **piecewise constant in τ**, with breakpoints only at
-observed gap values. So when the band contains no observed gap, every τ inside it
-gives *bit-identical* tie structure — by argument, not by sampling.
+observed gap values. When the band contains no observed gap, every τ inside it
+gives *bit-identical* tie structure by argument rather than by sampling.
 `verify_band_invariance` recomputes at eight probes as a check on the code.
 
 Measured (1500 documents, 25 queries): `η = 1.665e−16`, `τ_floor = 3.331e−16`,
-`g_min = 6.958e−10` — a **6.32-decade** band containing **zero** observed gaps.
+`g_min = 6.958e−10`, a **6.32-decade** band containing **zero** observed gaps.
 
-**Read the caveat.** Invariance across the band reflects *emptiness of the score
-lattice*, not robustness of the tie-break mechanism. The plateau must always be
+The caveat: invariance across the band reflects *emptiness of the score lattice*
+rather than robustness of the tie-break mechanism. The plateau must always be
 reported with its cause. ([G23](spec_addenda.md#g23))
 
 `TauBand.display_tau()` exists so a caption can name a number. It is a
 presentation choice and must never be cited as a derived constant.
 
-**If the band is ever empty** (`is_valid` false), that is a finding, not a bug: it
-would mean arithmetic noise reaches the decision boundary, that every §7.3 result
-on that corpus is contaminated by A1's regime, and that A1 and A2 are not
+**If the band is ever empty** (`is_valid` false), that is a finding rather than a
+bug: arithmetic noise would reach the decision boundary, every §7.3 result on
+that corpus would be contaminated by A1's regime, and A1 and A2 would not be
 separable there. The code says so and refuses to invent a value.
 
-## E1 — margin distributions
+## E1. Margin distributions
 
-`m_k` across queries at each `k`, summarised with **nearest-rank** percentiles —
-every reported value is an observation that actually occurred. Interpolating
-would invent a margin no query produced, which could not be looked up in the raw
-data or compared with `same_bits`.
+`m_k` across queries at each `k`, summarised with **nearest-rank** percentiles,
+so every reported value is an observation that actually occurred. Interpolation
+would invent a margin no query produced, one that could not be looked up in the
+raw data or compared with `same_bits`.
 
 Degenerate queries are excluded per G3, and the exclusion count is reported
-rather than silently applied. The **exact-tie share** is broken out separately
-because it is G3's headline statistic and vanishes into the percentiles once it
-exceeds 50%.
+rather than silently applied. The **exact-tie share** is broken out separately:
+it is G3's headline statistic and vanishes into the percentiles once it exceeds
+50%.
 
-## E2 — the A1 transition
+## E2. The A1 transition
 
 See [ranking_stability.md](ranking_stability.md).
 
-## E3/E4 — the A2 ablations and the case study
+## E3/E4. The A2 ablations and the case study
 
 See [tie_breaking_discontinuities.md](tie_breaking_discontinuities.md).
 
 ## Figures, and how each one could falsify its hypothesis
 
-Figures are rendered from the recorded JSON, never recomputed. A figure that
+Figures are rendered from the recorded JSON, never recomputed; a figure that
 recomputed its own data could silently disagree with the numbers in the text. Each
 carries the digest of the result it was built from.
 
@@ -121,13 +121,12 @@ normative pipeline never imports it.
 ## Notebooks
 
 `notebooks/` mirrors these experiments interactively. They are exploratory
-companions, not the source of any published number — that is always a runner
-plus its JSON.
+companions; every published number comes from a runner plus its JSON.
 
 ## Datasets
 
 `synthetic_tiny` (120 documents) for tests and CI, `synthetic_small` (2000) for
 the full run, `movielens_small` for external validity. The synthetic generator is
 seeded and byte-reproducible; CI regenerates it twice and requires the files to
-be identical, which is what would catch a regression reintroducing a
-non-version-stable PRNG call.
+be identical, which would catch a regression reintroducing a non-version-stable
+PRNG call.
