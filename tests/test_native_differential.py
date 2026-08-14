@@ -81,14 +81,27 @@ def index(model: TfidfModel):  # type: ignore[no-untyped-def]
 # Provenance and environment
 # ---------------------------------------------------------------------------
 def test_build_is_reproducible() -> None:
-    """A build with fast-math or arch tuning must never produce published numbers."""
+    """A build with fast-math or arch tuning must never produce published numbers.
+
+    The contraction check is per compiler, because the two spell it differently
+    and one of the spellings used to be wrong. MSVC has no negative form of
+    ``/fp:contract``; the flag list carried ``/fp:contract-`` for a long time and
+    MSVC answered ``warning D9002: ignoring unknown option`` and went on
+    contracting, so this assertion passed on a substring of a flag that did
+    nothing. ``/fp:strict`` is the documented way to forbid it there.
+    """
     info = build_info()
     assert info["reproducible"] is True, f"non-reproducible build: {info}"
     assert info["fast_math"] is False
     assert info["arch_tune"] is False
-    assert "-ffp-contract=off" in str(info["numeric_flags"]) or "contract-" in str(
-        info["numeric_flags"]
-    )
+
+    flags = str(info["numeric_flags"])
+    compiler = str(info["compiler_id"])
+    if compiler == "MSVC":
+        # Not "contract-": that is the string that never worked.
+        assert "/fp:strict" in flags, f"MSVC may contract to FMA: {flags}"
+    else:
+        assert "-ffp-contract=off" in flags, f"{compiler} may contract to FMA: {flags}"
 
 
 def test_float_environment_is_trustworthy() -> None:
