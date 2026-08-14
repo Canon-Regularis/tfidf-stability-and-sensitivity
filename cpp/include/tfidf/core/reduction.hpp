@@ -50,6 +50,24 @@ struct Naive {
 /// it back once at the end. Unlike plain Kahan this variant is also correct when
 /// the running total is smaller in magnitude than the addend, which is the
 /// common case when a large term arrives late.
+/// ``|x|``, usable in a constant expression on every supported compiler.
+///
+/// Deliberately not `std::abs`. That is `constexpr` in libstdc++ (C++23's
+/// P0533) but **not** in MSVC's STL, so `constexpr` + `std::abs` compiles under
+/// GCC and fails under MSVC with C3615, "cannot result in a constant
+/// expression". This project's own CI hit exactly that split: the C++ tests are
+/// built by a hand-rolled CMake invocation that picks MinGW GCC, while
+/// scikit-build-core builds the Python extension with MSVC -- so the same
+/// header compiled in one job and broke the other, and only on Windows.
+///
+/// Behaviourally identical at the one call site. The sole difference from
+/// `std::abs` is that this returns -0.0 rather than +0.0 for a negative zero,
+/// and the use below is a magnitude *comparison*, where -0.0 and +0.0 compare
+/// equal. NaN and the infinities are unaffected.
+[[nodiscard]] constexpr Real magnitude(Real x) noexcept {
+    return x < Real(0) ? -x : x;
+}
+
 struct Neumaier {
     Real sum = 0.0;
     Real compensation = 0.0;
@@ -58,7 +76,7 @@ struct Neumaier {
         const Real t = sum + x;
         // Whichever operand is larger keeps its bits; the other one is the one
         // whose low-order bits were discarded, so that is where we recover them.
-        if (std::abs(sum) >= std::abs(x)) {
+        if (magnitude(sum) >= magnitude(x)) {
             compensation += (sum - t) + x;
         } else {
             compensation += (x - t) + sum;

@@ -49,11 +49,22 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
 
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
   target_compile_options(tfidf_numerics_strict INTERFACE
-    /fp:precise
-    # Easy to miss and actively dangerous: since VS2022, MSVC permits FMA
-    # contraction *under /fp:precise* by default. This flag turns it back off.
-    /fp:contract-
-    /fp:except-
+    # /fp:strict, not /fp:precise + /fp:contract-.
+    #
+    # Since VS2022, MSVC contracts to FMA *under /fp:precise* by default, which
+    # would break bit-exactness against the reference. The previous attempt to
+    # switch that off used `/fp:contract-`, which MSVC does not accept: the
+    # compiler answered
+    #     cl : command line warning D9002: ignoring unknown option '/fp:contract-'
+    # and carried on contracting. The flag was inert and the comment beside it
+    # claimed the opposite -- found in a CI log, because the warning is not an
+    # error and nothing was reading the output.
+    #
+    # There is no negative form of /fp:contract. /fp:strict is the documented
+    # way to forbid contraction, and it also pins exception and rounding
+    # semantics, which this project wants anyway. It costs some speed on the
+    # MSVC path; reproducibility is the thing being bought.
+    /fp:strict
   )
 else()
   message(WARNING "tfidf: unrecognised compiler '${CMAKE_CXX_COMPILER_ID}'. "
