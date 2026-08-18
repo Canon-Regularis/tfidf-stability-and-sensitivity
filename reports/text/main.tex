@@ -32,6 +32,33 @@
 \newcommand{\addendum}[1]{\textsf{G#1}}
 \newcommand{\code}[1]{\texttt{\small #1}}
 
+% reports/figures/ is gitignored: a figure is a rendering of a recorded result,
+% and matplotlib stamps its own version into every PNG, so committing the bytes
+% would tie them to the plotting library rather than to the result. A fresh clone
+% therefore has the JSON but not the images, and an unguarded \includegraphics
+% would fail the build of the document that is meant to be the deliverable.
+% The fallback prints the two commands that produce the missing figure.
+%   #1 basename  #2 width as a fraction of \textwidth  #3 producing command
+%   #4 caption   #5 label
+\newcommand{\resultfigure}[5]{%
+  \begin{figure}[ht]\centering
+  \IfFileExists{../figures/#1.png}{%
+    \includegraphics[width=#2\textwidth]{../figures/#1.png}%
+  }{%
+    \fbox{\parbox{0.7\textwidth}{\centering\vspace{1em}%
+    \textbf{Figure not generated.}\\[0.4em]
+    \texttt{#3}\\
+    % -{}- rather than --, which TeX ligatures into an en dash even in \texttt.
+    % The box exists to hand someone a command that runs, and "-reports" does not.
+    \texttt{python scripts/make\_figures.py -{}-reports reports/}%
+    \vspace{1em}}}%
+  }
+  \caption{#4}\label{#5}
+  \end{figure}%
+}
+\newcommand{\profilecmd}{python scripts/run\_stability\_profile.py -o reports/}
+\newcommand{\ablationcmd}{python scripts/run\_tie\_break\_ablations.py -{}-tau 4.8e-13 -o reports/}
+
 \lstset{
   basicstyle=\ttfamily\footnotesize,
   breaklines=true,
@@ -53,8 +80,8 @@
 This report accompanies the specification in \code{README.md} and records what
 building the system established that the specification did not state, together
 with what had to be corrected. Three results are structural rather than
-incidental. First, the numerical noise floor sits roughly six orders of
-magnitude below the smallest observed score separation, so floating-point error
+incidental. First, the numerical noise floor sits nearly eight orders of
+magnitude below the smallest non-zero score separation, so floating-point error
 cannot reorder two distinctly-scored documents; every ranking instability in the
 unperturbed pipeline arises from \emph{exact} ties, and therefore from the
 tie-break. Second, the tolerance $\tau$ admits no single principled value, but it
@@ -62,7 +89,7 @@ does admit a derived \emph{band} across which the reported tie structure is
 provably invariant. Third, a fine near-tie cannot be manufactured by editing
 document text, because term-frequency normalisation makes a single-token edit a
 relative perturbation of order $1/L$; the case study of \S7.4 must therefore
-identify a near-tie rather than construct one. Twenty-three addenda are recorded
+identify a near-tie rather than construct one. Twenty-eight addenda are recorded
 in \code{docs/spec\_addenda.md}; this report summarises those that change what
 may be claimed.
 \end{abstract}
@@ -160,25 +187,43 @@ gap observed.
 
 \begin{proposition}[Piecewise constancy]\label{prop:piecewise}
 Every $\tau$-dependent object in the implementation is piecewise constant in
-$\tau$, with breakpoints only at observed gap values.
+$\tau$, with breakpoints among the pairwise score differences $s_a - s_b$.
 \end{proposition}
 
 \begin{proof}[Argument]
 \code{tie\_chains} cuts wherever an adjacent gap exceeds $\tau$, so it changes
-only when $\tau$ crosses a gap. \code{tie\_cliques} admits an interval whose
-diameter is at most $\tau$, and every diameter is a sum of gaps.
-\code{tie\_ball}$(j,\tau)$ is delimited by $|s_i - s_j| \le \tau$, again a sum of
-gaps.
+only when $\tau$ crosses an adjacent gap. \code{tie\_cliques} admits an interval
+whose diameter is at most $\tau$, and \code{tie\_ball}$(j,\tau)$ is delimited by
+$|s_i - s_j| \le \tau$; each changes when $\tau$ crosses a difference $s_a -
+s_b$. Such a difference is a sum of consecutive gaps, and a sum of gaps is not in
+general a gap, so the adjacent gaps do not exhaust the breakpoints.
 \end{proof}
 
-Consequently, if $[\tau_{\text{floor}}, g_{\min})$ contains no observed gap, every
-$\tau$ within it yields bit-identical tie structure. That follows from the
-argument above rather than from sampling. Measured: $\eta =
-1.665\times10^{-16}$, $\tau_{\text{floor}} = 3.331\times10^{-16}$, $g_{\min} =
-6.958\times10^{-10}$, a band of $6.32$ decades containing zero observed gaps.
+An earlier version of this proposition put the breakpoints at observed gap values
+alone. That is false for the complete-linkage objects, and measurably so: across
+the swept range $\rho(\tau)$ has $129$ discontinuities, of which $18$ are at an
+adjacent gap and $111$ at a clique threshold that is not one. Sweeping the gaps
+alone located one in seven and interpolated the rest, so the runner now evaluates
+both sets; see Figure~\ref{fig:rho}.
+
+Consequently, if $[\tau_{\text{floor}}, g_{\min})$ contains no pairwise
+difference, every $\tau$ within it yields bit-identical tie structure. It cannot
+contain one: a strictly-positive difference is a sum of adjacent gaps of which at
+least one is positive, so it is at least $g_{\min}$. The band is therefore empty
+of breakpoints by construction and not by observation, which makes the invariance
+across it weaker evidence than it first appears, as
+Finding~\ref{find:plateau} records. Measured: $\eta =
+5.551\times10^{-16}$, $\tau_{\text{floor}} = 1.110\times10^{-15}$, $g_{\min} =
+3.709\times10^{-8}$, a band of $7.52$ decades.
 
 This is not circular: $\tau_{\text{floor}}$ comes from arithmetic and $g_{\min}$
 from the score lattice, and neither is a function of $\tau$.
+
+\resultfigure{fig_tau_band}{0.9}{\profilecmd}{%
+The admissible band for $\tau$. The lower endpoint is twice the measured noise
+floor, the upper is the smallest non-zero adjacent gap, and the marker is the
+band's geometric centre rather than the value any experiment ran with. Exact
+ties are absent by necessity: a log axis has no zero.}{fig:tauband}
 
 \begin{finding}\label{find:plateau}
 Invariance across the band reflects \emph{emptiness of the score lattice}; it is
@@ -200,7 +245,8 @@ every step exact in binary64. The bound cannot be improved.
 configuration is a measure-zero corner of the perturbation cube.
 
 \begin{table}[ht]\centering
-\caption{Empirical top-$k$ flip rate, $k=10$, 28 queries $\times$ 40 trials.}
+\caption{Empirical top-$k$ flip rate, $k=10$, $33$ of $40$ queries $\times$ $40$
+trials. Seven queries are excluded for $m_k = 0$, which is A2's regime.}
 \label{tab:transition}
 \begin{tabular}{lr}
 \toprule
@@ -208,10 +254,10 @@ $\varepsilon / (m_k/2)$ & flip rate \\
 \midrule
 $0.25$ to $0.99$ & $0.00\%$ \\
 $1.00$         & $0.00\%$ \\
-$1.10$         & $0.36\%$ \\
-$2.00$         & $22.14\%$ \\
-$5.00$         & $65.89\%$ \\
-$20.00$        & $88.21\%$ \\
+$1.10$         & $0.15\%$ \\
+$2.00$         & $22.35\%$ \\
+$5.00$         & $60.61\%$ \\
+$20.00$        & $91.82\%$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -221,27 +267,28 @@ suggests rankings are far more fragile than they are.
 
 The certificate is audited as a $2\times2$ table rather than an accuracy, since
 accuracy would reward a certificate that always declined. Certified-and-changed
-was $0$ (any other value falsifies \S4.4, and the runner exits non-zero); roughly
-$60\%$ of \emph{uncertified} perturbations left the top-$k$ unchanged regardless.
+was $0$ (any other value falsifies \S4.4, and the runner exits non-zero); $51\%$
+of \emph{uncertified} perturbations left the top-$k$ unchanged regardless ($296$
+of $579$).
 ``Not certified'' must not be read as ``will change''.
 
-% reports/figures/ is gitignored: figures are regenerated from the recorded
-% experiment JSON rather than versioned, so a fresh clone does not have them.
-% Without this guard the report fails to build from a clean checkout, which is a
-% poor property for the document meant to be the deliverable.
-\begin{figure}[ht]\centering
-\IfFileExists{../figures/fig_transition.png}{%
-  \includegraphics[width=0.78\textwidth]{../figures/fig_transition.png}%
-}{%
-  \fbox{\parbox{0.7\textwidth}{\centering\vspace{1em}%
-  \textbf{Figure not generated.}\\[0.4em]
-  \texttt{python scripts/run\_stability\_profile.py -o reports/}\\
-  \texttt{python scripts/make\_figures.py --reports reports/}%
-  \vspace{1em}}}%
-}
-\caption{The A1 transition. A non-zero point left of the dashed line would
-falsify \S4.4 or the implementation.}
-\end{figure}
+\resultfigure{fig_transition}{0.78}{\profilecmd}{%
+The A1 transition. A non-zero point left of the dashed line would falsify \S4.4
+or the implementation, though the first few flips are sub-pixel on a linear
+axis, so the caption carries the recorded violation count and that is what
+settles it.}{fig:transition}
+
+\resultfigure{fig_margins}{0.78}{\profilecmd}{%
+Where the margins are. The whiskers span p5 to p95 with the median marked; a
+downward triangle means the fifth percentile is exactly zero, which happens at
+every $k$ whose exact-tie share exceeds $5\%$. The exact-tie mass, annotated
+along the top, is the finding.}{fig:margins}
+
+\resultfigure{fig_rank_cascade}{0.85}{\profilecmd}{%
+The paths behind the rate in Figure~\ref{fig:transition}. Rank is an integer, so
+nothing is projected. Documents that cross the top-$k$ boundary are coloured and
+labelled; the rest are recessive. Every trajectory is flat left of the certified
+radius.}{fig:cascade}
 
 \section{A2: tie-breaking causes discontinuities}
 
@@ -251,10 +298,22 @@ $\pi$, $\pi_{\text{score}}$ and $\pi_{\text{alt}}$, so no arithmetic separates
 them and a disagreement admits a single cause. The runner verifies this with
 bit comparison before reporting anything, and aborts otherwise.
 
-Disagreement concentrates at $k=1$ ($20.0\%$ for $\pi$ against
-$\pi_{\text{alt}}$, $16.7\%$ against $\pi_{\text{score}}$), because the leading
+Disagreement concentrates at $k=1$ ($42.5\%$ for $\pi$ against
+$\pi_{\text{score}}$, $2.5\%$ against $\pi_{\text{alt}}$), because the leading
 document frequently sits in an exact-tie block. The decision-level discontinuity
 therefore lands at the rank where a recommender's output is most visible.
+
+\resultfigure{fig_ablation}{0.78}{\ablationcmd}{%
+Disagreement by operator pair and $k$. The three operators consume one shared
+sorted-score object, so a bar can only come from the tie-break.}{fig:ablation}
+
+\resultfigure{fig_stratified}{0.98}{\ablationcmd}{%
+The same disagreement, conditioned on the margin. A non-zero rate anywhere right
+of the exact-tie band would contradict A2. The shaded region holds no query at
+all: every margin here is either exactly zero or above $100\tau$, so $\tau$'s
+position inside that void cannot move a published number. An empty band is drawn
+as a gap rather than as a rate of zero, since ``nothing was tested here'' and
+``everything tested here agreed'' are opposite claims.}{fig:stratified}
 
 Three corrections belong here.
 
@@ -274,6 +333,14 @@ Three corrections belong here.
       and must be stated (\addendum{15}).
 \end{enumerate}
 
+\resultfigure{fig_rho_discontinuity}{0.82}{\ablationcmd}{%
+$\rho(\tau)$, the chain-inflation ratio, as the step function it is. Every riser
+sits at the exact $\tau$ where $\rho$ jumps, which needs the clique thresholds as
+well as the adjacent gaps (Proposition~\ref{prop:piecewise}). $\rho = 1$ says the
+largest chain and the largest clique are the same size, which does not by itself
+make the two groupings agree. The peak sits ten decades above the $\tau$ these
+results use, where $\rho = 1$.}{fig:rho}
+
 \section{\texorpdfstring{\S7.4}{Section 7.4}: near-ties are identified rather than constructed}
 
 \S7.4 states that two documents are ``identified such that $|s_A - s_B| \le
@@ -287,8 +354,9 @@ applied to all coordinates at once. A separation of $10^{-9}$ would require a
 document of roughly $10^{9}$ tokens.
 \end{finding}
 
-Adjacent gaps are instead either exactly zero (17\% to 18\% of pairs) or above
-roughly $10^{-9}$; the interval between is empty. At fine $\tau$ the near-tie
+Adjacent gaps are instead either exactly zero ($9.5\%$ of the $3{,}570$ observed)
+or above $g_{\min} = 3.7\times10^{-8}$; the interval between is empty. At fine
+$\tau$ the near-tie
 regime therefore \emph{is} the exact-tie regime, so \S7.3's $m_k \le \tau$
 stratum measures the tie-break rather than numerical error, placing it in A2's
 regime and outside A1's. Conflating the two would misattribute the cause
@@ -304,15 +372,15 @@ regime and outside A1's. Conflating the two would misattribute the cause
 quantity & magnitude \\
 \midrule
 arithmetic noise floor $\eta$      & ${\sim}10^{-16}$ \\
-smallest observed score gap        & ${\sim}7\times10^{-10}$ \\
-typical adjacent gap               & $10^{-4}$ to $10^{-3}$ \\
+smallest non-zero score gap        & ${\sim}4\times10^{-8}$ \\
+typical adjacent gap               & $10^{-4}$ to $10^{-2}$ \\
 corpus-edit perturbation           & $10^{-4}$ to $10^{-1}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Roughly thirteen orders of magnitude separate the numerical-error regime from the
-corpus-perturbation regime, and numerical error never came within six orders of
+corpus-perturbation regime, and numerical error never came within seven orders of
 closing a real gap. A1's bounded perturbations are therefore entirely about
 semantic perturbation; floating-point error is not a threat to ranking at any
 scale this system operates at. That is a positive result for the numerical
@@ -342,8 +410,8 @@ it are marked non-reproducible-from-repository in their provenance block.
 \section{Reproducing every number}
 
 \begin{lstlisting}[language=bash]
-python scripts/run_stability_profile.py   --dataset synthetic_small -o reports/
-python scripts/run_tie_break_ablations.py --dataset synthetic_small \
+python scripts/run_stability_profile.py   --dataset synthetic_tiny -o reports/
+python scripts/run_tie_break_ablations.py --dataset synthetic_tiny \
        --tau 4.8e-13 -o reports/
 python scripts/make_figures.py --reports reports/
 python scripts/snapshot.py    # the cross-platform reproducibility digest
