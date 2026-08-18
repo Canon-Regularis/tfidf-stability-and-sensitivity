@@ -16,7 +16,12 @@ purely by the tie-break and is therefore the most informative case for A2.
 
 Usage::
 
-    python scripts/run_tie_break_ablations.py --dataset synthetic_tiny -o reports/
+    python scripts/run_tie_break_ablations.py --dataset synthetic_tiny \
+        --tau 4.8e-13 -o reports/
+
+``--tau`` has no default and the run refuses to start without it: section 7.1
+makes every tie-break result conditional on it, so it is passed in from the
+derivation in E0 rather than picked up from a default here.
 """
 
 from __future__ import annotations
@@ -56,41 +61,74 @@ DEFAULT_KS = (1, 5, 10, 20, 50)
 
 
 def _rho_sweep(scores: list[float]) -> dict:
-    """rho(tau) across the whole span, recorded so the discontinuity is checkable.
+    """rho(tau) as an exact step function, evaluated wherever it can move.
 
-    ``rho = |largest chain| / |largest clique|`` is piecewise constant in tau,
-    with breakpoints at the observed adjacent gaps: tau moves freely between two
-    gaps without changing which pairs are related, and crossing a gap merges two
-    chains at once. Hence a grid plus the gaps themselves; a grid alone lands
-    between breakpoints and draws a smooth ramp through a step function.
+    ``rho = |largest chain| / |largest clique|``, and the numerator and the
+    denominator move at different places. A chain is single-linkage, so its size
+    changes only when tau crosses an adjacent gap. A clique is complete-linkage:
+    the largest one reaches size ``m + 1`` exactly when some window of ``m + 1``
+    consecutive scores has diameter at most tau, which happens at
+
+        c_m = min over a of (S[a] - S[a + m]),
+
+    a span between scores ``m`` apart rather than between neighbours. Sweeping the
+    adjacent gaps therefore locates the chain steps and misses most of the clique
+    steps, and a log grid laid over them lands between breakpoints and holds a
+    level that is already stale.
+
+    The union of the two sets is every tau at which rho can change and nothing
+    else, so the recorded curve is exact rather than sampled. It is also the cheap
+    way to get there: at most ``2N - 2`` values, against the ``N(N-1)/2`` distinct
+    pairwise differences that enumerating every span would evaluate for the same
+    answer. Building the ``c_m`` costs ``O(N^2)`` comparisons and ``O(N)`` space.
     """
     sorted_scores = sorted(scores, reverse=True)
-    gaps = sorted({a - b for a, b in itertools.pairwise(sorted_scores) if a - b > 0.0})
-    if not gaps:
-        return {"taus": [], "rho": [], "n_chains": [], "n_cliques": [], "breakpoints": []}
+    n = len(sorted_scores)
+    empty = {
+        "taus": [],
+        "rho": [],
+        "n_chains": [],
+        "n_cliques": [],
+        "chain_breakpoints": [],
+        "clique_breakpoints": [],
+        "rho_breakpoints": [],
+        "rho_below_range": math.nan,
+    }
+    if n < 2:
+        return empty
 
-    # A log grid over the gap span, plus each gap and a hair either side of it,
-    # so every breakpoint is bracketed rather than approached.
-    lo, hi = gaps[0], gaps[-1]
-    decades = math.log10(hi / lo) if hi > lo else 0.0
-    grid = {lo * 10 ** (decades * i / 120) for i in range(121)} if decades else {lo}
-    for gap in gaps:
-        grid.update({math.nextafter(gap, 0.0), gap, math.nextafter(gap, math.inf)})
+    chain_gaps = {a - b for a, b in itertools.pairwise(sorted_scores) if a - b > 0.0}
+    clique_spans = set()
+    for m in range(1, n):
+        span = min(sorted_scores[a] - sorted_scores[a + m] for a in range(n - m))
+        if span > 0.0:
+            clique_spans.add(span)
 
-    taus = sorted(t for t in grid if t > 0.0)
+    taus = sorted(chain_gaps | clique_spans)
+    if not taus:
+        return empty
+
     rho, n_chains, n_cliques = [], [], []
     for t in taus:
         rho.append(chain_inflation_ratio(sorted_scores, t))
         n_chains.append(len(tie_chains(sorted_scores, t)))
         n_cliques.append(len(tie_cliques(sorted_scores, t)))
+
     return {
         "taus": taus,
         "rho": rho,
         "n_chains": n_chains,
         "n_cliques": n_cliques,
-        # The gaps are the only places rho can change; recorded so a reader can
-        # check that every step in the plot sits on one.
-        "breakpoints": gaps,
+        # Kept apart so the mechanism stays checkable: a step in the curve that
+        # sits on a clique span and not on a chain gap is the case the previous
+        # sweep could not represent.
+        "chain_breakpoints": sorted(chain_gaps),
+        "clique_breakpoints": sorted(clique_spans),
+        "rho_breakpoints": [t for i, t in enumerate(taus) if i and rho[i] != rho[i - 1]],
+        # Below the smallest span nothing is related but the exact ties, so this
+        # is rho for every tau under the swept range, including the tau the
+        # experiments actually use. Recorded rather than left to be inferred.
+        "rho_below_range": chain_inflation_ratio(sorted_scores, 0.0),
     }
 
 
