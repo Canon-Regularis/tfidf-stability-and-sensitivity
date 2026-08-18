@@ -80,7 +80,7 @@ minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --strict-config"
 markers = [
-  "slow: long-running (excluded from the default PR run)",
+  "slow: long-running; still runs everywhere, the marker only labels cost",
   "native: requires the compiled native backend",
   "sklearn: requires scikit-learn as an external oracle",
   "property: Hypothesis property-based test",
