@@ -156,26 +156,31 @@ m_k/2$.
 $\eta$ is measured against \code{Reduction.EXACT}, an exact-summation
 expansion~\cite{shewchuk1997adaptive}, over the corpus.
 
+The norms are recomputed under each policy rather than reused.
+\code{TfidfModel.norms} is precomputed under the model's own reduction, so
+varying only the scorer's policy would hold them fixed and understate $\eta$: a
+dot product runs over a handful of shared terms, while a norm sums the whole
+document vector, and the longer sum is where the error accumulates.
+
 \begin{table}[ht]\centering
-\caption{Measured arithmetic error, 1500 documents $\times$ 25 queries. The
-norms must be recomputed under each policy: \code{TfidfModel.norms} is
-precomputed under the model's own reduction, so varying only the scorer's policy
-holds them fixed and understates $\eta$ threefold. A dot product runs over a
-handful of shared terms; a norm sums the whole document vector.}
+\caption{Measured arithmetic error against \code{Reduction.EXACT}. Corpus of
+$120$ documents $\times$ $30$ queries, so $3{,}600$ scores per policy. $\eta$ is
+the largest absolute deviation observed.}
 \label{tab:noise}
-\begin{tabular}{lrr}
+\begin{tabular}{lrrr}
 \toprule
-what varies & scores differing & $\eta$ \\
+reduction policy & scores differing & $\eta$ & max ulps \\
 \midrule
-dot product only \emph{(incorrect)} & $9.25\%$  & $5.551\times10^{-17}$ \\
-dot product and norms               & $42.54\%$ & $1.665\times10^{-16}$ \\
+naive fold & $65.56\%$ & $5.551\times10^{-16}$ & $8$ \\
+pairwise   & $65.56\%$ & $5.551\times10^{-16}$ & $8$ \\
+Neumaier   & $0.00\%$  & $0$                   & $0$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Two incidental observations. Neumaier
 summation~\cite{neumaier1974rundungsfehler} was correctly rounded on all
-$37{,}500$ comparisons. Pairwise summation was bit-identical to the naive fold,
+$3{,}600$ comparisons. Pairwise summation was bit-identical to the naive fold,
 its block size being 128 and no summation here being that long; a
 reduction-policy sweep over short queries therefore measures nothing while
 appearing informative.
@@ -400,8 +405,13 @@ its grid size, rather than as a proven bound.
 
 \paragraph{Corpus dependence.} The gap distribution shares vary with corpus size,
 vocabulary and query; an earlier draft quoted one configuration's table as
-canonical and was corrected. What does not vary, and is enforced by test, is
-that the interval $(0, 10^{-9})$ is empty.
+canonical and was corrected. The same draft claimed the interval $(0, 10^{-9})$
+was invariably empty, and that does not survive either. It holds on the seeded
+generator, where a test enforces it and says in its own docstring that it
+generalises no further. MovieLens falsifies it: $197$ of $114{,}504$ adjacent
+pairs fall below $\tau_{\text{floor}}$, and the smallest strictly-positive gap is
+$1.4\times10^{-11}$ even with the scores recomputed exactly, so the emptiness is a
+property of the generator rather than of TF-IDF (\addendum{22}).
 
 \paragraph{Synthetic data.} The controlled results use a seeded generator.
 MovieLens supplies external validity but may not be redistributed, so results on
@@ -417,8 +427,9 @@ python scripts/make_figures.py --reports reports/
 python scripts/snapshot.py    # the cross-platform reproducibility digest
 \end{lstlisting}
 
-Each runner writes a result envelope whose digest is taken over the payload with
-volatile fields stripped, so a rerun on the same data yields the same string and
+Each runner writes a result envelope whose digest is taken over the payload and
+the parameters block together, with volatile fields stripped, so a rerun on the
+same data yields the same string and
 a published number can be checked by comparing one hexadecimal value. Continuous
 integration computes \code{snapshot.py} on Linux, macOS and Windows, at three
 optimisation levels and under both backends, and requires every digest to be
