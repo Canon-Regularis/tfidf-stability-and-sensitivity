@@ -386,6 +386,7 @@ def test_neither_radius_dominates_the_other() -> None:
 def test_the_joint_radius_is_the_minimum_of_the_two() -> None:
     """Guaranteeing set *and* order needs both conditions to hold."""
     rng = random.Random(8)
+    asserted = 0
     for _ in range(100):
         s = sorted_scores_desc([rng.random() for _ in range(rng.randint(3, 15))])
         for k in range(2, len(s)):
@@ -394,6 +395,10 @@ def test_the_joint_radius_is_the_minimum_of_the_two() -> None:
                 assert c.joint_radius == min(c.set_radius, c.order_radius)
                 assert is_top_k_stable(s, k, c.joint_radius * 0.99)
                 assert is_order_stable(s, k, c.joint_radius * 0.99)
+                asserted += 1
+    # Every assertion sits behind that guard, so an undefined or NaN order radius
+    # throughout would leave the whole sweep having checked nothing.
+    assert asserted > 0, "no (scores, k) pair had a defined order radius"
 
 
 @given(

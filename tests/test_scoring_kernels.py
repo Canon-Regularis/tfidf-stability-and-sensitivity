@@ -180,6 +180,9 @@ def test_scratch_reuse_is_numerically_invisible(
     wrong one.
     """
     qs = queries(model, corpus, 6, seed=4242)
+    # The comparison below runs one iteration per query, so an empty grid would
+    # make the whole test vacuous.
+    assert len(qs) == 6, "the query grid is the test's only source of coverage"
     fresh = [taat_scores(q, index, model.norms, scratch=ScoringScratch()) for q in qs]
 
     shared = ScoringScratch()

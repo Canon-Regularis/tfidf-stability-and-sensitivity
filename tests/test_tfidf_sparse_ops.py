@@ -101,16 +101,20 @@ def test_tf_sums_to_one_over_in_vocabulary_tokens(mini_model) -> None:  # type: 
     """Exactly 1 as a rational; ``L`` is an integer so no rounding enters it."""
     from fractions import Fraction
 
+    checked = 0
     for i in range(mini_model.n_documents):
         row = mini_model.matrix.row(i)
         if row.nnz == 0:
             continue
+        checked += 1
         total = Fraction(0)
         for tid, w in zip(row.indices, row.values, strict=True):
             # w = tf * idf; dividing back recovers tf to within the rational
             # limit imposed below, which is all this total needs.
             total += Fraction(w / mini_model.idf[tid]).limit_denominator(10**9)
         assert abs(total - 1) < Fraction(1, 10**9)
+    # Every document being the zero vector would skip the loop body entirely.
+    assert checked > 0, "no document had an in-vocabulary token"
 
 
 def test_zero_in_vocabulary_document_is_the_zero_vector(mini_model) -> None:  # type: ignore[no-untyped-def]
@@ -242,11 +246,15 @@ def test_weights_equal_sklearn_unnormalised_divided_by_length(
         random_corpus
     )
     ours = TfidfVectoriser(log_impl=LogImpl.PLATFORM).fit(random_corpus)
+    compared = 0
     for i in range(len(random_corpus)):
         dense = raw[i].toarray()[0]
         row = ours.matrix.row(i)
         for tid, w in zip(row.indices, row.values, strict=True):
             assert abs(ulps_between(dense[tid] / ours.lengths[i], w)) <= 2.0
+            compared += 1
+    # An all-empty matrix would satisfy the loop without comparing a weight.
+    assert compared > 0, "no weight was compared against sklearn"
 
 
 @pytest.mark.sklearn
@@ -338,6 +346,7 @@ def test_intermediates_tf_matches_the_term_frequency_vector(mini_model, mini_fea
     """End to end on the fixture, against the tf vector the fit actually built."""
     from tfidf_stability.vectorisation.tf import term_frequencies
 
+    compared = 0
     for i, features in enumerate(mini_features):
         vector, _length = term_frequencies(features, mini_model.vocabulary)
         truth = dict(zip(vector.indices, vector.values, strict=True))
@@ -345,3 +354,6 @@ def test_intermediates_tf_matches_the_term_frequency_vector(mini_model, mini_fea
             expected = truth.get(term["term_id"])
             if expected is not None:
                 assert same_bits(term["tf"], expected), term["token"]
+                compared += 1
+    # The lookup returning None throughout would leave the comparison unreached.
+    assert compared > 0, "no intermediate term matched the tf vector"
