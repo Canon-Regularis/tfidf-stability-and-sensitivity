@@ -28,8 +28,8 @@ separates numerical error from tie structure, a finding about the corpus.
 ``fig_rho_discontinuity``: ``rho(tau)`` as a step function, so that interpolating
 does not assert values it never takes. ``rho = 1`` means the largest chain and the
 largest clique are the same size; any step above it is single-linkage chaining.
-The sweep resolves ``rho`` to a sample rather than to the exact ``tau``; see the
-function for why, and read a riser's position as approximate.
+Every riser is at the exact ``tau`` where ``rho`` jumps, because the sweep
+evaluates the adjacent gaps and the clique thresholds together rather than a grid.
 
 ``fig_ablation``: disagreement rate by operator pair and ``k``. The operators
 consume bit-identical scores, so a false A2 would leave every bar at zero and a
@@ -231,21 +231,20 @@ def fig_rho_discontinuity(record: dict, out: Path) -> bool:
     A step plot rather than a line, because joining the samples with straight
     segments would assert intermediate values the function never takes.
 
-    Where the risers sit is approximate, and the reason is worth stating because
-    the obvious assumption is wrong. rho is the largest chain over the largest
-    clique. Chains are single-linkage and move only at an adjacent gap, which is
-    what ``_rho_sweep`` records as a breakpoint, but cliques are complete-linkage
-    and change at spans ``S[a] - S[b]`` with ``b > a + 1``, which are not adjacent
-    gaps. Over all 5460 distinct pairwise differences rho has 129 true jumps and
-    only 18 of them are adjacent gaps, so the recorded breakpoints do not bracket
-    it. The 432-point grid draws 64 risers, and 46 of those sit at the sample
-    after a jump rather than at the jump: about a third of the plotted x-range
-    holds a level that is right at the sampled endpoints and stale in between.
-    Resolving this means bracketing clique spans in ``_rho_sweep`` and re-running
-    E3, not changing the drawing.
+    Every riser is at the tau where rho actually jumps, which took getting the
+    breakpoints right rather than sampling finely. rho is the largest chain over
+    the largest clique, and the two move in different places: a chain is
+    single-linkage and changes only at an adjacent gap, while a clique is
+    complete-linkage and changes at a span between scores that are not
+    neighbours. Of the 129 jumps here only 18 are at an adjacent gap, so a sweep
+    over the gaps alone located one in seven of them and a log grid filled the
+    rest in at whichever sample came next. ``_rho_sweep`` now evaluates the union
+    of the adjacent gaps and the clique thresholds, 215 tau in place of a
+    432-point grid, and that set is provably complete: rho cannot move anywhere
+    else.
 
     Falsification: rho = 1 means the largest chain and the largest clique are the
-    same size, which does not by itself make the tie groups agree; 25 of the 116
+    same size, which does not by itself make the tie groups agree; 7 of the 24
     samples at rho = 1 have differing chain and clique counts. Any step above 1 is
     single-linkage chaining, and its height is how much that tau inflates the
     largest tie group.
@@ -290,30 +289,34 @@ def fig_rho_discontinuity(record: dict, out: Path) -> bool:
     axes.set_xscale("log")
     axes.set_xlabel("$\\tau$")
     axes.set_ylabel("$\\rho(\\tau)$ = largest chain / largest clique")
-    # The breakpoint count is the number of adjacent gaps, which is how often the
-    # chain count changes, not how often rho does. Titling with it put 104 over a
-    # curve that visibly rises 64 times.
+    # Counted off the curve rather than read from a breakpoint list. The old title
+    # used the adjacent-gap count, which is how often the chain count changes and
+    # not how often rho does, so it put 104 over a curve that rose 64 times.
     risers = sum(1 for previous, current in pairwise(rho) if previous != current)
     axes.set_title(
-        f"Chain inflation is a step function of $\\tau$ ({risers} risers over {len(taus)} samples)",
+        f"Chain inflation is a step function of $\\tau$ ({risers} jumps, "
+        f"each at its exact $\\tau$)",
         fontsize=10,
     )
     axes.grid(alpha=0.3, linewidth=0.5)
-    # Where the peak sits relative to the tau in use. The sweep spans the range
+    # Where the peak sits relative to the tau in use. The sweep covers the range
     # over which rho varies at all, and this record's tau is seven decades below
     # its lower end, so the peak belongs to a regime none of the results occupy.
     # Left unsaid, the figure reads as though chain inflation threatened them.
     # Extending the axis to reach tau would compress the informative decades into
-    # nothing, so it is stated instead of drawn.
+    # nothing, so it is stated instead of drawn. rho_below_range is recorded by
+    # the sweep, so the value is read rather than inferred from the leftmost
+    # sample.
     operative = record.get("parameters", {}).get("tau")
-    if isinstance(operative, int | float) and operative < taus[0]:
-        note = f"  |  run tau = {operative:.3e} is below the sweep, rho = {rho[0]:.0f}"
+    below = sweep.get("rho_below_range")
+    if isinstance(operative, int | float) and operative < taus[0] and below is not None:
+        note = f"  |  run tau = {operative:.3e} is below the sweep, rho = {below:.0f}"
     else:
         note = ""
     _stamp(
         figure,
-        f"result {record['result_digest'][:16]}  |  "
-        f"risers located to the sample, not the exact tau{note}",
+        f"result {record['result_digest'][:16]}  |  {len(taus)} exact tau: "
+        f"every adjacent gap and clique threshold{note}",
     )
     figure.tight_layout()
     figure.savefig(out, dpi=200)
