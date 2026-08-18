@@ -81,6 +81,74 @@ _PAIR_LABELS = {
 }
 
 
+def _contiguous_runs(populated: list[bool]) -> list[list[int]]:
+    """Index runs of consecutive empty bands, for shading.
+
+    Shading each empty band separately leaves white seams between them that read
+    as slots holding something. Spanning first-to-last empty index instead is
+    simpler and wrong: it would shade over a populated band whenever the empty
+    ones are not contiguous. They happen to be on this corpus, which is the
+    finding rather than something to rely on.
+    """
+    runs: list[list[int]] = []
+    for position, ok in enumerate(populated):
+        if ok:
+            continue
+        if runs and runs[-1][-1] == position - 1:
+            runs[-1].append(position)
+        else:
+            runs.append([position])
+    return runs
+
+
+def _series_handles(ks: list[int]) -> list:
+    """One legend proxy per k, built from the series list rather than from what was
+    drawn.
+
+    Labelling inside the plotting loop omitted k=5 entirely: its only appearance is
+    in the separated band, and the label was attached in the exact-tie band, where
+    k=5 has no queries. The series was on the chart and missing from the key.
+    """
+    import matplotlib.pyplot as plt
+
+    return [
+        plt.Line2D(
+            [],
+            [],
+            marker="o",
+            linestyle="none",
+            markersize=6,
+            markerfacecolor=_SERIES[i % len(_SERIES)],
+            markeredgecolor="white",
+            label=f"$k$={k}",
+        )
+        for i, k in enumerate(ks)
+    ]
+
+
+def _wilson(successes: int, trials: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a proportion, as percentages.
+
+    Every rate in these reports comes from a small sample: the ablation grid is 40
+    queries, and a stratified cell can hold one. A bare point estimate says 100%
+    where the evidence is one query out of one, whose interval runs from 21% to
+    100%. Drawing the estimate without the interval asserts a precision the run
+    does not have, which is the one thing these figures exist not to do.
+
+    Wilson rather than the normal approximation: it does not run below 0 or above
+    100, and it stays sensible at 0 and n successes, which is exactly where these
+    counts sit. Reported at 95%, two-sided.
+    """
+    if trials <= 0:
+        return (math.nan, math.nan)
+    p_hat = successes / trials
+    denominator = 1.0 + z * z / trials
+    centre = (p_hat + z * z / (2.0 * trials)) / denominator
+    spread = z * math.sqrt(p_hat * (1.0 - p_hat) / trials + z * z / (4.0 * trials * trials))
+    spread /= denominator
+    return (100.0 * max(0.0, centre - spread), 100.0 * min(1.0, centre + spread))
+
+
 def _uniform_log_minor(axis) -> None:
     """Put a log axis's minor ticks at half-decades, so every mark is equidistant.
 
@@ -626,12 +694,27 @@ def fig_ablation(record: dict, out: Path) -> bool:
     for i, pair in enumerate(pairs):
         values = [100.0 * rates[pair][k]["rate"] for k in ks]
         positions = [x + i * width for x in range(len(ks))]
+        # 40 queries per cell, so the interval is wide enough to change the
+        # reading: the tallest bar here is 42.5% and its interval spans 28 to 58.
+        # Without it the chart invites a comparison between bars that the sample
+        # cannot support.
+        bounds = [
+            _wilson(round(rates[pair][k]["rate"] * rates[pair][k]["n"]), rates[pair][k]["n"])
+            for k in ks
+        ]
+        errors = [
+            [v - lo for v, (lo, _) in zip(values, bounds, strict=True)],
+            [hi - v for v, (_, hi) in zip(values, bounds, strict=True)],
+        ]
         axes.bar(
             positions,
             values,
             width=width * 0.92,  # a surface gap between adjacent bars
             label=_PAIR_LABELS.get(pair, pair.replace("_", " ")),
             color=_SERIES[i % len(_SERIES)],
+            yerr=errors,
+            capsize=2.5,
+            error_kw={"ecolor": _MUTED, "elinewidth": 0.9, "capthick": 0.9},
         )
 
     axes.set_xticks([x + width * (len(pairs) - 1) / 2 for x in range(len(ks))])
@@ -708,19 +791,7 @@ def fig_stratified(record: dict, out: Path) -> bool:
     # once from any pair and is identical in both panels.
     populated = [any(census.get((k, band), 0) for k in ks) for band, _ in _BANDS]
 
-    # Shaded per contiguous run, not per band: separate spans leave white seams
-    # between them that read as slots holding something. Spanning first-to-last
-    # empty index instead would be simpler and wrong, since it would shade over a
-    # populated band whenever the empty ones are not contiguous. They happen to be
-    # on this corpus, which is the finding rather than something to rely on.
-    runs: list[list[int]] = []
-    for position, ok in enumerate(populated):
-        if ok:
-            continue
-        if runs and runs[-1][-1] == position - 1:
-            runs[-1].append(position)
-        else:
-            runs.append([position])
+    runs = _contiguous_runs(populated)
 
     for axes, pair in zip(axes_list, pairs, strict=True):
         rows = {(r["k"], r["band"]): r for r in strata[pair]}
@@ -735,8 +806,14 @@ def fig_stratified(record: dict, out: Path) -> bool:
                     continue
                 # Area proportional to n, so a rate resting on one query cannot
                 # look like one resting on forty.
+                x = position + (series - (len(ks) - 1) / 2) * 0.19
+                # The interval matters more here than anywhere: a cell can hold a
+                # single query, where 100% and 21% are the same evidence. Marker
+                # area already shows n; the whisker shows what n buys.
+                lo, hi = _wilson(row["n_disagree"], row["n"])
+                axes.plot([x, x], [lo, hi], color=_MUTED, linewidth=0.9, zorder=2)
                 axes.scatter(
-                    [position + (series - (len(ks) - 1) / 2) * 0.19],
+                    [x],
                     [100.0 * row["rate"]],
                     s=14.0 + 2.4 * row["n"],
                     color=_SERIES[series % len(_SERIES)],
@@ -765,24 +842,7 @@ def fig_stratified(record: dict, out: Path) -> bool:
         axes.set_xticks(range(len(_BANDS)))
         axes.set_xticklabels([label for _, label in _BANDS], rotation=35, ha="right", fontsize=8)
 
-    # Proxy handles, one per k, built from the series list rather than from what
-    # happened to be drawn. Labelling inside the loop omitted k=5 entirely: its
-    # only appearance is in the separated band, and the label was attached in the
-    # exact-tie band, where k=5 has no queries. The series was on the chart and
-    # missing from the legend.
-    handles = [
-        plt.Line2D(
-            [],
-            [],
-            marker="o",
-            linestyle="none",
-            markersize=6,
-            markerfacecolor=_SERIES[i % len(_SERIES)],
-            markeredgecolor="white",
-            label=f"$k$={k}",
-        )
-        for i, k in enumerate(ks)
-    ]
+    handles = _series_handles(ks)
     axes_list[0].set_ylim(-6.0, 106.0)
     axes_list[0].set_ylabel("top-$k$ set disagreement (%)")
     axes_list[-1].legend(
@@ -821,8 +881,8 @@ def fig_stratified(record: dict, out: Path) -> bool:
     _stamp(
         figure,
         f"result {record['result_digest'][:16]}  |  {tau_note}"
-        f"{n_disagree} disagreements among {n_separated} query-k observations "
-        f"whose scores were separated",
+        f"{n_disagree} of {n_separated} separated query-k observations disagree "
+        f"(95% upper bound {_wilson(n_disagree, n_separated)[1]:.1f}%)",
     )
     figure.tight_layout(rect=(0, 0.02, 1, 0.96))
     figure.savefig(out, dpi=200)
