@@ -7,13 +7,13 @@
 
 preprocessing:
   unicode_form: NFKC          # G7. NFC would leave compatibility variants apart.
-  lowercase: true             # str.lower(), NOT casefold() -- casefold needs ICU
+  lowercase: true             # str.lower(); casefold() needs ICU
                               # to reproduce in C++ and its tailorings vary.
   token_pattern: '[^\W_]+'    # G7. Hashed into the manifest.
   min_token_length: 1
   max_token_length: 64
   stopword_asset: stopwords_en_v1.txt   # frozen and hash-verified
-  lemmatiser: porter2         # G7. A stemmer, not a lemmatiser -- see the addendum.
+  lemmatiser: porter2         # G7. A stemmer despite the name; see the addendum.
   insert_gaps: true           # G7. n-grams must not span a removed stopword.
   n_min: 1
   n_max: 2
@@ -61,5 +61,5 @@ profiles:
                               # Kept because it becomes real if aggregation
                               # ever moves to text.
   min_interactions: 5         # G10(4)
-  exclude_profile_items: true # G10(3) -- the most consequential choice
-  interaction_min_weight: 4.0 # G10(5) -- what "interacted" means
+  exclude_profile_items: true # G10(3), the most consequential choice
+  interaction_min_weight: 4.0 # G10(5): what "interacted" means

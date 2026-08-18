@@ -115,7 +115,7 @@ ignore = [
   "PLR2004",  # magic values: unavoidable in tests asserting exact constants
   "N806",     # non-lowercase locals: mathematical names (N, V, C, L) mirror the paper
   "N803",     # ditto for arguments
-  # `class X(str, Enum)` rather than `StrEnum`. Deliberate: these enums are
+  # `class X(str, Enum)` rather than `StrEnum`. Chosen because these enums are
   # serialised into YAML configs and run manifests, and the explicit `__str__`
   # on each makes the serialised form part of the visible contract rather than
   # an inherited behaviour.

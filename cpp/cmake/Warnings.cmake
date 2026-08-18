@@ -1,10 +1,10 @@
 # =============================================================================
-# Warnings.cmake -- a deliberately noisy warning set.
+# Warnings.cmake: a noisy warning set, on purpose.
 #
 # Several of these are chosen specifically for a numerics codebase:
 #   -Wfloat-equal        forces every intentional `==` on doubles to be justified
-#                        (we DO compare doubles exactly -- bit-exactness is the
-#                        whole point -- so each site is silenced locally, which
+#                        (doubles are compared exactly here; bit-exactness is
+#                        the contract, so each site is silenced locally, which
 #                        makes the intent reviewable rather than accidental)
 #   -Wdouble-promotion   catches a float sneaking into a double computation
 #   -Wconversion         catches silent int/float narrowing in index arithmetic

@@ -4,7 +4,7 @@
 # redistributed under its usage licence, so it is fetched on demand and verified
 # against a pinned digest. GroupLens updates ml-latest-small *in place*, so the
 # pin is not optional: a changed digest must fail loudly and be reconciled
-# deliberately, with the resolved value recorded in every manifest.
+# explicitly, with the resolved value recorded in every manifest.
 #
 # This file is descriptive. The authoritative defaults live in
 # `datasets.synthetic.SyntheticSpec`, and `spec_digest` in each run manifest is
@@ -23,7 +23,7 @@ synthetic_small:
     # platform libm, which spec_addenda G13 shows disagrees across systems.
     zipf_exponent: 1.0
     # Uniform, not lognormal. A lognormal length distribution needs `exp`, which
-    # is the same G13 problem -- and length only has to be *varied*, not
+    # is the same G13 problem, and length only has to be varied rather than
     # distributed in any particular way, for the study's purposes.
     len_min: 3
     len_max: 40
@@ -36,7 +36,7 @@ synthetic_small:
     # separation.
     n_twin_pairs: 40
     twin_extra_token_df: [1, 2, 4, 8, 16, 32, 64, 128]
-  # Measured, not assumed -- see spec_addenda G22. A single-token edit is a
+  # Measured rather than assumed; see spec_addenda G22. A single-token edit is a
   # 1/(L+1) *relative* perturbation because section 2.2 normalises tf = count/L,
   # so the twin grid cannot reach below about 1e-3 at these document lengths.
   # Fine near-ties are located with `find_near_ties`, never constructed.
@@ -55,7 +55,7 @@ synthetic_tiny:
 
 movielens_small:
   kind: movielens
-  description: ml-latest-small -- 610 users, 9742 movies, 100836 ratings.
+  description: ml-latest-small, 610 users, 9742 movies, 100836 ratings.
   url: https://files.grouplens.org/datasets/movielens/ml-latest-small.zip
   # Filled by scripts/fetch_data.py on first verified download, then committed.
   # Held in `datasets.movielens.MOVIELENS_SHA256`, which is what `load` checks.

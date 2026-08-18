@@ -2,14 +2,14 @@
 #
 # Two things here are specific to this project rather than boilerplate.
 #
-# `float-divide-by-zero` is enabled deliberately. A division by a zero vector
+# `float-divide-by-zero` is enabled on purpose. A division by a zero vector
 # norm is a real logic error here: README section 2.3 fixes cosine to 0 for a
 # zero vector, and that convention must be applied *before* the division rather
 # than discovered afterwards by producing an Inf.
 #
 # The ranking layer is the reason ASan matters at all. A NaN in a sort key
 # destroys the strict weak ordering, and libstdc++'s final insertion pass then
-# walks off the front of the array -- a genuine out-of-bounds write, not merely
+# walks off the front of the array: a genuine out-of-bounds write rather than
 # a wrong answer. The finiteness guards exist to prevent that; ASan is what
 # proves they do.
 
@@ -41,10 +41,10 @@ jobs:
           cmake -S . -B build-asan -G Ninja             -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DTFIDF_BUILD_TESTS=ON             -DTFIDF_SANITIZERS="address;undefined"
           cmake --build build-asan
       - name: Native tests under ASan and UBSan
-        # --no-tests=error is load-bearing, not tidiness. Plain `ctest` prints
+        # --no-tests=error carries weight here. Plain `ctest` prints
         # "No tests were found!!!" and exits **0**, so a build that registered
-        # nothing -- a renamed target, a dropped add_test, a CMake option that
-        # quietly disabled the suite -- reports a green sanitizer run having
+        # nothing (a renamed target, a dropped add_test, a CMake option that
+        # quietly disabled the suite) reports a green sanitizer run having
         # executed zero tests under ASan. Measured: exit 0 without the flag,
         # exit 8 with it. Applied to every ctest call in this repository.
         run: ctest --test-dir build-asan --output-on-failure --no-tests=error

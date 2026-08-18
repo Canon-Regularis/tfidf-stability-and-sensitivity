@@ -178,7 +178,7 @@ jobs:
 
       - name: The native backend must be importable
         # Asserted, not hoped for. Every native test is skipif-guarded on
-        # native_available(), and pytest exits 0 when all of them skip -- so an
+        # native_available(), and pytest exits 0 when all of them skip, so an
         # extension that builds but cannot load turns this job into a second run
         # of the reference suite while still reporting the native backend green.
         #
@@ -318,7 +318,7 @@ jobs:
           tfidf-stability build-corpus /tmp/synth.jsonl -o /tmp/synth.tfsx
           tfidf-stability verify /tmp/synth.tfsx
       - name: The synthetic corpus must be byte-identical when regenerated
-        # The generator avoids random.choice/sample/shuffle precisely because
+        # The generator avoids random.choice/sample/shuffle because
         # they are not stable across CPython versions. This is what would catch
         # a regression that reintroduced one.
         shell: bash
@@ -329,7 +329,7 @@ jobs:
       - name: The experiments must run, and section 4.4 must hold
         # run_stability_profile.py exits non-zero if any perturbation inside the
         # certified radius flipped the top-k set. That is the theorem being
-        # checked against data on every push, not merely asserted in a docstring.
+        # checked against data on every push rather than asserted in a docstring.
         run: |
           python scripts/run_stability_profile.py --dataset synthetic_tiny -o /tmp/reports
           python scripts/run_tie_break_ablations.py --dataset synthetic_tiny \

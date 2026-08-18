@@ -4,7 +4,7 @@
 # Usage:  -DTFIDF_SANITIZERS="address;undefined"   or   -DTFIDF_SANITIZERS=thread
 #
 # `float-divide-by-zero` and `float-cast-overflow` are included with UBSan
-# deliberately: in this codebase a division by a zero vector norm is a real
+# on purpose: in this codebase a division by a zero vector norm is a real
 # logic error (the zero-vector convention of README section 2.3 must be applied
 # *before* the division, never discovered by producing an Inf).
 # =============================================================================

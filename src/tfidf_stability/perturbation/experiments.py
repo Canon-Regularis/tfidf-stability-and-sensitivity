@@ -106,8 +106,8 @@ def run_perturbation(
         query_features: The query's preprocessed feature stream. Embedded
             separately into each model, since section 3 requires a query to use
             the same vocabulary and IDF mapping as the corpus it is scored
-            against -- so the *query vector itself* moves under a perturbation,
-            which is why section 4.3 bounds movement in both arguments.
+            against, so the query vector itself moves under a perturbation;
+            section 4.3 bounds movement in both arguments for that reason.
         ks: Ranks at which to certify stability.
 
     Returns:

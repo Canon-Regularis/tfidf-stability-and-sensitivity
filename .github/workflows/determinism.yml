@@ -7,7 +7,7 @@
 #
 # Before the correctly-rounded logarithm, this job would have FAILED. The
 # platform `log` differs from the correctly-rounded value in about 15% of IDF
-# entries, and UCRT, glibc and Apple libm each round differently -- so Linux and
+# entries, and UCRT, glibc and Apple libm each round differently, so Linux and
 # Windows produced different weights, different norms and different scores. The
 # fix was to compute IDF once in Python via `decimal.Decimal.ln()` and keep
 # `log` out of the native core entirely, leaving only operations IEEE-754
@@ -80,10 +80,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install build dependencies
-        # The full dev set, not a hand-picked subset: the suite needs pytest,
+        # The full dev set rather than a hand-picked subset: the suite needs pytest,
         # hypothesis, numpy and pyyaml, and a hand-picked trio kept omitting
-        # one. The build backend is no longer resolved from here -- the install
-        # step below uses pip's build isolation -- but the test dependencies
+        # one. The build backend is no longer resolved from here (the install
+        # step below uses pip's build isolation), but the test dependencies
         # still are, so this stays.
         run: python -m pip install --upgrade pip -r requirements-dev.txt
       # Ninja must be on PATH before `cmake -G Ninja` runs. Having the configure
@@ -100,7 +100,7 @@ jobs:
         run: ctest --test-dir build-tests --output-on-failure --no-tests=error
       # The native backend must not change any number. The digest here is
       # computed by the reference path, and the differential suite is what
-      # proves the two agree -- so a divergence shows up as a test failure with
+      # proves the two agree, so a divergence shows up as a test failure with
       # a precise location rather than as an opaque hash mismatch.
       - name: Differential suite (reference vs native, bit-exact)
         shell: bash
@@ -112,7 +112,7 @@ jobs:
           python -m pip install -e .
           # The backend must be *importable*, asserted before the suite runs.
           # Every differential test is skipif-guarded on native_available(), and
-          # pytest exits 0 when every selected test skips -- measured, "2
+          # pytest exits 0 when every selected test skips. Measured: "2
           # skipped", exit 0. So a .pyd that built but failed to load (a missing
           # runtime DLL is the usual cause, and this job builds on three
           # platforms) would skip the entire comparison and report the native
@@ -216,7 +216,7 @@ jobs:
           cmake -S . -B build-fastmath -G Ninja -DTFIDF_FAST_MATH=ON -DTFIDF_BUILD_TESTS=ON
           # Both streams: ninja buffers compiler output and re-emits it on
           # STDOUT, so capturing stderr alone yields an empty log and the grep
-          # below can never match -- which is how this job failed.
+          # below can never match, which is how this job failed.
           if cmake --build build-fastmath >build.log 2>&1; then
             echo "::error::a fast-math build compiled; the fp_guard.hpp guard is not working"
             exit 1

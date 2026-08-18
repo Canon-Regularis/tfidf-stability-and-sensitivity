@@ -1,14 +1,13 @@
 # =============================================================================
-# NumericsFlags.cmake -- THE single source of truth for floating-point policy.
+# NumericsFlags.cmake: the single source of truth for floating-point policy.
 #
 # This project's subject matter is numerical stability. Every result it publishes
 # is claimed to be bit-reproducible across compilers, optimisation levels and
 # operating systems. That claim is only meaningful if the compiler is forbidden
-# from rewriting our arithmetic, so the flags below are load-bearing, not
-# stylistic. Do not add flags anywhere else.
+# from rewriting the arithmetic. Do not add floating-point flags anywhere else.
 #
 # The three rules:
-#   1. No contraction.   a*b+c must NOT become fma(a,b,c) -- a different rounding.
+#   1. No contraction.   a*b+c must not become fma(a,b,c), which rounds once.
 #   2. No reassociation. (a+b)+c must NOT become a+(b+c).
 #   3. No excess precision. Intermediates are binary64, never x87 80-bit.
 #
@@ -21,21 +20,20 @@ add_library(tfidf::numerics_strict ALIAS tfidf_numerics_strict)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
   target_compile_options(tfidf_numerics_strict INTERFACE
-    -ffp-contract=off                 # rule 1 -- the single most important flag
+    -ffp-contract=off                 # rule 1, the one that matters most
     -fno-fast-math
     -fno-associative-math             # rule 2
     -fno-reciprocal-math              # x/y must not become x*(1/y)
     -fno-unsafe-math-optimizations
     -fno-finite-math-only             # NaN/Inf semantics must be honoured
-    # NOT -fno-signed-zeros. That is a *fast-math sub-option* -- it licenses the
-    # compiler to ignore the sign of zero -- and it sat in this list of
-    # disables for years reading like one of them. Measured: with it,
-    # (-0.0) + 0.0 compiles to -0.0 (bits 8000000000000000); with
-    # -fsigned-zeros it gives +0.0, which is what IEEE 754 requires. This
-    # repository compares every score on its raw bit pattern and
-    # ranking/margins.py reasons explicitly that -0.0 cannot occur, so the
-    # relaxed form is exactly the wrong one. fp_guard.hpp cannot catch it
-    # either: -fno-signed-zeros alone does not define __FAST_MATH__.
+    # -fsigned-zeros, never -fno-signed-zeros. The negative form is a
+    # fast-math sub-option licensing the compiler to ignore the sign of zero,
+    # and it sat in this list of disables reading like one of them. Measured:
+    # with it, (-0.0) + 0.0 compiles to -0.0 (bits 8000000000000000); with
+    # -fsigned-zeros it gives +0.0, as IEEE 754 requires. Every score here is
+    # compared on its raw bit pattern and ranking/margins.py argues that -0.0
+    # cannot occur. fp_guard.hpp cannot catch the relaxed form either, since
+    # -fno-signed-zeros alone does not define __FAST_MATH__.
     -fsigned-zeros
     -fexcess-precision=standard       # rule 3
   )
@@ -49,7 +47,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
 
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
   target_compile_options(tfidf_numerics_strict INTERFACE
-    # /fp:strict, not /fp:precise + /fp:contract-.
+    # /fp:strict rather than /fp:precise plus /fp:contract-.
     #
     # Since VS2022, MSVC contracts to FMA *under /fp:precise* by default, which
     # would break bit-exactness against the reference. The previous attempt to
@@ -57,8 +55,8 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     # compiler answered
     #     cl : command line warning D9002: ignoring unknown option '/fp:contract-'
     # and carried on contracting. The flag was inert and the comment beside it
-    # claimed the opposite -- found in a CI log, because the warning is not an
-    # error and nothing was reading the output.
+    # claimed the opposite. Found in a CI log: D9002 is only a warning, so the
+    # build succeeded and nothing was reading the Windows output.
     #
     # There is no negative form of /fp:contract. /fp:strict is the documented
     # way to forbid contraction, and it also pins exception and rounding
@@ -72,13 +70,13 @@ else()
 endif()
 
 # -----------------------------------------------------------------------------
-# Deliberate violation, used only to prove the runtime guards actually fire.
+# A violation on purpose, used only to prove the runtime guards fire.
 # `cpp/tests/test_fp_guard.cpp` expects a fast-math build to FAIL to compile;
 # CI additionally builds a shared library this way and asserts the runtime
 # self-test rejects it.
 # -----------------------------------------------------------------------------
 if(TFIDF_FAST_MATH)
-  message(WARNING "tfidf: TFIDF_FAST_MATH=ON -- results from this build are NOT trustworthy.")
+  message(WARNING "tfidf: TFIDF_FAST_MATH=ON, results from this build are NOT trustworthy.")
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(tfidf_numerics_strict INTERFACE -ffast-math)
   elseif(MSVC)
@@ -89,10 +87,10 @@ endif()
 # -----------------------------------------------------------------------------
 # Architecture tuning. OFF by default: -march=native changes vectorisation, can
 # re-enable FMA contraction despite -ffp-contract=off in some GCC versions, and
-# makes the binary machine-specific -- all three fatal to reproducibility.
+# makes the binary machine-specific. All three are fatal to reproducibility.
 # -----------------------------------------------------------------------------
 if(TFIDF_ARCH_TUNE)
-  message(WARNING "tfidf: TFIDF_ARCH_TUNE=ON -- binary is machine-specific and NOT reproducible.")
+  message(WARNING "tfidf: TFIDF_ARCH_TUNE=ON, binary is machine-specific and NOT reproducible.")
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(tfidf_numerics_strict INTERFACE -march=native)
   elseif(MSVC)

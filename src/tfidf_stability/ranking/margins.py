@@ -12,7 +12,7 @@ makes the following structural:
     their primary key, so pi, pi_score and pi_alt have identical score sequences
     with differing document sequences.
 
-That is what makes research questions A1 (margins) and A2 (tie-breaking)
+Research questions A1 (margins) and A2 (tie-breaking) are therefore
 independent. The paper never states it; proposed as a note under section 2.3.2.
 
 Undefined margins follow ``spec_addenda.md#g3``: ``NaN`` plus an explicit

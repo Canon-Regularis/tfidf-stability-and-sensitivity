@@ -1,5 +1,5 @@
 # =============================================================================
-# cpp/ -- the native core, its bindings, tests and benchmarks.
+# cpp/: the native core, its bindings, tests and benchmarks.
 #
 # Layout mirrors the Python package one-for-one:
 #     cpp/include/tfidf/<sub>/   <->   src/tfidf_stability/<sub>/
@@ -10,9 +10,9 @@ include(Warnings)
 include(Sanitizers)
 
 # -----------------------------------------------------------------------------
-# build_config.hpp -- bakes the exact compiler, flags and git revision into the
+# build_config.hpp bakes the compiler, flags and git revision into the
 # binary so `tfidf_stability.build_info()` (and hence every run manifest) can
-# state precisely what produced a given number.
+# state what produced a given number.
 # -----------------------------------------------------------------------------
 find_package(Git QUIET)
 set(TFIDF_GIT_SHA "unknown")
@@ -38,7 +38,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/tfidf/core/build_config.hpp.
                @ONLY)
 
 # -----------------------------------------------------------------------------
-# tfidf_core -- the mathematics. Header-dominant, template-heavy, and containing
+# tfidf_core: the mathematics. Header-dominant, template-heavy, and containing
 # NO reference to Python whatsoever, so the core stays independently testable
 # and the binding layer stays swappable.
 # -----------------------------------------------------------------------------
@@ -53,7 +53,7 @@ target_compile_features(tfidf_core INTERFACE cxx_std_20)
 
 # Strict floating-point IS a usage requirement: anything that compiles these
 # headers must do so under IEEE-754 semantics, or the results it produces are
-# meaningless. Warnings are NOT a usage requirement -- propagating them through
+# meaningless. Warnings are not a usage requirement; propagating them through
 # the INTERFACE would force our pedantic style checks onto third-party headers
 # (nanobind, Python.h) that legitimately do not follow them. Each of our own
 # targets opts into tfidf::warnings explicitly instead.
@@ -96,14 +96,14 @@ if(TFIDF_BUILD_NATIVE)
   # MinGW note (verified empirically on this project's reference machine):
   #
   # CPython on Windows is built with MSVC, so a MinGW-produced .pyd must not
-  # depend on any GCC runtime DLL -- those are not on the interpreter's DLL
+  # depend on any GCC runtime DLL, which is not on the interpreter's DLL
   # search path and the import fails with a bare, unhelpful
   # "DLL load failed while importing ...".
   #
   # -static-libgcc/-static-libstdc++ alone are NOT sufficient: the posix thread
   # model also pulls in libwinpthread-1.dll. Plain -static covers all three.
   # With it the import list reduces to python3xx.dll + KERNEL32 + UCRT, which is
-  # exactly what a self-contained extension should need.
+  # what a self-contained extension should need.
   # ---------------------------------------------------------------------------
   if(MINGW)
     target_link_options(_tfidf_native PRIVATE -static -static-libgcc -static-libstdc++)

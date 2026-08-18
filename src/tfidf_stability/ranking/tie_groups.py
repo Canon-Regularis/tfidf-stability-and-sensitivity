@@ -127,7 +127,7 @@ def tie_ball_interval(sorted_scores: Sequence[float], j: int, tau: float) -> Int
 
 
 # ---------------------------------------------------------------------------
-# Chains -- single linkage, a genuine partition
+# Chains: single linkage, a genuine partition
 # ---------------------------------------------------------------------------
 def tie_chains(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ...]:
     """The transitive closure of the near-tie relation: a partition.
@@ -161,7 +161,7 @@ def tie_chains(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ..
 
 
 # ---------------------------------------------------------------------------
-# Cliques -- complete linkage, overlapping
+# Cliques: complete linkage, overlapping
 # ---------------------------------------------------------------------------
 def tie_cliques(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ...]:
     """Maximal sets in which every pair is within ``tau``.
@@ -222,7 +222,7 @@ def chain_inflation_ratio(sorted_scores: Sequence[float], tau: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# The index -- computes all three once, and owns the diagnostics
+# The index: computes all three once, and owns the diagnostics
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class TieGroupIndex:
@@ -285,7 +285,7 @@ class TieGroupIndex:
             )
         return index
 
-    # -- the paper's object ---------------------------------------------------
+    # --- the paper's object --------------------------------------------------
     def ball(self, j: int) -> Interval:
         """``G_tau(j)`` as a half-open rank range, for 0-indexed ``j``."""
         return tie_ball_interval(self.sorted_scores, j, self.tau)
@@ -295,7 +295,7 @@ class TieGroupIndex:
         lo, hi = self.ball(j)
         return tuple(range(lo, hi))
 
-    # -- diagnostics ----------------------------------------------------------
+    # --- diagnostics ---------------------------------------------------------
     @property
     def largest_chain(self) -> int:
         return max((hi - lo for lo, hi in self.chains), default=0)

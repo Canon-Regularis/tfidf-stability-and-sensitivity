@@ -36,7 +36,7 @@ option(TFIDF_WERROR       "Treat compiler warnings as errors"                OFF
 # NON-REPRODUCIBLE knobs. Both OFF for every published result. The manifest
 # records their state and refuses to label a run reproducible when either is on.
 option(TFIDF_ARCH_TUNE    "Enable -march=native (NON-REPRODUCIBLE)"          OFF)
-option(TFIDF_FAST_MATH    "Deliberately enable fast-math, to prove the numeric \
+option(TFIDF_FAST_MATH    "Enable fast-math on purpose, to prove the numeric \
 guard rails actually fire. Never use for results." OFF)
 
 set(TFIDF_SANITIZERS "" CACHE STRING

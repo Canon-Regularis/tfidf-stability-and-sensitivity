@@ -3,7 +3,7 @@
 # The pull-request suite runs Hypothesis at 1,000 examples. That is enough to
 # catch a broken invariant and nowhere near enough to be called an adversarial
 # search for a counterexample to the bounds of README section 4. This workflow
-# runs 100,000 -- which is the difference between "we checked the theorems" and
+# runs 100,000, the difference between "we checked the theorems" and
 # "we tried hard to break them".
 
 name: nightly
@@ -30,8 +30,8 @@ jobs:
       - name: Hunt for a counterexample to any section 4 bound
         # --hypothesis-show-statistics reports, per test, how many examples were
         # generated and how many `assume()` rejected. That distinguishes the two
-        # ways this step can fail -- a real falsifying example, or a health check
-        # such as filter_too_much -- which the bare exit code does not. It is a
+        # ways this step can fail (a real falsifying example, or a health check
+        # such as filter_too_much) which the bare exit code does not. It is a
         # diagnostic only: nothing is suppressed, so a genuine counterexample
         # still fails the build.
         # No -q: it suppresses the statistics section entirely, which made the
@@ -69,7 +69,7 @@ jobs:
           cmake -S . -B build-bench -G Ninja -DTFIDF_BUILD_BENCH=ON -DTFIDF_ARCH_TUNE=ON
           cmake --build build-bench
       - name: Kernel microbenchmarks
-        # Arch-tuned, therefore NOT reproducible -- fine for timing, never for
+        # Arch-tuned, therefore NOT reproducible: fine for timing, never for
         # results. The binary reports that itself.
         run: ./build-bench/cpp/bench/tfidf_bench
       - name: Python-side benchmarks

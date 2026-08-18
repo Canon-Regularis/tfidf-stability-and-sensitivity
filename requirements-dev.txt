@@ -14,12 +14,12 @@ hypothesis>=6.100
 
 # External oracles for the differential tests.
 #
-# scikit-learn's TfidfVectorizer with smooth_idf=True uses exactly the paper's
+# scikit-learn's TfidfVectorizer with smooth_idf=True uses the paper's
 # idf, which lets us cross-check the whole pipeline against an independent
 # implementation.
 scikit-learn>=1.4
 #
-# snowballstemmer is a TEST-TIME oracle only -- never a runtime dependency. The
+# snowballstemmer is a TEST-TIME oracle only, never a runtime dependency. The
 # generated stemmer itself is vendored under preprocessing/_snowball/; this pin
 # lets CI assert the vendored copy still matches upstream.
 snowballstemmer>=3.0
@@ -28,9 +28,9 @@ snowballstemmer>=3.0
 #
 # Exact pins, unlike everything else in this file. A linter floor is not a
 # constraint, it is a promise that every future release will agree with this
-# one -- and they do not: ruff 0.16 stabilised PLR0917, which the tree had
+# one, and they do not: ruff 0.16 stabilised PLR0917, which the tree had
 # never been checked against, so the lint job failed on a commit that changed
-# no Python at all. Bumping these is a deliberate commit that fixes whatever
+# no Python at all. Bumping these is its own commit that fixes whatever
 # the new release found, not something a rebuild does silently.
 ruff==0.16.2
 mypy==2.3.0

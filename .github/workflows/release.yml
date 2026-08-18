@@ -2,13 +2,13 @@
 #
 # Publishing is now straightforward because the code is Apache-2.0. Before the
 # licence split it was not: the repository was CC BY 4.0 throughout, which
-# Creative Commons explicitly advises against for software -- no patent grant,
+# Creative Commons explicitly advises against for software: no patent grant,
 # and attribution terms that do not map onto compiled binaries. The prose and
 # generated reports remain CC BY 4.0; see LICENSE.md.
 #
 # Every wheel is verified before release by running the suite against the
 # INSTALLED package rather than the source tree. A wheel that builds but omits
-# a data file -- the stopword list, say, or the vendored stemmer -- would pass
+# a data file (the stopword list, say, or the vendored stemmer) would pass
 # every source-tree test and fail for the first person who installed it.
 
 name: release
@@ -35,8 +35,8 @@ jobs:
       - run: python -m pip install --upgrade pip build
       - run: python -m build --sdist
       - name: The sdist must build from vendored C++ sources alone
-        # Renamed, because the old name -- "must build without network access"
-        # -- was not what this does, and cannot be. `[build-system] requires`
+        # Renamed: the old name, "must build without network access", is not what
+        # this does and cannot be. `[build-system] requires`
         # names scikit-build-core and nanobind, which come from PyPI, so a
         # `--no-index` run fails before it reaches any C++ at all. Adding that
         # flag was tried and reverted for exactly this reason.
@@ -44,7 +44,7 @@ jobs:
         # What the step does test is real and worth keeping: building the sdist
         # compiles the extension, and the C++ third-party sources are vendored
         # under cpp/third_party/, so a missing or unvendored C++ dependency
-        # fails here. The Python build backend is a declared dependency, not a
+        # fails here. The Python build backend is a declared dependency rather than a
         # vendored one, and was never claimed otherwise.
         run: |
           python -m pip download --no-deps --no-binary :all: --dest /tmp/check dist/*.tar.gz
@@ -77,7 +77,7 @@ jobs:
           CIBW_BEFORE_BUILD: "pip install nanobind numpy cmake ninja"
           # Show the compiler invocation and its diagnostics. Without this the
           # only thing a failed build reports is "pip wheel ... failed with code
-          # 1", which is not enough to act on -- and was not.
+          # 1", which was not enough to act on.
           CIBW_BUILD_VERBOSITY: "1"
           # manylinux2014 ships GCC 10. This is a C++20 core, and the default
           # image is the usual reason a C++20 wheel builds everywhere except in
@@ -88,7 +88,7 @@ jobs:
           # otherwise targets 10.9 on x86_64, where the build fails in the
           # standard headers rather than in this project's code.
           MACOSX_DEPLOYMENT_TARGET: "10.15"
-          # Test the INSTALLED wheel, not the checkout.
+          # Test the INSTALLED wheel rather than the checkout.
           CIBW_TEST_REQUIRES: "pytest hypothesis scikit-learn"
           CIBW_TEST_COMMAND: >
             python -c "import tfidf_stability, tfidf_stability._native as n;

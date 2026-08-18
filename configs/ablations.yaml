@@ -28,7 +28,7 @@ profile_aggregation:           # G11 / G21
   vary: profiles.aggregation
   values: [text_concat, vector_mean, vector_sum]
 
-profile_item_exclusion:        # G10(3) -- the most consequential decision
+profile_item_exclusion:        # G10(3), the most consequential decision
   description: Leaving the user's remaining items in the candidate set lets them
     retrieve themselves. Included to quantify how large that artefact is.
   vary: profiles.exclude_profile_items

@@ -1,6 +1,6 @@
 # Local checks, mirroring the cheap half of ci.yml.
 #
-# Deliberately only the fast ones. A pre-commit hook that takes a minute gets
+# Only the fast ones. A pre-commit hook that takes a minute gets
 # bypassed with --no-verify, and a bypassed hook is worse than no hook: it
 # trains the habit of skipping checks.
 
