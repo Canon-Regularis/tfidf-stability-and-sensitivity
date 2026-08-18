@@ -67,6 +67,15 @@ data/external/
 # Consequence to know about: a regenerated PNG shows as modified whenever
 # matplotlib changes, even with the underlying result identical. Check the digest
 # in the caption, not the bytes.
+# run_mutation_tests.py edits a module in place, because conftest.py puts the
+# working tree's src/ on sys.path and the tests must import the mutant. It writes
+# the original here first and restores in a finally. A file matching this pattern
+# means a run was killed mid-mutant, and the module beside it may still hold a
+# mutation: recover with `python scripts/run_mutation_tests.py --restore <module>`.
+# Ignored so a killed run can never be committed, either as a stray file or, far
+# worse, as a silently mutated source.
+*.mutation-backup
+
 reports/*.csv
 !reports/text/
 
