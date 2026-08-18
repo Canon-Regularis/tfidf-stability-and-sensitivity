@@ -12,25 +12,36 @@ normative pipeline never imports it.
 Each figure and its falsification
 ---------------------------------
 ``fig_transition``: flip rate against ``eps / (m_k / 2)``. If A1 were false the
-curve would rise before 1.0, so any non-zero point left of the dashed line
-falsifies section 4.4 or the code.
+curve would rise before 1.0. The first few flips are under a pixel, though: each
+point is 1320 trials, so one flip is 0.076% and moves the marker 0.46 px on a
+linear axis. The caption therefore carries the recorded violation count, and that
+number rather than the curve's shape is what falsifies section 4.4.
 
 ``fig_margins``: the distribution of ``m_k`` at each ``k``, log-scaled, with the
 exact-tie share annotated. Comfortably large margins would sit far from zero; the
 exact-tie mass is the finding.
 
 ``fig_tau_band``: the admissible band for ``tau``, from the arithmetic noise floor
-to the smallest observed gap, on a log axis. An empty band would mean no ``tau``
+to the smallest non-zero gap, on a log axis. An empty band would mean no ``tau``
 separates numerical error from tie structure, a finding about the corpus.
 
-``fig_rho_discontinuity``: ``rho(tau)`` as a step function. ``rho`` changes only
-at an observed gap, so interpolating would assert values it never takes.
-``rho = 1`` means chains and cliques agree; any step above it is single-linkage
-chaining.
+``fig_rho_discontinuity``: ``rho(tau)`` as a step function, so that interpolating
+does not assert values it never takes. ``rho = 1`` means the largest chain and the
+largest clique are the same size; any step above it is single-linkage chaining.
+The sweep resolves ``rho`` to a sample rather than to the exact ``tau``; see the
+function for why, and read a riser's position as approximate.
 
 ``fig_ablation``: disagreement rate by operator pair and ``k``. The operators
 consume bit-identical scores, so a false A2 would leave every bar at zero and a
 non-zero bar can only come from the tie-break.
+
+``fig_rank_cascade``: the rank of each document against perturbation size, with
+the documents that cross the top-k boundary picked out. The rate behind
+``fig_transition``, resolved into the paths that produce it.
+
+``fig_stratified``: the same disagreement conditioned on the margin. A rate right
+of the exact-tie band would contradict A2; the empty bands either side of ``tau``
+show that the choice of ``tau`` within them cannot move a result.
 
 Usage::
 
@@ -42,6 +53,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -59,6 +71,14 @@ _MUTED = "#52514e"
 #: against the surface, so every series carries a direct label.
 _SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4")
 
+#: The operators as section 2.3.1 writes them. The legend previously showed the
+#: payload key with its underscores replaced, so the figure named its series
+#: after a JSON identifier while every other axis label used mathtext.
+_PAIR_LABELS = {
+    "pi_vs_pi_alt": "$\\pi$ vs $\\pi_{\\mathrm{alt}}$",
+    "pi_vs_pi_score": "$\\pi$ vs $\\pi_{\\mathrm{score}}$",
+}
+
 
 def _load(path: Path) -> dict | None:
     if not path.exists():
@@ -72,7 +92,7 @@ def _stamp(figure, text: str) -> None:
     figure.text(0.01, 0.01, text, fontsize=6, color="#666666")
 
 
-def fig_transition(record: dict, out: Path) -> None:
+def fig_transition(record: dict, out: Path) -> bool:
     """A1: the empirical flip rate against the certified radius."""
     import matplotlib.pyplot as plt
 
@@ -104,23 +124,30 @@ def fig_transition(record: dict, out: Path) -> None:
         figure,
         f"result {record['result_digest'][:16]}  |  "
         f"{transition['n_queries_excluded_exact_tie']} queries excluded "
-        f"(m_k = 0, A2's regime)",
+        f"(m_k = 0, A2's regime)  |  {transition['violations']} recorded "
+        f"certificate violations",
     )
     figure.tight_layout()
     figure.savefig(out, dpi=200)
     plt.close(figure)
+    return True
 
 
-def fig_tau_band(record: dict, out: Path) -> None:
+def fig_tau_band(record: dict, out: Path) -> bool:
     """G23: tau is derived as a band, and the band has width.
 
     Lower bound from arithmetic noise, upper bound from the data. A log axis
     shows the gap between them; three numbers in a table make the reader do the
     subtraction. One interval, so no legend; the title names the quantity.
 
-    Falsification: a noise floor reaching the smallest observed gap leaves the
+    Falsification: a noise floor reaching the smallest non-zero gap leaves the
     band empty, so no tau separates numerical error from tie structure. A finding
     about the corpus, visible here.
+
+    The exact ties are not on this axis and cannot be: a log scale has no zero, and
+    9.5% of adjacent gaps here are exactly 0. They are the subject of fig_margins
+    and fig_stratified, and their count is in the caption so the band is not read
+    as covering every gap.
     """
     import matplotlib.pyplot as plt
 
@@ -139,8 +166,8 @@ def fig_tau_band(record: dict, out: Path) -> None:
     axes.vlines([eta], 0.44, 0.56, color=_MUTED, linewidth=1.2)
     axes.plot([tau], [0.5], marker="o", markersize=8, color=_ACCENT, zorder=3)
 
-    # Three labels only: the endpoints define the band, and the marker is the
-    # value chosen inside it.
+    # Three labels only: the endpoints define the band, and the marker sits inside
+    # it.
     axes.annotate(
         f"$\\eta$ = {eta:.3e}\nnoise floor",
         xy=(eta, 0.68),
@@ -149,49 +176,86 @@ def fig_tau_band(record: dict, out: Path) -> None:
         color=_MUTED,
     )
     axes.annotate(
-        f"$g_{{\\min}}$ = {g_min:.3e}\nsmallest observed gap",
+        f"$g_{{\\min}}$ = {g_min:.3e}\nsmallest non-zero gap",
         xy=(g_min, 0.68),
         ha="right",
         fontsize=8,
         color=_MUTED,
     )
-    axes.annotate(f"$\\tau$ = {tau:.3e}", xy=(tau, 0.30), ha="center", fontsize=8, color=_ACCENT)
+    # display_tau is the band's geometric centre, not the value any experiment ran
+    # with: tie_break_ablations.json uses its own parameters.tau = 4.8e-13, and the
+    # two differ by a factor of 13. Nothing needs reconciling, because the upper
+    # endpoint is the smallest observed positive gap, so every positive gap is at
+    # least g_min and none can fall below it. For any tau in the band the relation
+    # abs(s_i - s_j) <= tau therefore holds only where the scores are equal, and
+    # the tie groups are the exact-equality classes whichever admissible tau is
+    # picked. The marker is labelled for what it is, and that consequence is
+    # printed rather than n_gaps_in_band, which is 0 by construction and would read
+    # as a measurement.
+    axes.annotate(
+        f"$\\tau$ = {tau:.3e}\nband centre",
+        xy=(tau, 0.30),
+        ha="center",
+        va="top",
+        fontsize=8,
+        color=_ACCENT,
+    )
 
     axes.set_xscale("log")
     axes.set_ylim(0.15, 0.95)
     axes.set_yticks([])
     axes.set_xlabel("score separation")
-    axes.set_title(f"The admissible band for $\\tau$ spans {decades:.2f} decades", fontsize=10)
+    axes.set_title(
+        f"Every $\\tau$ in the {decades:.2f}-decade band gives the same tie groups",
+        fontsize=10,
+    )
     axes.grid(axis="x", alpha=0.3, linewidth=0.5)
     for side in ("left", "right", "top"):
         axes.spines[side].set_visible(False)
     _stamp(
         figure,
         f"result {record['result_digest'][:16]}  |  "
-        f"band [2 eta, g_min) = [{2 * eta:.3e}, {g_min:.3e})",
+        f"band [2 eta, g_min) = [{2 * eta:.3e}, {g_min:.3e})  |  "
+        f"{band['n_positive_gaps']} non-zero gaps, "
+        f"{band['n_exact_ties']} exact ties off a log axis",
     )
     figure.tight_layout()
     figure.savefig(out, dpi=200)
     plt.close(figure)
+    return True
 
 
-def fig_rho_discontinuity(record: dict, out: Path) -> None:
+def fig_rho_discontinuity(record: dict, out: Path) -> bool:
     """G1: rho(tau) is piecewise constant, and the steps are the subject.
 
-    rho changes only at an observed gap, so joining the samples with straight
-    segments would assert intermediate values the function never takes, smoothing
-    away the discontinuity.
+    A step plot rather than a line, because joining the samples with straight
+    segments would assert intermediate values the function never takes.
 
-    Falsification: rho = 1 means chains and cliques agree, so tie groups are
-    unambiguous at that tau. Any step above 1 is single-linkage chaining, and
-    its height is how much the chosen tau inflates the largest tie group.
+    Where the risers sit is approximate, and the reason is worth stating because
+    the obvious assumption is wrong. rho is the largest chain over the largest
+    clique. Chains are single-linkage and move only at an adjacent gap, which is
+    what ``_rho_sweep`` records as a breakpoint, but cliques are complete-linkage
+    and change at spans ``S[a] - S[b]`` with ``b > a + 1``, which are not adjacent
+    gaps. Over all 5460 distinct pairwise differences rho has 129 true jumps and
+    only 18 of them are adjacent gaps, so the recorded breakpoints do not bracket
+    it. The 432-point grid draws 64 risers, and 46 of those sit at the sample
+    after a jump rather than at the jump: about a third of the plotted x-range
+    holds a level that is right at the sampled endpoints and stale in between.
+    Resolving this means bracketing clique spans in ``_rho_sweep`` and re-running
+    E3, not changing the drawing.
+
+    Falsification: rho = 1 means the largest chain and the largest clique are the
+    same size, which does not by itself make the tie groups agree; 25 of the 116
+    samples at rho = 1 have differing chain and clique counts. Any step above 1 is
+    single-linkage chaining, and its height is how much that tau inflates the
+    largest tie group.
     """
     import matplotlib.pyplot as plt
 
     sweep = record["payload"].get("E3_rho_sweep")
     if not sweep or not sweep["taus"]:
         print("skipping fig_rho_discontinuity (no rho sweep recorded)")
-        return
+        return False
 
     taus, rho = sweep["taus"], sweep["rho"]
     peak = max(rho)
@@ -204,7 +268,7 @@ def fig_rho_discontinuity(record: dict, out: Path) -> None:
     # has to clear the step, which runs along rho = 1 across the left half.
     axes.set_ylim(0.85, peak * 1.14)
     axes.annotate(
-        "$\\rho = 1$: chains and cliques agree",
+        "$\\rho = 1$: largest chain = largest clique",
         xy=(taus[0], 1.0),
         xytext=(4, 10),
         textcoords="offset points",
@@ -226,22 +290,38 @@ def fig_rho_discontinuity(record: dict, out: Path) -> None:
     axes.set_xscale("log")
     axes.set_xlabel("$\\tau$")
     axes.set_ylabel("$\\rho(\\tau)$ = largest chain / largest clique")
+    # The breakpoint count is the number of adjacent gaps, which is how often the
+    # chain count changes, not how often rho does. Titling with it put 104 over a
+    # curve that visibly rises 64 times.
+    risers = sum(1 for previous, current in pairwise(rho) if previous != current)
     axes.set_title(
-        f"Chain inflation is a step function of $\\tau$ ({len(sweep['breakpoints'])} breakpoints)",
+        f"Chain inflation is a step function of $\\tau$ ({risers} risers over {len(taus)} samples)",
         fontsize=10,
     )
     axes.grid(alpha=0.3, linewidth=0.5)
+    # Where the peak sits relative to the tau in use. The sweep spans the range
+    # over which rho varies at all, and this record's tau is seven decades below
+    # its lower end, so the peak belongs to a regime none of the results occupy.
+    # Left unsaid, the figure reads as though chain inflation threatened them.
+    # Extending the axis to reach tau would compress the informative decades into
+    # nothing, so it is stated instead of drawn.
+    operative = record.get("parameters", {}).get("tau")
+    if isinstance(operative, int | float) and operative < taus[0]:
+        note = f"  |  run tau = {operative:.3e} is below the sweep, rho = {rho[0]:.0f}"
+    else:
+        note = ""
     _stamp(
         figure,
         f"result {record['result_digest'][:16]}  |  "
-        f"{len(taus)} sampled tau, steps only at observed gaps",
+        f"risers located to the sample, not the exact tau{note}",
     )
     figure.tight_layout()
     figure.savefig(out, dpi=200)
     plt.close(figure)
+    return True
 
 
-def fig_rank_cascade(record: dict, out: Path) -> None:
+def fig_rank_cascade(record: dict, out: Path) -> bool:
     """A1, per document: which ranks cross, and when.
 
     ``fig_transition`` gives the rate of top-k changes; this gives the paths
@@ -263,7 +343,7 @@ def fig_rank_cascade(record: dict, out: Path) -> None:
     trajectories = record["payload"]["E2_transition"].get("rank_trajectories")
     if not trajectories:
         print("skipping fig_rank_cascade (no trajectories recorded)")
-        return
+        return False
 
     ratios = trajectories["ratios"]
     k = trajectories["k"]
@@ -305,8 +385,10 @@ def fig_rank_cascade(record: dict, out: Path) -> None:
     )
 
     axes.set_xscale("log")
-    # Ranks are 1-based, and the inverted axis needs headroom or the note above
-    # the highest line is clipped by the top spine.
+    # Ranks are 1-based and the axis is inverted, so rank 1 sits at the top. The
+    # headroom is for the lines themselves: two documents hold rank 1 across the
+    # sweep and would otherwise be drawn along the spine. There is no annotation up
+    # there to clip, which is what the previous note claimed.
     deepest = max(max(s) for s in ranks.values())
     axes.set_ylim(deepest + 2, -1.5)
     # Placed low-left, where the plot is empty: at the top it collided with the
@@ -335,9 +417,10 @@ def fig_rank_cascade(record: dict, out: Path) -> None:
     figure.tight_layout()
     figure.savefig(out, dpi=200)
     plt.close(figure)
+    return True
 
 
-def fig_margins(record: dict, out: Path) -> None:
+def fig_margins(record: dict, out: Path) -> bool:
     """A1: where the margins actually are, including the exact-tie mass."""
     import matplotlib.pyplot as plt
 
@@ -345,32 +428,61 @@ def fig_margins(record: dict, out: Path) -> None:
     labels = sorted(dists, key=lambda s: int(s[1:]))
     figure, axes = plt.subplots(figsize=(6.4, 4.0))
 
+    # A log axis has no zero, and p5 is exactly zero wherever the exact-tie share
+    # exceeds 5% (k = 1, 10, 20 on the synthetic corpus). Clamping those to a
+    # small positive number draws a bar reaching 1e-18, which asserts a margin
+    # the data does not contain. The floor is set one decade below the smallest
+    # positive percentile instead, and a bar that reaches zero is capped with a
+    # marker rather than drawn to a fictitious value.
+    positive = [
+        v
+        for label in labels
+        for v in dists[label]["m_k"]["percentiles"].values()
+        if isinstance(v, int | float) and v > 0.0
+    ]
+    floor = min(positive) / 10.0 if positive else 1e-18
+
     for offset, label in enumerate(labels):
         # E1 reports both margins per k; the boundary margin governs top-k
         # membership, which is this figure's subject.
         d = dists[label]["m_k"]
         percentiles = d["percentiles"]
-        # Zero cannot be drawn on a log axis, so the exact-tie share is annotated
-        # rather than dropped; it is the finding, and inferring it from a gap in
-        # the plot asks too much.
-        lo = max(percentiles["p5"], 1e-18)
-        hi = max(percentiles["p95"], 1e-18)
-        mid = max(percentiles["p50"], 1e-18)
+        hi = max(percentiles["p95"], floor)
+        mid = max(percentiles["p50"], floor)
+        reaches_zero = percentiles["p5"] <= 0.0
+        lo = floor if reaches_zero else percentiles["p5"]
         axes.plot([offset, offset], [lo, hi], color=_INK, linewidth=2.0)
+        if reaches_zero:
+            axes.plot([offset], [lo], marker="v", color=_INK, markersize=7)
         axes.plot([offset], [mid], marker="o", color=_ACCENT, markersize=5)
-        if d["share_zero"] > 0:
-            axes.annotate(
-                f"{d['share_zero']:.0%} exact",
-                xy=(offset, hi * 2.2),
-                fontsize=7,
-                ha="center",
-                color=_ACCENT,
-            )
+        # One row, in axes coordinates. Anchoring each label to its own whisker
+        # top put k=1's outside the axes entirely, since an annotation does not
+        # extend the data limits and k=1 has both the tallest p95 and the largest
+        # exact-tie share: the figure's headline number was the one clipped. A
+        # shared baseline also makes the five comparable, which five different
+        # heights did not. k=5 is labelled 0% rather than skipped, so a gap in the
+        # row cannot be read as "not measured".
+        axes.annotate(
+            f"{d['share_zero']:.0%} exact",
+            xy=(offset, 0.96),
+            xycoords=("data", "axes fraction"),
+            fontsize=7,
+            ha="center",
+            va="top",
+            color=_ACCENT,
+        )
 
     axes.set_yscale("log")
     axes.set_xticks(range(len(labels)))
     axes.set_xticklabels([f"$k$={label[1:]}" for label in labels])
-    axes.set_ylabel("$m_k$  (p5-p95, median marked)")
+    # Headroom for the label row. The top would otherwise autoscale to k=1's p95
+    # and leave its label sitting on the whisker.
+    ceiling = max(dists[label]["m_k"]["percentiles"]["p95"] for label in labels)
+    axes.set_ylim(floor / 3.0, ceiling * 6.0)
+    # Half a slot either side. The default 5% margin is narrower than the labels
+    # over the first and last column, which then overhang the spines.
+    axes.set_xlim(-0.5, len(labels) - 0.5)
+    axes.set_ylabel("$m_k$  (p5 to p95, median marked; triangle = reaches 0)")
     # m_min^top stays off this axis: it constrains a disjoint set of gaps, so
     # sharing one axis would invite the reading that either bounds the other. It
     # sits in the JSON alongside.
@@ -380,24 +492,33 @@ def fig_margins(record: dict, out: Path) -> None:
     figure.tight_layout()
     figure.savefig(out, dpi=200)
     plt.close(figure)
+    return True
 
 
-def fig_ablation(record: dict, out: Path) -> None:
+def fig_ablation(record: dict, out: Path) -> bool:
     """A2: disagreement caused by the tie-break alone."""
     import matplotlib.pyplot as plt
 
     rates = record["payload"]["E3_disagreement_rates"]
     pairs = sorted(rates)
     if not pairs:
-        return
+        return False
     ks = sorted(rates[pairs[0]], key=lambda s: int(s[1:]))
     width = 0.8 / len(pairs)
 
+    # Without an explicit colour this fell through to matplotlib's default cycle,
+    # making it the one figure not drawn from the validated palette.
     figure, axes = plt.subplots(figsize=(6.4, 4.0))
     for i, pair in enumerate(pairs):
         values = [100.0 * rates[pair][k]["rate"] for k in ks]
         positions = [x + i * width for x in range(len(ks))]
-        axes.bar(positions, values, width=width, label=pair.replace("_", " "))
+        axes.bar(
+            positions,
+            values,
+            width=width * 0.92,  # a surface gap between adjacent bars
+            label=_PAIR_LABELS.get(pair, pair.replace("_", " ")),
+            color=_SERIES[i % len(_SERIES)],
+        )
 
     axes.set_xticks([x + width * (len(pairs) - 1) / 2 for x in range(len(ks))])
     axes.set_xticklabels([f"$k$={k[1:]}" for k in ks])
@@ -413,6 +534,186 @@ def fig_ablation(record: dict, out: Path) -> None:
     figure.tight_layout()
     figure.savefig(out, dpi=200)
     plt.close(figure)
+    return True
+
+
+#: Section 7.3's margin bands, ordered by magnitude, as the payload spells them.
+#: ``undefined`` is deliberately absent: it records that no margin exists (k >= N),
+#: which is a validity state rather than a small margin, so placing it on an
+#: ordered magnitude axis would invite reading it as one.
+_BANDS = (
+    ("exact_tie", "$m_k = 0$"),
+    ("(0, tau/100]", "$(0, \\tau/100]$"),
+    ("(tau/100, tau/10]", "$(\\tau/100, \\tau/10]$"),
+    ("(tau/10, tau]", "$(\\tau/10, \\tau]$"),
+    ("(tau, 10*tau]", "$(\\tau, 10\\tau]$"),
+    ("(10*tau, 100*tau]", "$(10\\tau, 100\\tau]$"),
+    ("(100*tau, inf)", "$(100\\tau, \\infty)$"),
+)
+
+
+def fig_stratified(record: dict, out: Path) -> bool:
+    """A2, stratified: where the disagreements actually live.
+
+    ``fig_ablation`` gives one rate per k, which mixes tied and separated queries
+    into a single number and so understates the result. Conditioning on the
+    margin separates them, and the aggregate follows from this figure rather than
+    the other way round.
+
+    Two things are being shown. The first is the rate in each band. The second is
+    which bands contain anything at all. Every margin here is either exactly zero
+    or above ``100 tau``, which is not a coincidence: a margin is a gap between
+    adjacent scores, so the smallest positive one is ``g_min``, and E0 measures
+    ``g_min`` at 3.7e-08 against ``100 tau`` of 4.8e-11. Three orders of magnitude
+    of headroom is what empties the intervening bands, and it is why tau's position
+    inside them cannot move a published number. An empty band is drawn as an
+    explicit gap, never as a rate of zero, since "no query was tested here" and
+    "every query tested here agreed" are opposite claims.
+
+    Falsification: a non-zero rate anywhere right of ``m_k = 0`` would mean the
+    tie-break changed a top-k set that the scores had already separated, which
+    contradicts A2 and would have to be a bug in the operator.
+    """
+    import matplotlib.pyplot as plt
+
+    strata = record["payload"].get("E3_stratified_by_margin")
+    if not strata:
+        print("skipping fig_stratified (no stratified table recorded)")
+        return False
+
+    pairs = sorted(strata)
+    ks = sorted({row["k"] for row in strata[pairs[0]]})
+    # Band populations are a property of the corpus, not of the operator pair, so
+    # one pair's rows describe both panels.
+    census = {(row["k"], row["band"]): row["n"] for row in strata[pairs[0]]}
+
+    figure, axes_pair = plt.subplots(1, len(pairs), figsize=(9.6, 4.2), sharey=True, sharex=True)
+    axes_list = list(axes_pair) if len(pairs) > 1 else [axes_pair]
+
+    # A band is empty for the corpus, not per operator, so the shading is computed
+    # once from any pair and is identical in both panels.
+    populated = [any(census.get((k, band), 0) for k in ks) for band, _ in _BANDS]
+
+    # Shaded per contiguous run, not per band: separate spans leave white seams
+    # between them that read as slots holding something. Spanning first-to-last
+    # empty index instead would be simpler and wrong, since it would shade over a
+    # populated band whenever the empty ones are not contiguous. They happen to be
+    # on this corpus, which is the finding rather than something to rely on.
+    runs: list[list[int]] = []
+    for position, ok in enumerate(populated):
+        if ok:
+            continue
+        if runs and runs[-1][-1] == position - 1:
+            runs[-1].append(position)
+        else:
+            runs.append([position])
+
+    for axes, pair in zip(axes_list, pairs, strict=True):
+        rows = {(r["k"], r["band"]): r for r in strata[pair]}
+        for run in runs:
+            axes.axvspan(run[0] - 0.5, run[-1] + 0.5, color="#f0efec", zorder=0)
+        for position, (band, _) in enumerate(_BANDS):
+            if not populated[position]:
+                continue
+            for series, k in enumerate(ks):
+                row = rows.get((k, band))
+                if not row or not row["n"]:
+                    continue
+                # Area proportional to n, so a rate resting on one query cannot
+                # look like one resting on forty.
+                axes.scatter(
+                    [position + (series - (len(ks) - 1) / 2) * 0.19],
+                    [100.0 * row["rate"]],
+                    s=14.0 + 2.4 * row["n"],
+                    color=_SERIES[series % len(_SERIES)],
+                    edgecolor="white",
+                    linewidth=0.8,
+                    zorder=3,
+                )
+
+        # Labelled once, on the widest run, so a narrow gap does not carry a
+        # sentence longer than itself.
+        if runs:
+            widest = max(runs, key=len)
+            axes.annotate(
+                "no query has a margin here",
+                xy=((widest[0] + widest[-1]) / 2, 50.0),
+                ha="center",
+                va="center",
+                rotation=90,
+                fontsize=8,
+                color=_MUTED,
+            )
+        axes.set_title(_PAIR_LABELS.get(pair, pair.replace("_", " ")), fontsize=10)
+        axes.grid(axis="y", alpha=0.3, linewidth=0.5)
+        # sharex propagates the tick locations but not their formatting, so the
+        # second panel kept the default horizontal labels and they collided.
+        axes.set_xticks(range(len(_BANDS)))
+        axes.set_xticklabels([label for _, label in _BANDS], rotation=35, ha="right", fontsize=8)
+
+    # Proxy handles, one per k, built from the series list rather than from what
+    # happened to be drawn. Labelling inside the loop omitted k=5 entirely: its
+    # only appearance is in the separated band, and the label was attached in the
+    # exact-tie band, where k=5 has no queries. The series was on the chart and
+    # missing from the legend.
+    handles = [
+        plt.Line2D(
+            [],
+            [],
+            marker="o",
+            linestyle="none",
+            markersize=6,
+            markerfacecolor=_SERIES[i % len(_SERIES)],
+            markeredgecolor="white",
+            label=f"$k$={k}",
+        )
+        for i, k in enumerate(ks)
+    ]
+    axes_list[0].set_ylim(-6.0, 106.0)
+    axes_list[0].set_ylabel("top-$k$ set disagreement (%)")
+    axes_list[-1].legend(
+        handles=handles,
+        fontsize=8,
+        title="marker area $\\propto$ queries",
+        title_fontsize=7,
+        loc="center right",
+        framealpha=0.95,
+    )
+
+    # Counted from the rows rather than asserted. Writing "0 disagreements" as a
+    # literal would keep printing it after the first run that found one, which is
+    # the failure this figure exists to make visible.
+    separated = [
+        row for pair in pairs for row in strata[pair] if row["band"] != "exact_tie" and row["n"]
+    ]
+    n_separated = sum(row["n"] for row in separated)
+    n_disagree = sum(row["n_disagree"] for row in separated)
+
+    # The axis is denominated in tau, and this record's tau is not the band centre
+    # fig_tau_band marks, so the value is named rather than left to be assumed.
+    tau = record.get("parameters", {}).get("tau")
+    tau_note = f"tau = {tau:.3e}  |  " if isinstance(tau, int | float) else ""
+
+    # The title states the result, so it is derived from the result rather than
+    # written in. A run that broke A2 would retitle itself.
+    figure.suptitle(
+        "Disagreement is confined to exact ties"
+        if n_disagree == 0
+        else f"A2 violated: {n_disagree} disagreements at separated scores",
+        fontsize=11,
+        y=0.98,
+    )
+    figure.supxlabel("score-separation margin $m_k$", fontsize=9, y=0.02)
+    _stamp(
+        figure,
+        f"result {record['result_digest'][:16]}  |  {tau_note}"
+        f"{n_disagree} disagreements among {n_separated} query-k observations "
+        f"whose scores were separated",
+    )
+    figure.tight_layout(rect=(0, 0.02, 1, 0.96))
+    figure.savefig(out, dpi=200)
+    plt.close(figure)
+    return True
 
 
 def main() -> int:
@@ -436,20 +737,29 @@ def main() -> int:
     output = args.output or args.reports / "figures"
     output.mkdir(parents=True, exist_ok=True)
 
+    # Counted, not assumed. Three of these decline to draw when their payload is
+    # absent, so a hardcoded total reported figures that were never written.
     written = 0
     profile = _load(args.reports / "stability_profile.json")
     if profile:
-        fig_transition(profile, output / "fig_transition.png")
-        fig_tau_band(profile, output / "fig_tau_band.png")
-        fig_rank_cascade(profile, output / "fig_rank_cascade.png")
-        fig_margins(profile, output / "fig_margins.png")
-        written += 4
+        written += sum(
+            (
+                fig_transition(profile, output / "fig_transition.png"),
+                fig_tau_band(profile, output / "fig_tau_band.png"),
+                fig_rank_cascade(profile, output / "fig_rank_cascade.png"),
+                fig_margins(profile, output / "fig_margins.png"),
+            )
+        )
 
     ablation = _load(args.reports / "tie_break_ablations.json")
     if ablation:
-        fig_ablation(ablation, output / "fig_ablation.png")
-        fig_rho_discontinuity(ablation, output / "fig_rho_discontinuity.png")
-        written += 2
+        written += sum(
+            (
+                fig_ablation(ablation, output / "fig_ablation.png"),
+                fig_rho_discontinuity(ablation, output / "fig_rho_discontinuity.png"),
+                fig_stratified(ablation, output / "fig_stratified.png"),
+            )
+        )
 
     if not written:
         print("no experiment results found; nothing to plot", file=sys.stderr)
