@@ -37,3 +37,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^(cpp/third_party/|src/tfidf_stability/preprocessing/_snowball/|tests/fixtures/snowball/)
+
+      - id: test-vacuity
+        name: no test passes without asserting anything
+        # Pure AST work over tests/, so it costs milliseconds and catches the
+        # guard-forgotten-on-a-new-test case at the moment it is written.
+        entry: python scripts/check_test_vacuity.py
+        language: system
+        pass_filenames: false
+        files: ^tests/.*\.py$

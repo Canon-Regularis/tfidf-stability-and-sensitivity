@@ -64,6 +64,11 @@ jobs:
         run: python scripts/check_vendored.py
       - name: The C++ tree must mirror the Python packages
         run: python scripts/check_layout.py
+      - name: No test may pass without asserting anything
+        # The run-level guards elsewhere (ctest --no-tests=error, the executed-test
+        # count in determinism.yml) answer "did anything run". This answers "could
+        # what ran have failed", which is the same question one level down.
+        run: python scripts/check_test_vacuity.py
 
   reference:
     name: reference ${{ matrix.os }} py${{ matrix.python }}
