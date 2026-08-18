@@ -52,11 +52,21 @@ data/external/
 !data/assets/
 !data/lexicon/
 
-# Figures are renderings and stay out of the tree: they are reproducible from the
-# JSON below by `python scripts/make_figures.py`, and matplotlib stamps its own
-# version into every PNG, so committing them would make the bytes depend on the
-# plotting library rather than on the result.
-reports/figures/
+# Figures ARE committed. They are renderings, and matplotlib stamps its version
+# into every PNG, so the bytes depend on the plotting library rather than on the
+# result: two people regenerating from identical JSON get different files. That
+# argued for keeping them out, and for a while they were.
+#
+# It was the wrong trade. reports/text/main.tex embeds seven of them, so a fresh
+# clone built the report with seven "figure not generated" boxes, and the results
+# were invisible to anyone reading the repository rather than running it. A
+# figure nobody can see is worth less than a figure whose bytes are not
+# reproducible. The JSON beside them is the reproducible artefact and the digest
+# in each caption ties the image back to it, so the provenance claim survives.
+#
+# Consequence to know about: a regenerated PNG shows as modified whenever
+# matplotlib changes, even with the underlying result identical. Check the digest
+# in the caption, not the bytes.
 reports/*.csv
 !reports/text/
 

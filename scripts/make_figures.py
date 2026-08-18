@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from itertools import pairwise
 from pathlib import Path
@@ -78,6 +79,24 @@ _PAIR_LABELS = {
     "pi_vs_pi_alt": "$\\pi$ vs $\\pi_{\\mathrm{alt}}$",
     "pi_vs_pi_score": "$\\pi$ vs $\\pi_{\\mathrm{score}}$",
 }
+
+
+def _uniform_log_minor(axis) -> None:
+    """Put a log axis's minor ticks at half-decades, so every mark is equidistant.
+
+    The default subdivides each decade at 2,3,...,9 times its base. That is what a
+    log scale means, and it is unreadable as a ruler: the marks bunch towards the
+    top of every decade and the gap between neighbours changes by a factor of four
+    across it. Nothing about styling fixes that, because the positions themselves
+    are uneven.
+
+    A tick at sqrt(10) times each decade sits exactly half a decade up, so the
+    marks are uniformly spaced in device coordinates: one gap, everywhere, at half
+    the major spacing. It still denotes something, unlike an arbitrary subdivision.
+    """
+    from matplotlib.ticker import LogLocator
+
+    axis.set_minor_locator(LogLocator(base=10.0, subs=(10.0**0.5,), numticks=100))
 
 
 def _load(path: Path) -> dict | None:
@@ -107,12 +126,43 @@ def fig_transition(record: dict, out: Path) -> bool:
     axes.axvline(1.0, linestyle="--", color=_ACCENT, linewidth=1.2)
     axes.annotate(
         "certified radius\n$\\epsilon = m_k/2$",
-        xy=(1.15, peak * 0.55),
+        xy=(1.15, peak * 0.30),
         fontsize=8,
         color=_ACCENT,
     )
     axes.set_xscale("log")
+    _uniform_log_minor(axes.xaxis)
+    axes.tick_params(axis="x", which="minor", length=3.0, width=0.6, color=_MUTED)
     axes.set_xlabel("$\\epsilon \\,/\\, (m_k/2)$")
+    # Symlog, with the linear region ending at one flip. Six of the ten points are
+    # exactly zero and the first non-zero is a single-digit count, so on a linear
+    # axis the whole sub-percent regime collapses onto the axis line: one flip in
+    # 1320 trials moves the marker 0.46 px, indistinguishable from zero. That
+    # regime is what section 4.4 is about, so the axis has to resolve it. Below
+    # linthresh the scale is linear, which is what lets the exact zeros be drawn;
+    # a plain log axis has no zero.
+    one_flip = 100.0 / max(point["n_trials"] for point in points) if points else 0.1
+    axes.set_yscale("symlog", linthresh=one_flip, linscale=0.9)
+    # Explicit decades, plus zero. The default symlog locator put two ticks inside
+    # the linear window and one just above it, giving gaps of 4, 38 and 83 px on
+    # one axis: correct for the scale and unreadable as a ruler. Zero, then the
+    # decades, has one deliberate change of gauge at the bottom where the scale
+    # genuinely changes, and a uniform ruler above it.
+    axes.set_yticks([0.0, 0.1, 1.0, 10.0, 100.0])
+    # A flip rate cannot be negative, and symlog draws the negative decades unless
+    # told otherwise: the first attempt showed ticks down to -10^0 and collided
+    # -10^-2 with 10^-2 at the origin. Clamping at zero keeps the linear window
+    # that makes the exact zeros drawable without inventing a negative half.
+    axes.set_ylim(0.0, peak * 1.6)
+    axes.axhline(one_flip, color=_MUTED, linewidth=0.7, linestyle=":")
+    axes.annotate(
+        f"one flip = {one_flip:.2f}%",
+        xy=(min(ratios), one_flip),
+        xytext=(2, 3),
+        textcoords="offset points",
+        fontsize=7,
+        color=_MUTED,
+    )
     axes.set_ylabel("top-$k$ set flip rate (%)")
     axes.set_title(
         f"Ranking stability transition (k={transition['k']}, "
@@ -202,6 +252,8 @@ def fig_tau_band(record: dict, out: Path) -> bool:
     )
 
     axes.set_xscale("log")
+    _uniform_log_minor(axes.xaxis)
+    axes.tick_params(axis="x", which="minor", length=3.0, width=0.6, color=_MUTED)
     axes.set_ylim(0.15, 0.95)
     axes.set_yticks([])
     axes.set_xlabel("score separation")
@@ -287,6 +339,8 @@ def fig_rho_discontinuity(record: dict, out: Path) -> bool:
     )
 
     axes.set_xscale("log")
+    _uniform_log_minor(axes.xaxis)
+    axes.tick_params(axis="x", which="minor", length=3.0, width=0.6, color=_MUTED)
     axes.set_xlabel("$\\tau$")
     axes.set_ylabel("$\\rho(\\tau)$ = largest chain / largest clique")
     # Counted off the curve rather than read from a breakpoint list. The old title
@@ -353,8 +407,18 @@ def fig_rank_cascade(record: dict, out: Path) -> bool:
     ranks = trajectories["ranks"]
 
     # A document "crosses" if it changes side of the top-k boundary anywhere.
+    #
+    # The reference is the recorded unperturbed order, not the first sample. They
+    # agree on this run, but taking series[0] would define away the case the
+    # figure exists to catch: a document already across the boundary at the
+    # smallest perturbation would compare equal to itself and be drawn as grey.
+    baseline = trajectories.get("tracked_documents") or []
+    inside_at_rest = {
+        doc: (baseline.index(doc) + 1 <= k) if doc in baseline else (series[0] <= k)
+        for doc, series in ranks.items()
+    }
     crossers = [
-        doc for doc, series in ranks.items() if any((r <= k) != (series[0] <= k) for r in series)
+        doc for doc, series in ranks.items() if any((r <= k) != inside_at_rest[doc] for r in series)
     ]
 
     figure, axes = plt.subplots(figsize=(7.0, 4.2))
@@ -376,24 +440,52 @@ def fig_rank_cascade(record: dict, out: Path) -> bool:
             annotation_clip=False,
         )
 
+    # Grey against coloured is the whole encoding, so it is named rather than left
+    # to be inferred. The five hues are not in the legend: each already carries its
+    # document id at the end of its own line, and repeating them would be a second
+    # key for the same thing.
+    handles = [
+        plt.Line2D([], [], color=_SERIES[0], linewidth=1.8, label=f"crosses the top-{k} boundary"),
+        plt.Line2D([], [], color="#c9c9c6", linewidth=1.0, label="stays on its side"),
+    ]
+    axes.legend(
+        handles=handles,
+        fontsize=8,
+        loc="lower left",
+        framealpha=0.95,
+        title="line colour  (labels at right are document ids)",
+        title_fontsize=7,
+    )
+
     axes.axvline(1.0, linestyle="--", color=_MUTED, linewidth=1.2)
     axes.axhline(k + 0.5, color=_MUTED, linewidth=0.8)
+    # Right-aligned: at the left end the boundary sits among the flat trajectories
+    # and the label was drawn over them. Every line has descended well below it by
+    # the right-hand end, so the space there is genuinely empty.
     axes.annotate(
         f"top-{k} boundary",
-        xy=(ratios[0], k + 0.5),
-        xytext=(4, 5),
+        xy=(ratios[-1], k + 0.5),
+        xytext=(-4, -5),
         textcoords="offset points",
+        ha="right",
+        va="top",
         fontsize=8,
         color=_MUTED,
     )
 
     axes.set_xscale("log")
+    _uniform_log_minor(axes.xaxis)
+    axes.tick_params(axis="x", which="minor", length=3.0, width=0.6, color=_MUTED)
     # Ranks are 1-based and the axis is inverted, so rank 1 sits at the top. The
     # headroom is for the lines themselves: two documents hold rank 1 across the
     # sweep and would otherwise be drawn along the spine. There is no annotation up
     # there to clip, which is what the previous note claimed.
+    # Ticked from 1, not 0: ranks are 1-based, so a tick at rank 0 labels a
+    # position no document can occupy. The top of the axis sits one rank above the
+    # best rank so the lines that hold rank 1 are not drawn along the spine.
     deepest = max(max(s) for s in ranks.values())
-    axes.set_ylim(deepest + 2, -1.5)
+    axes.set_ylim(deepest + 2, 0.0)
+    axes.set_yticks([1, *range(20, deepest + 1, 20)])
     # Placed low-left, where the plot is empty: at the top it collided with the
     # spine and the title, and every line is flat there anyway.
     axes.annotate(
@@ -443,7 +535,7 @@ def fig_margins(record: dict, out: Path) -> bool:
         for v in dists[label]["m_k"]["percentiles"].values()
         if isinstance(v, int | float) and v > 0.0
     ]
-    floor = min(positive) / 10.0 if positive else 1e-18
+    floor = min(positive) / 3.0 if positive else 1e-18
 
     for offset, label in enumerate(labels):
         # E1 reports both margins per k; the boundary margin governs top-k
@@ -467,7 +559,7 @@ def fig_margins(record: dict, out: Path) -> bool:
         # row cannot be read as "not measured".
         axes.annotate(
             f"{d['share_zero']:.0%} exact",
-            xy=(offset, 0.96),
+            xy=(offset, 0.97),
             xycoords=("data", "axes fraction"),
             fontsize=7,
             ha="center",
@@ -480,8 +572,27 @@ def fig_margins(record: dict, out: Path) -> bool:
     axes.set_xticklabels([f"$k$={label[1:]}" for label in labels])
     # Headroom for the label row. The top would otherwise autoscale to k=1's p95
     # and leave its label sitting on the whisker.
+    # Whole decades, and minor ticks kept but made recessive.
+    #
+    # The limits were data-derived (2.78e-5 to 1.14), so the axis began and ended
+    # part-way through a decade and the gaps around the outermost labels matched
+    # no other gap on the ruler. Snapping to decades fixes that.
+    #
+    # The minor ticks are a separate matter. Deleting them was tried and was
+    # wrong: four of the five medians fall inside the 1e-3 decade, so without
+    # marks between the labels this figure loses the comparison it exists to make.
+    # Keeping the default 2..9 subdivision was also wrong, for the reason in
+    # _uniform_log_minor. Half-decades give an evenly spaced ruler that still
+    # resolves those medians.
+
     ceiling = max(dists[label]["m_k"]["percentiles"]["p95"] for label in labels)
-    axes.set_ylim(floor / 3.0, ceiling * 6.0)
+    axes.set_ylim(
+        10.0 ** math.floor(math.log10(floor / 2.0)),
+        10.0 ** math.ceil(math.log10(ceiling)),
+    )
+    _uniform_log_minor(axes.yaxis)
+    axes.tick_params(axis="y", which="minor", length=3.0, width=0.6, color=_MUTED)
+    axes.grid(which="minor", axis="y", alpha=0.12, linewidth=0.4)
     # Half a slot either side. The default 5% margin is narrower than the labels
     # over the first and last column, which then overhang the spines.
     axes.set_xlim(-0.5, len(labels) - 0.5)
