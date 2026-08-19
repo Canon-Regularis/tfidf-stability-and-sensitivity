@@ -242,7 +242,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
+      # The compiled backend has to be present for this job to measure what it
+      # claims to. Without it `benchmarks/tfidf_perf.py` loses its 66 statements
+      # of native comparison, `cli/commands.py` its build-info block and
+      # `manifest.py` the arm that records a build -- code that exists, ships and
+      # runs, but cannot execute on a machine with no compiler. Measuring the
+      # subset that happens to be reachable and calling the result 100% would be
+      # the kind of green-but-empty number this project's test suite is built to
+      # refuse. The pure-Python arms stay covered because the tests reach them by
+      # monkeypatching `native_available`, not by the machine lacking a compiler.
+      - name: Install the extension, so every path is reachable
+        run: python -m pip install -e .
+      - name: The compiled backend must actually have loaded
+        # Without this the job degrades silently: a failed build leaves the
+        # native paths unexecuted, and the floor below reports the shortfall as a
+        # coverage regression somewhere in the Python. Naming the cause here
+        # costs one step and saves the misdiagnosis.
+        run: |
+          python - <<'CHECK'
+          import sys
+          from tfidf_stability._native import native_available, unavailable_reason
+          sys.exit(None if native_available() else unavailable_reason())
+          CHECK
       - name: Coverage, with a floor
         # A coverage number nobody gates on is decoration. The floor ratchets and
         # is never lowered to make a build pass.
