@@ -20,6 +20,7 @@ import json
 import random as random_module
 import zipfile
 from itertools import pairwise
+from pathlib import Path
 
 import pytest
 
@@ -28,6 +29,7 @@ from tfidf_stability.datasets.loaders import load_dataset, load_jsonl_corpus
 from tfidf_stability.preprocessing.pipeline import PreprocessingPipeline
 from tfidf_stability.ranking.attributes import AttributeTable
 from tfidf_stability.similarity.cosine import cosine_against_corpus
+from tfidf_stability.utils.hashing import hash_bytes, hash_text
 from tfidf_stability.utils.validation import DataIntegrityError
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
 
@@ -419,3 +421,167 @@ def test_the_near_tie_interval_below_tau_is_empty() -> None:
         "empty -- and section 7.4's reliance on it -- would need revisiting"
     )
     assert min(positive) > 1e-12
+
+
+# ---------------------------------------------------------------------------
+# Writing the corpus out: the committed bytes are the artefact
+# ---------------------------------------------------------------------------
+# Nothing regenerates from the spec at experiment time, so PRNG portability stays
+# out of the reproducibility surface and the written files are what downstream
+# reads. That makes write_corpus part of the provenance chain rather than a
+# convenience, and it had no test at all.
+def test_writing_a_corpus_produces_the_three_files_and_a_manifest(tmp_path: Path) -> None:
+    corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30))
+    digests = synthetic.write_corpus(corpus, tmp_path)
+
+    for name in ("corpus.jsonl", "interactions.jsonl", "spec.json"):
+        assert (tmp_path / name).is_file(), f"{name} was not written"
+        assert name in digests, f"{name} is missing from the returned digests"
+    assert (tmp_path / "MANIFEST.sha256").is_file()
+
+
+def test_the_manifest_records_the_digest_of_every_file_beside_it(tmp_path: Path) -> None:
+    """A manifest that disagreed with the files would make the corpus
+    unverifiable while looking verified."""
+    corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30))
+    digests = synthetic.write_corpus(corpus, tmp_path)
+
+    recorded = {}
+    for line in (tmp_path / "MANIFEST.sha256").read_text(encoding="utf-8").splitlines():
+        digest, _, name = line.partition("  ")
+        recorded[name.strip()] = digest.strip()
+
+    assert recorded == digests
+    for name, digest in recorded.items():
+        assert hash_text((tmp_path / name).read_text(encoding="utf-8")) == digest
+
+
+def test_the_manifest_is_written_with_lf_endings_on_every_platform(tmp_path: Path) -> None:
+    """The manifest is itself hashed by the repository-wide gate, so a CRLF here
+    would make the same corpus verify on Linux and fail on Windows."""
+    corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30))
+    synthetic.write_corpus(corpus, tmp_path)
+    assert b"\r\n" not in (tmp_path / "MANIFEST.sha256").read_bytes()
+
+
+def test_the_manifest_lists_its_entries_in_sorted_order(tmp_path: Path) -> None:
+    """Dictionary iteration order would otherwise leak into a committed file."""
+    corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30))
+    synthetic.write_corpus(corpus, tmp_path)
+    names = [
+        line.partition("  ")[2].strip()
+        for line in (tmp_path / "MANIFEST.sha256").read_text(encoding="utf-8").splitlines()
+    ]
+    assert names == sorted(names)
+
+
+def test_the_written_spec_records_the_constructed_cases_it_planted(tmp_path: Path) -> None:
+    """An experiment finds the twins and duplicates by reading this rather than
+    searching for them, so the record has to match what was generated."""
+    spec = _spec(n_docs=16, vocab_size=30, n_twin_pairs=2, n_exact_duplicates=2)
+    corpus = synthetic.generate(spec)
+    synthetic.write_corpus(corpus, tmp_path)
+    written = json.loads((tmp_path / "spec.json").read_text(encoding="utf-8"))
+
+    assert written["spec_digest"] == corpus.spec.digest()
+    assert written["n_documents"] == corpus.n_documents
+    assert len(written["twins"]) == len(corpus.twins)
+    assert len(written["exact_duplicate_pairs"]) == len(corpus.exact_duplicate_pairs)
+
+
+def test_writing_the_same_corpus_twice_produces_identical_bytes(tmp_path: Path) -> None:
+    """The committed artefact must not depend on when it was written."""
+    corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30))
+    first = synthetic.write_corpus(corpus, tmp_path / "a")
+    second = synthetic.write_corpus(corpus, tmp_path / "b")
+    assert first == second
+
+
+def test_writing_into_a_directory_that_does_not_exist_creates_it(tmp_path: Path) -> None:
+    corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30))
+    target = tmp_path / "deep" / "nested"
+    synthetic.write_corpus(corpus, target)
+    assert (target / "corpus.jsonl").is_file()
+
+
+# ---------------------------------------------------------------------------
+# Generation boundaries
+# ---------------------------------------------------------------------------
+def test_a_corpus_too_small_for_its_constructed_cases_is_refused() -> None:
+    """The planted duplicates and twins consume documents, so a spec asking for
+    more of them than it has room for is a caller error rather than a corpus
+    with no ordinary documents in it."""
+    with pytest.raises(ValueError, match="too small for"):
+        synthetic.generate(_spec(n_docs=4, vocab_size=20, n_exact_duplicates=2, n_twin_pairs=2))
+
+
+def test_a_non_integer_zipf_exponent_is_permitted_but_goes_through_the_platform() -> None:
+    """The integer path is exact; a fractional exponent uses pow and therefore
+    the platform libm, which is why the generated files rather than the spec
+    become the artefact."""
+    corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30, zipf_exponent=1.2))
+    assert corpus.n_documents == 12
+    assert all(doc for doc in corpus.documents), "no document may come out empty"
+
+
+def test_a_missing_jsonl_corpus_is_named_rather_than_raising_an_oserror(tmp_path) -> None:
+    """Every failure out of the loader façade is a DataIntegrityError, so a
+    caller catching that one type cannot be surprised by a FileNotFoundError."""
+    with pytest.raises(DataIntegrityError, match="corpus file not found"):
+        load_jsonl_corpus(tmp_path / "absent.jsonl")
+
+
+def test_the_jsonl_prefix_reaches_the_same_loader_as_calling_it_directly(tmp_path) -> None:
+    """`jsonl:<path>` is the documented escape hatch from the registered names,
+    and it must not be a second, divergent parse."""
+    source = load_dataset("synthetic_tiny")
+    path = tmp_path / "corpus.jsonl"
+    path.write_text(
+        "".join(json.dumps(r, sort_keys=True) + "\n" for r in source.records), encoding="utf-8"
+    )
+    assert load_dataset(f"jsonl:{path}").digest() == load_jsonl_corpus(path).digest()
+
+
+def test_the_doc_ids_of_a_loaded_corpus_are_its_records_in_order() -> None:
+    """Downstream indexes documents by position and reports them by id, so the
+    two orders being the same is what makes a reported rank meaningful."""
+    data = load_dataset("synthetic_tiny")
+    assert data.doc_ids == [str(r["doc_id"]) for r in data.records]
+    assert len(data.doc_ids) == data.n_documents
+    assert len(set(data.doc_ids)) == data.n_documents, "doc ids must identify a document"
+
+
+def test_loading_movielens_through_the_facade_records_that_it_is_not_redistributable(
+    tmp_path, monkeypatch
+) -> None:
+    """The provenance is the only place a reader learns that this result cannot
+    be reproduced from the repository alone.
+
+    The digest pin is repointed at the fixture archive rather than removed: the
+    pin's own behaviour is tested separately, and what is under test here is the
+    wiring from a parsed corpus into a LoadedDataset.
+    """
+    data = _archive()
+    path = tmp_path / "ml-latest-small.zip"
+    path.write_bytes(data)
+    monkeypatch.setattr(
+        movielens.load,
+        "__kwdefaults__",
+        {**movielens.load.__kwdefaults__, "expect_sha256": hash_bytes(data)},
+    )
+
+    loaded = load_dataset("movielens_small", archive=path)
+
+    assert loaded.provenance["kind"] == "movielens"
+    assert loaded.provenance["redistributable"] is False
+    assert loaded.provenance["archive_sha256"] == hash_bytes(data)
+    assert loaded.n_documents == 5
+    assert loaded.interactions, "the ratings must survive the façade"
+
+
+def test_a_whole_star_rating_written_with_a_zero_decimal_is_the_same_rating() -> None:
+    """GroupLens writes 4.0, not 4. The doubled-integer domain has to treat the
+    trailing zero as absent rather than as a fraction it cannot represent."""
+    ratings = "userId,movieId,rating,timestamp\n1,1,4.00,964982703\n1,2,4,964981247\n"
+    corpus = movielens.parse_archive(_archive(ratings=ratings))
+    assert {w for _, _, w in corpus.interactions} == {4.0}
