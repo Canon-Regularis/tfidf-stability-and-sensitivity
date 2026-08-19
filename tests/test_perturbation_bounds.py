@@ -30,14 +30,23 @@ from tfidf_stability.perturbation.corpus_edits import (
     edit_document,
     remove_document,
 )
-from tfidf_stability.perturbation.idf_perturb import align_models, analyse_idf_shift
+from tfidf_stability.perturbation.idf_perturb import (
+    Alignment,
+    IdfPerturbation,
+    align_models,
+    analyse_idf_shift,
+)
 from tfidf_stability.perturbation.score_bounds import (
     certified_radius,
     flip_witness,
     is_order_stable,
     is_top_k_stable,
 )
-from tfidf_stability.perturbation.vector_perturb import analyse_vector_shift
+from tfidf_stability.perturbation.vector_perturb import (
+    ThreeTermBound,
+    VectorPerturbation,
+    analyse_vector_shift,
+)
 from tfidf_stability.ranking.attributes import AttributeSpec, AttributeTable
 from tfidf_stability.ranking.ranker import rank, sorted_scores_desc
 from tfidf_stability.ranking.sort_keys import SortKeySpec
@@ -570,3 +579,90 @@ def test_a_perturbation_of_exactly_half_the_margin_ties_rather_than_reversing() 
     perturbed, eps = outcome
     assert perturbed[1] > perturbed[0], "a returned witness must actually reverse the pair"
     assert eps > (scores[0] - scores[1]) / 2.0, "and it must exceed the certified radius"
+
+
+# ---------------------------------------------------------------------------
+# The degenerate readings the diagnostics have to survive
+# ---------------------------------------------------------------------------
+# Each of these is a ratio whose denominator can legitimately be zero: an edit
+# that moved nothing, or one that moved only tokens the two vocabularies do not
+# share. They are constructed rather than provoked because the interesting part
+# is what the accessor returns, not which corpus edit happens to produce it --
+# and a corpus edit that produces one is exactly what nobody would think to try.
+_EMPTY_ALIGNMENT = Alignment(tokens=(), in_before=(), in_after=(), idf_before=(), idf_after=())
+
+
+def _idf_shift(linf: float, linf_shared: float) -> IdfPerturbation:
+    return IdfPerturbation(
+        alignment=_EMPTY_ALIGNMENT,
+        n_before=0,
+        n_after=0,
+        linf=linf,
+        linf_shared=linf_shared,
+        worst_token="",
+        worst_delta=linf,
+    )
+
+
+def test_a_shift_confined_to_churned_tokens_reports_infinite_looseness() -> None:
+    """Nothing the two vocabularies share moved, so the section 4.2 bound is
+    driven entirely by tokens that existed on one side only. There is no ratio
+    to report, and reporting 1.0 -- the value that means "as tight as it gets" --
+    would invert the reading.
+    """
+    assert _idf_shift(linf=0.25, linf_shared=0.0).looseness == float("inf")
+
+
+def test_an_idf_vector_that_did_not_move_at_all_is_maximally_tight() -> None:
+    """0/0 is the no-op edit, not a degenerate one: the bound is exact."""
+    assert _idf_shift(linf=0.0, linf_shared=0.0).looseness == 1.0
+
+
+def test_a_stable_vocabulary_gives_a_looseness_of_one() -> None:
+    """The reference point the two cases above are read against."""
+    assert _idf_shift(linf=0.25, linf_shared=0.25).looseness == 1.0
+
+
+def test_a_bound_of_zero_reports_no_tightness_rather_than_dividing_by_it() -> None:
+    """An edit whose three terms all vanish bounds an observed shift of zero.
+    The bound is attained, but "attained" is not a ratio here, and 0/0 has to
+    resolve to a number a percentile summary can hold.
+    """
+    assert ThreeTermBound(local=0.0, glob=0.0, interaction=0.0, observed=0.0).tightness == 0.0
+
+
+def test_the_churn_fraction_splits_a_movement_into_shared_and_churned_parts() -> None:
+    """The three parts are supported on disjoint coordinate sets, so the squared
+    movement partitions exactly. The fraction is what turns that identity into a
+    reading: how much of this document's shift was tokens changing weight, and
+    how much was tokens appearing or disappearing.
+    """
+    # 0.6^2 + 0.6^2 + 0.52^2 = 0.9904 = 0.99518...^2, so Pythagoras holds.
+    moved = VectorPerturbation(
+        doc_id="d0",
+        bound=ThreeTermBound(local=1.0, glob=1.0, interaction=1.0, observed=math.sqrt(0.9904)),
+        alignment=_EMPTY_ALIGNMENT,
+        shared_shift=0.6,
+        gained_mass=0.6,
+        lost_mass=0.52,
+    )
+    assert moved.pythagoras_holds, "the premise: the split is exact"
+    assert moved.churn_fraction == pytest.approx((0.6**2 + 0.52**2) / 0.9904)
+    assert 0.0 < moved.churn_fraction < 1.0
+
+
+def test_a_document_that_did_not_move_has_no_churn_fraction() -> None:
+    """Churn is measured against the observed shift, so a document the edit left
+    alone divides by zero. Zero is the truthful answer: none of a movement of
+    nothing was due to vocabulary churn.
+    """
+    still = VectorPerturbation(
+        doc_id="d0",
+        bound=ThreeTermBound(local=0.0, glob=0.0, interaction=0.0, observed=0.0),
+        alignment=_EMPTY_ALIGNMENT,
+        shared_shift=0.0,
+        gained_mass=0.0,
+        lost_mass=0.0,
+    )
+    assert still.churn_fraction == 0.0
+    assert still.bound.holds, "a zero bound still bounds a zero shift"

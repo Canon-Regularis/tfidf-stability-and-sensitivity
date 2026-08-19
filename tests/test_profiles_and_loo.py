@@ -456,3 +456,42 @@ def test_separate_items_is_inert_while_aggregation_joins_features(mini_model) ->
     other = embed_profile(separated, mini_model)
     assert one.indices == other.indices
     assert all(same_bits(x, y) for x, y in zip(one.values, other.values, strict=True))
+
+
+def test_an_empty_query_set_reports_a_zero_spread_rather_than_raising() -> None:
+    """A protocol that eliminated every user -- a minimum-interaction threshold
+    above what anyone reached -- is a legitimate configuration whose provenance
+    still has to be written to the manifest. The alternative is a run that
+    crashes while recording why it had nothing to run.
+    """
+    grouped = {"u_a": ("m1", "m2"), "u_b": ("m3", "m4")}
+    qs = leave_one_out_queries(grouped, FEATURES, min_interactions=99, doc_ids=DOC_IDS)
+    assert len(qs) == 0
+    assert qs.candidate_spread == (0, 0, 0)
+
+    p = qs.provenance()
+    assert (p["candidates_min"], p["candidates_median"], p["candidates_max"]) == (0, 0, 0)
+
+
+def test_a_profile_with_no_items_embeds_to_the_zero_vector() -> None:
+    """The mean over no items has no divisor. The zero vector is the honest
+    answer and a legitimate one downstream: section 6 identifies low-norm
+    queries as the unstable regime, and this is its limit, where the ranking
+    falls entirely to the tie-break.
+    """
+    m = model()
+    empty = build_profile("u", (), FEATURES, ProfileAggregation.VECTOR_MEAN)
+    assert empty.n_items == 0
+
+    vector = embed_profile(empty, m, FEATURES)
+    assert vector.dim == len(m.vocabulary)
+    assert vector.values == () or all(v == 0.0 for v in vector.values)
+    assert profile_norm(vector) == 0.0
+
+
+def test_an_empty_profile_summed_rather_than_averaged_is_also_zero() -> None:
+    """The sum path has a divisor of one, so it reaches the same place by a
+    different route; the two aggregations must not disagree about nothing."""
+    m = model()
+    empty = build_profile("u", (), FEATURES, ProfileAggregation.VECTOR_SUM)
+    assert profile_norm(embed_profile(empty, m, FEATURES)) == 0.0
