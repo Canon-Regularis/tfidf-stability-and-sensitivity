@@ -84,7 +84,7 @@ recorded as an addendum and enforced by a test:
 ## Gates
 
 ```bash
-python -m pytest tests/ -q          # 592 tests, 90% coverage
+python -m pytest tests/ -q          # 1003 tests, 100% line and branch coverage
 ctest --preset mingw                # 79 cases, 20,074 assertions
 python scripts/benchmark.py         # speedups, each gated on bit-identity
 python -m ruff check src tests scripts && python -m ruff format --check src tests scripts

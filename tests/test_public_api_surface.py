@@ -196,6 +196,21 @@ def test_every_enum_str_is_its_value_so_a_manifest_round_trips() -> None:
     assert checked > 30, f"only {checked} string enum members were checked; expected far more"
 
 
+def test_every_enum_writes_the_method_rather_than_inheriting_it() -> None:
+    """The contract the test above checks only exists if the method is written.
+
+    An enum that dropped its `__str__` would inherit `Enum.__str__` and serialise
+    as `Reduction.NAIVE`, not `naive` -- which is precisely the drift the UP042
+    ignore is justified on avoiding. The check is worth stating separately
+    because on a `class X(str, Enum)` the inherited behaviour is close enough to
+    look right in a log line and wrong in a manifest.
+    """
+    missing = [
+        f"{e.__module__}.{e.__qualname__}" for e in _package_enums() if "__str__" not in vars(e)
+    ]
+    assert not missing, f"these enums inherit __str__ instead of declaring it: {missing}"
+
+
 def test_a_string_enum_member_compares_equal_to_its_serialised_form() -> None:
     """`class X(str, Enum)` is chosen so a config value read from YAML matches."""
     from tfidf_stability.utils.numerics import Reduction

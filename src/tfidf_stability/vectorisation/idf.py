@@ -42,7 +42,7 @@ class LogImpl(str, Enum):
     #: Kept so the difference can be measured.
     PLATFORM = "platform"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 

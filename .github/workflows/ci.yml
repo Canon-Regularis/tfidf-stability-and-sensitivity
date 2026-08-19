@@ -255,10 +255,15 @@ jobs:
         #
         # --cov-branch is explicit even though pyproject sets branch = true, so
         # the intent survives someone editing that setting.
+        #
+        # The floor is 100 on lines and branches both. At that setting the number
+        # stops being a summary and becomes a question about every new line: it
+        # is covered, or it carries a pragma naming the reason. The pragmas in
+        # src/ are countable and each states why the line cannot be reached.
         run: >
           python -m pytest tests/ -q -m "not slow"
           --cov --cov-branch --cov-report=term-missing
-          --cov-report=xml --cov-fail-under=90
+          --cov-report=xml --cov-fail-under=100
       - uses: actions/upload-artifact@v4
         with:
           name: coverage

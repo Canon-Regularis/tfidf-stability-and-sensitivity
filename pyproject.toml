@@ -168,7 +168,7 @@ omit = [
   # that identity. Covering it would test snowballstemmer 3.1.1, not this project.
   # The evidence it runs is the 42,649-word official conformance vector pair,
   # replayed by tests/test_preprocessing_determinism.py.
-  # Note this does not raise the headline number: 91% with and without.
+  # It is scope, not progress: the project measured 91% with and without it.
   "*/preprocessing/_snowball/*",
 ]
 
