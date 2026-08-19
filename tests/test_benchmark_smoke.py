@@ -24,7 +24,10 @@ import pytest
 
 from tfidf_stability._native import native_available, unavailable_reason
 from tfidf_stability.benchmarks.tfidf_perf import (
+    BenchmarkReport,
     BitIdentityError,
+    Comparison,
+    Timing,
     Workload,
     check_same_bits,
     check_same_order,
@@ -232,3 +235,87 @@ def test_the_runner_script_runs_and_writes_its_report(
     assert _load_script().main() == 0
     assert "workload" in capsys.readouterr().out
     assert json.loads(destination.read_text(encoding="utf-8"))["workload"]["n_docs"] == TINY.n_docs
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+# The report is assembled from plain dataclasses rather than measured, because
+# the cases that matter here -- a nanosecond operation, a multi-second one, a run
+# that found a compiler -- are properties of the machine when they are measured
+# and properties of the renderer when they are constructed.
+def _timing(seconds: float, backend: str = "reference") -> Timing:
+    return Timing(label="op", backend=backend, seconds=seconds, repeats=1, inner=1)
+
+
+def _report(*comparisons: Comparison, **kw: object) -> BenchmarkReport:
+    fields: dict[str, object] = {
+        "workload": TINY,
+        "repeats": 1,
+        "comparisons": comparisons,
+        "native": False,
+        "native_reason": "forced off",
+        "build": None,
+        "n_features": 40,
+        "nnz": 100,
+    }
+    fields.update(kw)
+    return BenchmarkReport(**fields)  # type: ignore[arg-type]
+
+
+def test_a_duration_is_rendered_in_the_unit_that_keeps_its_significant_digits() -> None:
+    """Four decades of cost land in one table: a dot product is nanoseconds and a
+    full fit is seconds. Printing both in one unit would either round the fast
+    row to zero or push the slow row off the column.
+    """
+    text = format_report(
+        _report(
+            Comparison("nanosecond_op", _timing(5e-7), None, "checked"),
+            Comparison("microsecond_op", _timing(5e-4), None, "checked"),
+            Comparison("millisecond_op", _timing(0.5), None, "checked"),
+            Comparison("second_op", _timing(2.0), None, "checked"),
+        )
+    )
+    assert "500.0 ns" in text
+    assert "500.00 us" in text
+    assert "500.00 ms" in text
+    assert "2.000 s" in text
+
+
+def test_a_report_with_no_caveats_ends_at_the_table_rather_than_an_empty_heading() -> None:
+    """The notes block is deduplicated and appended only when something was
+    recorded; an empty one would read as a caveat the run did not make."""
+    text = format_report(_report(Comparison("op", _timing(1e-4), None, "checked")))
+    assert "note" not in text
+    assert text.rstrip().endswith("checked")
+
+
+def test_a_native_run_names_the_compiler_and_whether_its_build_was_reproducible() -> None:
+    """The speedup is only meaningful beside the flags that produced it: a
+    fast-math build is faster and is not the same computation, so the header
+    carries the build rather than leaving a reader to assume it.
+    """
+    build = {
+        "compiler_id": "GNU",
+        "compiler_ver": "13.2.0",
+        "build_type": "Release",
+        "reproducible": True,
+    }
+    text = format_report(
+        _report(
+            Comparison("op", _timing(1e-4), _timing(5e-5, "native"), "checked"),
+            native=True,
+            native_reason=None,
+            build=build,
+        )
+    )
+    assert "GNU 13.2.0" in text
+    assert "Release" in text
+    assert "reproducible = True" in text
+
+
+def test_a_ranking_of_a_different_length_is_refused_before_any_speedup_is_reported() -> None:
+    """Two rankings of different lengths are not a near miss; comparing them
+    element-by-element would silently check only the shorter one."""
+    with pytest.raises(BitIdentityError, match="Refusing to report a speedup"):
+        check_same_order((0, 1, 2), (0, 1), "ranking")
