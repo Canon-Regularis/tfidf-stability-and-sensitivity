@@ -42,6 +42,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 _MODULE: Any | None = None
 _REASON: str | None = None
+_ABI_MISMATCH: bool = False
 
 # Dynamic import: the extension's existence depends on build state, and a static
 # `from ... import` would make type checking depend on it too (missing attribute
@@ -59,6 +60,7 @@ except ImportError as exc:  # pragma: no cover - depends on whether a build exis
 else:
     _abi = getattr(_loaded, "__abi__", None)
     if _abi != REQUIRED_ABI:
+        _ABI_MISMATCH = True
         _REASON = (
             f"the compiled extension reports ABI {_abi!r} but this Python "
             f"package expects {REQUIRED_ABI!r}. Rebuild the native backend."
@@ -94,9 +96,16 @@ def unavailable_reason() -> str | None:
 def require_native() -> Any:
     """Return the compiled module, raising a helpful error if it is missing."""
     if _MODULE is None:
-        from tfidf_stability.utils.validation import NativeBackendUnavailableError
+        from tfidf_stability.utils.validation import (
+            AbiVersionMismatchError,
+            NativeBackendUnavailableError,
+        )
 
-        raise NativeBackendUnavailableError(_REASON or "the native backend is unavailable")
+        # A stale .pyd and a missing one need different fixes: rebuild against the
+        # current contract, or build at all. AbiVersionMismatchError subclasses
+        # NativeBackendUnavailableError, so callers that do not care are unaffected.
+        error = AbiVersionMismatchError if _ABI_MISMATCH else NativeBackendUnavailableError
+        raise error(_REASON or "the native backend is unavailable")
     return _MODULE
 
 

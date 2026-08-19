@@ -244,12 +244,21 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: Coverage, with a floor
-        # A coverage number nobody gates on is decoration. The floor is set just
-        # below the current value so it ratchets rather than blocks; raise it
-        # when it is comfortably exceeded, never lower it to make a build pass.
+        # A coverage number nobody gates on is decoration. The floor ratchets and
+        # is never lowered to make a build pass.
+        #
+        # -m "not slow" is what makes the tiering honest. Because the stress tier
+        # is deselected here, a slow test can never be the only cover for a line:
+        # if it were, this job goes red and asks for a fast sibling. Stress tests
+        # widen the input domain, they never introduce coverage. The full tier
+        # runs in nightly.
+        #
+        # --cov-branch is explicit even though pyproject sets branch = true, so
+        # the intent survives someone editing that setting.
         run: >
-          python -m pytest tests/ -q --cov --cov-report=term-missing
-          --cov-report=xml --cov-fail-under=85
+          python -m pytest tests/ -q -m "not slow"
+          --cov --cov-branch --cov-report=term-missing
+          --cov-report=xml --cov-fail-under=90
       - uses: actions/upload-artifact@v4
         with:
           name: coverage

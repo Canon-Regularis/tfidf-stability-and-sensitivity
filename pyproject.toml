@@ -80,7 +80,10 @@ minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --strict-config"
 markers = [
-  "slow: long-running; still runs everywhere, the marker only labels cost",
+  # Deselected from the coverage job, so a slow test can never be the only cover
+  # for a line: if it were, the 100% gate goes red and asks for a fast sibling.
+  # Stress tests widen the input domain; they never introduce coverage.
+  "slow: long-running; deselected from the PR coverage run, full in nightly",
   "native: requires the compiled native backend",
   "sklearn: requires scikit-learn as an external oracle",
   "property: Hypothesis property-based test",
@@ -158,7 +161,23 @@ follow_imports = "skip"
 [tool.coverage.run]
 branch = true
 source = ["src/tfidf_stability"]
-omit = ["*/_native/*"]
+omit = [
+  "*/_native/*",
+  # Vendored Porter2, already excluded from ruff and mypy for the same reason:
+  # it is identified by hash against MANIFEST.sha256, and reformatting it breaks
+  # that identity. Covering it would test snowballstemmer 3.1.1, not this project.
+  # The evidence it runs is the 42,649-word official conformance vector pair,
+  # replayed by tests/test_preprocessing_determinism.py.
+  # Note this does not raise the headline number: 91% with and without.
+  "*/preprocessing/_snowball/*",
+]
 
 [tool.coverage.report]
-exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  # A Protocol's body is a declaration, not code. One regex retires the whole
+  # class of them rather than an annotation per site that drifts as the protocol
+  # grows.
+  '^\s*\.\.\.$',
+]
