@@ -375,3 +375,20 @@ def test_unit_vector_has_unit_norm() -> None:
     u = unit(sv({0: 3.0, 1: 4.0}))
     assert abs(l2_norm(u) - 1.0) <= 4 * math.ulp(1.0)
     assert unit(SparseVector.zero(DIM)).nnz == 0
+
+
+def test_a_norm_supplied_for_every_document_is_required() -> None:
+    """The norms are precomputed and passed in parallel to the documents, so a
+    short list would silently pair each score with the wrong denominator rather
+    than run out: `zip` stops at the shorter of the two."""
+    docs = [sv({0: 1.0}), sv({1: 1.0}), sv({2: 1.0})]
+    with pytest.raises(ValueError, match="3 documents but 2 norms"):
+        cosine_against_corpus(sv({0: 1.0}), docs, [1.0, 1.0])
+
+
+def test_a_difference_norm_across_dimensions_is_refused() -> None:
+    """Two vectors of different dimension have no common space to subtract in.
+    Padding the shorter one would return a number for a question with no answer.
+    """
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        difference_norm(sv({0: 1.0}, dim=DIM), sv({0: 1.0}, dim=DIM + 1))

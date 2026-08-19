@@ -362,3 +362,62 @@ def test_mini_corpus_agrees_across_all_three_paths(mini_model: TfidfModel) -> No
             daat = daat_scores(q, mini_model.matrix, norms, policy)
             assert all(same_bits(a, b) for a, b in zip(reference, taat, strict=True))
             assert all(same_bits(a, b) for a, b in zip(reference, daat, strict=True))
+
+
+# ---------------------------------------------------------------------------
+# What `is_canonical` is for
+# ---------------------------------------------------------------------------
+# The scoring loops read postings lists without re-establishing their invariants,
+# on the strength of this check. It is only worth that if it actually rejects,
+# so each rejection arm gets a specimen. The mirror of `save_load._check_csr`,
+# one transpose along.
+def _index(colptr, rowidx, values, n_rows=3, n_cols=2) -> InvertedIndex:
+    return InvertedIndex(
+        colptr=tuple(colptr),
+        rowidx=tuple(rowidx),
+        values=tuple(values),
+        n_rows=n_rows,
+        n_cols=n_cols,
+    )
+
+
+def test_a_canonical_index_passes_every_arm() -> None:
+    """The reference the rejections below are rejections from."""
+    assert _index([0, 2, 3], [0, 2, 1], [1.0, 2.0, 3.0]).is_canonical()
+
+
+@pytest.mark.parametrize(
+    ("case", "colptr", "rowidx", "values"),
+    [
+        ("colptr is the wrong length", [0, 2], [0, 2], [1.0, 2.0]),
+        ("colptr does not start at zero", [1, 2, 3], [0, 2, 1], [1.0, 2.0, 3.0]),
+        ("colptr does not end at nnz", [0, 2, 9], [0, 2, 1], [1.0, 2.0, 3.0]),
+        ("a posting has no weight", [0, 2, 3], [0, 2, 1], [1.0, 2.0]),
+    ],
+)
+def test_a_malformed_index_is_rejected_before_its_postings_are_read(
+    case: str, colptr: list[int], rowidx: list[int], values: list[float]
+) -> None:
+    """These four are settled from the array lengths alone, so they are checked
+    once rather than per column: a colptr that disagrees with its own arrays
+    makes every subsequent postings slice meaningless."""
+    assert not _index(colptr, rowidx, values).is_canonical(), case
+
+
+def test_a_postings_list_that_repeats_a_document_is_rejected() -> None:
+    """Strict increase makes a postings list a set. A repeat double-counts one
+    document's contribution to that term in every score TAAT computes."""
+    assert not _index([0, 2, 3], [1, 1, 2], [1.0, 2.0, 3.0]).is_canonical()
+
+
+def test_a_postings_list_in_descending_order_is_rejected() -> None:
+    """Ascending order is what makes the DAAT merge and the accumulator agree;
+    the same documents in the other order is not the same index."""
+    assert not _index([0, 2, 3], [2, 0, 1], [1.0, 2.0, 3.0]).is_canonical()
+
+
+def test_a_posting_naming_a_document_outside_the_corpus_is_rejected() -> None:
+    """It would index past the accumulator, and a negative one would silently
+    wrap round to a real document at the other end."""
+    assert not _index([0, 2, 3], [0, 7, 1], [1.0, 2.0, 3.0]).is_canonical()
+    assert not _index([0, 2, 3], [-1, 2, 1], [1.0, 2.0, 3.0]).is_canonical()
