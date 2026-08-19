@@ -108,8 +108,15 @@ class NativeBackendUnavailableError(TfidfStabilityError):
     """The compiled native backend was requested but could not be loaded."""
 
 
-class AbiVersionMismatchError(TfidfStabilityError):
-    """The compiled extension was built against a different Python-side contract."""
+class AbiVersionMismatchError(NativeBackendUnavailableError):
+    """The compiled extension was built against a different Python-side contract.
+
+    A subclass rather than a sibling: a stale extension *is* a form of the backend
+    being unavailable, so `except NativeBackendUnavailableError` keeps working
+    while a caller that wants to tell "never built" from "built against an older
+    contract" can now do so. Before this it was defined, exported and never
+    raised, and the ABI path reported the generic error instead.
+    """
 
 
 class DataIntegrityError(TfidfStabilityError):

@@ -334,9 +334,17 @@ def verify_band_invariance(
     upper = band.g_min if math.isfinite(band.g_min) else max(band.tau_floor, 1.0) * 1e6
     lower = band.tau_floor if band.tau_floor > 0.0 else min(upper, 1.0) * 1e-300
 
+    if probes < 1:
+        raise ValueError(f"probes must be at least 1, got {probes}")
+
     lo = math.log10(lower)
     hi = math.log10(upper)
-    taus = [10.0 ** (lo + (hi - lo) * i / (probes - 1)) for i in range(probes)]
+    # A single probe cannot be spaced across the band, and `i / (probes - 1)`
+    # divided by zero rather than saying so. One probe is the lower endpoint.
+    if probes == 1:
+        taus = [lower]
+    else:
+        taus = [10.0 ** (lo + (hi - lo) * i / (probes - 1)) for i in range(probes)]
     # tau = 0 is admissible whenever the floor is 0, and it is the exact-tie
     # baseline.
     if band.tau_floor <= 0.0:

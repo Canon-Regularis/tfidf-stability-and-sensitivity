@@ -34,7 +34,7 @@ from fractions import Fraction
 from itertools import pairwise
 from typing import Literal
 
-from tfidf_stability.utils.validation import EmptyVocabularyError
+from tfidf_stability.utils.validation import EmptyVocabularyError, TfidfStabilityError
 
 __all__ = [
     "MaxFeaturesPolicy",
@@ -278,6 +278,12 @@ def build_vocabulary(
         n_discarded=n_seen - len(tokens),
         _index=index,
     )
-    # O(|V|), and it is the invariant everything downstream assumes.
-    assert vocab.is_sorted(), "vocabulary identifiers are not in UTF-8 byte order"
+    # O(|V|), and it is the invariant everything downstream assumes: the binary
+    # searches in tf.py and the merge in align_models are only correct on a sorted
+    # vocabulary. Raised rather than asserted because `python -O` deletes an
+    # assert, and this is the one check standing between a mis-sorted vocabulary
+    # and silently wrong weights. Same reasoning as BitIdentityError in
+    # benchmarks/tfidf_perf.py: a finding about correctness must survive -O.
+    if not vocab.is_sorted():
+        raise TfidfStabilityError("vocabulary identifiers are not in UTF-8 byte order")
     return vocab

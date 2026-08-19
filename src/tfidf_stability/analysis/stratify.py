@@ -119,7 +119,12 @@ def stratify_by_margin(
         One :class:`Stratum` per (band, k), empty bands included so a plot's
         x-axis is complete rather than silently ragged.
     """
-    if tau < 0.0:
+    # `not (tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is
+    # false, so the second form lets NaN through a guard whose own message says
+    # non-negative. tie_groups.py:104,151,195 already spell it this way for
+    # exactly this reason, and a NaN here would give every band NaN bounds and
+    # drop every pair into the final band via _band_of's fallthrough.
+    if not (tau >= 0.0):
         raise ValueError(f"tau must be non-negative, got {tau}")
 
     bands = margin_bands(tau)
