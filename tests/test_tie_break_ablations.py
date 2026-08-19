@@ -22,6 +22,7 @@ import pytest
 from tfidf_stability.analysis.stratify import (
     EXACT_TIE_BAND,
     UNDEFINED_BAND,
+    _band_of,
     margin_bands,
     stratify_by_margin,
 )
@@ -266,3 +267,59 @@ def test_one_query_is_counted_once_even_when_several_k_clamp_together(
 
     _, n = disagreement_rate([result], "pi", "pi_score", 6)
     assert n == 1, f"one query must contribute once, got a denominator of {n}"
+
+
+def test_a_query_with_no_pair_at_that_k_is_left_out_of_the_denominator() -> None:
+    """`ablate_query` clamps k to the candidate count, so a short candidate list
+    never produces a pair at the requested k. Counting it as an agreement would
+    dilute the rate with queries the comparison could not be made on; the count
+    returned beside the rate is what makes that visible.
+    """
+    results = [
+        ablate_query([0.5, 0.5, 0.2, 0.0], table_of([3, 2, 1, 0]), query_id="long", ks=(3,)),
+        ablate_query([0.5, 0.5], table_of([2, 1]), query_id="short", ks=(3,)),
+    ]
+    rate, n = disagreement_rate(results, "pi", "pi_alt", 3)
+    assert n == 1, "only the query with three candidates could be compared at k = 3"
+    assert 0.0 <= rate <= 1.0
+
+    # The short query is not lost; it contributed at the k it was clamped to.
+    _, n_at_two = disagreement_rate(results, "pi", "pi_alt", 2)
+    assert n_at_two == 1
+
+
+def test_a_result_can_be_sliced_by_operator_pair_and_by_k() -> None:
+    """The two accessors a report writer reaches for: one comparison across
+    every k, or every comparison at one k. Between them they partition the
+    pairs, which is the property that makes either slice safe to summarise.
+    """
+    table = table_of([3, 2, 1, 0])
+    (result,) = ablate_queries([("a", [0.5, 0.5, 0.2, 0.0])], table, ks=KS)
+
+    for_pair = result.for_pair("pi", "pi_alt")
+    assert for_pair, "the pi/pi_alt comparison is one of the ones run"
+    assert {p.k for p in for_pair} == set(KS)
+    assert all(p.baseline == "pi" and p.variant == "pi_alt" for p in for_pair)
+
+    at_k = result.at_k(KS[0])
+    assert at_k, "k values from the requested set are present"
+    assert all(p.k == KS[0] for p in at_k)
+    assert len(at_k) == len(result.pairs) // len(KS)
+
+    assert result.for_pair("pi", "no_such_operator") == ()
+    assert result.at_k(9999) == ()
+
+
+def test_a_margin_outside_every_band_falls_into_the_last_one_rather_than_vanishing() -> None:
+    """The bands cover (0, inf), so only a negative value can miss them all --
+    which a gap between sorted scores cannot be. The fallthrough is what keeps a
+    value that got there anyway inside the partition: dropping it would make the
+    per-k totals stop reconciling with the query count, which is the check that
+    would otherwise catch the upstream bug.
+    """
+    bands = margin_bands(1e-9)
+    assert _band_of(-1.0, True, bands) == bands[-1][0]
+    assert _band_of(math.inf, True, bands) == bands[-1][0], "the top band is unbounded above"
+    assert _band_of(math.nan, True, bands) == UNDEFINED_BAND
+    assert _band_of(0.5, False, bands) == UNDEFINED_BAND, "undefined wins over the value"
+    assert _band_of(0.0, True, bands) == EXACT_TIE_BAND

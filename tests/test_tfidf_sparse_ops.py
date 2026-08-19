@@ -26,7 +26,7 @@ import pytest
 
 from tfidf_stability.similarity.cosine import cosine
 from tfidf_stability.utils.numerics import Reduction, same_bits, ulps_between
-from tfidf_stability.vectorisation.idf import LogImpl
+from tfidf_stability.vectorisation.idf import LogImpl, smoothed_idf_one
 from tfidf_stability.vectorisation.sparse import CsrMatrix, SparseVector, cosine_of, dot, l2_norm
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
 
@@ -317,7 +317,6 @@ def test_intermediates_reports_the_tf_that_was_actually_used() -> None:
     in 9.01% of them. Scores here are compared on raw bit patterns, so the
     reported intermediate was off by the quantity under study.
     """
-    from tfidf_stability.vectorisation.idf import smoothed_idf_one
     from tfidf_stability.vectorisation.tfidf import _exact_tf
 
     naive_wrong = 0
@@ -522,3 +521,25 @@ def test_iterating_the_rows_yields_every_row_in_order() -> None:
     assert len(rows) == 3
     assert [r.nnz for r in rows] == [1, 0, 2], "the empty middle row must still be yielded"
     assert [list(r) for r in rows] == [[(0, 1.0)], [], [(1, 2.0), (2, 3.0)]]
+
+
+def test_the_tf_reconstruction_refuses_to_divide_by_a_degenerate_denominator() -> None:
+    """Neither input can occur in a fitted model -- the smoothed IDF is at least
+    1, and a document of zero in-vocabulary length has no row entries to inspect
+    -- so the guard exists for a caller reaching the helper directly. Zero
+    rather than an exception: `intermediates` is a diagnostic, and one that
+    raised while reporting a degenerate document would be useless exactly where
+    it is needed.
+    """
+    from tfidf_stability.vectorisation.tfidf import _exact_tf
+
+    assert _exact_tf(0.0, 0.0, 6) == 0.0
+    assert _exact_tf(0.5, 1.5, 0) == 0.0
+    assert _exact_tf(0.0, 0.0, 0) == 0.0
+
+    # The guard is a boundary, not a blanket: one step off it the reconstruction
+    # runs. This is the case the docstring cites, where weight / idf misses.
+    idf = smoothed_idf_one(1, 100)
+    tf = 5 / 6
+    assert same_bits(_exact_tf(tf * idf, idf, 6), tf)
+    assert (tf * idf) / idf != tf, "the premise: the naive round trip is wrong here"

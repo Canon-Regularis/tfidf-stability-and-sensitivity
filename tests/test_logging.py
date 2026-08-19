@@ -339,3 +339,27 @@ def test_the_cli_log_level_flag_configures_the_package_logger(
     assert "backend_selected" in err
     assert "reduction_policy" in err
     assert CLOCK.search(err) is None
+
+
+def test_the_root_logger_is_returned_for_a_name_that_is_already_it() -> None:
+    """Call sites pass `__name__`, and the package's own top-level module passes
+    the root name itself. Reparenting that would give
+    `tfidf_stability.tfidf_stability`, a logger outside the subtree `configure`
+    installs its handler on -- so its records would vanish.
+    """
+    root = logging.getLogger(ROOT_NAME)
+    assert get_logger(ROOT_NAME) is root
+    assert get_logger(None) is root
+    assert get_logger() is root
+
+
+def test_a_name_from_inside_the_package_is_used_as_written() -> None:
+    """The dotted path is what makes per-module filtering possible; rewriting it
+    would flatten every module onto one name."""
+    assert get_logger(f"{ROOT_NAME}.ranking.ranker").name == f"{ROOT_NAME}.ranking.ranker"
+
+
+def test_a_name_from_outside_the_package_is_reparented_under_the_root() -> None:
+    """Nothing may emit outside the subtree `configure` controls, or a record
+    would escape the handler and the formatter that makes it canonical."""
+    assert get_logger("scripts.benchmark").name == f"{ROOT_NAME}.scripts.benchmark"

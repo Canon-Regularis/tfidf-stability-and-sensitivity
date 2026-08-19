@@ -481,3 +481,21 @@ def test_the_radius_is_tight_not_merely_conservative() -> None:
         f"only {flipped}/{total} flipped at exactly the radius; if the bound were "
         f"tight this should be common, so the radius may be far too small"
     )
+
+
+def test_a_summary_of_only_undefined_margins_reports_no_percentiles() -> None:
+    """Every query in the set asked for a k its corpus could not supply. The
+    counts are still meaningful and still reach the manifest; the percentiles
+    are not, and an empty tuple says so where a row of NaNs would look like a
+    measured distribution.
+    """
+    s = (1.0, 0.5)
+    margins = [boundary_margin(s, 2, mode=LENIENT), boundary_margin(s, 99, mode=LENIENT)]
+    assert all(not m.defined for m in margins), "the premise: nothing is defined"
+
+    summary = summarise(margins)
+    assert summary.percentiles == ()
+    assert summary.n == 2
+    assert summary.n_defined == 0
+    assert summary.n_undefined == 2
+    assert math.isnan(summary.p_exact_tie), "a rate over nothing is not zero"

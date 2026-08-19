@@ -14,6 +14,7 @@ disagree maximally, which is what the ``rho`` diagnostic exists to flag.
 from __future__ import annotations
 
 import math
+import warnings
 
 import pytest
 from hypothesis import given
@@ -405,3 +406,27 @@ def test_an_inadmissible_tau_is_rejected_by_every_tie_group_object(bad: float) -
             call(scores, bad)
     with pytest.raises(ValueError, match="non-negative"):
         tie_ball_interval(scores, 2, bad)
+
+
+def test_an_empty_corpus_builds_an_index_without_warning_about_its_score_range() -> None:
+    """A corpus with no documents has no span to compare tau against, so the
+    degeneracy warning has nothing to say. Warning anyway would put a caveat on
+    every empty sweep point and train a reader to ignore the ones that matter.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        index = TieGroupIndex.build((), tau=1.0)
+
+    assert index.chains == ()
+    assert index.cliques == ()
+    assert index.n_chains == 0
+
+
+def test_rho_is_undefined_rather_than_one_on_an_empty_corpus() -> None:
+    """Both the largest chain and the largest clique are zero, and 0/0 is not
+    1.0: an empty corpus is no evidence about chain inflation, and reporting the
+    value that means "no inflation" would put a data point on section 7.3's plot
+    that no corpus produced.
+    """
+    assert math.isnan(TieGroupIndex.build((), tau=1.0).rho)
+    assert math.isnan(chain_inflation_ratio((), 1.0))
