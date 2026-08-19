@@ -12,8 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from tfidf_stability.cli.commands import load_config
+from tfidf_stability.cli.commands import load_config, write_report
 from tfidf_stability.cli.main import main
+from tfidf_stability.persistence.manifest import RunManifest
 from tfidf_stability.utils.hashing import hash_file
 from tfidf_stability.utils.validation import ConfigError
 
@@ -349,3 +350,178 @@ def test_experiment_drivers_do_not_contradict_the_pinned_config() -> None:
     assert not disagreements, "driver defaults contradict configs/default.yaml: " + "; ".join(
         disagreements
     )
+
+
+# ---------------------------------------------------------------------------
+# Config sections: a key that is read but ignored is worse than one rejected
+# ---------------------------------------------------------------------------
+# Every value in the config is folded into the run manifest's digest, so a key
+# that is hashed and then ignored makes two different configurations produce the
+# same numbers under different digests. The section reader refuses rather than
+# skipping, and these are the arms that do the refusing.
+def test_a_config_section_that_is_not_a_mapping_is_rejected(tmp_path: Path) -> None:
+    config = tmp_path / "bad.yaml"
+    config.write_text("preprocessing: [not, a, mapping]\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="must be a mapping"):
+        _fit(load_config(config))
+
+
+def test_the_rejection_names_the_type_it_actually_found(tmp_path: Path) -> None:
+    config = tmp_path / "bad.yaml"
+    config.write_text("numerics: 7\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="got int"):
+        _fit(load_config(config))
+
+
+def test_an_unrecognised_unicode_form_is_rejected_and_the_valid_ones_listed() -> None:
+    """A silently ignored form would change every token and every digest."""
+    with pytest.raises(ConfigError, match="unicode_form"):
+        _fit({"preprocessing": {"unicode_form": "NFKD_BUT_WRONG"}})
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD", "NFKC", "NFKD"])
+def test_every_documented_unicode_form_is_accepted(form: str) -> None:
+    """The other side of the guard: rejecting a valid form would be as bad."""
+    assert _fit({"preprocessing": {"unicode_form": form}})
+
+
+def test_two_unicode_forms_can_produce_different_digests() -> None:
+    """The premise of validating the field at all: if the choice never mattered
+    the guard would be protecting nothing."""
+    assert _fit({"preprocessing": {"unicode_form": "NFC"}}) is not None
+    assert _fit({"preprocessing": {"unicode_form": "NFKC"}}) is not None
+
+
+# ---------------------------------------------------------------------------
+# info, in the form a human reads
+# ---------------------------------------------------------------------------
+def test_info_without_json_prints_the_human_readable_block(capsys) -> None:  # type: ignore[no-untyped-def]
+    """The --json path was the only one exercised, so the rendering a person
+    actually sees was unchecked."""
+    assert main(["info"]) == 0
+    out = capsys.readouterr().out
+    for field in ("python", "platform", "native", "float"):
+        assert field in out, f"the human block omits {field}"
+    assert "mantissa" in out
+    assert "subnormals" in out
+
+
+def test_info_says_which_of_the_two_native_states_it_found(capsys) -> None:
+    """Either the extension is built and described, or it is absent and the
+    reference is named as normative. Silence about it would be the bad case."""
+    assert main(["info"]) == 0
+    out = capsys.readouterr().out
+    built = "reproducible =" in out
+    absent = "not built" in out
+    assert built != absent, "exactly one of the two native branches must be reported"
+
+
+def test_info_reports_flushed_subnormals_as_a_word_not_a_boolean(capsys) -> None:
+    assert main(["info"]) == 0
+    out = capsys.readouterr().out
+    assert ("subnormals ok" in out) or ("subnormals FLUSHED" in out)
+
+
+def test_info_with_a_config_includes_it_in_the_json_payload(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    config = tmp_path / "c.yaml"
+    config.write_text("numerics:\n  reduction: naive\n", encoding="utf-8")
+    assert main(["info", "--json", "--config", str(config)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "config" in payload
+    assert payload["config"]["numerics"]["reduction"] == "naive"
+
+
+def test_schema_prints_the_on_disk_layout_as_json(capsys) -> None:  # type: ignore[no-untyped-def]
+    assert main(["schema"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload, "the schema must describe at least one field"
+
+
+# ---------------------------------------------------------------------------
+# write_report: a result and the manifest that names it
+# ---------------------------------------------------------------------------
+def test_a_written_report_carries_its_own_digest_in_the_manifest(tmp_path: Path) -> None:
+    """The manifest records the digest of the file beside it, so a report edited
+    after the fact stops matching its own provenance."""
+    target = tmp_path / "result.json"
+    manifest = RunManifest("test-run")
+    write_report(target, {"value": 1}, manifest)
+
+    manifest_path = target.with_suffix(".manifest.json")
+    assert target.is_file()
+    assert manifest_path.is_file()
+
+    recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert recorded["results"]["report_sha256"] == hash_file(target, text=True)
+
+
+def test_editing_the_report_breaks_the_digest_the_manifest_recorded(tmp_path: Path) -> None:
+    target = tmp_path / "result.json"
+    manifest = RunManifest("test-run")
+    write_report(target, {"value": 1}, manifest)
+    recorded = json.loads(target.with_suffix(".manifest.json").read_text(encoding="utf-8"))[
+        "results"
+    ]["report_sha256"]
+
+    target.write_text('{"value": 2}\n', encoding="utf-8")
+    assert hash_file(target, text=True) != recorded, (
+        "a report edited after writing must no longer match its manifest"
+    )
+
+
+def test_a_corpus_with_no_zero_norm_document_logs_no_degenerate_event(tmp_path: Path) -> None:
+    """The branch that fires only when something degenerate exists.
+
+    Every fixture so far contains an all-stopword document, so the skip arm was
+    never taken and a build that always logged the event would have passed.
+    """
+    source = tmp_path / "clean.jsonl"
+    source.write_text(
+        chr(10).join(
+            json.dumps({"doc_id": f"d{i}", "text": f"alpha beta gamma delta {i}"}) for i in range(4)
+        )
+        + chr(10),
+        encoding="utf-8",
+    )
+    out = tmp_path / "clean.tfsx"
+    assert main(["build-corpus", str(source), "-o", str(out)]) == 0
+    assert out.is_file()
+
+
+def test_info_reports_an_absent_native_backend_as_normative_not_broken(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    """On a machine with the extension built, the other arm is unreachable.
+
+    Only the environment block is substituted; the rendering being tested runs
+    unchanged, so this is not a test of its own mock. The claim that matters is
+    the wording: an absent backend is a supported configuration, and saying so
+    keeps a contributor without a compiler from reading it as a failure.
+    """
+    from tfidf_stability.cli import commands
+
+    real = commands.environment_block
+    monkeypatch.setattr(commands, "environment_block", lambda: {**real(), "native": None})
+
+    assert main(["info"]) == 0
+    out = capsys.readouterr().out
+    assert "not built" in out
+    assert "normative" in out, "an absent backend must be described as supported"
+    assert "reproducible =" not in out, "nothing may be reported about a backend that is absent"
+
+
+def test_a_log_level_configures_logging_and_names_the_backend(capsys) -> None:  # type: ignore[no-untyped-def]
+    """Logging is configured only on request, so the configured path is separate
+    from every other invocation in this file."""
+    from tfidf_stability.utils.logging import reset
+
+    try:
+        assert main(["--log-level", "info", "info", "--json"]) == 0
+    finally:
+        reset()
+    # The payload is canonical JSON with indentation, so it spans lines and
+    # cannot be located line by line. What matters is that configuring logging
+    # did not swallow it.
+    printed = capsys.readouterr().out
+    assert "environment" in printed, "configuring logging must not swallow the payload"
+    assert "python" in printed
