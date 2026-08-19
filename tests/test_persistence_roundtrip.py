@@ -17,8 +17,11 @@ import struct
 import pytest
 
 from tfidf_stability.persistence.save_load import (
+    _FLAG_MASK,
     FORMAT_VERSION,
     MAGIC,
+    _check_csr,
+    _decode_block,
     load_model,
     model_bytes,
     save_model,
@@ -29,6 +32,10 @@ from tfidf_stability.vectorisation.idf import LogImpl
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
 
 TfsxFormatError = pytest.importorskip("tfidf_stability.persistence.save_load").TfsxFormatError
+
+#: Byte offset of the flags word, derived from the header layout rather than
+#: written down, so a field added ahead of it moves this with it.
+_FLAGS_OFFSET = struct.calcsize("<8sIIIQ")
 
 
 # ---------------------------------------------------------------------------
@@ -206,3 +213,69 @@ def test_overwriting_replaces_cleanly(mini_model, mini_features, tmp_path) -> No
     other = TfidfVectoriser(reduction=Reduction.EXACT).fit(list(mini_features))
     save_model(other, path, sidecar=False)
     assert load_model(path).reduction is Reduction.EXACT
+
+
+def test_an_unknown_flag_bit_is_refused_rather_than_ignored(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Only one flag is defined, and it selects the correctly-rounded logarithm.
+
+    A future writer that sets a second bit is describing a model this build
+    cannot reconstruct. Masking the bit off would produce a plausible model
+    computed under the wrong assumption, which is the failure the whole container
+    format exists to prevent.
+    """
+    payload = bytearray(model_bytes(mini_model))
+    struct.pack_into("<I", payload, _FLAGS_OFFSET, _FLAG_MASK | (1 << 17))
+    path = tmp_path / "flagged.tfsx"
+    path.write_bytes(bytes(payload))
+    with pytest.raises(TfsxFormatError, match="unknown flag bits"):
+        load_model(path)
+
+
+# ---------------------------------------------------------------------------
+# The two guards the container format cannot reach
+# ---------------------------------------------------------------------------
+# `_check_csr`'s length arms and `_decode_block`'s empty-block arms cannot be
+# provoked by a corrupt file: the header fixes every count, and a file whose
+# length disagrees with its header is rejected before the arrays are read. They
+# guard the direct caller instead, which is what `row()`, the reference scorer
+# and the native core rely on when they skip re-checking. Reaching them means
+# calling them, and the alternative -- deleting them -- would leave the assumption
+# unstated.
+def test_an_indptr_of_the_wrong_length_is_rejected() -> None:
+    """One offset per row plus a final one. A short indptr makes the last row's
+    extent depend on whatever the array happens to end with."""
+    with pytest.raises(TfsxFormatError, match=r"expected n_docs \+ 1"):
+        _check_csr([0, 1], [0], [1.0], n_rows=2, n_cols=4)
+
+
+def test_a_weight_for_every_column_index_is_required() -> None:
+    """The two arrays are read independently with only their lengths fixed, so a
+    mismatch pairs a weight with the wrong column in every dot product."""
+    with pytest.raises(TfsxFormatError, match="weights for"):
+        _check_csr([0, 2], [0, 1], [1.0], n_rows=1, n_cols=4)
+
+
+def test_a_canonical_matrix_passes_every_arm() -> None:
+    """The negative cases above only mean something if the positive one passes."""
+    _check_csr([0, 2, 3], [0, 2, 1], [1.0, 2.0, 3.0], n_rows=2, n_cols=4)
+
+
+def test_an_empty_block_decodes_to_no_entries_rather_than_one_empty_string() -> None:
+    """Splitting an empty block yields one empty string, so a zero count has to
+    be settled before the split or an empty model would gain a phantom token."""
+    assert _decode_block(b"", 0, "token") == ()
+
+
+def test_a_non_empty_block_under_a_zero_count_is_rejected_rather_than_dropped() -> None:
+    """Those bytes cannot be reproduced on the way back out, so silently
+    discarding them would break the model-to-bytes bijection."""
+    with pytest.raises(TfsxFormatError, match="count is 0 but the block holds"):
+        _decode_block(b"orphan", 0, "token")
+
+
+def test_a_block_holding_the_wrong_number_of_entries_is_rejected() -> None:
+    """The header states the count and the block carries the bytes; the two are
+    written independently, so a file can satisfy every length check and still
+    decode to the wrong number of tokens."""
+    with pytest.raises(TfsxFormatError, match="expected 3 token entries, decoded 2"):
+        _decode_block(b"a\nb", 3, "token")
