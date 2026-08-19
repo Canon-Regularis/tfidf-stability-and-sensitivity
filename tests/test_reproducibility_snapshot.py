@@ -25,7 +25,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tfidf_stability.persistence.manifest import RunManifest
+from tfidf_stability import _native
+from tfidf_stability.persistence.manifest import RunManifest, environment_block
 from tfidf_stability.persistence.save_load import model_bytes
 from tfidf_stability.ranking.attributes import AttributeTable
 from tfidf_stability.ranking.margins import margin_profile
@@ -260,3 +261,31 @@ def test_canonical_json_is_key_order_independent() -> None:
 
 def test_model_bytes_are_the_same_object_every_call(mini_model) -> None:  # type: ignore[no-untyped-def]
     assert model_bytes(mini_model) == model_bytes(mini_model)
+
+
+def test_a_pure_python_run_records_a_null_native_block_rather_than_omitting_it(
+    monkeypatch,  # type: ignore[no-untyped-def]
+) -> None:
+    """An absent key and a null value read the same to a human and differently
+    to a digest. Recording ``None`` makes "there was no native backend" a stated
+    fact about the run rather than something inferred from a missing field.
+    """
+    monkeypatch.setattr(_native, "native_available", lambda: False)
+    block = environment_block()
+    assert "native" in block
+    assert block["native"] is None
+    assert block["python"], "the rest of the block is unaffected"
+    assert block["float"]
+
+
+def test_a_run_with_no_native_backend_counts_as_a_reproducible_build(
+    monkeypatch,  # type: ignore[no-untyped-def]
+) -> None:
+    """The reproducibility question is about compiler flags, and the pure-Python
+    reference has none: it is the normative implementation the native backend is
+    checked against, so refusing it would refuse the standard itself."""
+    monkeypatch.setattr(_native, "native_available", lambda: False)
+    manifest = RunManifest("stability_profile")
+    assert manifest.environment["native"] is None
+    assert manifest.is_reproducible_build is True
+    manifest.require_reproducible()
