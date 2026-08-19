@@ -55,7 +55,7 @@ class MaxFeaturesPolicy(str, Enum):
     #: with a matching criterion.
     SKLEARN_COMPAT = "sklearn_compat"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 

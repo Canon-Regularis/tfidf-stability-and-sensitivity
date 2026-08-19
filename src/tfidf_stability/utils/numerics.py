@@ -78,7 +78,7 @@ class Reduction(str, Enum):
     #: Correctly-rounded sum (``math.fsum``). Ground truth for error measurement.
     EXACT = "exact"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 

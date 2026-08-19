@@ -140,7 +140,11 @@ def min_adjacent_margin_top(
 
     if k_eff < 2:
         return Margin("min_adjacent_top", k, k_eff, math.nan, False, "k == 1: vacuous minimum")
-    if n < 2:
+    # Unreachable while `resolve_k` either returns k (having checked k <= n) or
+    # clamps to n, both of which put n at or above k_eff: the guard above has
+    # already returned for every corpus of fewer than two documents. Kept
+    # because the loop below indexes a second element on the strength of it.
+    if n < 2:  # pragma: no cover - defensive
         return Margin("min_adjacent_top", k, k_eff, math.nan, False, "N == 1: no adjacent pair")
 
     gaps = [sorted_scores[j] - sorted_scores[j + 1] for j in range(k_eff - 1)]

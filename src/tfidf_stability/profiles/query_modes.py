@@ -65,7 +65,7 @@ class QueryMode(str, Enum):
     LEAVE_ONE_OUT = "leave_one_out"
     ITEM_AS_QUERY = "item_as_query"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 

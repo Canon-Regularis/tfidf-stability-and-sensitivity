@@ -73,7 +73,7 @@ class Direction(str, Enum):
     DESC = "desc"
     ASC = "asc"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 
@@ -91,7 +91,7 @@ class AttributeDType(str, Enum):
     #: reproducible in C++ via ``memcmp``, unlike locale or Unicode collation.
     BYTES = "bytes"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 
@@ -104,7 +104,7 @@ class MissingPolicy(str, Enum):
     #: because it is what makes the ordering total.
     FORBID = "forbid"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 

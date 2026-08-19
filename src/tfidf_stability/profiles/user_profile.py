@@ -56,7 +56,7 @@ class ProfileAggregation(str, Enum):
     #: 4.2's bounds are stated in terms of norms.
     VECTOR_SUM = "vector_sum"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 

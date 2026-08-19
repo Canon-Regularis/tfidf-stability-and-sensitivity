@@ -42,7 +42,7 @@ class EditKind(str, Enum):
     EDIT = "edit"
     DUPLICATE = "duplicate"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 

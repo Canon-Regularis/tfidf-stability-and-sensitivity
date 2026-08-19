@@ -46,7 +46,7 @@ class LemmatiserKind(str, Enum):
     PORTER2 = "porter2"
     LOOKUP = "lookup"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 

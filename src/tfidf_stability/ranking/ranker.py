@@ -57,7 +57,7 @@ class Selection(str, Enum):
     HEAP_TOP_K = "heap_top_k"
     INSERTION = "insertion"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 

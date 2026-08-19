@@ -50,7 +50,7 @@ class StrictMode(str, Enum):
     STRICT = "strict"
     LENIENT = "lenient"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 

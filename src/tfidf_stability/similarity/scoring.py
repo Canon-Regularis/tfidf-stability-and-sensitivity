@@ -85,7 +85,7 @@ class ScoringAlgorithm(str, Enum):
     #: Document at a time; an independent merge per document.
     DAAT = "daat"
 
-    def __str__(self) -> str:  # pragma: no cover - trivial
+    def __str__(self) -> str:
         return self.value
 
 
