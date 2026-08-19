@@ -501,3 +501,72 @@ def test_a_perturbation_can_preserve_membership_while_reordering_it() -> None:
     eps = (cert.order_radius + cert.set_radius) / 2
     assert is_top_k_stable(s, 2, eps) is True
     assert is_order_stable(s, 2, eps) is False
+
+
+# ---------------------------------------------------------------------------
+# Which of the two radii binds, and when neither does
+# ---------------------------------------------------------------------------
+# Neither radius dominates: m_min^top minimises over the gaps strictly inside the
+# top-k, m_k is the boundary gap, and those sets are disjoint. A certificate
+# quoted without saying which invariant it certifies is ambiguous, so both are
+# carried and both arms of the comparison have to be reachable.
+def test_a_tight_top_with_a_wide_boundary_makes_the_order_radius_binding() -> None:
+    scores = (1.000, 0.999, 0.100)  # ranks 1->2 nearly tied, 2->3 wide apart
+    cert = certified_radius(scores, 2)
+    assert cert.defined
+    assert cert.order_radius < cert.set_radius
+    assert cert.order_radius_is_binding
+    assert cert.joint_radius == cert.order_radius
+
+
+def test_a_spread_top_with_a_near_tied_boundary_makes_the_set_radius_binding() -> None:
+    scores = (1.000, 0.500, 0.499)  # ranks 1->2 wide, 2->3 nearly tied
+    cert = certified_radius(scores, 2)
+    assert cert.defined
+    assert cert.set_radius < cert.order_radius
+    assert not cert.order_radius_is_binding
+    assert cert.joint_radius == cert.set_radius
+
+
+def test_an_undefined_certificate_binds_nothing_and_has_no_joint_radius() -> None:
+    """k == N leaves no r_{k+1}, so there is no boundary gap to certify."""
+    cert = certified_radius((1.0, 0.5), 2)
+    assert not cert.defined
+    assert not cert.order_radius_is_binding, "an absent radius cannot be the binding one"
+    assert math.isnan(cert.joint_radius)
+
+
+def test_a_vacuous_order_radius_leaves_the_set_radius_as_the_joint_one() -> None:
+    """At k = 1 the order radius is undefined by G16, since minimising over the
+    gaps strictly inside a one-element top-k is an empty minimum. NaN there must
+    not poison the joint radius into NaN as well."""
+    cert = certified_radius((1.0, 0.5, 0.2), 1)
+    assert cert.defined
+    assert math.isnan(cert.order_radius), "the premise: no interior gap exists at k = 1"
+    assert not cert.order_radius_is_binding
+    assert cert.joint_radius == cert.set_radius, "a vacuous radius constrains nothing"
+
+
+def test_a_perturbation_of_exactly_half_the_margin_ties_rather_than_reversing() -> None:
+    """The last guard in flip_witness, and A1's hinge.
+
+    At exactly ``eps = m/2`` the two scores meet: dyadic values make the
+    construction exact, so the pair becomes equal rather than crossing. A witness
+    is only a witness if it reverses the pair, so the honest answer is that none
+    exists, not a "witness" whose perturbation leaves a tie the tie-break would
+    then decide.
+    """
+    scores = (0.5, 0.25, 0.1)  # dyadic, so m/2 lands on a representable value
+    order = (0, 1, 2)
+    assert flip_witness(scores, order, 1, delta=0.0) is None, (
+        "exactly m/2 ties the pair; only a strict excess reverses it"
+    )
+    assert flip_witness(scores, order, 1, delta=1e-30) is None, (
+        "an excess too small to survive rounding is no excess at all"
+    )
+
+    outcome = flip_witness(scores, order, 1)
+    assert outcome is not None, "the default excess must produce a genuine witness"
+    perturbed, eps = outcome
+    assert perturbed[1] > perturbed[0], "a returned witness must actually reverse the pair"
+    assert eps > (scores[0] - scores[1]) / 2.0, "and it must exceed the certified radius"
