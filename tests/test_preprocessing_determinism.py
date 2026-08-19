@@ -31,7 +31,7 @@ from tfidf_stability.preprocessing.ngrams import (
     ngram_order,
     split_ngram,
 )
-from tfidf_stability.preprocessing.normalise import normalise
+from tfidf_stability.preprocessing.normalise import NormalisationConfig, normalise
 from tfidf_stability.preprocessing.pipeline import (
     PreprocessingConfig,
     PreprocessingPipeline,
@@ -465,3 +465,56 @@ def test_the_manifest_parser_skips_blank_lines_and_comments(
         assert "the" in loaded
     finally:
         load_stopwords.cache_clear()
+
+
+def test_consecutive_gap_sentinels_open_one_boundary_rather_than_an_empty_segment() -> None:
+    """Two stopwords in a row leave two sentinels side by side, and a leading
+    stopword leaves one at the front. Either would produce an empty segment if
+    the splitter closed a run unconditionally, and an empty segment contributes
+    nothing but changes how many there are.
+    """
+    assert generate_ngrams(["a", GAP, GAP, "b"], 1, 2) == generate_ngrams(["a", GAP, "b"], 1, 2)
+    assert generate_ngrams([GAP, "a", "b"], 1, 2) == generate_ngrams(["a", "b"], 1, 2)
+    assert generate_ngrams([GAP], 1, 2) == []
+    assert generate_ngrams([GAP, GAP], 1, 2) == []
+
+
+def test_every_normalisation_stage_can_be_turned_off_independently() -> None:
+    """The normative configuration has all of them on, which leaves the off
+    paths carrying published numbers on no evidence. They exist so an ablation
+    can attribute a change to one stage, and that only works if each is really
+    separable.
+    """
+    text = "  A​B   c  "
+
+    everything_off = NormalisationConfig(
+        lowercase=False, strip_control=False, collapse_whitespace=False
+    )
+    assert normalise(text, everything_off) == unicodedata.normalize("NFKC", text)
+
+    kept_control = normalise(text, NormalisationConfig(strip_control=False))
+    assert "​" in kept_control, "the zero-width space survives"
+    assert kept_control == "a​b c", "the other two stages still ran"
+
+    kept_spacing = normalise(text, NormalisationConfig(collapse_whitespace=False))
+    assert kept_spacing == "  ab   c  ", "the control character went, the spacing stayed"
+
+
+def test_a_lemmatiser_override_changes_the_config_digest_on_its_own() -> None:
+    """The pipeline accepts a ready-made lemmatiser that bypasses the configured
+    one, so without this two pipelines producing different features would share
+    an identity -- and a cached result computed under one would be served for the
+    other."""
+    config = PreprocessingConfig()
+    plain = config.digest()
+
+    assert config.digest(lemmatiser_override="lookup:v3") != plain
+    assert config.digest(lemmatiser_override="lookup:v3") != config.digest(
+        lemmatiser_override="lookup:v4"
+    )
+    assert config.digest(lemmatiser_override=None) == plain, "absent means digest as before"
+
+    # The two bindings are independent: neither one masks the other.
+    assert config.digest(stopword_digest="abc") != config.digest(
+        stopword_digest="abc", lemmatiser_override="lookup:v3"
+    )
