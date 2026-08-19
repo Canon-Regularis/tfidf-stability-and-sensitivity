@@ -13,6 +13,7 @@ would be measuring something else.
 from __future__ import annotations
 
 import random
+from dataclasses import dataclass
 from itertools import pairwise
 
 import pytest
@@ -481,3 +482,233 @@ def test_the_ranking_does_not_depend_on_the_order_records_were_supplied_in() -> 
         for i in rank_all_operators([0.5, 0.5], AttributeTable.from_records(reverse))["pi"].order
     ]
     assert first == second, f"ranking depends on record order: {first} vs {second}"
+
+
+# ---------------------------------------------------------------------------
+# The comparator self-test, shown to actually detect
+# ---------------------------------------------------------------------------
+# assert_strict_total_order is an oracle: its job is to catch a comparator that
+# has stopped being a strict total order. Its failure arms had never fired, which
+# means the detector had never been shown to detect anything. Pragmas would have
+# recorded that permanently, so each axiom gets a specimen that violates exactly
+# it. The mock here is the specimen under test, not a stand-in for a collaborator.
+@dataclass(frozen=True)
+class _ReflexivelyLess:
+    """Less than everything, itself included. Violates irreflexivity only."""
+
+    tag: int
+
+    def __lt__(self, other: object) -> bool:
+        return True
+
+
+@dataclass(frozen=True)
+class _MutuallyLess:
+    """Less than everything except itself: two of these are each less than the
+    other, which is the asymmetry violation and nothing else."""
+
+    tag: int
+
+    def __lt__(self, other: object) -> bool:
+        return other is not self
+
+
+@dataclass(frozen=True)
+class _CyclicKey:
+    """Rock-paper-scissors: 0 < 1 < 2 < 0.
+
+    Irreflexive, asymmetric and trichotomous for every pair, so the first three
+    checks pass and only transitivity can catch it.
+    """
+
+    i: int
+
+    def __lt__(self, other: object) -> bool:
+        assert isinstance(other, _CyclicKey)
+        return (self.i + 1) % 3 == other.i
+
+
+def test_a_key_that_compares_less_than_itself_is_reported_as_not_irreflexive() -> None:
+    with pytest.raises(AssertionError, match="not irreflexive"):
+        assert_strict_total_order([_ReflexivelyLess(0)])  # type: ignore[list-item]
+
+
+def test_two_keys_each_less_than_the_other_are_reported_as_not_asymmetric() -> None:
+    keys = [_MutuallyLess(0), _MutuallyLess(1)]
+    assert keys[0] < keys[1], "the premise being demonstrated"
+    assert keys[1] < keys[0], "and in the other direction, which is the violation"
+    with pytest.raises(AssertionError, match="not asymmetric"):
+        assert_strict_total_order(keys)  # type: ignore[arg-type]
+
+
+def test_a_rock_paper_scissors_comparator_is_reported_as_not_transitive() -> None:
+    """The only violation the O(n^3) pass can catch that the pairwise ones cannot."""
+    keys = [_CyclicKey(0), _CyclicKey(1), _CyclicKey(2)]
+    assert keys[0] < keys[1], "the premise"
+    assert keys[1] < keys[2], "and onward round the cycle"
+    assert not keys[0] < keys[2], "and the cycle closes"
+    with pytest.raises(AssertionError, match="not transitive"):
+        assert_strict_total_order(keys)  # type: ignore[arg-type]
+
+
+def test_two_distinct_nan_keys_are_reported_as_non_trichotomous_not_silently_tied() -> None:
+    """Reachable with real tuple keys, no specimen required.
+
+    Two separately constructed NaNs hash differently, so injectivity passes, and
+    then neither compares less than the other. A comparator that answers "no"
+    both ways has no opinion about the pair, and the sorted permutation stops
+    being determined by the key.
+    """
+    first, second = float("nan"), float("nan")
+    keys = [(first, 0), (second, 1)]
+    assert len(set(keys)) == 2, "the premise: injectivity passes"
+    assert not keys[0] < keys[1]
+    assert not keys[1] < keys[0]
+    with pytest.raises(AssertionError, match="not trichotomous"):
+        assert_strict_total_order(keys)
+
+
+def test_a_duplicated_key_is_reported_as_non_injective() -> None:
+    """With duplicates the ranking is only a weak order and the sorted
+    permutation is no longer unique, which is what the message says."""
+    with pytest.raises(AssertionError, match="not injective"):
+        assert_strict_total_order([(-1.0, 0), (-1.0, 0)])
+
+
+def test_the_transitivity_sweep_is_skipped_above_its_size_limit() -> None:
+    """O(n^3) is affordable at test sizes and not beyond, so the check switches
+    off above 40. Both sides are exercised, since a limit nothing crosses is a
+    limit nothing tests."""
+    forty = [(-float(i), i) for i in range(40)]
+    forty_one = [(-float(i), i) for i in range(41)]
+    assert_strict_total_order(forty)
+    assert_strict_total_order(forty_one)
+
+
+def test_a_score_count_that_disagrees_with_the_table_is_rejected_not_zipped_short() -> None:
+    """Zipping to the shorter of the two would silently rank a prefix."""
+    table = table_of(4)
+    with pytest.raises(ValueError, match="scores but the attribute table"):
+        build_keys([0.1, 0.2], table, SortKeySpec(PI))
+
+
+# ---------------------------------------------------------------------------
+# Attribute encoding: the dtypes and directions the tie-break can be built from
+# ---------------------------------------------------------------------------
+def test_a_bytes_attribute_orders_by_utf8_bytes_not_by_locale() -> None:
+    """The same rule vocabulary.py uses, and reproducible in C++ via memcmp.
+
+    Locale or Unicode collation would order these differently between machines,
+    which would move a published ranking without changing a single score.
+    """
+    records = [
+        {"doc_id": "d0", "label": "Zebra"},
+        {"doc_id": "d1", "label": "apple"},
+        {"doc_id": "d2", "label": "Apple"},
+    ]
+    specs = (AttributeSpec("label", Direction.ASC, AttributeDType.BYTES),)
+    table = AttributeTable.from_records(records, specs)
+    ranks = table.column("label").ranks
+
+    # Uppercase sorts before lowercase in byte order; a locale-aware collation
+    # would interleave them.
+    order = sorted(range(3), key=lambda i: ranks[i])
+    assert [records[i]["label"] for i in order] == ["Apple", "Zebra", "apple"]
+
+
+def test_an_ascending_direction_reverses_the_ranks_a_descending_one_gives() -> None:
+    """Only DESC was ever built, so the reversal arm was never taken."""
+    records = [{"doc_id": f"d{i}", "popularity": v} for i, v in enumerate([10, 30, 20])]
+    asc = AttributeTable.from_records(
+        records, (AttributeSpec("popularity", Direction.ASC, AttributeDType.INT64),)
+    )
+    desc = AttributeTable.from_records(
+        records, (AttributeSpec("popularity", Direction.DESC, AttributeDType.INT64),)
+    )
+    assert asc.column("popularity").ranks[0] < asc.column("popularity").ranks[2], (
+        "ascending puts the smallest first"
+    )
+    assert desc.column("popularity").ranks[0] > desc.column("popularity").ranks[2], (
+        "descending puts the largest first"
+    )
+
+
+def test_a_missing_bytes_value_becomes_the_empty_string_and_is_marked_absent() -> None:
+    records = [{"doc_id": "d0", "label": "x"}, {"doc_id": "d1"}]
+    specs = (AttributeSpec("label", Direction.ASC, AttributeDType.BYTES),)
+    column = AttributeTable.from_records(records, specs).column("label")
+    assert column.value_of(0) == "x"
+    assert column.value_of(1) is None, "absent is None, never the placeholder it stores"
+
+
+def test_a_column_reports_one_entry_per_document() -> None:
+    table = table_of(5, popularity=[1, 2, 3, 4, 5])
+    assert len(table.column("popularity")) == 5
+
+
+def test_asking_for_an_attribute_that_does_not_exist_names_the_ones_that_do() -> None:
+    table = table_of(3, popularity=[1, 2, 3])
+    with pytest.raises(KeyError, match="no attribute named"):
+        table.column("engagement")
+
+
+def test_a_table_built_from_no_records_has_no_positions_rather_than_raising() -> None:
+    table = AttributeTable.from_records(
+        [], (AttributeSpec("popularity", Direction.DESC, AttributeDType.INT64),)
+    )
+    assert table.n_documents == 0
+    assert table.column("popularity").ranks == ()
+
+
+def test_the_reporting_view_returns_the_raw_values_not_the_encoded_ranks() -> None:
+    """Section 7.4 prints these, so a rank leaking into the report would show a
+    dense position where a reader expects the rating that produced it."""
+    records = [
+        {"doc_id": "a", "popularity": 7, "rating_sum2": 9, "rating_count": 2},
+        {"doc_id": "b", "popularity": 3, "rating_sum2": 5, "rating_count": 2},
+    ]
+    specs = (
+        AttributeSpec("popularity", Direction.DESC, AttributeDType.INT64),
+        AttributeSpec("rating", Direction.DESC, AttributeDType.RATIO_I64),
+    )
+    table = AttributeTable.from_records(records, specs)
+    view = table.attributes_of(0)
+
+    assert view["doc_id"] == "a"
+    assert view["popularity"] == 7, "the raw value, not its dense rank"
+    assert view["rating"] == (9, 2), "the exact pair, never a divided mean"
+    assert view["id_rank"] == table.id_ranks[0]
+
+
+def test_a_rating_count_of_zero_with_a_non_zero_sum_is_inconsistent_not_absent() -> None:
+    """Zero ratings summing to something is a corrupt record, and treating it as
+    merely missing would rank the document on a value that cannot exist."""
+    records = [
+        {"doc_id": "a", "rating_sum2": 7, "rating_count": 0},
+        {"doc_id": "b", "rating_sum2": 4, "rating_count": 2},
+    ]
+    specs = (AttributeSpec("rating", Direction.DESC, AttributeDType.RATIO_I64),)
+    with pytest.raises(TfidfStabilityError, match="is inconsistent"):
+        AttributeTable.from_records(records, specs)
+
+
+def test_a_rating_count_of_zero_with_a_zero_sum_is_simply_absent() -> None:
+    """The other side: nothing was rated, which is ordinary rather than corrupt."""
+    records = [
+        {"doc_id": "a", "rating_sum2": 0, "rating_count": 0},
+        {"doc_id": "b", "rating_sum2": 4, "rating_count": 2},
+    ]
+    specs = (AttributeSpec("rating", Direction.DESC, AttributeDType.RATIO_I64),)
+    column = AttributeTable.from_records(records, specs).column("rating")
+    assert column.value_of(0) is None, "an unrated document has no rating, not a zero one"
+    assert column.value_of(1) == (4, 2)
+
+
+def test_a_negative_rating_count_is_rejected() -> None:
+    records = [
+        {"doc_id": "a", "rating_sum2": 4, "rating_count": -2},
+        {"doc_id": "b", "rating_sum2": 4, "rating_count": 2},
+    ]
+    specs = (AttributeSpec("rating", Direction.DESC, AttributeDType.RATIO_I64),)
+    with pytest.raises(TfidfStabilityError, match="is negative"):
+        AttributeTable.from_records(records, specs)
