@@ -27,13 +27,24 @@ from tfidf_stability.preprocessing.lemmatise import (
 from tfidf_stability.preprocessing.ngrams import (
     JOINER,
     generate_ngrams,
+    iter_gap_free,
     ngram_order,
     split_ngram,
 )
 from tfidf_stability.preprocessing.normalise import normalise
-from tfidf_stability.preprocessing.pipeline import PreprocessingConfig, PreprocessingPipeline
+from tfidf_stability.preprocessing.pipeline import (
+    PreprocessingConfig,
+    PreprocessingPipeline,
+    preprocess_all,
+)
 from tfidf_stability.preprocessing.stopwords import load_stopwords, remove_stopwords
-from tfidf_stability.preprocessing.tokenise import GAP, tokenise
+from tfidf_stability.preprocessing.tokenise import (
+    GAP,
+    TokenisationConfig,
+    tokenise,
+    tokenise_with_offsets,
+)
+from tfidf_stability.utils.validation import DataIntegrityError
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -293,7 +304,10 @@ def test_an_injected_lemmatiser_reaches_the_digest() -> None:
     sibling ``stopwords=`` injection was always bound by content.
     """
     from tfidf_stability.preprocessing.lemmatise import LemmatiserKind, make_lemmatiser
-    from tfidf_stability.preprocessing.pipeline import PreprocessingConfig, PreprocessingPipeline
+    from tfidf_stability.preprocessing.pipeline import (
+        PreprocessingConfig,
+        PreprocessingPipeline,
+    )
 
     config = PreprocessingConfig()
     plain = PreprocessingPipeline(config)
@@ -306,3 +320,148 @@ def test_an_injected_lemmatiser_reaches_the_digest() -> None:
     # digest, or every recorded value in the repository would have churned.
     agreeing = PreprocessingPipeline(config, lemmatiser=make_lemmatiser(LemmatiserKind.PORTER2))
     assert agreeing.digest() == plain.digest()
+
+
+# ---------------------------------------------------------------------------
+# Offsets, accessors and the wrappers nothing had called
+# ---------------------------------------------------------------------------
+def test_tokens_carry_the_source_span_they_came_from() -> None:
+    """Provenance: `tfidf inspect` shows where in the text a feature originated,
+    so the span has to index back into the original string."""
+    text = "alpha beta gamma"
+    tokens = tokenise_with_offsets(text)
+    assert [t.text for t in tokens] == ["alpha", "beta", "gamma"]
+    for token in tokens:
+        assert text[token.start : token.end] == token.text, "the span must recover the token"
+
+
+def test_offsets_honour_the_same_length_filter_as_plain_tokenisation() -> None:
+    """Two code paths that must agree, or a reported span would point at a token
+    the pipeline discarded."""
+    config = TokenisationConfig(min_token_length=4)
+    text = "a bb cccc ddddd"
+    assert [t.text for t in tokenise_with_offsets(text, config)] == tokenise(text, config)
+
+
+def test_offsets_over_empty_text_yield_nothing() -> None:
+    assert tokenise_with_offsets("") == []
+
+
+def test_a_preprocessed_document_reports_how_many_features_it_produced() -> None:
+    pipeline = PreprocessingPipeline(PreprocessingConfig())
+    document = pipeline.preprocess_document("d0", "alpha beta gamma")
+    assert document.n_features == len(document.features)
+    assert document.n_features > 0
+
+
+def test_a_pipeline_exposes_the_two_assets_that_decide_its_identity() -> None:
+    """Both feed digest(), so a report naming one map must be able to show which
+    stopword list and which lemmatiser produced it."""
+    pipeline = PreprocessingPipeline(PreprocessingConfig())
+    assert pipeline.stopwords.name
+    assert pipeline.lemmatiser.name
+    assert pipeline.digest()
+
+
+def test_the_repr_names_the_parts_a_reader_needs_to_tell_two_pipelines_apart() -> None:
+    """Asserted by content rather than by exact text, so adding a field later
+    does not break this."""
+    text = repr(PreprocessingPipeline(PreprocessingConfig()))
+    assert "PreprocessingPipeline(" in text
+    assert "lemmatiser=" in text
+    assert "stopwords=" in text
+    assert "digest=" in text
+
+
+def test_the_stopword_set_repr_names_its_asset_and_size() -> None:
+    pipeline = PreprocessingPipeline(PreprocessingConfig())
+    text = repr(pipeline.stopwords)
+    assert "StopwordSet(" in text
+    assert "digest=" in text
+
+
+def test_the_convenience_wrapper_agrees_with_building_a_pipeline_by_hand() -> None:
+    """A second entry point that must not drift from the first, or two callers
+    would preprocess the same corpus differently."""
+    texts = ["alpha beta", "gamma the delta"]
+    config = PreprocessingConfig()
+    assert preprocess_all(texts, config) == [
+        PreprocessingPipeline(config).preprocess(t) for t in texts
+    ]
+
+
+def test_preprocessing_no_texts_at_all_yields_no_streams() -> None:
+    assert preprocess_all([], PreprocessingConfig()) == []
+
+
+def test_gap_sentinels_are_dropped_when_a_caller_asks_for_a_flat_stream() -> None:
+    """Used where the gaps have served their purpose and only the tokens matter."""
+    assert list(iter_gap_free(["a", GAP, "b", GAP])) == ["a", "b"]
+    assert list(iter_gap_free([])) == []
+
+
+def test_a_stopword_asset_missing_from_the_manifest_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An asset that exists but is unrecorded must not load.
+
+    The list decides the vocabulary, so an unverifiable one changes every
+    published number. This is distinct from the digest-mismatch case: here there
+    is nothing to compare against at all, which is the weaker and easier failure
+    to overlook. The asset directory is redirected rather than the loader
+    patched, so the loader's own logic runs.
+    """
+    from tfidf_stability.preprocessing import stopwords as stopwords_module
+
+    (tmp_path / "unrecorded_v1.txt").write_text("the\nof\n", encoding="utf-8")
+    (tmp_path / "MANIFEST.sha256").write_text("", encoding="utf-8")
+    monkeypatch.setattr(stopwords_module, "_ASSET_DIR", tmp_path)
+    monkeypatch.setattr(stopwords_module, "_MANIFEST", tmp_path / "MANIFEST.sha256")
+    load_stopwords.cache_clear()
+
+    try:
+        with pytest.raises(DataIntegrityError, match="no recorded digest"):
+            load_stopwords("unrecorded_v1.txt")
+    finally:
+        load_stopwords.cache_clear()
+
+
+def test_a_missing_stopword_asset_raises_before_any_digest_is_computed() -> None:
+    """A different failure from an unrecorded one, and the two must stay
+    distinct: "the file is not there" and "the file is not vouched for" need
+    different fixes."""
+    with pytest.raises(FileNotFoundError):
+        load_stopwords("no_such_asset_v9.txt")
+
+
+def test_the_manifest_parser_skips_blank_lines_and_comments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """sha256sum files carry comments, and a parser that treated one as an entry
+    would either fail to find a real asset or vouch for a comment."""
+    import hashlib
+
+    from tfidf_stability.preprocessing import stopwords as stopwords_module
+
+    # write_bytes, not write_text: on Windows the text form translates LF to
+    # CRLF, so the digest would be taken over bytes that never reach the file.
+    body = b"the\nof\n"
+    (tmp_path / "commented_v1.txt").write_bytes(body)
+    digest = hashlib.sha256(body).hexdigest()
+    (tmp_path / "MANIFEST.sha256").write_bytes(
+        b"# a comment line\n\n   \n"
+        # A real entry for a different asset, so the name comparison has to
+        # reject one and keep looking rather than taking the first line it parses.
+        + b"0" * 64
+        + b"  some_other_asset.txt\n"
+        + f"{digest}  commented_v1.txt\n".encode()
+    )
+    monkeypatch.setattr(stopwords_module, "_ASSET_DIR", tmp_path)
+    monkeypatch.setattr(stopwords_module, "_MANIFEST", tmp_path / "MANIFEST.sha256")
+    load_stopwords.cache_clear()
+
+    try:
+        loaded = load_stopwords("commented_v1.txt")
+        assert "the" in loaded
+    finally:
+        load_stopwords.cache_clear()
