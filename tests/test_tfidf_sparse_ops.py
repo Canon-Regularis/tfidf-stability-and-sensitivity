@@ -27,7 +27,7 @@ import pytest
 from tfidf_stability.similarity.cosine import cosine
 from tfidf_stability.utils.numerics import Reduction, same_bits, ulps_between
 from tfidf_stability.vectorisation.idf import LogImpl
-from tfidf_stability.vectorisation.sparse import CsrMatrix, SparseVector, dot, l2_norm
+from tfidf_stability.vectorisation.sparse import CsrMatrix, SparseVector, cosine_of, dot, l2_norm
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
 
 sklearn = pytest.importorskip("sklearn", reason="external oracle")
@@ -357,3 +357,168 @@ def test_intermediates_tf_matches_the_term_frequency_vector(mini_model, mini_fea
                 compared += 1
     # The lookup returning None throughout would leave the comparison unreached.
     assert compared > 0, "no intermediate term matched the tf vector"
+
+
+# ---------------------------------------------------------------------------
+# The canonical form is a checkable invariant, so its rejections must be checked
+# ---------------------------------------------------------------------------
+# CsrMatrix is frozen with no validating __post_init__, and save_load.py records
+# that of 2,715 mutated containers accepted, 425 carried a non-monotonic indptr.
+# is_canonical is the opt-in check that catches those, and a checker whose reject
+# arms have never fired is decoration: each one is constructed directly here, no
+# mocking required.
+def _canonical() -> CsrMatrix:
+    """Two rows, ascending within each, every index in range."""
+    return CsrMatrix(
+        indptr=(0, 2, 3), indices=(0, 2, 1), values=(1.0, 2.0, 3.0), n_rows=2, n_cols=3
+    )
+
+
+def test_a_well_formed_matrix_is_canonical_so_the_rejections_below_mean_something() -> None:
+    assert _canonical().is_canonical(), "the baseline must pass or every rejection is vacuous"
+
+
+def test_an_indptr_of_the_wrong_length_is_not_canonical() -> None:
+    bad = CsrMatrix(indptr=(0, 2), indices=(0, 2, 1), values=(1.0, 2.0, 3.0), n_rows=2, n_cols=3)
+    assert not bad.is_canonical(), "indptr must hold n_rows + 1 entries"
+
+
+def test_an_indptr_not_starting_at_zero_is_not_canonical() -> None:
+    bad = CsrMatrix(indptr=(1, 2, 3), indices=(0, 2, 1), values=(1.0, 2.0, 3.0), n_rows=2, n_cols=3)
+    assert not bad.is_canonical()
+
+
+def test_an_indptr_not_ending_at_the_stored_count_is_not_canonical() -> None:
+    bad = CsrMatrix(indptr=(0, 2, 9), indices=(0, 2, 1), values=(1.0, 2.0, 3.0), n_rows=2, n_cols=3)
+    assert not bad.is_canonical()
+
+
+def test_more_indices_than_values_is_not_canonical() -> None:
+    """indptr must still agree with the value count, or an earlier arm fires
+    first and this one is never reached."""
+    bad = CsrMatrix(indptr=(0, 2), indices=(0, 1, 2), values=(1.0, 2.0), n_rows=1, n_cols=3)
+    assert bad.indptr[-1] == len(bad.values), "the earlier arm must not be the one rejecting"
+    assert not bad.is_canonical()
+
+
+def test_a_decreasing_indptr_segment_is_not_canonical() -> None:
+    """The 425-of-2,715 case: a row whose end precedes its start.
+
+    The last indptr entry still matches the value count, so the monotonicity
+    arm is what rejects this rather than the length arm above it.
+    """
+    bad = CsrMatrix(
+        indptr=(0, 2, 1, 3), indices=(0, 1, 2), values=(1.0, 2.0, 3.0), n_rows=3, n_cols=3
+    )
+    assert bad.indptr[-1] == len(bad.values), "the earlier arm must not be the one rejecting"
+    assert not bad.is_canonical()
+
+
+def test_a_repeated_column_within_a_row_is_not_canonical() -> None:
+    """Strictly ascending, not merely sorted: a duplicate would be summed twice
+    by a merge that assumes each column appears once."""
+    bad = CsrMatrix(indptr=(0, 2), indices=(1, 1), values=(1.0, 2.0), n_rows=1, n_cols=3)
+    assert not bad.is_canonical()
+
+
+def test_a_descending_column_pair_within_a_row_is_not_canonical() -> None:
+    bad = CsrMatrix(indptr=(0, 2), indices=(2, 1), values=(1.0, 2.0), n_rows=1, n_cols=3)
+    assert not bad.is_canonical()
+
+
+def test_a_column_index_at_n_cols_is_out_of_range_while_one_below_is_not() -> None:
+    """The off-by-one, from both sides, so a future edit cannot lose an arm."""
+    inside = CsrMatrix(indptr=(0, 1), indices=(2,), values=(1.0,), n_rows=1, n_cols=3)
+    outside = CsrMatrix(indptr=(0, 1), indices=(3,), values=(1.0,), n_rows=1, n_cols=3)
+    assert inside.is_canonical(), "n_cols - 1 is the last legal column"
+    assert not outside.is_canonical(), "n_cols itself is one past the end"
+
+
+def test_a_negative_column_index_is_not_canonical() -> None:
+    bad = CsrMatrix(indptr=(0, 1), indices=(-1,), values=(1.0,), n_rows=1, n_cols=3)
+    assert not bad.is_canonical()
+
+
+def test_an_empty_matrix_with_no_rows_is_canonical_rather_than_malformed() -> None:
+    assert CsrMatrix(indptr=(0,), indices=(), values=(), n_rows=0, n_cols=0).is_canonical()
+
+
+def test_a_row_of_length_zero_between_two_populated_rows_is_canonical() -> None:
+    """An empty row is a document with no in-vocabulary tokens, which section 2.2
+    maps to the zero vector: common, not a corruption."""
+    matrix = CsrMatrix(indptr=(0, 1, 1, 2), indices=(0, 1), values=(1.0, 2.0), n_rows=3, n_cols=2)
+    assert matrix.is_canonical()
+    assert matrix.row(1).nnz == 0
+
+
+# ---------------------------------------------------------------------------
+# The module-level cosine, and the sparse vector protocol
+# ---------------------------------------------------------------------------
+def test_cosine_of_is_pinned_to_dot_over_the_product_of_norms() -> None:
+    """The docstring forbids the algebraically equal reassociations, so the two
+    are shown to actually differ on a chosen input rather than assumed to."""
+    # Chosen by search: most inputs give the same double either way, so an
+    # arbitrary pair would assert the pinning without being able to detect its
+    # loss. These two differ by exactly one ulp.
+    u = SparseVector(
+        indices=(0, 1, 2),
+        values=(0.42451918914251396, 0.8268521246720381, 0.12380196114964559),
+        dim=3,
+    )
+    v = SparseVector(
+        indices=(0, 1, 2),
+        values=(0.22323896460701453, 0.6274332224055893, 0.9477089424570057),
+        dim=3,
+    )
+    nu, nv = l2_norm(u), l2_norm(v)
+
+    assert same_bits(cosine_of(u, v), dot(u, v) / (nu * nv))
+    alternative = (dot(u, v) / nu) / nv
+    assert not same_bits(cosine_of(u, v), alternative), (
+        "the two forms agreed here, so this input does not separate them and the "
+        "pinning is untested"
+    )
+
+
+def test_cosine_of_accepts_precomputed_norms_without_changing_the_value() -> None:
+    u = SparseVector(indices=(0, 2), values=(1.0, 2.0), dim=4)
+    v = SparseVector(indices=(0, 3), values=(3.0, 4.0), dim=4)
+    assert same_bits(cosine_of(u, v), cosine_of(u, v, u_norm=l2_norm(u), v_norm=l2_norm(v)))
+
+
+def test_cosine_of_a_zero_vector_is_zero_rather_than_a_division() -> None:
+    zero = SparseVector(indices=(), values=(), dim=3)
+    other = SparseVector(indices=(1,), values=(1.0,), dim=3)
+    assert cosine_of(zero, other) == 0.0
+    assert cosine_of(other, zero) == 0.0
+    assert cosine_of(zero, zero) == 0.0
+
+
+def test_a_dimension_mismatch_in_dot_is_rejected_not_silently_truncated() -> None:
+    u = SparseVector(indices=(0,), values=(1.0,), dim=2)
+    v = SparseVector(indices=(0,), values=(1.0,), dim=3)
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        dot(u, v)
+
+
+def test_len_reports_the_ambient_dimension_not_the_stored_count() -> None:
+    """A sparse vector is a vector of `dim`, most of whose entries are absent."""
+    vector = SparseVector(indices=(1,), values=(5.0,), dim=100)
+    assert len(vector) == 100
+    assert vector.nnz == 1
+
+
+def test_iterating_yields_index_value_pairs_in_ascending_index_order() -> None:
+    vector = SparseVector(indices=(0, 3, 7), values=(1.0, 2.0, 3.0), dim=8)
+    assert list(vector) == [(0, 1.0), (3, 2.0), (7, 3.0)]
+    assert list(SparseVector(indices=(), values=(), dim=4)) == []
+
+
+def test_iterating_the_rows_yields_every_row_in_order() -> None:
+    matrix = CsrMatrix(
+        indptr=(0, 1, 1, 3), indices=(0, 1, 2), values=(1.0, 2.0, 3.0), n_rows=3, n_cols=3
+    )
+    rows = list(matrix.rows())
+    assert len(rows) == 3
+    assert [r.nnz for r in rows] == [1, 0, 2], "the empty middle row must still be yielded"
+    assert [list(r) for r in rows] == [[(0, 1.0)], [], [(1, 2.0), (2, 3.0)]]
