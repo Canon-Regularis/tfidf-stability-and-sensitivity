@@ -15,10 +15,12 @@ from itertools import pairwise
 import pytest
 
 from tfidf_stability.utils.numerics import correctly_rounded_log_ratio, same_bits
-from tfidf_stability.utils.validation import EmptyVocabularyError
+from tfidf_stability.utils.validation import EmptyVocabularyError, TfidfStabilityError
 from tfidf_stability.vectorisation.idf import (
     LogImpl,
     delta_idf,
+    idf_linf,
+    smoothed_idf,
     smoothed_idf_one,
 )
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
@@ -324,3 +326,121 @@ def test_a_negative_max_features_is_rejected_not_silently_applied() -> None:
     for name in ("min_df", "max_df"):
         with pytest.raises(ValueError, match=name):
             build_vocabulary(docs, VocabularyConfig(**{name: -1}))
+
+
+# ---------------------------------------------------------------------------
+# The IDF vector's own accessors, and the bounds section 4.2 reads off them
+# ---------------------------------------------------------------------------
+def test_an_idf_vector_reports_one_entry_per_vocabulary_term() -> None:
+    idf = smoothed_idf([1, 2, 3], 10)
+    assert len(idf) == 3
+    assert idf[0] == smoothed_idf_one(1, 10)
+
+
+def test_the_infinity_norm_is_the_largest_idf_and_the_minimum_the_smallest() -> None:
+    """||idf||_inf appears in the section 4.2 perturbation bound, so it is read
+    off this vector rather than recomputed at the call site."""
+    idf = smoothed_idf([1, 5, 10], 10)
+    assert idf.linf == max(idf.values)
+    assert idf.minimum == min(idf.values)
+    assert idf.minimum >= 1.0, "every df <= N gives an idf of at least 1"
+
+
+def test_an_empty_idf_vector_reports_zero_rather_than_raising() -> None:
+    """max() over nothing raises, and a report being assembled from a filtered
+    corpus must not die because a vocabulary came back empty."""
+    empty = smoothed_idf([], 10)
+    assert len(empty) == 0
+    assert empty.linf == 0.0
+    assert empty.minimum == 0.0
+
+
+def test_the_free_function_accepts_either_a_vector_or_a_raw_sequence() -> None:
+    """The bound is computed in places that hold one or the other, and a
+    disagreement between the two forms would move a published bound."""
+    idf = smoothed_idf([1, 5, 10], 10)
+    assert idf_linf(idf) == idf.linf
+    assert idf_linf(list(idf.values)) == idf.linf
+
+
+def test_the_free_function_over_an_empty_sequence_is_zero() -> None:
+    assert idf_linf([]) == 0.0
+    assert idf_linf(smoothed_idf([], 4)) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Vocabulary thresholds as proportions
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("bad", [0.0, -0.5, 1.5, 2.0])
+def test_a_proportion_outside_zero_to_one_is_rejected(bad: float) -> None:
+    """A float threshold is a proportion of the corpus, so anything outside
+    (0, 1] is a caller error rather than a very large absolute count."""
+    with pytest.raises(ValueError, match="as a proportion must be in"):
+        build_vocabulary([["a"], ["b"]], VocabularyConfig(min_df=bad))
+
+
+def test_a_proportion_of_exactly_one_is_accepted_as_the_whole_corpus() -> None:
+    """The inclusive end of the interval: every document, which filters nothing
+    when used as an upper bound."""
+    vocab = build_vocabulary([["a", "b"], ["a"]], VocabularyConfig(max_df=1.0))
+    assert "a" in vocab.tokens, "a term in every document survives max_df = 1.0"
+
+
+def test_the_collection_frequency_policy_orders_by_total_occurrences() -> None:
+    """CF_DESC and DF_DESC disagree whenever a term is concentrated in one
+    document, which is the case the policy exists to distinguish."""
+    corpus = [["rare", "rare", "rare"], ["common"], ["common"]]
+    by_cf = build_vocabulary(
+        corpus, VocabularyConfig(max_features=1, max_features_policy=MaxFeaturesPolicy.CF_DESC)
+    )
+    by_df = build_vocabulary(
+        corpus, VocabularyConfig(max_features=1, max_features_policy=MaxFeaturesPolicy.DF_DESC)
+    )
+    assert by_cf.tokens == ("rare",), "three occurrences in one document wins on cf"
+    assert by_df.tokens == ("common",), "two documents wins on df"
+
+
+def test_the_sklearn_compatible_policy_ignores_document_frequency_entirely() -> None:
+    corpus = [["rare", "rare", "rare"], ["common"], ["common"]]
+    vocab = build_vocabulary(
+        corpus,
+        VocabularyConfig(max_features=1, max_features_policy=MaxFeaturesPolicy.SKLEARN_COMPAT),
+    )
+    assert vocab.tokens == ("rare",)
+
+
+def test_a_term_id_maps_back_to_the_token_it_was_assigned_to() -> None:
+    """The inverse of term_id, used wherever a report has to name a term rather
+    than number it."""
+    vocab = build_vocabulary([["beta", "alpha"], ["alpha"]])
+    for token in vocab.tokens:
+        term_id = vocab.id_of(token)
+        assert term_id is not None
+        assert vocab.token_of(term_id) == token
+    assert vocab.id_of("absent") is None, "an out-of-vocabulary token has no identifier"
+
+
+def test_the_byte_order_invariant_is_raised_rather_than_asserted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guard that survives `python -O`.
+
+    Identifiers are assigned by UTF-8 byte order, and the binary searches in tf.py
+    and the merge in align_models are correct only on a sorted vocabulary. The
+    check used to be a bare `assert`, which -O deletes, leaving nothing between a
+    mis-sorted vocabulary and silently wrong weights. It cannot be reached by any
+    input, since build_vocabulary sorts before checking, so the sort is faulted
+    instead of the checker.
+    """
+    from tfidf_stability.vectorisation import vocabulary as vocabulary_module
+
+    monkeypatch.setattr(vocabulary_module.Vocabulary, "is_sorted", lambda self: False, raising=True)
+    with pytest.raises(TfidfStabilityError, match="UTF-8 byte order"):
+        build_vocabulary([["alpha", "beta"]])
+
+
+def test_a_correctly_sorted_vocabulary_passes_that_same_guard() -> None:
+    """The other side: a guard that rejected everything would be as bad."""
+    vocab = build_vocabulary([["beta", "alpha", "gamma"]])
+    assert vocab.is_sorted()
+    assert list(vocab.tokens) == sorted(vocab.tokens, key=lambda t: t.encode("utf-8"))
