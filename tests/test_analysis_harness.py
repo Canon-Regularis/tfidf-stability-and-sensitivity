@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 
 import pytest
 
@@ -26,6 +27,7 @@ from tfidf_stability.analysis.summarise import (
     percentile,
     summarise_values,
 )
+from tfidf_stability.perturbation.score_bounds import certified_radius
 from tfidf_stability.ranking.attributes import AttributeTable
 from tfidf_stability.similarity.cosine import cosine_against_corpus
 from tfidf_stability.utils.io import canonical_json
@@ -332,3 +334,288 @@ def test_an_unbounded_band_never_yields_an_infinite_tau() -> None:
     assert math.isinf(band.g_min)
     assert math.isfinite(band.display_tau())
     assert band.display_tau() >= band.tau_floor
+
+
+# ---------------------------------------------------------------------------
+# The reporting blocks, which are what a manifest actually carries
+# ---------------------------------------------------------------------------
+# Every as_dict below lands in a published JSON file. The tests assert what the
+# block guarantees rather than a literal key list: that it survives the canonical
+# writer, and that every float is accompanied by the hex form that makes a
+# comparison across machines exact. Pinning the literal dict would calcify the
+# schema against any future field.
+def test_a_policy_error_block_survives_the_canonical_writer() -> None:
+    block = PolicyError("naive", 100, 25, 1e-16, 8.0).as_dict()
+    assert json.loads(canonical_json(block, indent=None)) == block
+    assert block["policy"] == "naive"
+
+
+def test_the_share_of_differing_scores_is_the_ratio_it_claims() -> None:
+    assert PolicyError("naive", 100, 25, 1e-16, 8.0).share_differing == 0.25
+
+
+def test_a_policy_that_compared_nothing_reports_zero_rather_than_dividing() -> None:
+    """An empty comparison is not evidence of agreement, but it must not raise
+    while a report is being assembled."""
+    assert PolicyError("exact", 0, 0, 0.0, 0.0).share_differing == 0.0
+
+
+def test_a_noise_floor_block_carries_the_hex_form_of_every_float() -> None:
+    """Decimal rendering loses the last bit, and the last bit is the subject."""
+    block = _floor(1e-16).as_dict()
+    assert json.loads(canonical_json(block, indent=None)) == block
+    assert float.fromhex(block["eta_hex"]) == block["eta"]
+
+
+def test_a_tau_band_block_round_trips_and_pins_its_endpoints_in_hex() -> None:
+    band = tau_band(_floor(1e-16), [[1.0, 0.5, 0.25]])
+    block = band.as_dict()
+    assert json.loads(canonical_json(block, indent=None)) == block
+    assert float.fromhex(block["tau_floor_hex"]) == block["tau_floor"]
+    assert float.fromhex(block["g_min_hex"]) == block["g_min"]
+
+
+def test_the_band_width_in_decades_is_the_logarithm_of_its_endpoints() -> None:
+    band = tau_band(_floor(1e-16), [[1.0, 0.5, 0.25]])
+    assert band.decades == pytest.approx(math.log10(band.g_min / band.tau_floor))
+
+
+def test_a_band_with_a_zero_floor_reports_no_width_rather_than_minus_infinity() -> None:
+    """log10(0) is not a number of decades, and -inf in a manifest is not a
+    measurement."""
+    band = tau_band(_floor(0.0), [[1.0, 0.5]])
+    assert band.tau_floor == 0.0
+    assert math.isnan(band.decades)
+
+
+# ---------------------------------------------------------------------------
+# The band probe
+# ---------------------------------------------------------------------------
+def test_a_probe_count_below_one_is_refused_rather_than_dividing_by_zero() -> None:
+    """`i / (probes - 1)` divided by zero at probes = 1 and said nothing useful.
+    A count below one is a caller error and now says so."""
+    band = tau_band(_floor(1e-16), [[1.0, 0.5, 0.25]])
+    with pytest.raises(ValueError, match="probes must be at least 1"):
+        verify_band_invariance(band, [[1.0, 0.5, 0.25]], probes=0)
+
+
+def test_a_single_probe_samples_the_lower_endpoint_rather_than_failing() -> None:
+    """One probe cannot be spaced across a band, so it is the floor itself."""
+    band = tau_band(_floor(1e-16), [[1.0, 0.5, 0.25]])
+    assert verify_band_invariance(band, [[1.0, 0.5, 0.25]], probes=1)
+
+
+def test_an_unbounded_band_is_probed_over_a_substitute_upper_end() -> None:
+    """`g_min` is infinite when no strictly-positive gap exists. Probing to
+    infinity would sample nothing, so a finite substitute is used instead."""
+    band = tau_band(_floor(1e-16), [[1.0, 1.0, 1.0]])
+    assert math.isinf(band.g_min), "the premise: every gap is exactly zero"
+    assert verify_band_invariance(band, [[1.0, 1.0, 1.0]]) is not None
+
+
+# ---------------------------------------------------------------------------
+# The certificate audit's own honesty
+# ---------------------------------------------------------------------------
+def test_an_audit_that_drew_no_certified_perturbation_is_not_conclusive() -> None:
+    """is_sound is `certified_changed == 0`, so an audit that certified nothing
+    reports the theorem upheld having checked it zero times. An earlier version
+    of the section 4.4 attack did exactly that."""
+    from tfidf_stability.analysis.stability_profile import CertificateAudit
+
+    empty = CertificateAudit(
+        certified_unchanged=0,
+        certified_changed=0,
+        uncertified_unchanged=5,
+        uncertified_changed=3,
+        n_undefined=0,
+        n_exact_tie=0,
+    )
+    assert empty.is_sound, "vacuously, which is the point"
+    assert not empty.is_conclusive, "and the count beside it says so"
+    assert empty.n_certified == 0
+
+
+def test_an_audit_with_certified_trials_is_conclusive_and_counts_them() -> None:
+    from tfidf_stability.analysis.stability_profile import CertificateAudit
+
+    audit = CertificateAudit(
+        certified_unchanged=7,
+        certified_changed=0,
+        uncertified_unchanged=2,
+        uncertified_changed=6,
+        n_undefined=0,
+        n_exact_tie=0,
+    )
+    assert audit.n_certified == 7
+    assert audit.is_conclusive
+    assert audit.conservatism == pytest.approx(2 / 8)
+    assert json.loads(canonical_json(audit.as_dict(), indent=None)) == audit.as_dict()
+
+
+def test_conservatism_over_no_uncertified_trials_is_undefined_not_zero() -> None:
+    """Zero would claim every uncertified perturbation changed the ranking,
+    which is the opposite of what no evidence means."""
+    from tfidf_stability.analysis.stability_profile import CertificateAudit
+
+    audit = CertificateAudit(
+        certified_unchanged=3,
+        certified_changed=0,
+        uncertified_unchanged=0,
+        uncertified_changed=0,
+        n_undefined=0,
+        n_exact_tie=0,
+    )
+    assert math.isnan(audit.conservatism)
+
+
+def test_a_transition_point_block_round_trips_through_the_canonical_writer() -> None:
+    from tfidf_stability.analysis.stability_profile import TransitionPoint
+
+    point = TransitionPoint(ratio=1.1, n_flips=2, n_trials=1320)
+    block = point.as_dict()
+    assert json.loads(canonical_json(block, indent=None)) == block
+    assert point.flip_rate == pytest.approx(2 / 1320)
+
+
+def test_a_ratio_below_one_is_inside_the_certificate_and_at_one_is_not() -> None:
+    """Strict: at exactly the certified radius the two scores meet, so the
+    guarantee is for radii strictly below it."""
+    from tfidf_stability.analysis.stability_profile import TransitionPoint
+
+    assert TransitionPoint(ratio=0.99, n_flips=0, n_trials=10).within_certificate
+    assert not TransitionPoint(ratio=1.0, n_flips=0, n_trials=10).within_certificate
+
+
+# ---------------------------------------------------------------------------
+# Candidate sets vary per query, so k can exceed one of them
+# ---------------------------------------------------------------------------
+# Section 7.1 gives every query its own candidate set, so a fixed k is larger
+# than some of them. Both entry points count those rather than clamping: a
+# clamped k measures the margin at a different rank and quietly averages two
+# different quantities together.
+def test_a_query_shorter_than_k_is_excluded_from_the_transition_rather_than_clamped() -> None:
+    table = AttributeTable.from_records(
+        [{"doc_id": f"d{i}", "popularity": 10 - i} for i in range(6)]
+    )
+    tall = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]
+    short = [0.9, 0.8]  # fewer candidates than k
+    points, n_used, n_excluded = transition_curve(
+        [tall, short], table, k=4, seed=1, ratios=(0.5, 2.0), trials=4
+    )
+
+    assert n_excluded >= 1, "the short query must be counted out, not measured at a different rank"
+    assert n_used >= 1, "the usable query must still be measured"
+    assert len(points) == 2, "one point per requested ratio, regardless of exclusions"
+    assert all(p.n_trials == n_used * 4 for p in points), (
+        "an excluded query must contribute no trials, or the denominator is wrong"
+    )
+
+
+def test_a_query_shorter_than_k_is_undefined_in_the_audit_rather_than_clamped() -> None:
+    table = AttributeTable.from_records(
+        [{"doc_id": f"d{i}", "popularity": 10 - i} for i in range(6)]
+    )
+    tall = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]
+    short = [0.9, 0.8]
+    audit = certificate_audit([tall, short], table, k=4, seed=1, trials=4)
+
+    assert audit.n_undefined >= 1, "a query with no rank k has no certificate there"
+
+
+def test_a_query_whose_certificate_is_undefined_is_counted_not_audited() -> None:
+    """k == N leaves no boundary gap, so no radius exists to certify against."""
+    table = AttributeTable.from_records(
+        [{"doc_id": f"d{i}", "popularity": 10 - i} for i in range(3)]
+    )
+    exactly_k = [0.9, 0.8, 0.7]  # k equals the candidate count
+    audit = certificate_audit([exactly_k], table, k=3, seed=1, trials=4)
+
+    assert audit.n_undefined == 1
+    assert audit.n_certified == 0
+    assert not audit.is_conclusive, "nothing was certified, so nothing was tested"
+
+
+def test_a_certificate_with_a_non_numeric_radius_is_counted_undefined() -> None:
+    """A defined-but-NaN certificate is the trap the second half of the guard
+    catches.
+
+    A NaN among the scores gives a certificate that reports itself defined while
+    its radius is NaN. Every comparison against NaN is false, so `realised <
+    radius` would answer "not certified" for every trial and the audit would
+    silently report a conclusive-looking run built on nothing.
+    """
+    table = AttributeTable.from_records(
+        [{"doc_id": f"d{i}", "popularity": 10 - i} for i in range(4)]
+    )
+    poisoned = [0.9, math.nan, 0.7, 0.6]
+    cert = certified_radius(sorted(poisoned, reverse=True), 2)
+    assert cert.defined, "the premise: it claims to be defined"
+    assert math.isnan(cert.set_radius), "but carries no usable radius"
+
+    audit = certificate_audit([poisoned], table, k=2, seed=1, trials=4)
+    assert audit.n_undefined == 1, "a NaN radius is no radius, and must be counted as such"
+    assert audit.n_certified == 0
+    assert not audit.is_conclusive
+
+
+# ---------------------------------------------------------------------------
+# The noise floor needs a corpus long enough to have a floor
+# ---------------------------------------------------------------------------
+def test_a_long_document_corpus_makes_the_naive_fold_stray_from_exact() -> None:
+    """The measurement arm, which the six-document fixture never reaches.
+
+    On the mini corpus every policy agrees with EXACT bit for bit, so the whole
+    error-accumulation branch never executed and eta was always zero. A floor
+    measured only where nothing strays is not a floor. Documents here are long
+    enough that the norm summation, which is where the error accumulates,
+    actually diverges.
+    """
+    rng = random.Random(11)
+    vocab = [f"t{i}" for i in range(150)]
+    documents = [[rng.choice(vocab) for _ in range(80)] for _ in range(50)]
+    model = TfidfVectoriser().fit(documents, [f"d{i}" for i in range(50)])
+    queries = [
+        TfidfVectoriser.transform_query([rng.choice(vocab) for _ in range(40)], model)
+        for _ in range(5)
+    ]
+
+    floor = measure_noise_floor(model, queries)
+    by_policy = {p.policy: p for p in floor.per_policy}
+
+    assert by_policy["naive"].n_differing > 0, (
+        "no score strayed from exact, so the floor measured nothing"
+    )
+    assert floor.eta > 0.0, "a floor of exactly zero is the absence of a measurement"
+    assert by_policy["naive"].max_ulps > 0.0
+    assert by_policy["naive"].max_abs == floor.eta, (
+        "eta is the largest deviation any instrument recorded"
+    )
+    assert by_policy["neumaier"].n_differing == 0, (
+        "compensated summation is expected to agree; if it strayed the premise "
+        "of using it as the recommended policy would be gone"
+    )
+
+
+def test_a_tau_beyond_the_band_moves_the_tie_structure_it_was_meant_to_preserve() -> None:
+    """The invariance check must be able to answer no.
+
+    Inside the band the tie groups are the exact-equality classes at every tau.
+    A tau above g_min merges two genuinely separated scores, so the shape moves
+    and the check reports it rather than passing regardless.
+    """
+    scores = [[1.0, 0.9, 0.5]]
+    band = tau_band(_floor(1e-16), scores)
+    assert verify_band_invariance(band, scores), "inside the band nothing moves"
+
+    from tfidf_stability.analysis.noise_floor import TauBand
+
+    too_wide = TauBand(
+        tau_floor=band.tau_floor,
+        g_min=0.5,  # above the 0.1 gap, so that pair merges partway through
+        n_exact_ties=band.n_exact_ties,
+        n_positive_gaps=band.n_positive_gaps,
+        n_gaps_in_band=1,
+    )
+    assert not verify_band_invariance(too_wide, scores), (
+        "a band spanning a real gap cannot leave the tie structure invariant"
+    )
