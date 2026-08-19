@@ -248,7 +248,13 @@ def _run_tests(tests: list[str], timeout: float, cwd: Path) -> bool:
 
 
 def _campaign(
-    target: Path, original: str, limit: int, tests: list[str], timeout: float, cwd: Path
+    target: Path,
+    original: str,
+    limit: int,
+    *,
+    tests: list[str],
+    timeout: float,
+    cwd: Path,
 ) -> tuple[int, int, list[Mutant]]:
     survivors: list[Mutant] = []
     killed = skipped = 0
@@ -305,7 +311,7 @@ def main() -> int:
 
         started = time.monotonic()
         killed, skipped, survivors = _campaign(
-            target, original, limit, tests, args.timeout, sandbox
+            target, original, limit, tests=tests, timeout=args.timeout, cwd=sandbox
         )
     finally:
         shutil.rmtree(sandbox, ignore_errors=True)
