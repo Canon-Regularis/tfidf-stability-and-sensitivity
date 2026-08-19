@@ -712,3 +712,89 @@ def test_a_negative_rating_count_is_rejected() -> None:
     specs = (AttributeSpec("rating", Direction.DESC, AttributeDType.RATIO_I64),)
     with pytest.raises(TfidfStabilityError, match="is negative"):
         AttributeTable.from_records(records, specs)
+
+
+# ---------------------------------------------------------------------------
+# A truncated ranking answers only what it can
+# ---------------------------------------------------------------------------
+# rank_top_k selects a prefix, so the object it returns knows the whole score
+# vector but only part of the order. Every accessor below has to say which of the
+# two it is answering from, because a question about the corpus answered from the
+# prefix would be wrong rather than merely unavailable.
+def test_a_complete_ranking_answers_whole_corpus_questions() -> None:
+    table = table_of(5, popularity=[5, 4, 3, 2, 1])
+    ranking = rank([0.5, 0.4, 0.3, 0.2, 0.1], table, POP)
+    assert ranking.is_complete
+    ranking.require_complete("a test")  # must not raise
+    assert ranking.top_k(5) == ranking.order
+
+
+def test_a_truncated_ranking_refuses_a_whole_corpus_question() -> None:
+    table = table_of(6, popularity=[6, 5, 4, 3, 2, 1])
+    ranking = rank_top_k([0.6, 0.5, 0.4, 0.3, 0.2, 0.1], table, POP, k=2)
+    assert not ranking.is_complete
+    with pytest.raises(ValueError, match="needs the complete ranking"):
+        ranking.require_complete("an ordering distance")
+
+
+def test_asking_a_truncated_ranking_for_more_than_it_selected_is_refused() -> None:
+    """Returning a short prefix instead would silently answer a different
+    question from the one asked."""
+    table = table_of(6, popularity=[6, 5, 4, 3, 2, 1])
+    ranking = rank_top_k([0.6, 0.5, 0.4, 0.3, 0.2, 0.1], table, POP, k=2)
+    assert len(ranking.top_k(2)) == 2
+    with pytest.raises(ValueError, match="but only"):
+        ranking.top_k(5)
+
+
+def test_the_score_at_a_rank_is_available_even_where_the_order_is_truncated() -> None:
+    """sorted_scores is always the whole corpus; only the order is cut. That
+    asymmetry is what lets margins be read at every k after a top-k selection."""
+    scores = [0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
+    table = table_of(6, popularity=[6, 5, 4, 3, 2, 1])
+    ranking = rank_top_k(scores, table, POP, k=2)
+
+    assert ranking.score_at_rank(1) == 0.6
+    assert ranking.score_at_rank(6) == 0.1, "readable past the truncation point"
+
+
+@pytest.mark.parametrize("bad", [0, 7, -1])
+def test_a_rank_outside_one_to_n_is_refused(bad: int) -> None:
+    """Ranks are 1-indexed in the public API and 0-indexed underneath, so both
+    ends are checked rather than trusted to the array."""
+    table = table_of(6, popularity=[6, 5, 4, 3, 2, 1])
+    ranking = rank([0.6, 0.5, 0.4, 0.3, 0.2, 0.1], table, POP)
+    with pytest.raises(IndexError, match="out of range"):
+        ranking.score_at_rank(bad)
+
+
+def test_the_rank_of_an_unselected_document_says_the_ranking_was_truncated() -> None:
+    """Two different absences: not in the corpus, and not in the selected
+    prefix. The message distinguishes them so a caller can tell which."""
+    table = table_of(6, popularity=[6, 5, 4, 3, 2, 1])
+    truncated = rank_top_k([0.6, 0.5, 0.4, 0.3, 0.2, 0.1], table, POP, k=2)
+    with pytest.raises(KeyError, match="truncated"):
+        truncated.rank_of(5)
+
+    complete = rank([0.6, 0.5, 0.4, 0.3, 0.2, 0.1], table, POP)
+    assert complete.rank_of(5) == 6, "the same document is answerable when nothing was cut"
+
+
+def test_restricting_to_a_subset_keeps_the_ranking_order_not_the_argument_order() -> None:
+    """Used to compare two operators over a tie group, so the result has to be
+    ordered by the ranking rather than by however the caller listed them."""
+    table = table_of(5, popularity=[5, 4, 3, 2, 1])
+    ranking = rank([0.5, 0.4, 0.3, 0.2, 0.1], table, POP)
+    assert ranking.order_within([3, 0, 2]) == (0, 2, 3)
+    assert ranking.order_within([]) == ()
+    assert ranking.order_within([99]) == (), "a document outside the ranking contributes nothing"
+
+
+def test_ranking_a_top_k_of_an_empty_corpus_is_refused_like_ranking_one() -> None:
+    """Both entry points guard it: the empty case must not reach resolve_k and
+    come back as a k error, which would name the wrong cause."""
+    table = AttributeTable.from_records(
+        [], (AttributeSpec("popularity", Direction.DESC, AttributeDType.INT64),)
+    )
+    with pytest.raises(EmptyCorpusError, match="empty corpus"):
+        rank_top_k([], table, POP, k=1)
