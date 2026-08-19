@@ -17,18 +17,25 @@ fast enough to finish, which a whole-suite campaign is not: the full suite is
 three minutes, so a single-module run scoped to that module's own test file is
 the difference between twenty minutes and a week.
 
-Safety. The mutant has to be the module the tests import, and `conftest.py` puts
-the working tree's `src/` on `sys.path`, so the file is edited in place. The
-original bytes are written to a sibling backup first, restored in a `finally`,
-and verified by digest afterwards. A backup left behind means a previous run was
-killed mid-mutant: the tool refuses to start until `--restore` clears it, rather
-than treating a mutated file as pristine.
+The working tree is never modified. An earlier version edited the module in
+place, because `tests/conftest.py` puts `src/` on `sys.path` and the tests have
+to import the mutant. It guarded that with a backup and a `finally`, which is not
+enough: `finally` does not run when the process is killed, and on Windows
+`terminate()` maps to `TerminateProcess`, so neither a SIGTERM handler nor an
+`atexit` hook fires either. Measured, not assumed: killing a live campaign left
+the module mutated and the backup behind. One such run was then committed, taking
+340 lines of source down to `ast.unparse` output with a binary search bound
+flipped the wrong way, which turned a 1.4-second test file into a hang.
+
+So the campaign runs against a copy instead. `conftest.py` computes `src/`
+relative to its own location, so a tree containing `src/` and `tests/` is
+self-contained: point pytest at the copy and the copy's modules are what get
+imported. Killing the run now loses a temporary directory and nothing else.
 
 Usage::
 
     python scripts/run_mutation_tests.py src/tfidf_stability/ranking/tie_groups.py \\
         --tests tests/test_tie_groups_tau.py
-    python scripts/run_mutation_tests.py --restore src/.../tie_groups.py
 
 Exits non-zero if any mutant survives.
 """
@@ -37,15 +44,24 @@ from __future__ import annotations
 
 import argparse
 import ast
-import hashlib
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-BACKUP_SUFFIX = ".mutation-backup"
+
+#: What a run needs to be a working checkout: the package, the suite that
+#: imports it, the pytest configuration that declares markers and turns warnings
+#: into errors, and the assets the package loads from the repository root.
+#: `data/` is not optional: preprocessing resolves the frozen stopword list as
+#: `parents[3] / "data" / "assets"`, so leaving it out fails the fixture that
+#: builds the normative pipeline and errors the suite before a mutant runs.
+_SANDBOX_CONTENTS = ("src", "tests", "configs", "data", "pyproject.toml")
 
 #: Comparison flips. The pairs that matter are the boundary ones: `<=` against
 #: `<` decides whether a score exactly `tau` away joins a clique, which is the
@@ -85,7 +101,6 @@ _CONSTANTS: dict[tuple[type, object], object] = {
 @dataclass(frozen=True, slots=True)
 class Mutant:
     line: int
-    col: int
     kind: str
     before: str
     after: str
@@ -106,9 +121,7 @@ class _Mutator(ast.NodeTransformer):
         self.seen += 1
         if self.seen != self.target:
             return False
-        self.applied = Mutant(
-            getattr(node, "lineno", 0), getattr(node, "col_offset", 0), kind, before, after
-        )
+        self.applied = Mutant(getattr(node, "lineno", 0), kind, before, after)
         return True
 
     def visit_Compare(self, node: ast.Compare) -> ast.AST:
@@ -158,16 +171,56 @@ def _count_sites(source: str) -> int:
 
 
 def _apply(source: str, index: int) -> tuple[str, Mutant] | None:
-    tree = ast.parse(source)
     mutator = _Mutator(target=index)
-    mutated = mutator.visit(tree)
+    mutated = mutator.visit(ast.parse(source))
     if mutator.applied is None:
         return None
     ast.fix_missing_locations(mutated)
     return ast.unparse(mutated), mutator.applied
 
 
-def _run_tests(tests: list[str], timeout: float) -> bool:
+def _make_sandbox() -> Path:
+    """A throwaway checkout holding the package, the suite and the pytest config."""
+    sandbox = Path(tempfile.mkdtemp(prefix="tfidf-mutation-"))
+    # The compiled extension is copied with everything else. Excluding it made
+    # native_available() false in the sandbox, which turned the differential
+    # tests into a collection error and the baseline run into a failure.
+    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".hypothesis")
+    for name in _SANDBOX_CONTENTS:
+        source = REPO / name
+        if source.is_dir():
+            shutil.copytree(source, sandbox / name, ignore=ignore)
+        elif source.exists():
+            shutil.copy2(source, sandbox / name)
+
+    # Copying the tree is not enough on its own. This project is installed
+    # editable, and scikit-build-core does that by putting a
+    # ScikitBuildRedirectingFinder on sys.meta_path pointing at the real src/.
+    # Meta-path finders are consulted before sys.path, so conftest.py inserting
+    # the sandbox at sys.path[0] loses and the tests import the working tree.
+    # Measured: replacing the sandbox module with `raise RuntimeError` still gave
+    # 26 passed, which would have scored every mutant a survivor.
+    #
+    # sitecustomize is imported during interpreter startup, before pytest or
+    # conftest, so it is the one place early enough to drop that finder.
+    (sandbox / "sitecustomize.py").write_text(
+        chr(10).join(
+            (
+                "import sys",
+                "sys.meta_path[:] = [",
+                "    finder",
+                "    for finder in sys.meta_path",
+                "    if 'Redirecting' not in type(finder).__name__",
+                "    and 'editable' not in getattr(finder, '__module__', '')",
+                "]",
+            )
+        ),
+        encoding="utf-8",
+    )
+    return sandbox
+
+
+def _run_tests(tests: list[str], timeout: float, cwd: Path) -> bool:
     """True if the suite passes, meaning the mutant survived."""
     try:
         finished = subprocess.run(
@@ -182,10 +235,12 @@ def _run_tests(tests: list[str], timeout: float) -> bool:
                 "-p",
                 "no:cacheprovider",
             ],
-            cwd=REPO,
+            cwd=cwd,
             capture_output=True,
             timeout=timeout,
             check=False,
+            # PYTHONPATH so the sandbox's sitecustomize is found at startup.
+            env={**os.environ, "PYTHONPATH": str(cwd)},
         )
     except subprocess.TimeoutExpired:
         return False  # a hang is a detection: the mutant changed behaviour
@@ -193,9 +248,8 @@ def _run_tests(tests: list[str], timeout: float) -> bool:
 
 
 def _campaign(
-    source_path: Path, original: str, limit: int, tests: list[str], timeout: float
+    target: Path, original: str, limit: int, tests: list[str], timeout: float, cwd: Path
 ) -> tuple[int, int, list[Mutant]]:
-    """Run every mutant in turn. The caller owns the backup and the restore."""
     survivors: list[Mutant] = []
     killed = skipped = 0
     baseline = ast.unparse(ast.parse(original))
@@ -208,10 +262,10 @@ def _campaign(
         if mutated_source == baseline:
             skipped += 1  # the mutation left the tree unchanged
             continue
-        source_path.write_text(mutated_source, encoding="utf-8")
-        if _run_tests(tests, timeout):
+        target.write_text(mutated_source, encoding="utf-8")
+        if _run_tests(tests, timeout, cwd):
             survivors.append(mutant)
-            print(f"  SURVIVED  {mutant.describe()}")
+            print(f"  SURVIVED  {mutant.describe()}", flush=True)
         else:
             killed += 1
     return killed, skipped, survivors
@@ -219,62 +273,42 @@ def _campaign(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path, help="module to mutate")
+    parser.add_argument("source", type=Path, help="module to mutate, relative to the repository")
     parser.add_argument(
         "--tests", nargs="+", default=None, help="pytest targets (default: whole suite)"
     )
     parser.add_argument("--max-mutants", type=int, default=0, help="0 = every site")
     parser.add_argument("--timeout", type=float, default=600.0, help="seconds per mutant")
-    parser.add_argument("--restore", action="store_true", help="recover from a killed run and exit")
     args = parser.parse_args()
 
-    source_path = (REPO / args.source).resolve() if not args.source.is_absolute() else args.source
-    backup_path = source_path.with_suffix(source_path.suffix + BACKUP_SUFFIX)
-
-    if args.restore:
-        if not backup_path.exists():
-            print(f"no backup at {backup_path.name}; nothing to restore")
-            return 0
-        source_path.write_bytes(backup_path.read_bytes())
-        backup_path.unlink()
-        print(f"restored {source_path.name}")
-        return 0
-
-    if backup_path.exists():
-        print(
-            f"{backup_path.name} exists, so a previous run was killed and "
-            f"{source_path.name} may still hold a mutant.\n"
-            f"Recover with: python scripts/run_mutation_tests.py --restore {args.source}",
-            file=sys.stderr,
-        )
+    relative = args.source.relative_to(REPO) if args.source.is_absolute() else args.source
+    if not (REPO / relative).exists():
+        print(f"no such module: {relative}", file=sys.stderr)
         return 2
 
-    original = source_path.read_text(encoding="utf-8")
-    original_digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    original = (REPO / relative).read_text(encoding="utf-8")
     tests = args.tests or ["tests/"]
-
     total = _count_sites(original)
     limit = min(total, args.max_mutants) if args.max_mutants else total
-    print(f"{source_path.name}: {total} mutable sites, running {limit}")
-    print(f"tests: {' '.join(tests)}\n")
 
-    # The unmutated suite must pass, or every mutant "survives" for the wrong
-    # reason and the whole run is meaningless.
-    if not _run_tests(tests, args.timeout):
-        print("the suite fails before any mutation; fix that first", file=sys.stderr)
-        return 2
-
-    backup_path.write_bytes(source_path.read_bytes())
-    started = time.monotonic()
+    sandbox = _make_sandbox()
+    print(f"{relative.name}: {total} mutable sites, running {limit}")
+    print(f"tests: {' '.join(tests)}")
+    print(f"sandbox: {sandbox}\n", flush=True)
     try:
-        killed, skipped, survivors = _campaign(source_path, original, limit, tests, args.timeout)
+        target = sandbox / relative
+        # A suite that fails before any mutation makes every mutant "survive" for
+        # the wrong reason, so the whole run would be meaningless.
+        if not _run_tests(tests, args.timeout, sandbox):
+            print("the suite fails in the sandbox before any mutation", file=sys.stderr)
+            return 2
+
+        started = time.monotonic()
+        killed, skipped, survivors = _campaign(
+            target, original, limit, tests, args.timeout, sandbox
+        )
     finally:
-        # Restoration is unconditional, and verified: a mutant left in the working
-        # tree would be a far worse outcome than a failed run.
-        source_path.write_bytes(backup_path.read_bytes())
-        backup_path.unlink()
-        if hashlib.sha256(source_path.read_bytes()).hexdigest() != original_digest:
-            raise RuntimeError(f"restore failed for {source_path}")
+        shutil.rmtree(sandbox, ignore_errors=True)
 
     elapsed = time.monotonic() - started
     scored = killed + len(survivors)
@@ -284,10 +318,7 @@ def main() -> int:
     if survivors:
         print("\nEach survivor is behaviour no test asserts:", file=sys.stderr)
         for mutant in survivors:
-            print(
-                f"  {source_path.relative_to(REPO)}:{mutant.line}: {mutant.describe()}",
-                file=sys.stderr,
-            )
+            print(f"  {relative}:{mutant.line}: {mutant.describe()}", file=sys.stderr)
         return 1
     return 0
 
