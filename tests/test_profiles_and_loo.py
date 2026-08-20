@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 
 from tfidf_stability.profiles.query_modes import (
+    Query,
     QueryMode,
     item_as_query,
     leave_one_out_queries,
@@ -495,3 +496,112 @@ def test_an_empty_profile_summed_rather_than_averaged_is_also_zero() -> None:
     m = model()
     empty = build_profile("u", (), FEATURES, ProfileAggregation.VECTOR_SUM)
     assert profile_norm(embed_profile(empty, m, FEATURES)) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# The candidate count, and the defaults that decide it
+# ---------------------------------------------------------------------------
+def test_the_candidate_count_is_the_corpus_less_the_exclusions() -> None:
+    """G19's whole point: N varies per query, so a margin distribution pools
+    populations of different sizes. Adding the exclusions instead of subtracting
+    them gives a plausible number that is wrong in the direction that makes
+    every query look better conditioned than it is.
+    """
+    grouped = group_interactions(interactions(), min_weight=4.0)
+    qs = user_profile_queries(grouped, FEATURES, doc_ids=DOC_IDS)
+    assert len(qs) >= 2
+
+    for q in qs:
+        assert q.n_candidates == len(DOC_IDS) - len(q.excluded)
+        assert q.n_candidates < len(DOC_IDS), "the profile items really were removed"
+
+
+def test_an_item_query_scores_every_document_but_itself() -> None:
+    q = item_as_query("m1", FEATURES, doc_ids=DOC_IDS)
+    assert q.n_candidates == len(DOC_IDS) - 1
+
+    kept = item_as_query("m1", FEATURES, exclude_self=False, doc_ids=DOC_IDS)
+    assert kept.n_candidates == len(DOC_IDS)
+
+
+def test_the_candidate_spread_is_the_min_median_and_max_of_the_counts() -> None:
+    """Asserted as the values rather than as `low <= median <= high`, which
+    holds for a great many wrong triples -- including one that reports the
+    second-smallest count as the minimum."""
+    grouped = {"few": ("m1", "m2"), "many": ("m1", "m2", "m3", "m4", "m5")}
+    qs = user_profile_queries(grouped, FEATURES, doc_ids=DOC_IDS)
+    counts = sorted(q.n_candidates for q in qs)
+    assert counts == [len(DOC_IDS) - 5, len(DOC_IDS) - 2], "two different-sized profiles"
+    assert qs.candidate_spread == (counts[0], counts[len(counts) // 2], counts[-1])
+    assert qs.candidate_spread[0] == 2
+
+
+def test_a_query_carries_no_candidate_count_until_one_is_supplied() -> None:
+    """It is carried rather than inferred, so the unset value has to be
+    distinguishable from a corpus of one document."""
+    bare = Query(query_id="q", mode=QueryMode.ITEM_AS_QUERY, features=("a",))
+    assert bare.n_candidates == 0
+    assert bare.excluded == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# The defaults, which are part of the protocol and reach the manifest
+# ---------------------------------------------------------------------------
+def test_profile_items_are_excluded_unless_the_protocol_says_otherwise() -> None:
+    """The default is the decision G10 records; flipping it lets every user's
+    own items retrieve themselves and inflates every retrieval number."""
+    grouped = {"u": ("m1", "m2")}
+    default = user_profile_queries(grouped, FEATURES, doc_ids=DOC_IDS)
+    assert default.exclude_profile_items is True
+    assert next(iter(default)).excluded == frozenset({"m1", "m2"})
+
+    kept = user_profile_queries(grouped, FEATURES, exclude_profile_items=False, doc_ids=DOC_IDS)
+    assert next(iter(kept)).excluded == frozenset()
+
+
+def test_one_interaction_is_enough_for_a_profile_query_by_default() -> None:
+    """Unlike a leave-one-out fold, which needs two. Raising the default to two
+    would silently drop every single-interaction user from the query set, and
+    the count is only visible in the provenance.
+    """
+    grouped = {"thin": ("m1",), "thick": ("m1", "m2", "m3")}
+    qs = user_profile_queries(grouped, FEATURES, doc_ids=DOC_IDS)
+    assert {q.query_id for q in qs} == {"thin", "thick"}
+    assert qs.min_interactions == 1
+    assert qs.provenance()["min_interactions"] == 1
+
+    # And the threshold is honoured when it is raised.
+    strict = user_profile_queries(grouped, FEATURES, min_interactions=2, doc_ids=DOC_IDS)
+    assert {q.query_id for q in strict} == {"thick"}
+
+
+def test_an_interaction_exactly_at_the_threshold_counts_as_one() -> None:
+    """G10 decision 5 sets the threshold as `rating >= 4.0`, so the filter drops
+    what is strictly below it. At exactly 4.0 the interaction is kept.
+
+    The boundary is the whole decision: on MovieLens the 4.0 rating is one of
+    the most common values, so moving this comparison by one notch changes the
+    size of nearly every profile and therefore every query built from one.
+    """
+    at_threshold = [
+        Interaction("u", "m1", 4.0),
+        Interaction("u", "m2", 3.5),
+        Interaction("u", "m3", 4.5),
+    ]
+    grouped = group_interactions(at_threshold, min_weight=4.0)
+    assert grouped == {"u": ("m1", "m3")}, "4.0 is in, 3.5 is out"
+
+
+def test_an_interaction_weighs_one_unless_the_file_says_otherwise() -> None:
+    """Uniform weighting is the normative choice, and the default is what makes
+    an interaction file without a weight column mean that. A default of zero
+    would be filtered out by any positive threshold, emptying every profile."""
+    assert Interaction("u", "m1").weight == 1.0
+    assert group_interactions([Interaction("u", "m1")], min_weight=1.0) == {"u": ("m1",)}
+
+
+def test_no_threshold_at_all_keeps_every_interaction() -> None:
+    """`min_weight=None` is the documented way to take a file as written."""
+    every = [Interaction("u", "m1", 0.5), Interaction("u", "m2", 5.0)]
+    assert group_interactions(every) == {"u": ("m1", "m2")}
+    assert group_interactions(every, min_weight=None) == {"u": ("m1", "m2")}
