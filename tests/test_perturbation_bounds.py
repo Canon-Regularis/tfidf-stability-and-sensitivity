@@ -861,3 +861,105 @@ def test_a_token_absent_before_starts_from_zero_term_frequency() -> None:
     assert result.bound.local == pytest.approx(math.sqrt(1.0 / 6.0) * rare, rel=1e-12)
     # Starting gamma at 1.0 instead would make delta_tf (-1/6, -1/6, -2/3).
     assert result.bound.local != pytest.approx(math.sqrt(0.5) * rare, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# corpus_edits: every edit refuses what would break the ranking
+# ---------------------------------------------------------------------------
+# A `Corpus` is `(ids, documents)` and each edit returns the new corpus with an
+# `EditRecord`. The record is what a manifest carries, so an edit that succeeded
+# without describing itself would leave a run unreproducible.
+_CORPUS = (("d0", "d1"), (["a", "b"], ["a"]))
+
+
+@pytest.mark.parametrize(
+    ("label", "edit"),
+    [
+        ("adding onto an existing id", lambda: add_document(_CORPUS, "d0", ["c"])),
+        ("duplicating onto an existing id", lambda: duplicate_document(_CORPUS, "d0", "d1")),
+    ],
+)
+def test_an_edit_that_would_duplicate_an_identifier_is_refused(label: str, edit: object) -> None:
+    """Refused here rather than surfacing later as a non-deterministic ordering.
+    The final tie-break key is the identifier, so a duplicate makes the sort
+    order undetermined rather than merely surprising."""
+    with pytest.raises(ValueError, match="already exists"):
+        edit()  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    ("label", "edit"),
+    [
+        ("removing", lambda: remove_document(_CORPUS, "zz")),
+        ("editing", lambda: edit_document(_CORPUS, "zz", ["z"])),
+        ("duplicating", lambda: duplicate_document(_CORPUS, "zz", "new")),
+    ],
+)
+def test_an_edit_naming_an_absent_document_is_refused(label: str, edit: object) -> None:
+    """A `KeyError` naming the identifier, so a sweep over a stale id list says
+    which one it could not find rather than appending a document nobody asked
+    for."""
+    with pytest.raises(KeyError, match="no document with id 'zz'"):
+        edit()  # type: ignore[operator]
+
+
+def test_adding_and_removing_change_the_corpus_size_in_opposite_directions() -> None:
+    """`N` is in the idf of every term, so an edit that changed it silently
+    would move every weight in the corpus."""
+    grown, _ = add_document(_CORPUS, "d2", ["c"])
+    shrunk, _ = remove_document(_CORPUS, "d0")
+
+    assert grown[0] == ("d0", "d1", "d2")
+    assert shrunk[0] == ("d1",)
+
+
+def test_editing_a_document_leaves_the_corpus_size_alone() -> None:
+    """The perturbation that isolates a change in the document-frequency
+    distribution from a change in `N`, which section 4.1 separates."""
+    edited, _ = edit_document(_CORPUS, "d0", ["z"])
+
+    assert edited[0] == _CORPUS[0]
+    assert edited[1][0] == ("z",)
+    assert edited[1][1] == _CORPUS[1][1], "the untouched document is untouched"
+
+
+def test_a_duplicate_scores_identically_and_so_manufactures_an_exact_tie() -> None:
+    """The most useful perturbation for the tie-break analysis: the copy scores
+    identically against every query, so membership at the boundary is decided
+    purely by the tie-break."""
+    copied, _ = duplicate_document(_CORPUS, "d0", "copy")
+
+    assert copied[0] == ("d0", "d1", "copy")
+    # The copy is stored as a tuple while the original arrived as a list, so the
+    # comparison is on contents. Worth knowing: an identity or type-sensitive
+    # check here would fail on a copy that is correct.
+    assert tuple(copied[1][-1]) == tuple(copied[1][0]), (
+        "the copy is the original, feature for feature"
+    )
+
+
+@pytest.mark.parametrize(
+    ("edit", "kind"),
+    [
+        (lambda: add_document(_CORPUS, "d2", ["c"]), EditKind.ADD),
+        (lambda: remove_document(_CORPUS, "d0"), EditKind.REMOVE),
+        (lambda: edit_document(_CORPUS, "d0", ["z"]), EditKind.EDIT),
+        (lambda: duplicate_document(_CORPUS, "d0", "copy"), EditKind.DUPLICATE),
+    ],
+)
+def test_every_edit_describes_itself_for_the_manifest(edit: object, kind: EditKind) -> None:
+    """The record travels into the run manifest, so an experiment can say which
+    perturbation produced a number without re-deriving it from the corpora."""
+    _, record = edit()  # type: ignore[operator]
+    assert record.kind is kind
+
+
+def test_an_edit_leaves_the_original_corpus_untouched() -> None:
+    """They return a new corpus rather than mutating, so a sweep can apply many
+    edits to one baseline without them accumulating."""
+    before = (_CORPUS[0], tuple(tuple(d) for d in _CORPUS[1]))
+    add_document(_CORPUS, "d2", ["c"])
+    remove_document(_CORPUS, "d0")
+
+    assert _CORPUS[0] == before[0]
+    assert tuple(tuple(d) for d in _CORPUS[1]) == before[1]
