@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import ast
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +48,16 @@ _ASSERTING = ("assert", "raises", "warns", "fail", "check", "verify", "expect")
 #: builtins are listed because they are the ones that catch a typo rather than the
 #: behaviour: AttributeError from a renamed method, NameError from a stale import.
 _TOO_BROAD = {"Exception", "BaseException", "AttributeError", "NameError", "ImportError"}
+
+#: `pytest.raises(X)` without `match=` asserts only the type, so two guards of
+#: the same class are interchangeable: swapping them, or reaching the second when
+#: the test meant the first, still passes. Most of this package's guards raise the
+#: same handful of project exceptions and differ only in what they say.
+#:
+#: Exempt where there is no message to match. `SystemExit` carries an exit code
+#: rather than prose, and the tests that raise it assert `.code` instead, which is
+#: stricter than any pattern would be.
+_NO_MESSAGE = {"SystemExit", "KeyboardInterrupt", "StopIteration", "GeneratorExit"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +155,36 @@ def _broad_raises(node: ast.Call) -> str | None:
     return None
 
 
+def _unmatched_raises(node: ast.Call) -> str | None:
+    """A `pytest.raises` that pins the type but not what the guard says.
+
+    A tuple of acceptable types is exempt: that form says "any of these", which a
+    single pattern cannot express, and it is used where the failure mode is
+    genuinely several (a fuzzed parser reaching different layers).
+    """
+    if "raises" not in _call_name(node.func) or not node.args:
+        return None
+    if any(keyword.arg == "match" for keyword in node.keywords):
+        return None
+
+    first = node.args[0]
+    if isinstance(first, ast.Tuple):
+        return None
+    name = first.id if isinstance(first, ast.Name) else getattr(first, "attr", "")
+    if name in _NO_MESSAGE:
+        return None
+    return f"raises({name or '...'}) without match= asserts the type but not the message"
+
+
+#: Checks that run against every call in a test body, paired with the kind they
+#: report. A tuple rather than two branches in `scan`, so adding the next one is
+#: an entry here rather than another arm.
+_CALL_CHECKS: tuple[tuple[str, Callable[[ast.Call], str | None]], ...] = (
+    ("broad-raises", _broad_raises),
+    ("unmatched-raises", _unmatched_raises),
+)
+
+
 def _can_be_empty(iterable: ast.expr) -> bool:
     """Whether the loop might run zero times for a reason the test cannot see.
 
@@ -203,6 +244,50 @@ def _asserts_only_inside_loop(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> str
     return None
 
 
+def _scan_test(path: Path, fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[Finding]:
+    """Every check that applies to one test function."""
+    body = [
+        n for n in fn.body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))
+    ]
+    if not body or all(isinstance(n, ast.Pass) for n in body):
+        return [Finding(path, fn.lineno, fn.name, "empty", "body is empty or only a docstring")]
+
+    findings: list[Finding] = []
+
+    # A test can legitimately assert by not raising, but only if it says so: the
+    # name is the assertion, and an unnamed one is indistinguishable from a test
+    # somebody forgot to finish.
+    declares_no_raise = any(
+        w in fn.name for w in ("not_raise", "no_error", "importable", "smoke", "serialis")
+    )
+    if not _establishes_something(fn) and not declares_no_raise:
+        findings.append(
+            Finding(path, fn.lineno, fn.name, "no-assertion", "nothing in the body can fail")
+        )
+
+    for deco in fn.decorator_list:
+        if detail := _empty_parametrize(deco):
+            findings.append(Finding(path, fn.lineno, fn.name, "empty-parametrize", detail))
+
+    if detail := _unmarked_property(fn):
+        findings.append(Finding(path, fn.lineno, fn.name, "unmarked-property", detail))
+
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assert) and (detail := _constant_assert(node)):
+            findings.append(Finding(path, node.lineno, fn.name, "constant-assert", detail))
+        if isinstance(node, ast.Call):
+            findings.extend(
+                Finding(path, node.lineno, fn.name, kind, detail)
+                for kind, detector in _CALL_CHECKS
+                if (detail := detector(node))
+            )
+
+    if detail := _asserts_only_inside_loop(fn):
+        findings.append(Finding(path, fn.lineno, fn.name, "loop-only-assert", detail))
+
+    return findings
+
+
 def scan(path: Path) -> list[Finding]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -211,48 +296,9 @@ def scan(path: Path) -> list[Finding]:
 
     findings: list[Finding] = []
     for fn in ast.walk(tree):
-        if not _is_test(fn):
-            continue
-        assert isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef)
-
-        body = [
-            n
-            for n in fn.body
-            if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))
-        ]
-        if not body or all(isinstance(n, ast.Pass) for n in body):
-            findings.append(
-                Finding(path, fn.lineno, fn.name, "empty", "body is empty or only a docstring")
-            )
-            continue
-
-        # A test can legitimately assert by not raising, but only if it says so:
-        # the name is the assertion, and an unnamed one is indistinguishable from
-        # a test somebody forgot to finish.
-        declares_no_raise = any(
-            w in fn.name for w in ("not_raise", "no_error", "importable", "smoke", "serialis")
-        )
-        if not _establishes_something(fn) and not declares_no_raise:
-            findings.append(
-                Finding(path, fn.lineno, fn.name, "no-assertion", "nothing in the body can fail")
-            )
-
-        for deco in fn.decorator_list:
-            if detail := _empty_parametrize(deco):
-                findings.append(Finding(path, fn.lineno, fn.name, "empty-parametrize", detail))
-
-        if detail := _unmarked_property(fn):
-            findings.append(Finding(path, fn.lineno, fn.name, "unmarked-property", detail))
-
-        for node in ast.walk(fn):
-            if isinstance(node, ast.Assert) and (detail := _constant_assert(node)):
-                findings.append(Finding(path, node.lineno, fn.name, "constant-assert", detail))
-            if isinstance(node, ast.Call) and (detail := _broad_raises(node)):
-                findings.append(Finding(path, node.lineno, fn.name, "broad-raises", detail))
-
-        if detail := _asserts_only_inside_loop(fn):
-            findings.append(Finding(path, fn.lineno, fn.name, "loop-only-assert", detail))
-
+        if _is_test(fn):
+            assert isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef)
+            findings.extend(_scan_test(path, fn))
     return findings
 
 

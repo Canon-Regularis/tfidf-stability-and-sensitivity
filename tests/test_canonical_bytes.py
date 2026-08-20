@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import struct
 import unicodedata
 from pathlib import Path
@@ -155,13 +156,13 @@ def test_the_two_integer_widths_disagree_so_the_width_is_part_of_the_identity() 
 
 
 def test_an_unsupported_integer_width_is_rejected_not_silently_widened() -> None:
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match=r"^2$"):
         hash_ints([1], width=2)
 
 
 def test_an_integer_beyond_the_chosen_width_is_rejected_rather_than_truncated() -> None:
     """Truncation would make two different corpora hash alike."""
-    with pytest.raises(struct.error):
+    with pytest.raises(struct.error, match=r"'i' format requires"):
         hash_ints([2**31], width=4)
 
 
@@ -203,7 +204,7 @@ def test_hashing_a_file_as_text_normalises_line_endings(tmp_path: Path) -> None:
 
 
 def test_hashing_a_missing_file_raises_rather_than_returning_a_digest(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match="No such file or directory"):
         hash_file(tmp_path / "absent", text=False)
 
 
@@ -477,7 +478,7 @@ def test_a_width_other_than_four_or_eight_is_refused(width: object) -> None:
     """The format table has two entries. A width that fell through to a default
     would digest the same integers into a different string, silently breaking
     every comparison against a previously recorded digest."""
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match=rf"^{re.escape(repr(width))}$"):
         hash_ints([1], width=width)  # type: ignore[arg-type]
 
 
@@ -550,7 +551,7 @@ def test_hashing_a_binary_file_as_text_refuses_rather_than_mangling(tmp_path) ->
     refusal is better than a digest over replacement characters."""
     path = tmp_path / "binary.bin"
     path.write_bytes(b"\xff\xfe\x00\x01")
-    with pytest.raises(UnicodeDecodeError):
+    with pytest.raises(UnicodeDecodeError, match="codec can't decode byte 0xff"):
         hash_file(path, text=True)
 
 
@@ -561,7 +562,7 @@ def test_text_that_cannot_be_encoded_is_refused() -> None:
     """A lone surrogate has no UTF-8 encoding. It can reach here from a corpus
     read with `errors="surrogateescape"`, so the refusal is the boundary between
     "text this project can hash" and "bytes pretending to be text"."""
-    with pytest.raises(UnicodeEncodeError):
+    with pytest.raises(UnicodeEncodeError, match="surrogates not allowed"):
         hash_text("\ud800")
 
 
@@ -731,7 +732,7 @@ def test_a_line_that_is_not_json_is_refused_rather_than_skipped(tmp_path) -> Non
     path = tmp_path / "broken.jsonl"
     path.write_bytes(b'{"a": 1}\nnot json at all\n')
 
-    with pytest.raises(json.JSONDecodeError):
+    with pytest.raises(json.JSONDecodeError, match="Expecting value"):
         list(read_jsonl(path))
 
 

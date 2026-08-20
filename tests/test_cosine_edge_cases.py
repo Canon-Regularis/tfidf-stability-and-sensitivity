@@ -480,7 +480,7 @@ def test_the_bound_object_cannot_be_edited_after_it_is_reported() -> None:
     """It is a measurement, and it travels into a run manifest. A caller that
     could adjust `observed` after the fact could make any bound hold."""
     bound = lipschitz_constant(sv({0: 4.0}), sv({0: 16.0}), sv({0: 8.0}), sv({0: 32.0}))
-    with pytest.raises(dataclasses.FrozenInstanceError):
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign to field 'observed'"):
         bound.observed = 0.0  # type: ignore[misc]
     assert not hasattr(bound, "__dict__"), "slots=True: no ad-hoc attributes either"
 

@@ -120,7 +120,7 @@ def test_duplicate_ids_are_refused() -> None:
 
 
 def test_editing_an_unknown_document_raises() -> None:
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="no document with id 'zzz'"):
         edit_document((("a",), (("x",),)), "zzz", ["y"])
 
 

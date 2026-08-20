@@ -92,7 +92,7 @@ def test_a_stale_extension_is_a_kind_of_unavailable_backend() -> None:
     assert issubclass(AbiVersionMismatchError, NativeBackendUnavailableError)
     assert issubclass(NativeBackendUnavailableError, TfidfStabilityError)
 
-    with pytest.raises(NativeBackendUnavailableError):
+    with pytest.raises(NativeBackendUnavailableError, match="stale"):
         raise AbiVersionMismatchError("stale")
 
 
@@ -255,7 +255,7 @@ def test_a_mode_given_as_a_string_clamps_instead_of_refusing() -> None:
     assert StrictMode.STRICT == "strict", "the premise: equality holds"
     assert resolve_k(9, 5, "strict") == 5  # type: ignore[arg-type]
 
-    with pytest.raises(KOutOfRangeError):
+    with pytest.raises(KOutOfRangeError, match="k=9 exceeds the 5 rankable documents"):
         resolve_k(9, 5, StrictMode.STRICT)
 
 

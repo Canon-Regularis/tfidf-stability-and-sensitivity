@@ -149,7 +149,7 @@ def test_a_one_ulp_divergence_is_caught() -> None:
 
 def test_signed_zero_divergence_is_caught() -> None:
     """``-0.0 == 0.0`` is true and their bit patterns differ; bits win."""
-    with pytest.raises(BitIdentityError):
+    with pytest.raises(BitIdentityError, match=r"!= native -0\.0"):
         check_same_bits([0.0], [-0.0], "scores")
 
 

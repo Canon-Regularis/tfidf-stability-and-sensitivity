@@ -365,7 +365,7 @@ def test_a_frozen_dataclass_actually_refuses_assignment() -> None:
     """The flags above are read off the class; this confirms the flag means what
     the two tests assume it means, on one representative instance."""
     margin = Margin("boundary", 5, 5, 0.25, True)
-    with pytest.raises(dataclasses.FrozenInstanceError):
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign to field 'value'"):
         margin.value = 0.0  # type: ignore[misc]
     assert not hasattr(margin, "__dict__"), "slots=True leaves nowhere to put a new attribute"
 
@@ -409,5 +409,5 @@ def test_the_two_backends_the_docstring_names_are_the_two_that_exist() -> None:
     text = backends.__doc__ or ""
     assert "numpy" in text, "the absent evaluator is explained, not merely absent"
 
-    with pytest.raises(ModuleNotFoundError):
+    with pytest.raises(ModuleNotFoundError, match=r"No module named .*numpy_backend"):
         importlib.import_module("tfidf_stability.backends.numpy_backend")

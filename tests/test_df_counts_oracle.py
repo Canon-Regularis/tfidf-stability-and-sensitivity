@@ -88,7 +88,7 @@ def test_a_featureless_corpus_has_counts_but_no_vocabulary() -> None:
     too high for the corpus.
     """
     assert document_frequencies([[], []]) == {}
-    with pytest.raises(EmptyVocabularyError):
+    with pytest.raises(EmptyVocabularyError, match="0 distinct features"):
         build_vocabulary([[], []])
 
 

@@ -289,7 +289,7 @@ def test_non_canonical_query_is_rejected(index) -> None:  # type: ignore[no-unty
 
 
 def test_out_of_range_term_is_rejected(index) -> None:  # type: ignore[no-untyped-def]
-    with pytest.raises(IndexError):
+    with pytest.raises(IndexError, match="term identifier out of range"):
         index.df(10**9)
 
 

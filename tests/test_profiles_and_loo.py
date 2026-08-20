@@ -163,7 +163,7 @@ def test_vector_aggregation_requires_the_feature_map() -> None:
 
 def test_a_missing_feature_stream_is_an_error_not_a_silent_skip() -> None:
     """Profile size is reported, so a silently shrunk profile would misreport it."""
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match=r"no feature stream for \['nonexistent'\]"):
         build_profile("u", ("m1", "nonexistent"), FEATURES)
 
 

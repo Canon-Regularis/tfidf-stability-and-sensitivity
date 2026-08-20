@@ -97,7 +97,9 @@ def table_of(n: int, **cols: list[int]) -> AttributeTable:
 def test_duplicate_identifiers_are_rejected() -> None:
     """Unique ids are the precondition of the strict total order, and so of
     every uniqueness claim this layer makes."""
-    with pytest.raises(DuplicateIdentifierError):
+    with pytest.raises(
+        DuplicateIdentifierError, match="identifier 'a' appears at positions 0 and 1"
+    ):
         AttributeTable.from_records(
             [{"doc_id": "a", "popularity": 1}, {"doc_id": "a", "popularity": 2}],
             (AttributeSpec("popularity"),),
@@ -341,12 +343,12 @@ def test_non_finite_score_is_rejected_before_sorting(
 
 
 def test_empty_corpus_is_an_error() -> None:
-    with pytest.raises(EmptyCorpusError):
+    with pytest.raises(EmptyCorpusError, match="cannot rank an empty corpus"):
         rank([], AttributeTable.from_records([], ()), PI_SCORE)
 
 
 def test_k_out_of_range_strict_raises(mini_attributes: AttributeTable) -> None:
-    with pytest.raises(KOutOfRangeError):
+    with pytest.raises(KOutOfRangeError, match="k=99 exceeds the 6 rankable documents"):
         rank_top_k([0.1] * 6, mini_attributes, PI, k=99, mode=StrictMode.STRICT)
 
 
@@ -370,7 +372,7 @@ def test_truncated_ranking_refuses_whole_corpus_questions(
     r = rank_top_k([0.9, 0.8, 0.7, 0.6, 0.5, 0.4], mini_attributes, PI, k=2)
     with pytest.raises(ValueError, match="complete ranking"):
         r.require_complete("this")
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="document 5 is not in the selected order"):
         r.rank_of(5)  # not selected
 
 
@@ -1283,7 +1285,7 @@ def test_a_truncated_ranking_says_so_when_asked_for_an_unselected_document() -> 
     with pytest.raises(KeyError, match="the ranking is truncated"):
         _ranked(4, k=2).rank_of(3)
 
-    with pytest.raises(KeyError) as caught:
+    with pytest.raises(KeyError, match="document 99 is not in the selected order") as caught:
         _ranked(4).rank_of(99)
     assert "truncated" not in str(caught.value)
 

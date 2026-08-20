@@ -256,7 +256,7 @@ def test_free_text_records_stay_out_of_the_run_record() -> None:
 def test_capture_restores_the_logger_afterwards() -> None:
     logger = logging.getLogger(ROOT_NAME)
     before, level = list(logger.handlers), logger.level
-    with pytest.raises(RuntimeError), capture():
+    with pytest.raises(RuntimeError, match="boom"), capture():
         raise RuntimeError("boom")
     assert logger.handlers == before
     assert logger.level == level
@@ -270,7 +270,7 @@ def test_configuring_logging_does_not_capture_warnings() -> None:
     Under ``filterwarnings = ["error"]`` these must abort the run instead of being
     filed."""
     configure(stream=io.StringIO())
-    with pytest.raises(UserWarning):
+    with pytest.raises(UserWarning, match="load-bearing"):
         warnings.warn("load-bearing", UserWarning, stacklevel=1)
 
 
@@ -281,7 +281,7 @@ def test_a_real_diagnostic_still_raises_with_logging_configured() -> None:
     from tfidf_stability.utils.validation import TauExceedsScoreRangeWarning
 
     configure(stream=io.StringIO())
-    with pytest.raises(TauExceedsScoreRangeWarning):
+    with pytest.raises(TauExceedsScoreRangeWarning, match="covers the entire score range"):
         TieGroupIndex.build([1.0, 0.5, 0.0], tau=2.0)
 
 

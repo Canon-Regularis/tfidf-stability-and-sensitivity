@@ -437,7 +437,7 @@ def test_a_missing_stopword_asset_raises_before_any_digest_is_computed() -> None
     """A different failure from an unrecorded one, and the two must stay
     distinct: "the file is not there" and "the file is not vouched for" need
     different fixes."""
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match="No such file or directory"):
         load_stopwords("no_such_asset_v9.txt")
 
 

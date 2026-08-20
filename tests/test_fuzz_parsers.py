@@ -314,5 +314,5 @@ def test_the_block_separator_is_validated_not_merely_skipped(valid_container) ->
     for value in (0x00, 0x20, 0x0D, 0xFF):
         mutated = bytearray(valid_container)
         mutated[offset] = value
-        with pytest.raises(TfidfStabilityError):
+        with pytest.raises(TfidfStabilityError, match="between the token and document-id blocks"):
             model_from_bytes(bytes(mutated))

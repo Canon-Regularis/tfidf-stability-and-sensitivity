@@ -325,7 +325,9 @@ def test_several_problems_are_reported_together_rather_than_one_at_a_time(
         "float_environment",
         lambda: {**real(), "rounds": 0, "subnormals_supported": False},
     )
-    with pytest.raises(NumericEnvironmentError) as caught:
+    with pytest.raises(
+        NumericEnvironmentError, match="floating-point environment is not trustworthy"
+    ) as caught:
         numerics.assert_sane_float_environment()
     message = str(caught.value)
     assert "rounding mode" in message
@@ -532,7 +534,7 @@ def test_the_exact_logarithm_survives_a_ratio_the_platform_cannot_form() -> None
     """
     assert correctly_rounded_log_ratio(10**400, 1) == pytest.approx(math.log(10) * 400)
 
-    with pytest.raises(OverflowError):
+    with pytest.raises(OverflowError, match="integer division result too large"):
         numerics.platform_log_ratio(10**400, 1)
 
 

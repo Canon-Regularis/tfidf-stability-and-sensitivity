@@ -286,7 +286,7 @@ def test_ball_is_always_contiguous_in_rank_space() -> None:
 
 
 def test_out_of_range_rank_is_rejected() -> None:
-    with pytest.raises(IndexError):
+    with pytest.raises(IndexError, match=r"rank index 7 out of range 0\.\.1"):
         tie_ball_interval((1.0, 0.5), 7, 0.1)
 
 
@@ -394,7 +394,7 @@ def test_chain_of_returns_the_unique_containing_chain() -> None:
     index = TieGroupIndex.build(s, 0.02)
     assert index.chain_of(0) == (0, 2)
     assert index.chain_of(3) == (2, 4)
-    with pytest.raises(IndexError):
+    with pytest.raises(IndexError, match="rank 99 is outside the corpus"):
         index.chain_of(99)
 
 
@@ -522,7 +522,7 @@ def test_the_group_builders_return_nothing_for_an_empty_corpus_before_checking_t
     assert tie_chains((), math.nan) == ()
     assert tie_cliques((), math.nan) == ()
 
-    with pytest.raises(IndexError):
+    with pytest.raises(IndexError, match=r"rank index 0 out of range 0\.\.-1"):
         tie_ball_interval((), 0, math.nan)
 
 

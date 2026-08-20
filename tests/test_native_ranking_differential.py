@@ -294,5 +294,5 @@ def test_the_two_backends_disagree_only_on_invalid_k_and_only_in_kind() -> None:
         assert not defined
 
         for mode in (StrictMode.STRICT, StrictMode.LENIENT):
-            with pytest.raises(KOutOfRangeError):
+            with pytest.raises(KOutOfRangeError, match="k must be positive, got 0"):
                 reference_fn([1.0, 0.5, 0.25], 0, mode=mode)

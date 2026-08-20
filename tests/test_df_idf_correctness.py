@@ -229,12 +229,12 @@ def test_a_proportional_max_df_never_admits_more_than_the_proportion() -> None:
     # The degenerate end: a cap below 1/n admits nothing rather than keeping
     # everything.
     ubiquitous = [["a", "b"] for _ in range(7)]
-    with pytest.raises(EmptyVocabularyError):
+    with pytest.raises(EmptyVocabularyError, match="over 7 documents with 2 distinct features"):
         build_vocabulary(ubiquitous, VocabularyConfig(max_df=0.95))
 
 
 def test_empty_vocabulary_raises() -> None:
-    with pytest.raises(EmptyVocabularyError):
+    with pytest.raises(EmptyVocabularyError, match="min_df=3, max_df=2"):
         build_vocabulary([["a"], ["b"]], VocabularyConfig(min_df=3))
     with pytest.raises(EmptyVocabularyError, match="empty corpus"):
         build_vocabulary([])
