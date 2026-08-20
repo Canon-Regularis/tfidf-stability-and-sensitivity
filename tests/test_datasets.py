@@ -916,3 +916,35 @@ def test_the_twin_frequency_grid_doubles() -> None:
     grid = synthetic.SyntheticSpec().twin_extra_token_df
     assert list(grid) == [2**i for i in range(len(grid))]
     assert len(grid) == 8
+
+
+def test_an_inverted_document_length_range_is_refused_rather_than_hanging() -> None:
+    """`_uniform_int` rejection-samples until a draw lands below `high - low + 1`.
+
+    With `len_max < len_min` that bound is non-positive, `bit_length()` still
+    returns 1, and every draw from `{0, 1}` fails the test -- so the generator
+    spins forever. A hang is worse than a crash: it cannot be caught by a test
+    that has to finish, and in CI it presents as a timeout with no stack.
+    """
+    with pytest.raises(ValueError, match="len_max=3 is below len_min=5"):
+        synthetic.generate(_spec(n_docs=12, vocab_size=30, len_min=5, len_max=3))
+
+
+@pytest.mark.parametrize("len_min", [0, -1])
+def test_a_document_length_below_one_is_refused(len_min: int) -> None:
+    """Zero reaches the same non-terminating loop through `_pick`, which is
+    called `length` times; a negative one produces documents of no tokens at
+    all, which the vocabulary builder would then reject far from the cause."""
+    with pytest.raises(ValueError, match=f"len_min must be at least 1, got {len_min}"):
+        synthetic.generate(_spec(n_docs=12, vocab_size=30, len_min=len_min))
+
+
+def test_the_length_range_is_checked_before_the_document_budget() -> None:
+    """Both are spec errors; the length range is the one that would hang, so it
+    is reported first even when the budget is also wrong."""
+    with pytest.raises(ValueError, match="len_max"):
+        synthetic.generate(
+            _spec(
+                n_docs=1, vocab_size=30, n_exact_duplicates=4, n_twin_pairs=4, len_min=9, len_max=2
+            )
+        )

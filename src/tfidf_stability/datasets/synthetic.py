@@ -203,6 +203,17 @@ def generate(spec: SyntheticSpec | None = None) -> SyntheticCorpus:
     cases without searching the corpus.
     """
     spec = spec or SyntheticSpec()
+    # Checked before the generator draws anything. `_uniform_int` rejection-samples
+    # until the draw lands below `high - low + 1`, so an inverted range makes that
+    # bound non-positive and the loop never terminates: a hang rather than an
+    # error, and one that cannot be caught by a test that has to finish.
+    if spec.len_min < 1:
+        raise ValueError(f"len_min must be at least 1, got {spec.len_min}")
+    if spec.len_max < spec.len_min:
+        raise ValueError(
+            f"len_max={spec.len_max} is below len_min={spec.len_min}; "
+            f"document lengths are drawn from the inclusive range between them"
+        )
     rng = random.Random(spec.seed)
 
     vocabulary = [f"w{i:05d}" for i in range(spec.vocab_size)]
