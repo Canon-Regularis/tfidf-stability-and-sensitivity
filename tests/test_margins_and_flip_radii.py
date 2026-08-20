@@ -21,6 +21,7 @@ from hypothesis import strategies as st
 from tfidf_stability.perturbation.score_bounds import certified_radius
 from tfidf_stability.ranking.attributes import AttributeSpec, AttributeTable
 from tfidf_stability.ranking.margins import (
+    Margin,
     adjacent_gaps,
     boundary_margin,
     margin_profile,
@@ -224,6 +225,7 @@ def test_margin_profile_covers_the_paper_k_set() -> None:
 # ---------------------------------------------------------------------------
 # Section 4.4: sufficiency
 # ---------------------------------------------------------------------------
+@pytest.mark.property
 @given(
     st.lists(st.sampled_from([0.0, 0.2, 0.4, 0.6, 0.8, 1.0]), min_size=6, max_size=25),
     st.integers(min_value=1, max_value=5),
@@ -350,6 +352,7 @@ scores_strategy = st.lists(
 )
 
 
+@pytest.mark.property
 @given(scores_strategy)
 def test_every_defined_margin_is_non_negative(scores: list[float]) -> None:
     s = sorted_scores_desc(scores)
@@ -358,6 +361,7 @@ def test_every_defined_margin_is_non_negative(scores: list[float]) -> None:
         assert not m.defined or m.value >= 0.0
 
 
+@pytest.mark.property
 @given(scores_strategy, st.integers(min_value=2, max_value=10))
 def test_min_adjacent_margin_lower_bounds_every_top_k_gap(scores: list[float], k: int) -> None:
     s = sorted_scores_desc(scores)
@@ -368,6 +372,7 @@ def test_min_adjacent_margin_lower_bounds_every_top_k_gap(scores: list[float], k
             assert s[j] - s[j + 1] >= m.value
 
 
+@pytest.mark.property
 @given(scores_strategy)
 def test_min_adjacent_margin_is_non_increasing_in_k(scores: list[float]) -> None:
     """Widening the window can only expose a smaller gap."""
@@ -499,3 +504,56 @@ def test_a_summary_of_only_undefined_margins_reports_no_percentiles() -> None:
     assert summary.n_defined == 0
     assert summary.n_undefined == 2
     assert math.isnan(summary.p_exact_tie), "a rate over nothing is not zero"
+
+
+def test_the_percentile_index_is_nearest_rank_on_a_known_distribution() -> None:
+    """Ten margins of 1.0 to 10.0, so every quantile has one right answer.
+
+    Nearest rank is `defined[ceil(q * n) - 1]`. Mutation testing walked through
+    six different arithmetic changes on that one line -- `q * n` to `q / n`, the
+    `- 1` to `+ 1`, the lower clamp from 0 to 1 -- because the only assertions
+    on this summary were counts. The percentiles are what section 7 reports.
+    """
+    margins = [Margin("boundary", 1, 1, float(i), True) for i in range(1, 11)]
+    summary = summarise(margins)
+    got = dict(summary.percentiles)
+
+    assert summary.n_defined == 10
+    # ceil(q*10) - 1, clamped: 0.01 -> 0, 0.25 -> 2, 0.5 -> 4, 0.75 -> 7, 0.99 -> 9.
+    assert got[0.01] == 1.0
+    assert got[0.05] == 1.0
+    assert got[0.25] == 3.0
+    assert got[0.5] == 5.0, "the median is the 5th of ten, not the 6th and not the 1st"
+    assert got[0.75] == 8.0
+    assert got[0.95] == 10.0
+    assert got[0.99] == 10.0
+
+
+def test_the_default_quantiles_are_the_seven_the_paper_reports() -> None:
+    """The set is a default argument, so nothing else pins it."""
+    margins = [Margin("boundary", 1, 1, float(i), True) for i in range(1, 11)]
+    assert [q for q, _ in summarise(margins).percentiles] == [
+        0.01,
+        0.05,
+        0.25,
+        0.5,
+        0.75,
+        0.95,
+        0.99,
+    ]
+
+
+def test_a_single_defined_margin_is_every_percentile_of_itself() -> None:
+    """n = 1 puts the lower clamp to work: `ceil(0.01 * 1) - 1` is 0."""
+    got = dict(summarise([Margin("boundary", 1, 1, 7.5, True)]).percentiles)
+    assert set(got.values()) == {7.5}
+
+
+def test_an_undefined_boundary_margin_says_which_case_it_hit() -> None:
+    """`k == N` and `k > N` are different situations -- one is the top of the
+    ranking, the other a request the corpus could not serve -- and the reason is
+    what a run report shows a reader. Swapping the test that picks between them
+    left both saying the same thing."""
+    s = (1.0, 0.5, 0.25)
+    assert boundary_margin(s, 3, mode=LENIENT).reason == "k == N: r_{k+1} does not exist"
+    assert boundary_margin(s, 99, mode=LENIENT).reason == "k clamped to N"

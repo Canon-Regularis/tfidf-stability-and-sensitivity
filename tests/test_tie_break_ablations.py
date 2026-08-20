@@ -323,3 +323,142 @@ def test_a_margin_outside_every_band_falls_into_the_last_one_rather_than_vanishi
     assert _band_of(math.nan, True, bands) == UNDEFINED_BAND
     assert _band_of(0.5, False, bands) == UNDEFINED_BAND, "undefined wins over the value"
     assert _band_of(0.0, True, bands) == EXACT_TIE_BAND
+
+
+# ---------------------------------------------------------------------------
+# The banding rule and the statistics it produces, by value
+# ---------------------------------------------------------------------------
+def test_the_bands_are_half_open_at_the_bottom_and_closed_at_the_top() -> None:
+    """`lo < value <= hi`. Which way each end points decides where a margin of
+    exactly tau lands, and section 7.3 reads the transition off the band
+    straddling tau -- so a boundary that leaked one band down would move the
+    reported transition without changing any total.
+    """
+    tau = 1e-9
+    bands = margin_bands(tau)
+    labels = {b[0] for b in bands}
+    assert "(tau/10, tau]" in labels
+    assert "(tau, 10*tau]" in labels
+
+    # Exactly tau is the top of its band, not the bottom of the next.
+    assert _band_of(tau, True, bands) == "(tau/10, tau]"
+    assert _band_of(tau + math.ulp(tau), True, bands) == "(tau, 10*tau]"
+
+    # And the same rule one decade down, so this is the rule and not a fluke of
+    # where tau happens to sit.
+    assert _band_of(tau / 10.0, True, bands) == "(tau/100, tau/10]"
+    assert _band_of(tau / 10.0 + math.ulp(tau / 10.0), True, bands) == "(tau/10, tau]"
+
+
+def test_a_tau_of_exactly_zero_is_accepted_as_the_exact_tie_baseline() -> None:
+    """The guard is `not (tau >= 0.0)`, so zero passes. Tightening it to `> 0`
+    would reject the one point every tie-break result is normalised against."""
+    strata = stratify_by_margin([], tau=0.0, ks=(2,))
+    assert strata, "a tau of zero still produces the full band set"
+    assert any(s.label == EXACT_TIE_BAND for s in strata)
+
+
+def test_the_exact_tie_band_is_the_single_point_zero() -> None:
+    """It is reported with bounds like every other band, and those bounds are
+    what a plot's axis is built from. Both ends are zero: the band holds one
+    value, which is why it is separate from the smallest numeric band."""
+    stratum = next(
+        s for s in stratify_by_margin([], tau=1e-9, ks=(2,)) if s.label == EXACT_TIE_BAND
+    )
+    assert (stratum.lo, stratum.hi) == (0.0, 0.0)
+
+
+def test_the_disagreement_rate_and_means_are_the_arithmetic_they_claim() -> None:
+    """Four queries, two of which disagree, gives one half.
+
+    Every existing assertion on these was a bound or a NaN check, so dividing by
+    the wrong thing -- or multiplying instead -- passed. The rate is section
+    7.3's headline number.
+    """
+    table = table_of([3, 2, 1, 0])
+    results = ablate_queries(
+        [
+            ("tied_a", [0.5, 0.5, 0.5, 0.5]),
+            ("tied_b", [0.5, 0.5, 0.5, 0.5]),
+            ("distinct_a", [0.9, 0.8, 0.7, 0.6]),
+            ("distinct_b", [0.9, 0.8, 0.7, 0.6]),
+        ],
+        table,
+        ks=(2,),
+    )
+    strata = stratify_by_margin(results, tau=1e-9, variant="pi_alt", ks=(2,))
+
+    tied = next(s for s in strata if s.label == EXACT_TIE_BAND)
+    assert tied.n == 2, "both all-tied queries land in the exact-tie band"
+    assert tied.disagreement_rate == tied.n_disagree / 2.0
+    assert tied.disagreement_rate in (0.0, 0.5, 1.0)
+
+    assert tied.n_disagree == 2
+    assert tied.disagreement_rate == 1.0
+    # Both means are over the band's two members, so a sum that was multiplied
+    # by the count instead of divided by it would read 4.0 here.
+    assert tied.mean_fks == 1.0
+    assert tied.mean_jaccard == 1.0
+
+    distinct = next(s for s in strata if s.label == "(100*tau, inf)")
+    assert distinct.n == 2, "the two strictly-ordered queries land far above tau"
+    assert distinct.disagreement_rate == 0.0, "distinct scores leave nothing to break"
+
+
+def test_a_comparison_nobody_ran_is_empty_rather_than_everything() -> None:
+    """The filter keeps the pairs matching the requested operators. Inverting
+    either test turns it into a filter that keeps everything else, which on a
+    result set holding several variants still fills the bands with a plausible
+    number of pairs -- just the wrong ones."""
+    table = table_of([3, 2, 1, 0])
+    results = ablate_queries([("a", [0.5, 0.5, 0.2, 0.0])], table, ks=(2,))
+    assert any(p.variant == "pi_alt" for r in results for p in r.pairs), "the premise"
+
+    for absent in ({"variant": "no_such_variant"}, {"baseline": "no_such_baseline"}):
+        strata = stratify_by_margin(results, tau=1e-9, ks=(2,), **absent)
+        assert strata, "the bands are still reported"
+        assert all(s.n == 0 for s in strata), f"nothing should match {absent}"
+
+
+def test_a_rate_over_an_empty_band_is_undefined_rather_than_zero() -> None:
+    """Already asserted for `disagreement_rate`; the two means take the same
+    view, and for the same reason: no evidence is not a measurement of zero."""
+    empty = next(s for s in stratify_by_margin([], tau=1e-9, ks=(2,)) if s.n == 0)
+    assert math.isnan(empty.disagreement_rate)
+    assert math.isnan(empty.mean_fks)
+    assert math.isnan(empty.mean_jaccard)
+
+
+def test_the_zero_norm_document_count_is_carried_rather_than_assumed() -> None:
+    """It defaults to zero and is recorded on the result, because a query whose
+    candidate set is padded with all-stopword documents produces an exact-tie
+    block that has nothing to do with the tie-break rule under test. A default
+    of anything but zero would report that block on corpora that have none."""
+    table = table_of([3, 2, 1, 0])
+    plain = ablate_query([0.9, 0.8, 0.7, 0.6], table, ks=(2,))
+    assert plain.n_zero_norm_docs == 0
+
+    padded = ablate_query([0.9, 0.8, 0.0, 0.0], table, ks=(2,), n_zero_norm_docs=2)
+    assert padded.n_zero_norm_docs == 2
+
+
+def test_the_rate_matches_on_all_three_of_operator_pair_and_k() -> None:
+    """The match is `baseline and variant and k`. Relaxing any one of the three
+    to an inequality picks up a pair from a different comparison, which still
+    yields a number and still yields a denominator -- just not the ones the
+    caller asked for."""
+    table = table_of([3, 2, 1, 0])
+    results = ablate_queries([("a", [0.5, 0.5, 0.5, 0.5])], table, ks=(2, 3))
+
+    matched, n = disagreement_rate(results, "pi", "pi_alt", 2)
+    assert n == 1, "exactly the one pair at k = 2 for this operator pair"
+
+    # None of these three exists, and each differs from the request in one field.
+    for baseline, variant, k in [
+        ("no_such_baseline", "pi_alt", 2),
+        ("pi", "no_such_variant", 2),
+        ("pi", "pi_alt", 99),
+    ]:
+        rate, count = disagreement_rate(results, baseline, variant, k)
+        assert (rate, count) == (0.0, 0), f"({baseline}, {variant}, k={k}) matched something"
+    assert matched in (0.0, 1.0)
