@@ -17,6 +17,13 @@ separately below.
 The value is not hard-coded. A literal digest would fail on any platform whose
 ``log`` rounds differently, which before G13 was every platform. Instead the
 digest is recomputed under varied conditions and required to agree.
+
+One constraint on this file: ``pytest`` is imported inside the tests that need
+it, never at module scope. ``test_the_digest_is_stable_across_processes_and_
+hash_seeds`` imports this module from a subprocess whose environment is
+deliberately stripped -- ``PATH`` is emptied so a path cannot reach a digest --
+and a top-level ``import pytest`` fails there. It fails as a CalledProcessError
+from the subprocess rather than as an ImportError naming the cause.
 """
 
 from __future__ import annotations
@@ -289,3 +296,41 @@ def test_a_run_with_no_native_backend_counts_as_a_reproducible_build(
     assert manifest.environment["native"] is None
     assert manifest.is_reproducible_build is True
     manifest.require_reproducible()
+
+
+def test_the_environment_records_the_interpreter_version_not_its_build_banner() -> None:
+    """`sys.version` is "3.12.1 (main, ...) [GCC ...]". Only the first field is
+    the version; the rest is a build banner that differs between two installs of
+    the same interpreter and would make the environment block -- which is inside
+    the manifest digest -- stop matching across machines."""
+    import platform
+
+    assert environment_block()["python"] == platform.python_version()
+
+
+def test_a_native_block_that_does_not_say_it_is_reproducible_is_not_assumed_to_be() -> None:
+    """The flag is absent on a build too old to report it. Defaulting to True
+    would let exactly the builds that cannot describe themselves publish
+    numbers."""
+    import pytest
+
+    manifest = RunManifest("stability_profile")
+    manifest.environment = {**manifest.environment, "native": {"compiler_id": "GNU"}}
+    assert manifest.is_reproducible_build is False
+    with pytest.raises(RuntimeError, match="not reproducible"):
+        manifest.require_reproducible()
+
+
+def test_the_refusal_names_the_two_flags_that_caused_it() -> None:
+    """The message is the whole remedy: it tells someone which build option to
+    drop. Losing the native block on the way into the message leaves it saying
+    `fast_math=None`, which names nothing."""
+    import pytest
+
+    manifest = RunManifest("stability_profile")
+    manifest.environment = {
+        **manifest.environment,
+        "native": {"reproducible": False, "fast_math": True, "arch_tune": False},
+    }
+    with pytest.raises(RuntimeError, match=r"fast_math=True, arch_tune=False"):
+        manifest.require_reproducible()
