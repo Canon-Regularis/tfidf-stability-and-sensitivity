@@ -17,12 +17,19 @@ import pytest
 from tfidf_stability.analysis.noise_floor import (
     NoiseFloor,
     PolicyError,
+    TauBand,
     measure_noise_floor,
     tau_band,
     verify_band_invariance,
 )
-from tfidf_stability.analysis.stability_profile import certificate_audit, transition_curve
+from tfidf_stability.analysis.stability_profile import (
+    CertificateAudit,
+    TransitionPoint,
+    certificate_audit,
+    transition_curve,
+)
 from tfidf_stability.analysis.summarise import (
+    DEFAULT_PERCENTILES,
     ExperimentResult,
     percentile,
     summarise_values,
@@ -391,14 +398,6 @@ def test_a_band_with_a_zero_floor_reports_no_width_rather_than_minus_infinity() 
 # ---------------------------------------------------------------------------
 # The band probe
 # ---------------------------------------------------------------------------
-def test_a_probe_count_below_one_is_refused_rather_than_dividing_by_zero() -> None:
-    """`i / (probes - 1)` divided by zero at probes = 1 and said nothing useful.
-    A count below one is a caller error and now says so."""
-    band = tau_band(_floor(1e-16), [[1.0, 0.5, 0.25]])
-    with pytest.raises(ValueError, match="probes must be at least 1"):
-        verify_band_invariance(band, [[1.0, 0.5, 0.25]], probes=0)
-
-
 def test_a_single_probe_samples_the_lower_endpoint_rather_than_failing() -> None:
     """One probe cannot be spaced across a band, so it is the floor itself."""
     band = tau_band(_floor(1e-16), [[1.0, 0.5, 0.25]])
@@ -619,3 +618,594 @@ def test_a_tau_beyond_the_band_moves_the_tie_structure_it_was_meant_to_preserve(
     assert not verify_band_invariance(too_wide, scores), (
         "a band spanning a real gap cannot leave the tie structure invariant"
     )
+
+
+# ---------------------------------------------------------------------------
+# percentile: a nearest-rank sample element, on a 0-to-100 scale
+# ---------------------------------------------------------------------------
+# There are two percentile functions in this package and they take different
+# scales. This one is `p in [0, 100]`; `ranking.margins.summarise` takes
+# quantiles in `[0, 1]`. Passing 0.5 here asks for the half-a-percent point and
+# returns the sample minimum, which is a plausible number and the wrong one.
+@pytest.mark.parametrize(("p", "expected"), [(0, 1.0), (25, 1.0), (50, 2.0), (75, 3.0), (100, 4.0)])
+def test_the_percentile_scale_runs_to_a_hundred_and_not_to_one(p: float, expected: float) -> None:
+    """Every returned value is a sample element: nearest rank, never
+    interpolated, because a margin distribution has an atom at exactly zero and
+    interpolating across it invents a value no query produced."""
+    assert percentile([1.0, 2.0, 3.0, 4.0], p) == expected
+
+
+def test_asking_on_the_wrong_scale_silently_returns_the_minimum() -> None:
+    """`0.5` meant as a median is half a percent, which rounds to rank one.
+
+    Pinned because both spellings exist in this package and neither raises: a
+    caller who reaches for the wrong one gets the sample minimum reported as a
+    median, and every downstream figure is quietly the wrong statistic.
+    """
+    sample = [1.0, 2.0, 3.0, 4.0]
+    assert percentile(sample, 0.5) == 1.0, "half a percent"
+    assert percentile(sample, 50) == 2.0, "the median it was probably meant to be"
+
+
+@pytest.mark.parametrize(("p", "expected"), [(-10, 1.0), (200, 4.0), (-math.inf, 1.0)])
+def test_a_percentile_outside_the_scale_clamps_to_an_end(p: float, expected: float) -> None:
+    """The index is clamped rather than checked, so an out-of-range percentile
+    reports an extreme instead of raising. That is what makes `p = 100` mean the
+    maximum rather than an index error."""
+    assert percentile([1.0, 2.0, 3.0, 4.0], p) == expected
+
+
+def test_a_percentile_of_an_empty_sample_is_undefined_rather_than_zero() -> None:
+    """NaN marks an undefined quantity here and is never a measurement -- an
+    empty band is no evidence, not evidence of zero."""
+    assert math.isnan(percentile([], 50))
+
+
+def test_a_single_observation_is_every_percentile_of_itself() -> None:
+    assert percentile([3.0], 0) == percentile([3.0], 50) == percentile([3.0], 100) == 3.0
+
+
+def test_the_sample_is_assumed_sorted_and_is_not_checked() -> None:
+    """Sorting is the caller's job: they already hold a sorted array, and
+    re-sorting per percentile would be the dominant cost. An unsorted sample
+    therefore returns a sample element that is not the percentile.
+
+    Pinned as the precondition it is, since the failure is silent and the value
+    returned still looks like an observation.
+    """
+    unsorted = [4.0, 1.0, 3.0, 2.0]
+    assert percentile(unsorted, 50) == 1.0, "the element at the median rank, not the median"
+    assert percentile(sorted(unsorted), 50) == 2.0
+
+
+# ---------------------------------------------------------------------------
+# TauBand: the two-sided constraint, and the two degenerate bands
+# ---------------------------------------------------------------------------
+# The band is `[tau_floor, g_min)`: above arithmetic noise and below the
+# smallest gap the corpus actually exhibits. It is a plain frozen dataclass, so
+# every branch is reachable by construction rather than by fitting a corpus that
+# happens to produce one.
+def _band(tau_floor: float, g_min: float, *, gaps_in_band: int = 0) -> TauBand:
+    """A band built directly. Local by house convention."""
+    return TauBand(
+        tau_floor=tau_floor,
+        g_min=g_min,
+        n_gaps_in_band=gaps_in_band,
+        n_exact_ties=0,
+        n_positive_gaps=1,
+    )
+
+
+def test_a_band_is_valid_only_while_the_floor_stays_strictly_below_the_smallest_gap() -> None:
+    """Strictly. At equality there is no tau that is both above the noise and
+    below every gap, so the constraint has no solution -- which G23 calls a
+    finding rather than an error."""
+    assert _band(1e-16, 1e-9).is_valid
+    assert not _band(1e-9, 1e-9).is_valid, "the boundary itself is empty"
+    assert not _band(1e-8, 1e-9).is_valid, "and beyond it inverted"
+
+
+def test_an_empty_band_reports_every_derived_quantity_as_undefined() -> None:
+    """No tau exists, so there is nothing to quote and nothing to be invariant
+    over. NaN rather than zero, which would read as a legitimate exact-tie
+    baseline."""
+    empty = _band(1e-9, 1e-9)
+
+    assert not empty.is_invariant
+    assert math.isnan(empty.decades)
+    assert math.isnan(empty.display_tau())
+
+
+def test_a_gap_inside_the_band_costs_invariance_without_costing_validity() -> None:
+    """The two properties are separate claims. A band can admit a tau while the
+    tie structure still changes across it, and that is exactly the case where
+    quoting a single tau would be misleading."""
+    breached = _band(1e-16, 1e-9, gaps_in_band=1)
+
+    assert breached.is_valid
+    assert not breached.is_invariant
+    assert not math.isnan(breached.display_tau()), "a tau still exists to quote"
+
+
+def test_the_quoted_tau_is_the_geometric_midpoint_of_an_ordinary_band() -> None:
+    """Geometric rather than arithmetic, because the band spans decades: the
+    arithmetic mean of `1e-16` and `1e-9` sits a hair below the upper endpoint
+    and would look fitted to it."""
+    band = _band(1e-16, 1e-9)
+
+    assert band.display_tau() == math.sqrt(1e-16 * 1e-9)
+    assert band.decades == pytest.approx(7.0)
+
+
+def test_an_all_tied_corpus_quotes_the_floor_itself() -> None:
+    """`g_min` is infinite when no strictly-positive gap exists. The midpoint
+    would be infinite too, at which every tie ball swallows the corpus -- so the
+    smallest admissible tau is returned instead. No gap exists to cross, so
+    every admissible tau gives the same structure anyway.
+    """
+    all_tied = _band(1e-16, math.inf)
+
+    assert all_tied.is_valid
+    assert all_tied.is_invariant
+    assert all_tied.display_tau() == 1e-16
+    assert math.isinf(all_tied.decades)
+
+
+def test_a_corpus_with_no_measured_error_quotes_half_the_upper_endpoint() -> None:
+    """`tau_floor` is zero when every reduction policy agreed with exact
+    arithmetic. The geometric midpoint would collapse to zero -- legal under G3,
+    but that is the exact-tie baseline rather than a tau above the noise -- so
+    half the upper endpoint is returned instead.
+    """
+    no_error = _band(0.0, 1e-9)
+
+    assert no_error.display_tau() == 5e-10
+    assert math.isnan(no_error.decades), "a ratio against zero has no logarithm"
+
+
+def test_both_degeneracies_at_once_collapse_the_quoted_tau_to_zero() -> None:
+    """No measured error and no positive gap. The infinite-`g_min` branch is
+    checked first, so the answer is the floor -- which is zero. Pinned because
+    it is the one configuration where the quoted tau is the exact-tie baseline,
+    and a reader must not mistake it for a measurement.
+    """
+    both = _band(0.0, math.inf)
+
+    assert both.is_valid, "vacuously: zero is below infinity"
+    assert both.display_tau() == 0.0
+
+
+def test_the_band_reports_its_endpoints_in_hex_as_well_as_decimal() -> None:
+    """The decimal rendering of a subnormal loses bits a reader may need to
+    reproduce the band exactly, so both go into the record."""
+    payload = _band(1e-16, 1e-9).as_dict()
+
+    assert payload["tau_floor_hex"] == float.hex(1e-16)
+    assert payload["g_min_hex"] == float.hex(1e-9)
+    assert set(payload) >= {"is_valid", "is_invariant", "decades", "display_tau"}
+
+
+# ---------------------------------------------------------------------------
+# TransitionPoint: one sampled ratio on the A1 curve
+# ---------------------------------------------------------------------------
+def test_a_ratio_below_one_is_covered_by_the_certificate_and_at_one_is_not() -> None:
+    """The theorem is `eps < m_k / 2`, strictly, so `ratio == 1.0` sits exactly
+    on the boundary and is uncovered.
+
+    Sampled anyway: a flip at the boundary rather than beyond it is the
+    interesting failure, and excluding the point would hide it.
+    """
+    assert TransitionPoint(ratio=0.99, n_flips=0, n_trials=10).within_certificate
+    assert not TransitionPoint(ratio=1.0, n_flips=0, n_trials=10).within_certificate
+    assert not TransitionPoint(ratio=1.01, n_flips=0, n_trials=10).within_certificate
+
+
+def test_a_ratio_of_zero_is_covered_because_no_perturbation_is_applied() -> None:
+    """The degenerate left end of the sweep."""
+    assert TransitionPoint(ratio=0.0, n_flips=0, n_trials=10).within_certificate
+
+
+def test_a_flip_rate_over_no_trials_is_undefined_rather_than_zero() -> None:
+    """An unsampled ratio is no evidence, and a zero would plot as a point on
+    the transition curve that no trial produced."""
+    assert math.isnan(TransitionPoint(ratio=0.5, n_flips=0, n_trials=0).flip_rate)
+
+
+@pytest.mark.parametrize(
+    ("flips", "trials", "rate"), [(0, 10, 0.0), (5, 10, 0.5), (10, 10, 1.0), (1, 3, 1 / 3)]
+)
+def test_the_flip_rate_is_the_share_of_trials_that_flipped(
+    flips: int, trials: int, rate: float
+) -> None:
+    """Reported with its denominator, because a rate over three trials and one
+    over thirty thousand are different claims."""
+    point = TransitionPoint(ratio=0.5, n_flips=flips, n_trials=trials)
+    assert point.flip_rate == pytest.approx(rate)
+    assert point.as_dict()["n_trials"] == trials
+
+
+# ---------------------------------------------------------------------------
+# CertificateAudit: soundness is not the same as having tested anything
+# ---------------------------------------------------------------------------
+def _audit(cu: int = 0, cc: int = 0, uu: int = 0, uc: int = 0, **kw: int) -> CertificateAudit:
+    """The 2x2 table, built directly. Local by house convention."""
+    return CertificateAudit(
+        certified_unchanged=cu,
+        certified_changed=cc,
+        uncertified_unchanged=uu,
+        uncertified_changed=uc,
+        n_undefined=kw.get("n_undefined", 0),
+        n_exact_tie=kw.get("n_exact_tie", 0),
+    )
+
+
+def test_a_single_certified_failure_makes_the_audit_unsound() -> None:
+    """`certified_changed` must be zero. Any other value falsifies section 4.4:
+    it is a bug or a broken proof, never a statistic."""
+    assert _audit(cu=100, cc=0).is_sound
+    assert not _audit(cu=100, cc=1).is_sound
+
+
+def test_an_audit_that_drew_no_certified_perturbation_is_sound_and_says_nothing() -> None:
+    """The distinction the two properties exist to keep apart.
+
+    `is_sound` is `certified_changed == 0`, which an audit with an empty
+    certified cell satisfies having checked the theorem zero times. An earlier
+    version of the section 4.4 attack reported thousands of "certified
+    perturbations" with none inside the radius, making its zero-violation result
+    vacuous -- so soundness must always be read beside the count.
+    """
+    vacuous = _audit(uu=1000, uc=500)
+
+    assert vacuous.is_sound, "vacuously"
+    assert not vacuous.is_conclusive
+    assert vacuous.n_certified == 0
+
+
+def test_one_certified_perturbation_is_enough_to_make_the_audit_conclusive() -> None:
+    """The threshold is "any at all", not a sample-size rule: the theorem is a
+    guarantee, so a single counterexample would refute it and a single
+    confirmation is a real test of it."""
+    assert _audit(cu=1).is_conclusive
+    assert _audit(cc=1).is_conclusive, "even a failing one tested it"
+
+
+def test_conservatism_is_reported_over_the_uncertified_cases_alone() -> None:
+    """The certificate is sufficient, not necessary, so the interesting figure
+    is how often it declined to certify something that was in fact stable.
+    Accuracy over the whole table would reward a certificate that always said
+    no."""
+    assert _audit(cu=10, uu=3, uc=1).conservatism == 0.75
+    assert _audit(cu=10, uu=0, uc=4).conservatism == 0.0
+
+
+def test_conservatism_over_no_uncertified_cases_is_undefined() -> None:
+    """Every perturbation was certified, so there is no declined case to have
+    been conservative about. NaN rather than 1.0, which would claim perfect
+    conservatism from no evidence."""
+    assert math.isnan(_audit(cu=10).conservatism)
+
+
+def test_the_excluded_and_undefined_counts_travel_with_the_table() -> None:
+    """Exact-tie queries are excluded from the A1 curve because the tie-break
+    already decides membership there. Counted rather than dropped, so the
+    exclusion is visible in the published record rather than inferred from a
+    total that does not add up.
+    """
+    audit = _audit(cu=5, uu=2, n_undefined=3, n_exact_tie=7)
+    payload = audit.as_dict()
+
+    assert payload["n_exact_tie"] == 7
+    assert payload["n_undefined"] == 3
+    assert payload["n_certified"] == 5
+    assert set(payload) >= {"is_sound", "is_conclusive", "conservatism"}
+
+
+# ---------------------------------------------------------------------------
+# verify_band_invariance: probing a band whose endpoints may be degenerate
+# ---------------------------------------------------------------------------
+#: A corpus with one clean gap structure, so any change in the probed tie shape
+#: is attributable to the tau rather than to the scores.
+_SPREAD = [[1.0, 0.5, 0.0]]
+
+
+def test_an_invalid_band_verifies_nothing_and_says_so() -> None:
+    """There is no interval to probe. `False` rather than a vacuous `True`,
+    which would report the invariance upheld having checked it nowhere."""
+    assert verify_band_invariance(_band(1e-9, 1e-9), _SPREAD) is False
+
+
+def test_an_ordinary_band_holds_its_tie_structure_across_every_probe() -> None:
+    """Piecewise constancy already proves this when no gap lies inside the band.
+    The probe exercises the code anyway, so a tau comparison made with the wrong
+    strictness would surface here rather than in an argument."""
+    assert verify_band_invariance(_band(1e-16, 1e-9), _SPREAD) is True
+
+
+@pytest.mark.parametrize("probes", [0, -1, -(2**20)])
+def test_a_probe_count_below_one_is_refused_rather_than_dividing_by_zero(probes: int) -> None:
+    """The spacing is `i / (probes - 1)`, which divided by zero at a single
+    probe rather than saying so. The guard names the value it got."""
+    with pytest.raises(ValueError, match=f"probes must be at least 1, got {probes}"):
+        verify_band_invariance(_band(1e-16, 1e-9), _SPREAD, probes=probes)
+
+
+def test_a_single_probe_takes_the_lower_endpoint_rather_than_spacing_nothing() -> None:
+    """One probe cannot be spaced across a band. The lower endpoint is the
+    meaningful choice: it is the smallest tau the band admits."""
+    assert verify_band_invariance(_band(1e-16, 1e-9), _SPREAD, probes=1) is True
+
+
+def test_a_band_wide_enough_to_swallow_a_real_gap_fails_verification() -> None:
+    """The negative case that makes the positive one evidence. With the upper
+    endpoint above an actual score gap, the tie structure changes across the
+    band and the probe detects it."""
+    assert verify_band_invariance(_band(1e-16, 10.0), _SPREAD) is False
+
+
+def test_a_degenerate_lower_endpoint_is_substituted_rather_than_logged() -> None:
+    """`tau_floor` is zero when every reduction policy was correctly-rounded,
+    and `log10(0)` raises. A tiny positive value is substituted so the reachable
+    part of the band is still probed, and `tau = 0` is appended because it is
+    admissible and is the exact-tie baseline.
+    """
+    assert verify_band_invariance(_band(0.0, 1e-9), _SPREAD) is True
+
+
+def test_a_degenerate_upper_endpoint_is_substituted_and_then_fails_honestly() -> None:
+    """`g_min` is infinite when no strictly-positive gap exists. A finite stand
+    -in is substituted so the probe runs at all -- and on a corpus that *does*
+    have gaps, that stand-in reaches above them, so the structure moves and the
+    answer is `False`.
+
+    Pinned as the honest outcome rather than a special case: an infinite `g_min`
+    paired with a gapped corpus is a contradiction between the band and the
+    scores it was supposedly measured from.
+    """
+    assert verify_band_invariance(_band(1e-16, math.inf), _SPREAD) is False
+
+
+# ---------------------------------------------------------------------------
+# certificate_audit: which queries the audit refuses to count, and why
+# ---------------------------------------------------------------------------
+def test_a_k_past_the_end_of_a_query_is_counted_as_undefined_not_dropped(a1_setup) -> None:
+    """`k >= len(scores)` has no boundary to certify. Counted so the published
+    record shows how much of the query set the audit could not speak for, rather
+    than reporting a rate over a denominator that quietly shrank."""
+    vectors, table = a1_setup
+    audit = certificate_audit(vectors, table, k=999, seed=1, trials=2)
+
+    assert audit.n_undefined == len(vectors)
+    assert audit.n_certified == 0
+    assert not audit.is_conclusive, "nothing was tested, so soundness says nothing"
+
+
+def test_an_exact_tie_query_is_excluded_and_counted_separately(a1_setup) -> None:
+    """A2's regime, and the exclusion has a recorded reason.
+
+    At `m_k = 0` the radius is zero, so `eps` is zero, the perturbed scores
+    equal the originals element for element, `realised < 0.0` is false and
+    "unchanged" is trivially true. Every such trial landed in
+    (uncertified, unchanged) and inflated the published conservatism with cases
+    where nothing was perturbed.
+
+    The mini corpus embeds an exact-duplicate pair, so this is reachable rather
+    than hypothetical.
+    """
+    vectors, table = a1_setup
+    tied = [[0.5] * len(vectors[0])]
+    audit = certificate_audit(tied, table, k=1, seed=1, trials=5)
+
+    assert audit.n_exact_tie == 1
+    assert audit.n_certified == 0
+    assert audit.uncertified_unchanged == 0, "the trials never ran at all"
+
+
+def test_the_counted_categories_partition_every_query(a1_setup) -> None:
+    """Undefined, exact-tie, and trialled: each query lands in exactly one, so
+    the three counts reconcile against the query set. A query silently in none
+    of them would make every rate above it wrong by an unknown amount.
+    """
+    vectors, table = a1_setup
+    trials = 4
+    audit = certificate_audit(vectors, table, k=2, seed=7, trials=trials)
+
+    counted = audit.n_certified + audit.uncertified_unchanged + audit.uncertified_changed
+    trialled = counted // trials
+    assert audit.n_undefined + audit.n_exact_tie + trialled == len(vectors)
+
+
+def test_the_audit_is_reproducible_from_its_seed(a1_setup) -> None:
+    """A local generator, seeded per call. Two audits at one seed must agree
+    exactly or a published 2x2 table could not be rerun."""
+    vectors, table = a1_setup
+    first = certificate_audit(vectors, table, k=2, seed=11, trials=6)
+    second = certificate_audit(vectors, table, k=2, seed=11, trials=6)
+
+    assert first.as_dict() == second.as_dict()
+
+
+def test_the_audit_does_not_disturb_the_global_random_state(a1_setup) -> None:
+    """`random.Random(seed)` rather than `random.seed`. Reseeding the module
+    generator would make every other seeded thing in the process depend on
+    whether an audit had run."""
+    import random as _random
+
+    vectors, table = a1_setup
+    _random.seed(1234)
+    before = _random.random()
+
+    _random.seed(1234)
+    certificate_audit(vectors, table, k=2, seed=99, trials=3)
+    assert _random.random() == before
+
+
+def test_perturbations_straddle_the_radius_so_both_cells_are_populated(a1_setup) -> None:
+    """Drawing only tiny perturbations would make the certificate look trivially
+    sound: every trial inside the radius and unchanged. The draw goes up to
+    `max_ratio` times the radius so the uncertified row is reached too."""
+    vectors, table = a1_setup
+    audit = certificate_audit(vectors, table, k=2, seed=3, trials=40)
+
+    assert audit.n_certified > 0, "the certified row was reached"
+    assert audit.uncertified_unchanged + audit.uncertified_changed > 0, "and the uncertified one"
+    assert audit.is_sound
+    assert audit.is_conclusive
+
+
+# ---------------------------------------------------------------------------
+# summarise_values: the mean is summed exactly, and an empty sample says nothing
+# ---------------------------------------------------------------------------
+def test_the_mean_is_summed_exactly_rather_than_left_to_right() -> None:
+    """`math.fsum`, not an accumulator. A margin sample spans many orders of
+    magnitude -- an exact tie at 0.0 sits beside a separation near 1.0 -- and a
+    left-to-right accumulation over the sorted values cancels the small ones
+    away entirely.
+
+    The contrast is written out rather than taken from `sum`: CPython 3.12 gave
+    the builtin Neumaier compensation for floats, so `sum` no longer shows the
+    failure that the accumulator here still has.
+    """
+    sample = [1.0, 1e100, 1.0, -1e100]
+
+    running = 0.0
+    for value in sorted(sample):
+        running += value
+    assert running == 0.0, "the accumulation this guards against, on the sorted values"
+
+    d = summarise_values("m", sample)
+    assert d.mean == math.fsum(sample) / 4 == 0.5
+
+
+def test_an_empty_sample_has_no_zero_share_rather_than_a_share_of_zero() -> None:
+    """`n_zero / n` is 0/0. NaN is this package's mark for an undefined
+    quantity: no observations is no evidence about the exact-tie rate, whereas
+    0.0 would publish "no exact ties were seen" from a sample that saw
+    nothing."""
+    empty = summarise_values("m", [])
+    assert empty.n == 0
+    assert empty.n_zero == 0, "no observations, so none of them were ties"
+    assert math.isnan(empty.share_zero)
+
+    all_undefined = summarise_values("m", [math.nan, math.nan])
+    assert math.isnan(all_undefined.share_zero), "an all-NaN sample is empty too"
+
+
+def test_a_sample_of_one_zero_is_entirely_ties() -> None:
+    """The other end of the same ratio, so the NaN above is shown to be the
+    empty case rather than the general one."""
+    assert summarise_values("m", [0.0]).share_zero == 1.0
+
+
+def test_the_published_record_names_the_percentile_method() -> None:
+    """Nearest-rank and interpolated percentiles disagree wherever the
+    distribution has an atom, and a margin distribution has one at exactly zero.
+    A reader recomputing a published p50 with numpy's default would get a
+    different number and no way to tell which convention produced the original.
+    """
+    recorded = summarise_values("m", [0.0, 1.0]).as_dict()
+    assert recorded["percentile_method"] == "nearest-rank (no interpolation)"
+
+
+def test_the_record_carries_the_undefined_count_beside_the_statistics() -> None:
+    """A summary over mostly undefined values has to be visibly thin. Reporting
+    the statistics without `n_nan` would present a p50 over three observations
+    exactly as one over three hundred."""
+    recorded = summarise_values("m", [1.0, math.nan, math.nan, math.nan]).as_dict()
+
+    assert recorded["n"] == 1
+    assert recorded["n_nan"] == 3
+    assert recorded["share_zero"] == 0.0, "one observation, and it was not a tie"
+
+
+def test_an_all_nan_summary_reports_every_percentile_as_undefined() -> None:
+    """Not as zero, and not by omitting the keys: a reader diffing two runs'
+    records needs the same shape from both."""
+    recorded = summarise_values("m", [math.nan]).as_dict()
+
+    assert set(recorded["percentiles"]) == set(
+        summarise_values("m", [1.0]).as_dict()["percentiles"]
+    )
+    assert all(math.isnan(v) for v in recorded["percentiles"].values())
+
+
+# ---------------------------------------------------------------------------
+# percentile: a positive percentile whose rank underflows to zero
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("p", [5e-324, 1e-320, 1e-300])
+def test_a_positive_percentile_too_small_to_reach_rank_one_returns_the_minimum(
+    p: float,
+) -> None:
+    """`max(1, rank)`. The guards above line 77 only reject `p <= 0`, so a
+    subnormal-but-positive percentile gets past them and then computes
+    `ceil(p / 100 * n)`, which underflows to 0.
+
+    Without the clamp the index is `-1`, which Python reads from the far end:
+    the smallest percentile anyone can ask for would return the sample
+    **maximum**. Not an exception -- a plausible number, off by the width of
+    the distribution.
+    """
+    sample = [1.0, 2.0, 3.0, 4.0]
+    assert percentile(sample, p) == 1.0
+    assert percentile(sample, p) != sample[-1], "the wrong end is what the clamp prevents"
+
+
+def test_the_rank_of_such_a_percentile_really_does_underflow() -> None:
+    """The premise. If `p / 100 * n` stayed positive the clamp above would be
+    guarding nothing and the test would pass for the wrong reason."""
+    assert math.ceil(5e-324 / 100.0 * 4) == 0
+    assert math.ceil(1.0 / 100.0 * 4) == 1, "an ordinary percentile reaches rank one"
+
+
+def test_the_summary_reports_both_ends_of_the_sample() -> None:
+    """`minimum` and `maximum` come off opposite ends of the sorted values. A
+    summary whose maximum is its minimum reads as a degenerate distribution --
+    every margin identical -- which is a finding this project would report, so
+    it must not be an artefact of the summariser."""
+    d = summarise_values("m", [3.0, 1.0, 2.0])
+
+    assert d.minimum == 1.0
+    assert d.maximum == 3.0
+    assert d.minimum != d.maximum, "three distinct values are not a degenerate sample"
+
+
+def test_the_default_percentiles_keep_both_tails() -> None:
+    """p1 and p99 are where the near-tie behaviour lives: the interesting mass
+    of a margin distribution is at the bottom, and a grid starting at p5 would
+    not show it. p0 and p100 restate min and max under the same nearest-rank
+    convention, so a reader comparing them is comparing like with like.
+    """
+    assert DEFAULT_PERCENTILES == (0, 1, 5, 25, 50, 75, 95, 99, 100)
+
+    keys = summarise_values("m", [1.0, 2.0]).percentiles
+    assert list(keys) == [f"p{p}" for p in DEFAULT_PERCENTILES]
+
+
+def test_the_first_percent_of_a_large_sample_is_not_the_minimum() -> None:
+    """`p <= 0.0` is a shortcut for the bottom of the scale, not for the bottom
+    of the sample. On 200 observations the first percentile is the second
+    element, and a guard that swallowed everything up to p1 would report the
+    minimum as though 1% of the mass sat at or below it.
+    """
+    sample = [float(i) for i in range(200)]
+
+    assert percentile(sample, 1.0) == 1.0
+    assert percentile(sample, 0.0) == 0.0, "the scale's bottom is still the minimum"
+
+
+def test_the_two_shortcut_guards_agree_with_the_general_case_at_their_boundaries() -> None:
+    """`p <= 0` and `p >= 100` return an end directly, but the rank arithmetic
+    reaches the same elements: `ceil(0) = 0` clamps to rank one, and
+    `ceil(100/100 * n) = n` is the last rank.
+
+    Pinned because it says what those two branches are -- shortcuts, not
+    corrections -- so a change to the rank formula that broke the agreement
+    would be visible rather than hidden behind them.
+    """
+    sample = [1.0, 2.0, 3.0, 4.0]
+    n = len(sample)
+
+    assert math.ceil(0.0 / 100.0 * n) == 0, "clamped to rank one by max(1, rank)"
+    assert math.ceil(100.0 / 100.0 * n) == n
+    assert percentile(sample, 0.0) == sample[max(1, 0) - 1]
+    assert percentile(sample, 100.0) == sample[n - 1]
