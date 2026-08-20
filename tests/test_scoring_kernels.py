@@ -421,3 +421,56 @@ def test_a_posting_naming_a_document_outside_the_corpus_is_rejected() -> None:
     wrap round to a real document at the other end."""
     assert not _index([0, 2, 3], [0, 7, 1], [1.0, 2.0, 3.0]).is_canonical()
     assert not _index([0, 2, 3], [-1, 2, 1], [1.0, 2.0, 3.0]).is_canonical()
+
+
+def test_a_term_with_no_postings_leaves_the_index_canonical() -> None:
+    """An empty column is `lo == hi`, not an error. The check rejects a colptr
+    that *decreases*; treating equality as a decrease would condemn any index
+    holding a term that survived the vocabulary but appears in no document."""
+    empty_middle = _index([0, 1, 1, 2], [0, 2], [1.0, 2.0], n_rows=3, n_cols=3)
+    assert empty_middle.is_canonical()
+    assert empty_middle.df(1) == 0, "the middle term really has no postings"
+
+
+def test_a_posting_one_past_the_last_document_is_out_of_range() -> None:
+    """Documents are 0-based, so `n_rows` itself is the first invalid index and
+    the one an off-by-one produces. It would read past the score accumulator."""
+    assert not _index([0, 1, 2], [0, 3], [1.0, 2.0], n_rows=3, n_cols=2).is_canonical()
+    assert _index([0, 1, 2], [0, 2], [1.0, 2.0], n_rows=3, n_cols=2).is_canonical()
+
+
+def test_a_query_of_explicit_zeros_scores_zero_everywhere(
+    model: TfidfModel, index: InvertedIndex
+) -> None:
+    """A vector can carry stored entries whose values are all 0.0 -- a query
+    built from tokens that are all in the vocabulary but weightless. Its norm is
+    zero while its nnz is not, so the degenerate check has to catch either
+    condition. Requiring both divides by zero (spec_addenda G3).
+    """
+    zero_valued = SparseVector(indices=(0, 2), values=(0.0, 0.0), dim=len(model.vocabulary))
+    assert zero_valued.nnz == 2, "the premise: stored entries, no magnitude"
+
+    norms = model.matrix.row_norms()
+    assert taat_scores(zero_valued, index, norms) == [0.0] * model.n_documents
+    assert daat_scores(zero_valued, model.matrix, norms) == [0.0] * model.n_documents
+
+
+def test_the_scratch_records_each_touched_document_once(
+    model: TfidfModel, index: InvertedIndex, corpus: list[list[str]]
+) -> None:
+    """`touched` is the reset list: everything the accumulator wrote, cleared
+    before the next query. A document appended once per matching term instead of
+    once per query still produces the right scores, and grows without bound as
+    the scratch is reused."""
+    query = TfidfVectoriser.transform_query(corpus[0], model)
+
+    # Every policy: the naive path accumulates into a dense array and the
+    # compensated ones collect per-document addend lists, and they keep their
+    # own copies of this bookkeeping.
+    for policy in POLICIES:
+        scratch = ScoringScratch()
+        taat_scores(query, index, model.matrix.row_norms(policy), policy, scratch=scratch)
+        assert scratch.touched, f"the query matched something under {policy}"
+        assert len(scratch.touched) == len(set(scratch.touched)), (
+            f"a document was recorded more than once under {policy}"
+        )

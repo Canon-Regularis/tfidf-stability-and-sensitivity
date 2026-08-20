@@ -543,3 +543,44 @@ def test_the_tf_reconstruction_refuses_to_divide_by_a_degenerate_denominator() -
     tf = 5 / 6
     assert same_bits(_exact_tf(tf * idf, idf, 6), tf)
     assert (tf * idf) / idf != tf, "the premise: the naive round trip is wrong here"
+
+
+def test_zero_norm_documents_are_exactly_the_ones_with_no_magnitude(mini_model) -> None:  # type: ignore[no-untyped-def]
+    """A document whose every token was a stopword embeds to the zero vector.
+    Its count is reported in every experiment, because it is the regime the
+    section 4.5 tie-break analysis covers: those documents all score exactly
+    zero and the ranking among them falls entirely to the tie-break.
+    """
+    reported = mini_model.zero_norm_documents
+    expected = tuple(i for i, n in enumerate(mini_model.norms) if n == 0.0)
+
+    assert reported == expected
+    assert reported, "the mini corpus embeds an all-stopword document on purpose"
+    assert len(reported) < mini_model.n_documents, "and it is not the whole corpus"
+    assert all(mini_model.norms[i] == 0.0 for i in reported)
+    assert all(
+        mini_model.norms[i] > 0.0 for i in range(mini_model.n_documents) if i not in reported
+    )
+
+
+def test_a_query_is_weighted_by_multiplying_tf_into_idf(mini_model, mini_features) -> None:  # type: ignore[no-untyped-def]
+    """`w = tf * idf`, on the query side as on the document side, using the
+    fitted model's own idf (G12: nothing is refitted for a query).
+
+    Asserted bitwise against the two factors. Dividing instead would still give
+    a plausible ranking -- rarer terms would simply count for less rather than
+    more -- and every cosine would still lie in [0, 1].
+    """
+    from tfidf_stability.vectorisation.tf import term_frequencies
+
+    query = TfidfVectoriser.transform_query(mini_features[0], mini_model)
+    tf, _ = term_frequencies(mini_features[0], mini_model.vocabulary)
+
+    assert query.indices == tf.indices
+    assert query.dim == len(mini_model.vocabulary)
+    assert query.nnz > 0, "the first document has in-vocabulary tokens"
+    for term_id, weight, raw in zip(query.indices, query.values, tf.values, strict=True):
+        assert same_bits(weight, raw * mini_model.idf[term_id])
+        assert (
+            not same_bits(weight, raw / mini_model.idf[term_id]) or mini_model.idf[term_id] == 1.0
+        )
