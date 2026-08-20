@@ -39,6 +39,7 @@ exercises it.
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import importlib
 import pkgutil
@@ -49,6 +50,7 @@ import pytest
 
 import tfidf_stability
 from tfidf_stability import types
+from tfidf_stability.ranking.margins import Margin
 
 REPO = Path(__file__).resolve().parents[1]
 HEADER = REPO / "cpp" / "include" / "tfidf" / "core" / "types.hpp"
@@ -275,3 +277,94 @@ def test_the_root_package_exports_only_its_version() -> None:
     """
     assert tfidf_stability.__all__ == ["__version__"]
     assert isinstance(tfidf_stability.__version__, str)
+
+
+# ---------------------------------------------------------------------------
+# Value objects are frozen and slotted, and the exceptions are named
+# ---------------------------------------------------------------------------
+# Mutation testing found this: `frozen=True` and `slots=True` could both be
+# deleted from any of nine modules' dataclasses with the whole suite still
+# green, which made about thirty surviving mutants and was by some way the
+# largest single gap. Neither flag is decoration. These objects carry measured
+# numbers into run manifests and are compared and hashed downstream, so one that
+# a caller could edit after the fact turns a record into a suggestion.
+#
+# Stated here once rather than as an assertion per class, and stated in both
+# directions: the mutable ones are listed, so adding a sixth is a deliberate
+# edit to this list rather than something that slips through.
+
+#: Dataclasses that are mutable on purpose. Each is built up in stages or reused
+#: as scratch, which is the opposite of the value-object case above.
+_MUTABLE_BY_DESIGN = {
+    # Assembled field by field as a run proceeds, then written once.
+    "tfidf_stability.persistence.manifest.RunManifest",
+    # A reusable accumulator: the whole point is that scoring writes into it
+    # rather than allocating per query.
+    "tfidf_stability.similarity.scoring.ScoringScratch",
+    # The builder. `fit` returns the frozen TfidfModel; this is the thing that
+    # holds configuration on the way there.
+    "tfidf_stability.vectorisation.tfidf.TfidfVectoriser",
+    # Benchmark scratch, rebound between workloads.
+    "tfidf_stability.benchmarks.tfidf_perf._Fixture",
+    "tfidf_stability.benchmarks.tfidf_perf._NativeFixture",
+}
+
+#: The one dataclass without `slots=True`.
+_UNSLOTTED_BY_DESIGN = {"tfidf_stability.vectorisation.tfidf.TfidfVectoriser"}
+
+
+def _package_dataclasses() -> dict[str, type]:
+    """Every dataclass defined by the package's own modules."""
+    found: dict[str, type] = {}
+    for info in pkgutil.walk_packages(tfidf_stability.__path__, f"{tfidf_stability.__name__}."):
+        if "_snowball" in info.name or "_native" in info.name:
+            continue
+        module = importlib.import_module(info.name)
+        for attribute in vars(module).values():
+            if (
+                isinstance(attribute, type)
+                and dataclasses.is_dataclass(attribute)
+                and attribute.__module__ == info.name
+            ):
+                found[f"{attribute.__module__}.{attribute.__name__}"] = attribute
+    return found
+
+
+def test_the_package_defines_the_dataclasses_this_file_reasons_about() -> None:
+    """A walk that quietly found nothing would pass every test below."""
+    found = _package_dataclasses()
+    assert len(found) > 50, f"only found {len(found)} dataclasses; the walk is not reaching in"
+    assert "tfidf_stability.ranking.margins.Margin" in found
+
+
+def test_every_dataclass_is_frozen_unless_it_is_a_named_exception() -> None:
+    """A measurement a caller can edit after the fact is not a measurement."""
+    mutable = {
+        name for name, cls in _package_dataclasses().items() if not cls.__dataclass_params__.frozen
+    }
+    assert mutable == _MUTABLE_BY_DESIGN, (
+        f"unexpected mutable: {sorted(mutable - _MUTABLE_BY_DESIGN)}; "
+        f"listed but now frozen: {sorted(_MUTABLE_BY_DESIGN - mutable)}"
+    )
+
+
+def test_every_dataclass_declares_slots_unless_it_is_a_named_exception() -> None:
+    """`slots=True` is what stops a typo'd attribute name becoming a silent
+    second field instead of an AttributeError, on objects whose field set is
+    the record being published."""
+    unslotted = {
+        name for name, cls in _package_dataclasses().items() if "__slots__" not in vars(cls)
+    }
+    assert unslotted == _UNSLOTTED_BY_DESIGN, (
+        f"unexpected unslotted: {sorted(unslotted - _UNSLOTTED_BY_DESIGN)}; "
+        f"listed but now slotted: {sorted(_UNSLOTTED_BY_DESIGN - unslotted)}"
+    )
+
+
+def test_a_frozen_dataclass_actually_refuses_assignment() -> None:
+    """The flags above are read off the class; this confirms the flag means what
+    the two tests assume it means, on one representative instance."""
+    margin = Margin("boundary", 5, 5, 0.25, True)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        margin.value = 0.0  # type: ignore[misc]
+    assert not hasattr(margin, "__dict__"), "slots=True leaves nowhere to put a new attribute"
