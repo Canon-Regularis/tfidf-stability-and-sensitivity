@@ -29,7 +29,6 @@ from tfidf_stability.ranking.attributes import AttributeTable  # noqa: E402
 from tfidf_stability.vectorisation.tfidf import TfidfModel, TfidfVectoriser  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
-GOLDEN = Path(__file__).resolve().parent / "golden"
 
 
 # ---------------------------------------------------------------------------
@@ -73,8 +72,8 @@ def mini_corpus() -> list[dict[str, object]]:
     """Six hand-written documents covering the degenerate cases.
 
     Exact-duplicate pair d3/d4 (they tie exactly), near-duplicate pair d1/d2,
-    all-stopword document d5 (embeds to the zero vector). Every golden value in
-    ``tests/golden/`` derives from this corpus.
+    all-stopword document d5 (embeds to the zero vector). Most hand-derived
+    expectations in the suite are computed from this corpus.
     """
     return _read_jsonl(FIXTURES / "mini_corpus.jsonl")
 
