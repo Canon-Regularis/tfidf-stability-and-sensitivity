@@ -525,3 +525,161 @@ def test_a_log_level_configures_logging_and_names_the_backend(capsys) -> None:  
     printed = capsys.readouterr().out
     assert "environment" in printed, "configuring logging must not swallow the payload"
     assert "python" in printed
+
+
+# ---------------------------------------------------------------------------
+# The dataset digest is an identity, so it must survive a checkout
+# ---------------------------------------------------------------------------
+def _corpus_with(tmp_path: Path, *, newline: bytes) -> Path:
+    """The mini corpus rewritten with a chosen line ending.
+
+    `write_bytes`, not `write_text`: text mode applies its own newline
+    translation on Windows and would produce CRLF for both arms, which is
+    exactly the difference this section is about.
+    """
+    body = CORPUS.read_bytes().replace(b"\r\n", b"\n")
+    target = tmp_path / f"corpus{len(newline)}.jsonl"
+    target.write_bytes(body.replace(b"\n", newline))
+    return target
+
+
+def test_the_recorded_dataset_digest_does_not_depend_on_the_line_endings(tmp_path: Path) -> None:
+    """`hash_file(..., text=True)`. The corpus is an input the caller supplies,
+    so it arrives with whatever endings its checkout produced; git's `text=auto`
+    hands a Windows worktree CRLF and a Linux one LF for the same commit.
+
+    Digesting the raw bytes would give the same corpus two identities and make
+    a manifest written on one platform fail verification on the other.
+    """
+    digests = []
+    for i, newline in enumerate((b"\n", b"\r\n")):
+        source = _corpus_with(tmp_path, newline=newline)
+        out = tmp_path / f"m{i}.tfsx"
+        assert main(["build-corpus", str(source), "-o", str(out)]) == 0
+        recorded = json.loads(out.with_suffix(".manifest.json").read_text(encoding="utf-8"))
+        digests.append(recorded["dataset"]["sha256"])
+
+    assert digests[0] == digests[1], "one corpus, one identity, whatever the checkout did"
+
+
+def test_the_two_line_ending_forms_really_are_different_files(tmp_path: Path) -> None:
+    """The premise of the test above. If the two arms produced identical bytes
+    it would be asserting that a digest equals itself."""
+    lf = _corpus_with(tmp_path, newline=b"\n").read_bytes()
+    crlf = _corpus_with(tmp_path, newline=b"\r\n").read_bytes()
+
+    assert lf != crlf
+    assert hash_file(_corpus_with(tmp_path, newline=b"\n")) != hash_file(
+        _corpus_with(tmp_path, newline=b"\r\n")
+    ), "and a raw-byte digest does separate them, which is the failure mode"
+
+
+# ---------------------------------------------------------------------------
+# verify: what an absent field is allowed to mean
+# ---------------------------------------------------------------------------
+def _manifest_of(model_path: Path) -> tuple[Path, dict[str, object]]:
+    """The manifest beside a built model, parsed. Local by house convention."""
+    path = model_path.with_suffix(".manifest.json")
+    return path, json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_a_model_built_without_a_native_backend_verifies_as_reproducible(
+    tmp_path: Path,
+    capsys,  # type: ignore[no-untyped-def]
+) -> None:
+    """No native block means the pure-Python reference produced this file, and
+    the reference is normative and reproducible on its own -- there is no build
+    whose flags could have moved a bit.
+
+    Reading the absent block as "not reproducible" would fail every result
+    produced on a machine without a compiler, which is the supported
+    configuration the `info` command goes out of its way to describe as such.
+    """
+    out = build(tmp_path)
+    path, manifest = _manifest_of(out)
+    environment = manifest["environment"]
+    assert isinstance(environment, dict)
+    environment.pop("native", None)
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    capsys.readouterr()
+    assert main(["verify", str(out)]) == 0
+    printed = capsys.readouterr().out
+    assert "backend         : reference (pure Python)" in printed
+    assert "reproducible    : True" in printed
+
+
+def test_a_native_block_that_omits_the_flag_is_not_taken_as_reproducible(
+    tmp_path: Path,
+    capsys,  # type: ignore[no-untyped-def]
+) -> None:
+    """`native.get("reproducible", False)`. The default is the conservative one:
+    a build that did not say is not thereby a build that promised.
+
+    Contrastive with the absent-block case above, where the same missing
+    information means the opposite -- there, nothing was compiled at all.
+    """
+    out = build(tmp_path)
+    path, manifest = _manifest_of(out)
+    environment = manifest["environment"]
+    assert isinstance(environment, dict)
+    environment["native"] = {"compiler_id": "GNU"}
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    capsys.readouterr()
+    assert main(["verify", str(out)]) == 1
+    assert "reproducible    : False" in capsys.readouterr().out
+
+
+def test_a_native_block_that_declares_the_flag_is_taken_at_its_word(
+    tmp_path: Path,
+    capsys,  # type: ignore[no-untyped-def]
+) -> None:
+    """The third arm, so the default above is shown to be a default rather than
+    the only answer the branch can give."""
+    out = build(tmp_path)
+    path, manifest = _manifest_of(out)
+    environment = manifest["environment"]
+    assert isinstance(environment, dict)
+    environment["native"] = {"compiler_id": "GNU", "reproducible": True}
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    capsys.readouterr()
+    assert main(["verify", str(out)]) == 0
+    assert "backend         : GNU" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# The parser refuses an invocation that could not produce a manifest
+# ---------------------------------------------------------------------------
+def test_building_a_corpus_without_a_destination_is_refused_by_the_parser() -> None:
+    """`--output` is required. Without the guard `args.output` is None,
+    `Path(None)` raises a TypeError from inside the command, and the corpus has
+    already been read and fitted by then -- the work is done and discarded, and
+    the diagnostic names a type rather than the missing flag.
+
+    Exit code 2 is argparse's, and is what a shell script tests for.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        main(["build-corpus", str(CORPUS)])
+    assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize("level", ["debug", "info", "warning", "error"])
+def test_every_documented_log_level_is_accepted(level: str) -> None:
+    """The choices are lowercased for the command line and upper-cased before
+    they reach `configure`, so each one has to make the round trip."""
+    from tfidf_stability.utils.logging import reset
+
+    try:
+        assert main(["--log-level", level, "schema"]) == 0
+    finally:
+        reset()
+
+
+def test_an_undocumented_log_level_is_refused_rather_than_defaulted() -> None:
+    """A typo'd level silently falling back to INFO would make a run that was
+    asked to be quiet emit provenance into a captured stream."""
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--log-level", "verbose", "schema"])
+    assert excinfo.value.code == 2
