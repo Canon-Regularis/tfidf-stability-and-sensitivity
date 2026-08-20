@@ -331,3 +331,82 @@ def test_every_fold_of_a_larger_grid_keeps_its_table_and_scores_aligned() -> Non
         assert len(query.candidate_ids) == len(query.scores)
         assert query.target in query.candidate_ids
     assert grid.provenance()["n_queries"] == len(grid)
+
+
+# ---------------------------------------------------------------------------
+# build_query_grid: the protocol boundary and the deterministic prefix
+# ---------------------------------------------------------------------------
+def _grid_inputs() -> tuple[list[tuple[str, str, float]], dict[str, list[str]], list[str]]:
+    """Three documents and one user who has interacted with all of them.
+
+    Local by house convention. Small enough that the prefix under `limit` can be
+    written out rather than described.
+    """
+    features = {"d0": ["a"], "d1": ["b"], "d2": ["c"]}
+    interactions = [("u1", "d0", 5.0), ("u1", "d1", 5.0), ("u1", "d2", 5.0)]
+    return interactions, features, list(features)
+
+
+def test_item_as_query_is_refused_here_rather_than_quietly_evaluated() -> None:
+    """The mode is implemented in `profiles.query_modes`, and section 7.1
+    excludes it from the reported experiments. Building a grid from it would
+    produce numbers the paper does not license, so the refusal is at the
+    protocol boundary rather than left to the reader."""
+    interactions, features, doc_ids = _grid_inputs()
+    with pytest.raises(ValueError, match=r"section 7\.1 excludes it"):
+        build_query_grid(
+            interactions, features, doc_ids, mode=QueryMode.ITEM_AS_QUERY, min_interactions=2
+        )
+
+
+def test_no_limit_at_all_keeps_every_fold() -> None:
+    """`None` is how this codebase spells unlimited, everywhere."""
+    interactions, features, doc_ids = _grid_inputs()
+    assert len(build_query_grid(interactions, features, doc_ids, min_interactions=2)) == 3
+
+
+def test_a_limit_of_zero_produces_an_empty_grid_rather_than_every_fold() -> None:
+    """Zero is a number of queries, not an absence of a limit. A run configured
+    with `limit: 0` should evaluate nothing and say so, not silently evaluate
+    the lot."""
+    interactions, features, doc_ids = _grid_inputs()
+    assert len(build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=0)) == 0
+
+
+def test_a_negative_limit_silently_drops_the_last_fold() -> None:
+    """`folds[:-1]` is a legal slice, so `-1` trims one query instead of raising
+    or meaning unlimited.
+
+    The fifth site in this package where a negative index is accepted where the
+    positive side is checked, after `short`, `Ranking.top_k`, `compare_top_k`
+    and `CsrMatrix.row`. Only `build_vocabulary`'s `max_features` guards it.
+    """
+    interactions, features, doc_ids = _grid_inputs()
+    trimmed = build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=-1)
+    assert len(trimmed) == 2
+
+
+def test_the_limited_prefix_is_the_same_folds_every_time() -> None:
+    """A truncated grid has to be a prefix of the full one in a fixed order, or
+    two runs at the same limit would evaluate different queries and their
+    numbers would not be comparable."""
+    interactions, features, doc_ids = _grid_inputs()
+    full = [
+        q.query_id for q in build_query_grid(interactions, features, doc_ids, min_interactions=2)
+    ]
+    prefix = [
+        q.query_id
+        for q in build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=2)
+    ]
+
+    assert prefix == full[:2]
+    assert prefix == ["u1::d0", "u1::d1"]
+
+
+def test_a_threshold_no_user_reaches_produces_an_empty_grid() -> None:
+    """A legitimate configuration -- a strict eligibility threshold on a small
+    corpus -- rather than an error. The provenance still records what was asked
+    for, which is how a run says it measured nothing on purpose."""
+    interactions, features, doc_ids = _grid_inputs()
+    grid = build_query_grid(interactions, features, doc_ids, min_interactions=99)
+    assert len(grid) == 0
