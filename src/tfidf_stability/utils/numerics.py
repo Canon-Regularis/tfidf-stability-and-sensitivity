@@ -10,7 +10,7 @@ bracketing, so the normative reading is a left-to-right fold
 (:data:`Reduction.NAIVE`, used for every published result). The other policies
 are instruments; the spread between them measures the floating-point noise floor
 the near-tie tolerance tau of section 7.1 is derived from. See
-``docs/spec_addenda.md#g13`` and ``docs/numerics.md``.
+``docs/spec_addenda.md#g13``.
 
 IEEE-754 mandates correct rounding for ``+ - * / sqrt`` but not for ``log``, so
 platform libms disagree: 15.16% of idf entries on this project's reference
