@@ -16,6 +16,7 @@ import struct
 
 import pytest
 
+from tfidf_stability.persistence.model import MODEL_FIELDS, describe_schema
 from tfidf_stability.persistence.save_load import (
     _FLAG_MASK,
     FORMAT_VERSION,
@@ -427,3 +428,80 @@ def test_a_descending_pair_is_reported_in_the_order_it_was_found() -> None:
     up editing the wrong end of a file."""
     with pytest.raises(TfsxFormatError, match="not strictly increasing: 3 then 1"):
         _check_csr([0, 2], [3, 1], [1.0, 2.0], n_rows=1, n_cols=4)
+
+
+# ---------------------------------------------------------------------------
+# The schema: an orphan module describing the container above
+# ---------------------------------------------------------------------------
+# `persistence/model.py` had no owning test file. It is the declared shape of a
+# `.tfsx` payload -- the thing `tfidf schema` prints and a reader of the format
+# consults -- so a drift between it and the writer would misdescribe every file
+# this project has produced.
+def test_the_schema_names_every_array_the_container_carries() -> None:
+    """Ten fields: three CSR arrays, four per-term or per-document vectors, and
+    the two string blocks. A field dropped here would leave a reader believing
+    the format is smaller than it is."""
+    names = [f.name for f in MODEL_FIELDS]
+
+    assert names == [
+        "indptr",
+        "indices",
+        "values",
+        "idf",
+        "norms",
+        "lengths",
+        "df",
+        "cf",
+        "tokens",
+        "doc_ids",
+    ]
+
+
+def test_every_field_declares_a_type_the_container_actually_writes() -> None:
+    """The reader reaches for `struct` formats from these names, so a dtype the
+    writer never emits would be unimplementable."""
+    assert {f.dtype for f in MODEL_FIELDS} == {"int32", "int64", "float64", "utf-8"}
+
+
+def test_the_csr_arrays_declare_the_lengths_the_format_check_enforces() -> None:
+    """`_check_csr` rejects an `indptr` that is not `n_docs + 1` long and
+    indices that do not match the values. The schema is where those lengths are
+    published, so the two have to agree in words as well as in behaviour."""
+    by_name = {f.name: f for f in MODEL_FIELDS}
+
+    assert by_name["indptr"].length == "n_docs + 1"
+    assert by_name["indices"].length == by_name["values"].length == "nnz"
+    assert by_name["indices"].dtype == "int32", "term ids, as the header packs them"
+
+
+def test_the_per_term_and_per_document_lengths_are_declared_separately() -> None:
+    """Four vectors are sized by the vocabulary and three by the corpus. Getting
+    one wrong is exactly the mistake that reads a file with the arrays
+    transposed and produces a plausible model."""
+    by_name = {f.name: f for f in MODEL_FIELDS}
+
+    assert {by_name[n].length for n in ("idf", "df", "cf", "tokens")} == {"n_terms"}
+    assert {by_name[n].length for n in ("norms", "lengths", "doc_ids")} == {"n_docs"}
+
+
+def test_every_field_says_what_it_is_for() -> None:
+    """The purpose column is what makes the schema readable without the source.
+    An empty one would leave a field named and unexplained."""
+    assert all(f.purpose for f in MODEL_FIELDS)
+    assert all(len(f.purpose) > 5 for f in MODEL_FIELDS)
+
+
+def test_the_schema_renders_as_plain_data_for_the_manifest() -> None:
+    """`describe_schema` is what the CLI prints and what a manifest can embed,
+    so it must be JSON-able rather than a list of dataclasses."""
+    described = describe_schema()
+
+    assert len(described) == len(MODEL_FIELDS)
+    assert all(sorted(row) == ["dtype", "length", "name", "purpose"] for row in described)
+    assert all(isinstance(v, str) for row in described for v in row.values())
+
+
+def test_the_rendered_schema_carries_the_same_fields_in_the_same_order() -> None:
+    """Positional agreement, not just set agreement: the printed table is read
+    top to bottom against the byte layout."""
+    assert [row["name"] for row in describe_schema()] == [f.name for f in MODEL_FIELDS]
