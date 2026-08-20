@@ -368,3 +368,46 @@ def test_a_frozen_dataclass_actually_refuses_assignment() -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         margin.value = 0.0  # type: ignore[misc]
     assert not hasattr(margin, "__dict__"), "slots=True leaves nowhere to put a new attribute"
+
+
+# ---------------------------------------------------------------------------
+# backends/: the third orphan -- a signpost, and it has to keep pointing right
+# ---------------------------------------------------------------------------
+# `backends/__init__.py` is a docstring and nothing else. It was the last module
+# in the package that no test file named. There is nothing in it to execute, so
+# what these pin is the claim: that the package is still empty, and that the two
+# things its docstring redirects to still exist under the names it uses. A
+# signpost that outlives what it points at is worse than no signpost.
+def test_the_backends_package_is_empty_as_its_docstring_says() -> None:
+    """It documents *why* there is no registry rather than providing one. A name
+    appearing here would mean the docstring had become false, and the redirect
+    to `_native` would be sending readers to the wrong place."""
+    from tfidf_stability import backends
+
+    public = [name for name in vars(backends) if not name.startswith("_")]
+    assert public == []
+    assert not hasattr(backends, "__all__"), "nothing to export"
+
+
+def test_the_signpost_points_at_names_that_exist() -> None:
+    """The docstring says selection is "one availability check
+    (`native_available()` plus an ABI guard)". Both are named here so that
+    renaming either breaks this test rather than silently stranding the text."""
+    from tfidf_stability import _native
+
+    assert callable(_native.native_available)
+    assert _native.REQUIRED_ABI, "the ABI guard the docstring promises"
+
+
+def test_the_two_backends_the_docstring_names_are_the_two_that_exist() -> None:
+    """ "There are two backends": the pure-Python reference, and the C++ core.
+    Not a registry of interchangeable evaluators, and in particular no numpy one
+    -- numpy's reductions are pairwise with an unspecified block size, so it
+    could not reproduce the reference's summation order."""
+    from tfidf_stability import backends
+
+    text = backends.__doc__ or ""
+    assert "numpy" in text, "the absent evaluator is explained, not merely absent"
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("tfidf_stability.backends.numpy_backend")
