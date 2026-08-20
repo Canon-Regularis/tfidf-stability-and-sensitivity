@@ -319,3 +319,113 @@ def test_a_ranking_of_a_different_length_is_refused_before_any_speedup_is_report
     element-by-element would silently check only the shorter one."""
     with pytest.raises(BitIdentityError, match="Refusing to report a speedup"):
         check_same_order((0, 1, 2), (0, 1), "ranking")
+
+
+# ---------------------------------------------------------------------------
+# The speedup, and the workload it was measured on
+# ---------------------------------------------------------------------------
+def test_a_speedup_is_the_reference_cost_divided_by_the_native_one() -> None:
+    """The headline number. Multiplying instead of dividing gives a figure that
+    still moves in the right direction whenever both timings do, so nothing
+    downstream would look wrong."""
+    faster = Comparison("op", _timing(2.0), _timing(0.5, "native"), "checked")
+    assert faster.speedup == 4.0
+
+    slower = Comparison("op", _timing(0.5), _timing(2.0, "native"), "checked")
+    assert slower.speedup == 0.25, "a slowdown is reported, not clamped"
+
+
+def test_a_native_timing_of_zero_yields_no_speedup_rather_than_infinity() -> None:
+    """A measured zero means the timer could not resolve the call, not that it
+    was infinitely fast. Guarding on `<= 0` rather than `< 0` is what keeps the
+    division from happening at all."""
+    assert Comparison("op", _timing(1.0), _timing(0.0, "native"), "checked").speedup is None
+    assert Comparison("op", _timing(1.0), None, "checked").speedup is None
+
+
+def test_a_tiny_workload_still_plants_a_duplicate_and_a_twin_pair() -> None:
+    """Scaled rather than fixed so a smoke-test workload still holds the exact
+    ties the ranking rows exercise. Below twenty documents the scaling rounds to
+    zero, and the floor is what stops the benchmark timing a corpus with no ties
+    in it -- which is the case the tie-break comparison exists to measure."""
+    spec = Workload(n_docs=10, vocab_size=40, n_queries=2, query_length=3, k=2).spec()
+    assert spec.n_exact_duplicates == 1
+    assert spec.n_twin_pairs == 1
+    assert spec.n_users == 0, "interactions belong to the profile experiments"
+
+    bigger = Workload(n_docs=100, vocab_size=200, n_queries=2, query_length=3, k=2).spec()
+    assert bigger.n_exact_duplicates == 5, "and it scales above the floor"
+
+
+def test_the_identity_check_counts_what_it_compared_in_words() -> None:
+    """The string is what appears in the `checked` column beside every ratio, so
+    it is the reader's evidence that the speedup was licensed at all."""
+    assert check_same_bits((1.0,), (1.0,), "idf") == "1 value bit-identical"
+    assert check_same_bits((1.0, 2.0), (1.0, 2.0), "idf") == "2 values bit-identical"
+
+
+@pytest.mark.parametrize(
+    ("seconds", "rendered", "if_it_slipped"),
+    [
+        (1e-6, "1.00 us", "1000.0 ns"),
+        (1e-3, "1.00 ms", "1000.00 us"),
+        (1.0, "1.000 s", "1000.00 ms"),
+    ],
+)
+def test_a_duration_exactly_on_a_unit_boundary_uses_the_larger_unit(
+    seconds: float, rendered: str, if_it_slipped: str
+) -> None:
+    """The thresholds are strict, so 1e-6 seconds is one microsecond and not a
+    thousand nanoseconds. Off by one comparison and every row at a decade
+    boundary jumps a unit, which is where a reader is most likely to be
+    comparing two rows against each other.
+
+    The whole rendered value is matched, not the unit alone: the table's own
+    header contains the word "speedup", so asserting that a bare " s" appears
+    somewhere in the report is satisfied whatever the row says. Mutation testing
+    found that -- in this test rather than in the code.
+    """
+    text = format_report(_report(Comparison("op", _timing(seconds), None, "checked")))
+    assert rendered in text
+    assert if_it_slipped not in text
+
+
+def test_a_native_run_that_reported_no_build_says_so_instead_of_crashing() -> None:
+    """Both conditions are required before the build line is rendered. A backend
+    that loaded but could not describe itself is a real state -- an older
+    extension without the build-info symbol -- and the header has to survive it."""
+    text = format_report(_report(Comparison("op", _timing(1e-4), None, "checked"), native=True))
+    assert "unavailable" in text
+
+
+def test_a_measured_cost_is_a_duration_and_not_a_clock_reading() -> None:
+    """`perf_counter` has an arbitrary origin, typically machine uptime, so a
+    batch timed as `now + start` instead of `now - start` reports a number in the
+    thousands of seconds. It would look like a plausible column of timings and
+    every ratio computed from it would be meaningless.
+
+    The bound asserted is not a performance threshold: a no-op callable taking
+    longer than a second is broken by any reading, and this is the assertion the
+    module's "nothing asserts a duration" rule is carved out for.
+    """
+    timing = measure(lambda: None, label="noop", backend="reference", repeats=1)
+
+    assert 0.0 <= timing.seconds < 1.0, f"a no-op measured {timing.seconds}s"
+    assert math.isfinite(timing.seconds)
+    assert timing.inner >= 1
+    assert timing.calls == timing.repeats * timing.inner
+
+
+def test_the_reported_cost_is_per_call_not_per_batch() -> None:
+    """Calibration grows the batch until it clears the minimum batch time, so a
+    batch holds many calls. Reporting the batch cost -- or multiplying by the
+    batch size instead of dividing -- inflates the per-call figure by the
+    calibration factor, which differs per operation and so silently reweights
+    every comparison in the table against every other.
+    """
+    timing = measure(lambda: None, label="noop", backend="reference", repeats=1)
+
+    # A no-op is far below the batch floor, so calibration must have grown the
+    # batch; the per-call cost is then a small fraction of one batch.
+    assert timing.inner > 1, "the premise: calibration actually scaled the batch up"
+    assert timing.seconds < 1e-3, "a no-op costs nanoseconds per call, not milliseconds"
