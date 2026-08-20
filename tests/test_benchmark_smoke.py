@@ -35,7 +35,9 @@ from tfidf_stability.benchmarks.tfidf_perf import (
     measure,
     run_benchmarks,
 )
+from tfidf_stability.similarity.cosine import cosine_against_corpus
 from tfidf_stability.utils.io import canonical_json
+from tfidf_stability.utils.numerics import Reduction
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "benchmark.py"
@@ -429,3 +431,245 @@ def test_the_reported_cost_is_per_call_not_per_batch() -> None:
     # batch; the per-call cost is then a small fraction of one batch.
     assert timing.inner > 1, "the premise: calibration actually scaled the batch up"
     assert timing.seconds < 1e-3, "a no-op costs nanoseconds per call, not milliseconds"
+
+
+# ---------------------------------------------------------------------------
+# The batch size is capped, so a fast callable cannot run away with the clock
+# ---------------------------------------------------------------------------
+def test_the_inner_batch_stops_doubling_at_the_cap(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """`while inner < _MAX_INNER and ...`. The loop grows the batch until it
+    takes long enough to time; the cap is the other exit, for a callable so
+    cheap that no reachable batch size crosses the threshold.
+
+    Both constants are lowered here rather than reached honestly: at the real
+    `_MAX_INNER` of 2^22 the test would make four million calls to prove it
+    stopped.
+    """
+    from tfidf_stability.benchmarks import tfidf_perf
+
+    monkeypatch.setattr(tfidf_perf, "_MAX_INNER", 8)
+    # No batch of any size reaches this, so the cap is the only way out.
+    monkeypatch.setattr(tfidf_perf, "_MIN_BATCH_SECONDS", 1e9)
+
+    timing = tfidf_perf.measure(lambda: None, label="noop", backend="reference", repeats=1)
+
+    assert timing.inner == 8, "the last doubling that satisfies inner < cap lands on the cap"
+
+
+def test_a_callable_slow_enough_to_time_is_not_batched_at_all(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The other exit from the same loop, so the cap above is shown to be the
+    cap rather than the only value `inner` can take. A single call already
+    exceeding the threshold needs no batching, and batching it would multiply
+    the measurement's cost for nothing."""
+    from tfidf_stability.benchmarks import tfidf_perf
+
+    monkeypatch.setattr(tfidf_perf, "_MIN_BATCH_SECONDS", 0.0)
+
+    timing = tfidf_perf.measure(lambda: None, label="noop", backend="reference", repeats=1)
+
+    assert timing.inner == 1
+
+
+def test_the_reported_cost_is_divided_by_the_batch_size(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """`seconds=best / inner`. A batched measurement reports the per-call cost,
+    so two runs that happened to choose different batch sizes stay comparable --
+    which is the whole point of recording `inner` beside the number."""
+    from tfidf_stability.benchmarks import tfidf_perf
+
+    monkeypatch.setattr(tfidf_perf, "_MAX_INNER", 4)
+    monkeypatch.setattr(tfidf_perf, "_MIN_BATCH_SECONDS", 1e9)
+
+    timing = tfidf_perf.measure(lambda: None, label="noop", backend="reference", repeats=1)
+
+    assert timing.inner == 4
+    assert timing.seconds >= 0.0
+    assert timing.seconds < 1e9, "a per-call cost, not the batch's total"
+
+
+# ---------------------------------------------------------------------------
+# "reference only" is two different statements, and the report keeps them apart
+# ---------------------------------------------------------------------------
+def test_an_operation_with_no_native_counterpart_says_so_in_its_own_words() -> None:
+    """`reference_only_reason or "reference only"`. Fitting has no native side
+    by design: idf is evaluated once in exact decimal arithmetic so the core
+    never sees a logarithm (G13), and there is nothing to compare against on any
+    machine.
+
+    Collapsing that into the generic phrase would read as "the backend was not
+    built here", inviting a reader to expect a speedup once it is -- and there
+    is none to come.
+    """
+    report = run_benchmarks(TINY, repeats=1, use_native=False)
+    fit = next(c for c in report.comparisons if c.name.startswith("fit"))
+
+    assert fit.verified == "no native counterpart exists"
+    assert fit.native is None
+    assert "G13" in fit.note, "and the note says why"
+
+
+def test_an_operation_whose_backend_was_simply_absent_uses_the_generic_phrase() -> None:
+    """The contrast. Building the index does have a native counterpart; it was
+    not exercised because this run asked for the reference alone, so the reason
+    is about this run rather than about the operation."""
+    report = run_benchmarks(TINY, repeats=1, use_native=False)
+    index = next(c for c in report.comparisons if c.name.startswith("build index"))
+
+    assert index.verified == "reference only"
+    assert index.native is None
+
+
+def test_no_reference_only_comparison_leaves_the_reason_blank() -> None:
+    """Every row of the published table has to say what licensed it. An empty
+    cell would be indistinguishable from a check that was skipped."""
+    report = run_benchmarks(TINY, repeats=1, use_native=False)
+
+    assert all(c.verified for c in report.comparisons)
+    assert all(c.as_dict()["verified"] for c in report.comparisons)
+
+
+# ---------------------------------------------------------------------------
+# Fixture construction: what both backends are handed, built once and never timed
+# ---------------------------------------------------------------------------
+# Reached directly, as `test_datasets.py` reaches the generator's deterministic
+# primitives. Nothing the fixture gets wrong shows up in a report -- the numbers
+# are timings, and a fixture that timed the wrong thing would still produce a
+# plausible table.
+def test_queries_are_drawn_across_the_corpus_rather_than_all_from_one_document() -> None:
+    """`stride = max(1, len(features) // max(1, n_queries))`. Asking for more
+    queries than there are documents makes the floor division zero, and a stride
+    of zero indexes `features[0]` for every one of them.
+
+    The benchmark would then time the same query twenty times over, and its
+    scoring row would report the cost of whichever document happened to be
+    first rather than a spread across the corpus.
+    """
+    from tfidf_stability.benchmarks.tfidf_perf import _build_fixture
+
+    crowded = Workload(n_docs=24, vocab_size=40, n_queries=30, query_length=4, k=3, seed=20260811)
+    fixture = _build_fixture(crowded)
+
+    assert len(fixture.queries) == 24, "capped at one query per document"
+    distinct = {(q.indices, q.values) for q in fixture.queries}
+    assert len(distinct) > 1, "a stride of zero would make every query the first document's"
+
+
+def test_a_query_set_smaller_than_the_corpus_still_spreads_over_it() -> None:
+    """The ordinary arm of the same expression, so the clamp above is shown to
+    be the crowded case rather than the only behaviour."""
+    from tfidf_stability.benchmarks.tfidf_perf import _build_fixture
+
+    fixture = _build_fixture(TINY)
+
+    assert len(fixture.queries) == TINY.n_queries
+    assert len({(q.indices, q.values) for q in fixture.queries}) > 1
+
+
+def test_the_ranking_rows_are_scored_from_the_first_query() -> None:
+    """`scores=cosine_against_corpus(queries[0], ...)`. The ranking and top-k
+    rows are timed on this one vector, and the docstring says which. Scoring a
+    different query would leave the field's own comment false and the margin
+    structure those rows exercise unrelated to the query named beside them.
+    """
+    from tfidf_stability.benchmarks.tfidf_perf import _build_fixture
+
+    fixture = _build_fixture(TINY)
+    expected = cosine_against_corpus(
+        fixture.queries[0], fixture.documents, fixture.model.norms, Reduction.NAIVE
+    )
+
+    assert fixture.scores == expected
+    other = cosine_against_corpus(
+        fixture.queries[1], fixture.documents, fixture.model.norms, Reduction.NAIVE
+    )
+    assert fixture.scores != other, "the two queries do score differently"
+
+
+@pytest.mark.parametrize(
+    ("label", "native_call", "verify"),
+    [
+        ("neither half", None, None),
+        ("a call with nothing to check it", lambda: None, None),
+        ("a check with nothing to run", None, lambda: "checked"),
+    ],
+)
+def test_a_comparison_missing_either_half_of_the_native_pair_is_reference_only(
+    label: str,
+    native_call: object,
+    verify: object,
+) -> None:
+    """`if native_call is None or verify is None`. Both halves are required:
+    timing a native call nobody verified is exactly the speedup-on-a-divergent-
+    result this module exists to refuse, and a verifier with nothing to run
+    would report a check that never happened.
+
+    With `and` in place of `or`, the half-populated rows fall through to the
+    comparison path and the missing half is called anyway.
+    """
+    from tfidf_stability.benchmarks.tfidf_perf import _compare
+
+    comparison = _compare(
+        "half a pair",
+        reference_call=lambda: None,
+        native_call=native_call,  # type: ignore[arg-type]
+        verify=verify,  # type: ignore[arg-type]
+        repeats=1,
+    )
+
+    assert comparison.native is None
+    assert comparison.speedup is None
+    assert comparison.verified == "reference only"
+
+
+def test_a_batch_that_exactly_meets_the_threshold_is_long_enough(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """`_time_batch(fn, inner) < _MIN_BATCH_SECONDS`. The loop grows the batch
+    until it is long enough to time, not until it is comfortably past: a batch
+    landing exactly on the threshold has met it, and doubling again would spend
+    twice the wall clock to learn nothing.
+
+    The timer is replaced rather than raced. A real reading equal to the
+    threshold to the last bit is not something a test can arrange, so the
+    boundary would otherwise be unreachable and the comparison untested at the
+    one input that distinguishes it.
+    """
+    from tfidf_stability.benchmarks import tfidf_perf
+
+    monkeypatch.setattr(tfidf_perf, "_MAX_INNER", 8)
+    monkeypatch.setattr(tfidf_perf, "_time_batch", lambda fn, inner: tfidf_perf._MIN_BATCH_SECONDS)
+
+    timing = tfidf_perf.measure(lambda: None, label="exact", backend="reference", repeats=1)
+
+    assert timing.inner == 1, "the first batch already met the threshold"
+    assert timing.seconds == tfidf_perf._MIN_BATCH_SECONDS
+
+
+def test_a_batch_just_under_the_threshold_is_doubled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The other side of the same comparison, one ulp away, so the boundary
+    above is shown to be a boundary rather than the only behaviour."""
+    from tfidf_stability.benchmarks import tfidf_perf
+
+    just_under = math.nextafter(tfidf_perf._MIN_BATCH_SECONDS, 0.0)
+    monkeypatch.setattr(tfidf_perf, "_MAX_INNER", 8)
+    monkeypatch.setattr(tfidf_perf, "_time_batch", lambda fn, inner: just_under)
+
+    timing = tfidf_perf.measure(lambda: None, label="under", backend="reference", repeats=1)
+
+    assert timing.inner == 8, "never satisfied, so it grows to the cap"
+
+
+def test_a_workload_asking_for_no_queries_is_not_validated_and_fails_late() -> None:
+    """`Workload` accepts `n_queries=0` and nothing checks it. The stride's
+    inner `max(1, n_queries)` keeps the floor division alive, so construction
+    gets as far as `scores=cosine_against_corpus(queries[0], ...)` and fails
+    there with a bare `IndexError`.
+
+    Pinned as the current behaviour rather than fixed: it is a tests-only
+    change, and the failure at least stops the run. Without the clamp it would
+    be a `ZeroDivisionError` from the stride instead -- equally unhelpful, and
+    one line earlier.
+    """
+    empty = Workload(n_docs=24, vocab_size=40, n_queries=0, query_length=4, k=3, seed=20260811)
+
+    from tfidf_stability.benchmarks.tfidf_perf import _build_fixture
+
+    with pytest.raises(IndexError, match="list index out of range"):
+        _build_fixture(empty)
