@@ -52,6 +52,7 @@ REPO = Path(__file__).resolve().parents[1]
 # ---------------------------------------------------------------------------
 # Normalisation
 # ---------------------------------------------------------------------------
+@pytest.mark.property
 @given(st.text(max_size=200))
 def test_normalisation_is_idempotent(text: str) -> None:
     """Otherwise the map depends on how many times it has been applied, which is
@@ -60,6 +61,7 @@ def test_normalisation_is_idempotent(text: str) -> None:
     assert normalise(once) == once
 
 
+@pytest.mark.property
 @given(st.text(max_size=200))
 def test_normalisation_output_is_nfkc(text: str) -> None:
     out = normalise(text)
@@ -142,6 +144,7 @@ def test_ngram_encoding_is_injective_and_reversible() -> None:
     assert ngram_order("solo") == 1
 
 
+@pytest.mark.property
 @given(st.lists(st.text(alphabet="abcdef", min_size=1, max_size=4), max_size=8))
 def test_ngram_round_trip(tokens: list[str]) -> None:
     for n in generate_ngrams(tokens, 1, 3):
@@ -518,3 +521,21 @@ def test_a_lemmatiser_override_changes_the_config_digest_on_its_own() -> None:
     assert config.digest(stopword_digest="abc") != config.digest(
         stopword_digest="abc", lemmatiser_override="lookup:v3"
     )
+
+
+def test_the_default_ngram_orders_are_unigrams_and_bigrams() -> None:
+    """Every call site in the package passes the orders explicitly, so the
+    defaults are only what an examples script or a notebook gets. They are part
+    of the preprocessing map's identity: the config digest covers `n_min` and
+    `n_max`, so a caller relying on the defaults and one passing (1, 2) must be
+    getting the same features.
+    """
+    tokens = ["new", "york", "city"]
+    assert generate_ngrams(tokens) == generate_ngrams(tokens, 1, 2)
+    assert generate_ngrams(tokens) == [
+        "new",
+        "york",
+        "city",
+        f"new{JOINER}york",
+        f"york{JOINER}city",
+    ]

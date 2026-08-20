@@ -363,3 +363,31 @@ def test_a_name_from_outside_the_package_is_reparented_under_the_root() -> None:
     """Nothing may emit outside the subtree `configure` controls, or a record
     would escape the handler and the formatter that makes it canonical."""
     assert get_logger("scripts.benchmark").name == f"{ROOT_NAME}.scripts.benchmark"
+
+
+def test_json_scalars_render_as_json_not_as_python() -> None:
+    """`None` and `bool` go through `json.dumps`, so a log line is parseable by
+    something that is not Python. `str(None)` is "None" and `str(True)` is
+    "True"; neither is a value a JSON reader can take."""
+    event = Event.build(EventKind.BACKEND_SELECTED, {"reason": None, "native": True})
+    rendered = event.render()
+    assert "reason=null" in rendered
+    assert "native=true" in rendered
+    assert "None" not in rendered
+    assert "True" not in rendered
+
+
+def test_an_integer_field_keeps_its_bare_form() -> None:
+    """The same branch, on the value where JSON and Python agree -- so the
+    branch is shown to be about the rendering and not about the type."""
+    assert "count=7" in Event.build(EventKind.DIGEST, {"count": 7}).render()
+
+
+def test_a_non_ascii_field_is_quoted_but_not_escaped() -> None:
+    """The log is UTF-8 and read by people. Escaping it to an ASCII escape sequence would make
+    a document identifier or a token unrecognisable in the one place someone
+    looks to find out what the run did with it."""
+    event = Event.build(EventKind.DEGENERATE, {"token": "café au lait"})
+    rendered = event.render()
+    assert rendered == 'degenerate token="café au lait"'
+    assert chr(92) not in rendered, "no escape sequences of any kind"
