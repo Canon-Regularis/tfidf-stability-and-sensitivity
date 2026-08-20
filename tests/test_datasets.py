@@ -948,3 +948,232 @@ def test_the_length_range_is_checked_before_the_document_budget() -> None:
                 n_docs=1, vocab_size=30, n_exact_duplicates=4, n_twin_pairs=4, len_min=9, len_max=2
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# Parallel arrays: a short one is a loud failure, never a shortened corpus
+# ---------------------------------------------------------------------------
+# Both corpus types keep documents as several tuples indexed in step, and both
+# zip them under `strict=True`. Without it `zip` stops at the shortest and the
+# corpus silently loses its tail: `N` shrinks, and `N` is inside the idf of every
+# term, so every weight in the corpus moves. The failure would surface as a set
+# of plausible numbers rather than as an error.
+def _movielens_corpus(*, n_texts: int = 2, n_attributes: int = 2) -> movielens.MovieLensCorpus:
+    """Two documents, with the parallel arrays independently sized so a test can
+    make one short. Local by house convention."""
+    return movielens.MovieLensCorpus(
+        archive_sha256="0" * 64,
+        doc_ids=("m1", "m2"),
+        texts=tuple(f"t{i}" for i in range(n_texts)),
+        attributes=tuple({"popularity": i} for i in range(n_attributes)),
+        interactions=(),
+        n_ratings=0,
+        n_users=0,
+        n_unrated=2,
+    )
+
+
+def test_a_movielens_corpus_with_arrays_in_step_renders_every_document() -> None:
+    """The passing side, so the refusals below are shown to be about the
+    mismatch rather than about the constructor."""
+    records = _movielens_corpus().records()
+
+    assert [r["doc_id"] for r in records] == ["m1", "m2"]
+    assert records[0]["text"] == "t0"
+    assert records[0]["popularity"] == 0
+
+
+@pytest.mark.parametrize(
+    ("label", "kwargs"),
+    [
+        ("one text short", {"n_texts": 1}),
+        ("one attribute short", {"n_attributes": 1}),
+        ("one text too many", {"n_texts": 3}),
+    ],
+)
+def test_a_movielens_corpus_whose_arrays_disagree_is_refused(
+    label: str, kwargs: dict[str, int]
+) -> None:
+    """`strict=True`. Truncating instead would drop `m2` from a two-film corpus
+    and report `n_documents = 2` beside a one-row record set."""
+    with pytest.raises(ValueError, match="zip"):
+        _movielens_corpus(**kwargs).records()
+
+
+def _synthetic_corpus(*, n_documents: int = 2, n_attributes: int = 2) -> synthetic.SyntheticCorpus:
+    """The generated corpus's counterpart, built by hand rather than generated so
+    the arrays can be put out of step."""
+    return synthetic.SyntheticCorpus(
+        spec=synthetic.SyntheticSpec(),
+        doc_ids=("d0", "d1"),
+        documents=tuple(("w",) * (i + 1) for i in range(n_documents)),
+        attributes=tuple({"popularity": i} for i in range(n_attributes)),
+        interactions=(),
+        twins=(),
+        exact_duplicate_pairs=(),
+    )
+
+
+def test_a_synthetic_corpus_whose_attributes_run_short_is_refused() -> None:
+    """The same guard on the generated side. A generator that planted fewer
+    attributes than documents would otherwise emit a corpus one document
+    shorter than the spec it records beside it."""
+    with pytest.raises(ValueError, match="zip"):
+        _synthetic_corpus(n_attributes=1).records()
+
+
+def test_a_synthetic_corpus_whose_documents_run_short_is_refused() -> None:
+    """`features_by_doc` pairs ids with documents and nothing else, so it has its
+    own use of the same guard."""
+    with pytest.raises(ValueError, match="zip"):
+        _synthetic_corpus(n_documents=1).features_by_doc()
+
+
+def test_a_synthetic_corpus_in_step_pairs_each_id_with_its_own_features() -> None:
+    """The passing side, and the property the mapping exists for: the pairing is
+    positional, so an off-by-one would silently attribute one document's tokens
+    to its neighbour."""
+    by_doc = _synthetic_corpus().features_by_doc()
+
+    assert by_doc == {"d0": ("w",), "d1": ("w", "w")}
+
+
+# ---------------------------------------------------------------------------
+# The Zipf exponent selects between two arithmetics, and both ends must hold
+# ---------------------------------------------------------------------------
+def test_an_exponent_of_zero_is_a_flat_vocabulary_not_a_zipf_one() -> None:
+    """`if exponent == 1.0` picks the exact integer path; everything else goes
+    through `pow`. At exponent 0 that yields `scale / 1` for every rank -- a
+    uniform vocabulary, the ablation with no skew at all.
+
+    Pinned because the branch is on a float equality: routing exponent 0 into
+    the integer path would silently substitute the 1/rank distribution and the
+    ablation would measure the baseline twice.
+    """
+    flat = synthetic._zipf_weights(6, 0.0)
+
+    assert len(set(flat)) == 1, "every rank equally likely"
+    assert flat != synthetic._zipf_weights(6, 1.0)
+
+
+def test_a_larger_exponent_concentrates_the_vocabulary_harder() -> None:
+    """The parameter's direction, so the two arithmetics are shown to agree
+    about what the exponent means. Only the head is fixed; every later rank
+    falls away faster."""
+    gentle = synthetic._zipf_weights(6, 1.0)
+    steep = synthetic._zipf_weights(6, 2.0)
+
+    assert gentle[0] == steep[0], "rank one is the scale itself either way"
+    assert all(s < g for s, g in zip(steep[1:], gentle[1:], strict=True))
+
+
+def test_the_exact_and_platform_arithmetics_agree_over_a_full_vocabulary() -> None:
+    """Exponent 1 is computed in integers so the corpus regenerates identically
+    on any interpreter; `pow` would reach the platform libm, which
+    `docs/spec_addenda.md#g13` shows disagrees across systems.
+
+    They happen to agree numerically at double the default vocabulary size, so
+    the integer path is chosen for its provenance rather than for its answer --
+    which is worth recording, since a reader comparing the two branches would
+    otherwise wonder what the difference buys.
+    """
+    exact = synthetic._zipf_weights(8000, 1.0)
+    via_pow = [max(1, int((1 << 40) / (rank + 1) ** 1.0)) for rank in range(8000)]
+
+    assert exact == via_pow
+
+
+def test_a_document_length_of_exactly_one_is_accepted() -> None:
+    """The boundary the guard is written around. `len_min = 1` is the shortest
+    document `_uniform_int` can be asked for and is a legitimate corpus: a
+    one-token document has `L = 1`, so `tf = count / L` is exactly 1 and its
+    weights are the idf alone.
+
+    Rejecting it would refuse the very corpus a length sweep starts from.
+    """
+    corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30, len_min=1, len_max=4))
+
+    assert corpus.n_documents == 12
+    assert min(len(d) for d in corpus.documents) >= 1
+    assert all(d for d in corpus.documents), "no document is empty"
+
+
+def test_a_single_length_range_is_accepted_and_fixes_every_document_length() -> None:
+    """`len_max < len_min` is the guard; `len_max == len_min` is a degenerate
+    but valid range, and a useful one -- with every document the same length,
+    `tf = count / L` has a common denominator and a margin sweep isolates the
+    document-frequency effect from the length effect.
+
+    Twins carry one extra token by construction, so they are the one documented
+    exception to the fixed length.
+    """
+    corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30, len_min=5, len_max=5))
+    twin_bs = {b for _, b, _ in corpus.twins}
+    by_doc = corpus.features_by_doc()
+
+    assert {len(by_doc[d]) for d in corpus.doc_ids if d not in twin_bs} == {5}
+    assert all(len(by_doc[b]) == 6 for b in twin_bs), "a twin is its source plus one token"
+
+
+def test_a_twin_token_too_frequent_for_the_vocabulary_falls_back_to_its_head() -> None:
+    """`vocabulary[min(vocab_size - 1, max(0, vocab_size // target_df - 1))]`.
+
+    The extra token is picked by Zipf rank so its document frequency is intended
+    rather than incidental. Asking for a df the vocabulary cannot supply --
+    `target_df` above `vocab_size`, so the rank computes to -1 -- clamps to rank
+    zero, the most frequent term available and the closest the vocabulary gets
+    to what was asked for.
+
+    Without the lower clamp the rank is negative and Python reads from the far
+    end, so the *rarest* term would stand in for the most frequent one and the
+    twin pair would separate by the opposite of the intended amount.
+    """
+    spec = synthetic.SyntheticSpec(
+        n_docs=40, vocab_size=30, n_users=0, n_exact_duplicates=2, n_twin_pairs=8
+    )
+    corpus = synthetic.generate(spec)
+    by_doc = corpus.features_by_doc()
+    extras = {df: by_doc[b][-1] for _, b, df in corpus.twins}
+
+    assert extras[1] == "w00029", "df 1 wants the rarest term, at the tail"
+    assert extras[16] == "w00000", "rank 30 // 16 - 1 = 0, the head, without any clamping"
+    for exhausted in (32, 64, 128):
+        assert extras[exhausted] == "w00000", f"df {exhausted} clamps to the head, not past it"
+
+
+def test_the_twin_token_rank_is_clamped_at_the_rare_end_too() -> None:
+    """The `min(vocab_size - 1, ...)` half of the same expression. A df of 1
+    asks for a term appearing in one document, which is rank `vocab_size - 1`
+    exactly -- so the clamp is on the boundary rather than beyond it, and an
+    off-by-one would index past the vocabulary."""
+    spec = synthetic.SyntheticSpec(
+        n_docs=40, vocab_size=30, n_users=0, n_exact_duplicates=2, n_twin_pairs=8
+    )
+    corpus = synthetic.generate(spec)
+    by_doc = corpus.features_by_doc()
+
+    assert {by_doc[b][-1] for _, b, _ in corpus.twins} <= {f"w{i:05d}" for i in range(30)}
+
+
+def test_find_near_ties_skips_exact_ties_unless_asked_for_them() -> None:
+    """`strictly_positive` defaults to True, and the default is what every
+    caller that does not think about it gets.
+
+    G22 measured the regime: at tau = 1e-9 essentially every within-tau pair has
+    a gap of exactly zero, and 17.2% of adjacent gaps are zero outright. A
+    "closest pairs" list that included them would be a list of zeros on any real
+    corpus -- it would report that exact ties exist, which is already known, and
+    nothing about the near-tie structure section 7.4 is looking for.
+
+    Both existing exact-tie tests pass the flag explicitly, so the default was
+    the one path never taken.
+    """
+    scores = [1.0, 1.0, 0.5, 0.0, 0.0]
+
+    by_default = synthetic.find_near_ties(scores, limit=10)
+    assert all(p.gap > 0.0 for p in by_default)
+    assert not any(p.is_exact for p in by_default)
+    assert [p.gap for p in by_default] == [0.5, 0.5]
+
+    asked_for = synthetic.find_near_ties(scores, limit=10, strictly_positive=False)
+    assert sum(p.is_exact for p in asked_for) == 2, "the pairs the default dropped"
