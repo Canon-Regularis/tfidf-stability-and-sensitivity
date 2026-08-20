@@ -27,6 +27,7 @@ from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
 from tfidf_stability.vectorisation.vocabulary import (
     MaxFeaturesPolicy,
     VocabularyConfig,
+    _resolve_threshold,
     build_vocabulary,
 )
 
@@ -444,3 +445,259 @@ def test_a_correctly_sorted_vocabulary_passes_that_same_guard() -> None:
     vocab = build_vocabulary([["beta", "alpha", "gamma"]])
     assert vocab.is_sorted()
     assert list(vocab.tokens) == sorted(vocab.tokens, key=lambda t: t.encode("utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# _resolve_threshold: the two ends round in opposite directions
+# ---------------------------------------------------------------------------
+# `min_df` keeps `df >= p*n` and rounds up; `max_df` keeps `df <= p*n` and must
+# round down. Rounding an upper bound up admits exactly what the caller asked to
+# exclude, and the module records two cases where it does.
+@pytest.mark.parametrize(
+    ("proportion", "n_docs", "lower", "upper"),
+    [
+        (0.5, 3, 2, 1),
+        (0.95, 7, 7, 6),
+        (0.3, 10, 3, 3),
+        (0.25, 4, 1, 1),
+    ],
+)
+def test_the_two_ends_of_a_proportion_resolve_in_opposite_directions(
+    proportion: float, n_docs: int, lower: int, upper: int
+) -> None:
+    """At `p=0.5, n=3` the exact threshold is 1.5: the lower bound becomes 2 and
+    the upper becomes 1, so the same proportion admits different token sets at
+    the two ends. Where `p*n` is an integer the two coincide, which is why the
+    asymmetry needs the fractional cases to be visible at all.
+    """
+    assert _resolve_threshold(proportion, n_docs, name="min_df") == lower
+    assert _resolve_threshold(proportion, n_docs, name="max_df", bound="upper") == upper
+
+
+def test_an_upper_bound_rounded_up_would_filter_nothing_at_all() -> None:
+    """The second recorded case: at `p=0.95, n=7` rounding up resolves to 7,
+    which is every document, so a `max_df` meant to drop near-ubiquitous terms
+    drops none. Rounding down gives 6 and does the job."""
+    assert _resolve_threshold(0.95, 7, name="max_df", bound="upper") == 6
+    assert _resolve_threshold(0.95, 7, name="min_df") == 7, "the other end really does give 7"
+
+
+@pytest.mark.parametrize("proportion", [0.0, -0.5, 1.0000001, 2.0, float("inf")])
+def test_a_proportion_outside_its_half_open_interval_is_refused(proportion: float) -> None:
+    """`(0, 1]`. Zero is excluded because it names no threshold, and anything
+    above one asks for more documents than exist."""
+    with pytest.raises(ValueError, match="as a proportion must be in"):
+        _resolve_threshold(proportion, 10, name="min_df")
+
+
+def test_a_proportion_of_exactly_one_is_the_whole_corpus() -> None:
+    """The closed end. A token must appear in every document to survive."""
+    assert _resolve_threshold(1.0, 10, name="min_df") == 10
+
+
+def test_a_vanishing_proportion_still_requires_one_document() -> None:
+    """The ceiling is floored at 1, so a tiny proportion cannot resolve to a
+    threshold of zero -- which would admit tokens no document contains."""
+    assert _resolve_threshold(1e-9, 10, name="min_df") == 1
+
+
+@pytest.mark.parametrize("value", [-1, -(2**40)])
+def test_a_negative_integer_threshold_is_refused(value: int) -> None:
+    """Integers take the other branch entirely, so they need their own guard."""
+    with pytest.raises(ValueError, match="must be non-negative"):
+        _resolve_threshold(value, 10, name="min_df")
+
+
+def test_an_integer_threshold_of_zero_is_admissible() -> None:
+    """Unlike the proportion, where zero is refused: an integer `min_df` of 0
+    means "no lower bound", which is a coherent request."""
+    assert _resolve_threshold(0, 10, name="min_df") == 0
+
+
+# ---------------------------------------------------------------------------
+# build_vocabulary: the ways it comes out empty
+# ---------------------------------------------------------------------------
+def test_a_corpus_with_no_documents_is_distinguished_from_one_with_no_tokens() -> None:
+    """Two different messages for two different problems. The first is a corpus
+    that was never loaded; the second is a filter that was set too tightly, and
+    the second message carries the thresholds so the reader can loosen them."""
+    with pytest.raises(
+        EmptyVocabularyError, match="cannot build a vocabulary from an empty corpus"
+    ):
+        build_vocabulary([])
+
+    with pytest.raises(EmptyVocabularyError, match="no token survived filtering"):
+        build_vocabulary([[], []])
+
+
+def test_the_filtering_message_carries_every_threshold_that_produced_it() -> None:
+    """A reader whose vocabulary vanished has three dials to check, and the
+    message names all three plus the corpus size and the tokens it started
+    from."""
+    documents = [["a", "b"], ["a"], ["b", "c"]]
+    with pytest.raises(
+        EmptyVocabularyError,
+        match=r"min_df=99, max_df=3, max_features=None\) over 3 documents with 3 distinct",
+    ):
+        build_vocabulary(documents, VocabularyConfig(min_df=99))
+
+
+def test_a_negative_feature_cap_is_refused_rather_than_dropping_the_last_token() -> None:
+    """`survivors[:-1]` is a legal slice, so `-1` quietly dropped the
+    lowest-ranked token. It is the plausible typo for "unlimited", which this
+    codebase spells `null`.
+
+    The fourth instance of a negative index being accepted where the positive
+    side is checked -- and the only one of the four that is guarded.
+    """
+    documents = [["a", "b"], ["a"], ["b", "c"]]
+    with pytest.raises(ValueError, match="max_features must be non-negative or None, got -1"):
+        build_vocabulary(documents, VocabularyConfig(max_features=-1))
+
+
+def test_a_feature_cap_of_zero_empties_the_vocabulary_by_the_other_route() -> None:
+    """Not a `ValueError`: zero is a non-negative cap, so it passes that guard
+    and fails later as an empty vocabulary. Two different errors for `-1` and
+    `0`, and the distinction is deliberate."""
+    documents = [["a", "b"], ["a"], ["b", "c"]]
+    with pytest.raises(EmptyVocabularyError, match="max_features=0"):
+        build_vocabulary(documents, VocabularyConfig(max_features=0))
+
+
+def test_the_identifiers_are_byte_sorted_whatever_the_truncation_kept() -> None:
+    """`max_features` ranks by frequency, then the survivors are re-sorted by
+    byte order before they become identifiers -- so the ranking decides *which*
+    tokens survive and never *what number* each one gets."""
+    documents = [["z", "a"], ["z"], ["z", "a"], ["m"]]
+    vocab = build_vocabulary(documents, VocabularyConfig(max_features=2))
+
+    assert vocab.tokens == tuple(sorted(vocab.tokens, key=lambda t: t.encode("utf-8")))
+    assert vocab.is_sorted()
+
+
+def test_the_discarded_count_is_what_filtering_removed() -> None:
+    """Reported so a run can say how much of the corpus its vocabulary covers
+    without recomputing the unfiltered one."""
+    documents = [["a", "b", "c"], ["a"], ["a"]]
+    vocab = build_vocabulary(documents, VocabularyConfig(min_df=2))
+
+    assert vocab.tokens == ("a",)
+    assert vocab.n_discarded == 2, "b and c fell below min_df"
+    assert vocab.n_documents == 3
+
+
+# ---------------------------------------------------------------------------
+# smoothed_idf_one: the ends of the admissible df range
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("n_documents", [0, 1, 10, 9742])
+def test_a_token_in_every_document_sits_exactly_on_the_smoothing_floor(
+    n_documents: int,
+) -> None:
+    """`log((1+N)/(1+N)) + 1` is `log(1) + 1`, so a ubiquitous token has an idf
+    of exactly one at every corpus size.
+
+    That floor is what makes `w = tf * idf` never shrink a term below its raw
+    frequency, and it is the reason `1.0` is a meaningful sentinel elsewhere --
+    a value of one means "carried by every document", not "absent".
+    """
+    assert smoothed_idf_one(n_documents, n_documents) == 1.0
+
+
+@pytest.mark.parametrize("n_documents", [0, 1, 10])
+def test_a_token_in_no_document_takes_the_largest_idf_the_corpus_admits(
+    n_documents: int,
+) -> None:
+    """`df = 0` is admissible: a token can survive into the vocabulary and then
+    be absent from a *perturbed* corpus, which is the case section 4.1 measures.
+    """
+    assert smoothed_idf_one(0, n_documents) == pytest.approx(math.log(1 + n_documents) + 1.0)
+
+
+@pytest.mark.parametrize(("df", "n_documents"), [(11, 10), (1, 0), (2**40, 10)])
+def test_a_frequency_above_the_corpus_size_is_refused(df: int, n_documents: int) -> None:
+    """`0 <= df <= N`. A df above N cannot arise from counting, so it means the
+    two arguments came from different corpora -- exactly the mix-up that would
+    otherwise produce a plausible negative logarithm."""
+    with pytest.raises(ValueError, match=f"df={df} exceeds the corpus size N={n_documents}"):
+        smoothed_idf_one(df, n_documents)
+
+
+@pytest.mark.parametrize("df", [-1, -(2**40)])
+def test_a_negative_frequency_is_refused_before_the_range_check(df: int) -> None:
+    """Guard order: negativity first, so `df=-1, N=-5` reports the negative df
+    rather than a range comparison between two nonsense numbers."""
+    with pytest.raises(ValueError, match=f"df must be non-negative, got {df}"):
+        smoothed_idf_one(df, 10)
+
+
+def test_the_idf_is_monotone_decreasing_in_the_document_frequency() -> None:
+    """The property the whole weighting rests on: a rarer token weighs more.
+    Swept rather than sampled, since a single pair would pass for a formula that
+    is monotone only locally."""
+    values = [smoothed_idf_one(df, 100) for df in range(101)]
+    assert values == sorted(values, reverse=True)
+    assert values[-1] == 1.0, "and it lands exactly on the floor"
+
+
+# ---------------------------------------------------------------------------
+# idf_linf: an exported function nothing calls, and why that matters
+# ---------------------------------------------------------------------------
+def test_the_infinity_norm_of_no_idf_values_is_zero() -> None:
+    """An empty vocabulary has no largest entry, and zero is the identity for
+    the bound it feeds rather than an error."""
+    assert idf_linf([]) == 0.0
+
+
+def test_the_infinity_norm_takes_the_maximum_rather_than_the_largest_magnitude() -> None:
+    """A latent defect, pinned rather than repaired.
+
+    `||x||_inf` is `max |x_i|`, but this computes `max(x_i)`. On genuine idf
+    values the two agree, because smoothing floors every entry at 1.0 and the
+    signature says the argument is idf -- so the gap is unreachable through the
+    documented use.
+
+    It matters because the function is exported and its docstring accepts "a raw
+    sequence". A caller reaching for it to norm a *delta* vector, which section
+    4.1 makes freely negative, gets the largest positive entry instead of the
+    largest magnitude. `vector_perturb` avoids it by computing `max(abs(...))`
+    inline rather than calling this -- and in fact nothing in the package calls
+    it at all.
+    """
+    with_negative = [1.0, -3.0, 2.0]
+
+    assert idf_linf(with_negative) == 2.0
+    assert max(abs(v) for v in with_negative) == 3.0, "what an infinity norm would give"
+
+
+def test_every_genuine_idf_vector_makes_the_two_definitions_agree() -> None:
+    """The reason the gap above is latent: smoothing puts every entry at or
+    above one, so no idf vector can distinguish the two spellings."""
+    idf = [smoothed_idf_one(df, 50) for df in range(51)]
+
+    assert min(idf) >= 1.0
+    assert idf_linf(idf) == max(abs(v) for v in idf)
+
+
+# ---------------------------------------------------------------------------
+# delta_idf
+# ---------------------------------------------------------------------------
+def test_an_unchanged_corpus_moves_no_idf_at_all() -> None:
+    """Exactly zero, and positive zero: the two logarithms are the same call on
+    the same arguments, so the subtraction is exact."""
+    assert same_bits(delta_idf(3, 3, 10, 10), 0.0)
+
+
+def test_a_token_becoming_rarer_raises_its_idf() -> None:
+    """The direction section 4.1 depends on. Computed as a difference of two
+    exact logarithms rather than one logarithm of a ratio of ratios, matching
+    the expression as written."""
+    assert delta_idf(5, 2, 10, 10) > 0.0
+    assert delta_idf(2, 5, 10, 10) < 0.0
+
+
+def test_the_smoothing_constant_cancels_in_the_difference() -> None:
+    """The `+1` that turns `log(N/df)` into an idf appears in both terms, so it
+    is absent from the delta -- which is why this function does not add it and
+    why its result can be negative where an idf cannot."""
+    by_hand = smoothed_idf_one(2, 10) - smoothed_idf_one(5, 10)
+    assert delta_idf(5, 2, 10, 10) == pytest.approx(by_hand, rel=1e-15)
