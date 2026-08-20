@@ -14,7 +14,9 @@ disagree maximally, which is what the ``rho`` diagnostic exists to flag.
 from __future__ import annotations
 
 import math
+import sys
 import warnings
+from pathlib import Path
 
 import pytest
 from hypothesis import given
@@ -436,3 +438,319 @@ def test_rho_is_undefined_rather_than_one_on_an_empty_corpus() -> None:
     """
     assert math.isnan(TieGroupIndex.build((), tau=1.0).rho)
     assert math.isnan(chain_inflation_ratio((), 1.0))
+
+
+# ---------------------------------------------------------------------------
+# Erroneous: the rank index, with the range it was checked against
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("j", [-1, -7, 2, 99])
+def test_a_rank_outside_the_corpus_names_the_range_it_was_checked_against(j: int) -> None:
+    """The message carries the computed upper bound, not just the index. On a
+    truncated ranking the reader's question is "how many were there", and the
+    bound answers it without a second call.
+
+    Negative indices matter especially: they are legal Python and would silently
+    address the *worst*-ranked documents rather than raising.
+    """
+    with pytest.raises(IndexError, match=f"rank index {j} out of range 0..1"):
+        tie_ball_interval((1.0, 0.5), j, 0.0)
+
+
+def test_an_empty_corpus_reports_an_empty_range_rather_than_a_negative_one() -> None:
+    """`0..-1` is how "there are no valid ranks" renders. Ugly and correct: a
+    message saying `0..0` would claim rank 0 exists."""
+    with pytest.raises(IndexError, match=r"rank index 0 out of range 0\.\.-1"):
+        tie_ball_interval((), 0, 0.0)
+
+
+def test_the_rank_is_checked_before_the_tolerance() -> None:
+    """Both guards fire for an empty corpus with a NaN tau. Which error the
+    caller sees is part of the interface, and the rank is the one they can act
+    on: a bad tau is a sweep parameter, a bad rank is a bug in the caller."""
+    with pytest.raises(IndexError, match="rank index"):
+        tie_ball_interval((), 0, math.nan)
+
+    with pytest.raises(ValueError, match="tau must be non-negative, got nan"):
+        tie_ball_interval((1.0,), 0, math.nan)
+
+
+# ---------------------------------------------------------------------------
+# Erroneous: the tolerance, across its whole invalid domain
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "tau", [-1.0, -5e-324, -math.inf, math.nan, -sys.float_info.max, float("-nan")]
+)
+def test_every_inadmissible_tolerance_is_refused_with_its_value(tau: float) -> None:
+    """The guard is spelled `not (tau >= 0.0)` rather than `tau < 0.0` precisely
+    so NaN is caught: every comparison with NaN is false, so the natural spelling
+    lets it through a guard whose own message says non-negative.
+
+    A NaN tau is the worst case because it does not fail loudly downstream: it
+    makes `gap > tau` and `gap <= tau` both false, so chains return one group
+    covering the corpus, cliques return all singletons, and rho reports N --
+    three contradictory answers to the same question, with nothing raised.
+    """
+    with pytest.raises(ValueError, match="tau must be non-negative"):
+        tie_ball_interval((1.0, 0.5), 0, tau)
+
+
+@pytest.mark.parametrize("tau", [0.0, -0.0, 5e-324, 1.0, math.inf])
+def test_every_admissible_tolerance_is_accepted_including_both_zeros(tau: float) -> None:
+    """`-0.0 >= 0.0` is true, so a negative zero is a legal tolerance and
+    behaves as zero. Worth stating: it is the one negative-looking value the
+    guard lets through, and the sweep that produced it may have divided."""
+    lo, hi = tie_ball_interval((1.0, 1.0, 0.5), 0, tau)
+    assert lo == 0
+    assert hi >= 1
+
+
+def test_a_negative_zero_tolerance_recovers_exact_ties_like_a_positive_zero() -> None:
+    """Not merely accepted -- identical. If the two zeros gave different groups,
+    a tau derived by halving could silently change a tie-group statistic."""
+    scores = (1.0, 1.0, 0.5)
+    assert tie_ball_interval(scores, 0, -0.0) == tie_ball_interval(scores, 0, 0.0)
+    assert tie_chains(scores, -0.0) == tie_chains(scores, 0.0)
+    assert tie_cliques(scores, -0.0) == tie_cliques(scores, 0.0)
+
+
+def test_the_group_builders_return_nothing_for_an_empty_corpus_before_checking_tau() -> None:
+    """`tie_chains` and `tie_cliques` short-circuit on an empty array, so they
+    accept a tau that `tie_ball_interval` refuses. Pinned as the guard-order
+    difference it is: a sweep reaching tau = NaN on an empty corpus gets three
+    different behaviours from the three entry points.
+    """
+    assert tie_chains((), math.nan) == ()
+    assert tie_cliques((), math.nan) == ()
+
+    with pytest.raises(IndexError):
+        tie_ball_interval((), 0, math.nan)
+
+
+# ---------------------------------------------------------------------------
+# Boundary: G9's predicate, at the one place it is interesting
+# ---------------------------------------------------------------------------
+def test_the_search_agrees_with_the_predicate_where_the_rounded_bound_would_not() -> None:
+    """G9 pins the test as ``|s_i - s_j| <= tau``. Binary-searching for
+    ``S[j] + tau`` instead evaluates ``S[i] <= fl(S[j] + tau)``, which is a
+    different predicate whenever that addition rounds.
+
+    The sweep chooses triples where it does round, so the two spellings actually
+    disagree, and checks the interval against the predicate written out
+    literally. A count outside the loop keeps the sweep from passing vacuously.
+    """
+    checked = 0
+    rounded_cases = 0
+    for exponent in range(-8, 8):
+        centre = 1.0 + 2.0**exponent
+        for tau in (2.0**-40, 2.0**-30, 2.0**-20 + 2.0**-53):
+            scores = tuple(
+                sorted((centre, centre - tau, centre + tau, centre - 2 * tau), reverse=True)
+            )
+            for j in range(len(scores)):
+                assert ball_members(scores, j, tau) == brute_force_ball(scores, j, tau)
+                checked += 1
+                if (scores[j] + tau) - scores[j] != tau:
+                    rounded_cases += 1
+
+    assert checked == 192, "the sweep did not run the shape it claims"
+    assert rounded_cases > 0, "no case actually rounded; the sweep proves nothing about G9"
+
+
+def test_the_ball_at_exactly_tau_includes_the_boundary_document() -> None:
+    """The comparison is inclusive (G9). One ulp further out it is not, which is
+    the whole content of the choice."""
+    scores = (1.0, 1.0 - 2.0**-30, 1.0 - 2.0**-29)
+    assert ball_members(scores, 0, 2.0**-30) == {0, 1}
+    assert ball_members(scores, 0, math.nextafter(2.0**-30, 0.0)) == {0}
+
+
+# ---------------------------------------------------------------------------
+# chain_inflation_ratio
+# ---------------------------------------------------------------------------
+def test_an_empty_corpus_has_no_inflation_ratio() -> None:
+    """0/0. NaN rather than 1.0, because "no evidence" is not "no inflation"."""
+    assert math.isnan(chain_inflation_ratio((), 0.1))
+
+
+def test_all_equal_scores_give_the_ratio_its_minimum_rather_than_a_warning() -> None:
+    """The errata correct G3 here: when every score is equal, the chain and the
+    clique are both the whole corpus, so rho is 1 -- its *minimum*. It is the
+    range warning that fires in that situation, not the inflation one."""
+    assert chain_inflation_ratio((0.5,) * 4, 0.0) == 1.0
+
+
+def test_the_ladder_inflates_the_ratio_above_one() -> None:
+    """G1's witness: single-linkage chaining walks the whole ladder while no two
+    ends are within tau of each other."""
+    assert chain_inflation_ratio(ladder(6), TAU) == 3.0
+
+
+# ---------------------------------------------------------------------------
+# The diagnostics: a warn / do-not-warn matrix
+# ---------------------------------------------------------------------------
+# `filterwarnings = ["error"]` means an unexpected warning fails the suite, so
+# the "does not warn" rows are asserted by simply calling `build` -- but that
+# reads as an accident. `catch_warnings(record=True)` states it, and lets the
+# rows that fire *both* diagnostics be checked as a set rather than one at a
+# time, which `pytest.warns` cannot do.
+def _diagnostics(scores: tuple[float, ...], tau: float, **kwargs: float) -> list[str]:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        TieGroupIndex.build(scores, tau, **kwargs)  # type: ignore[arg-type]
+    return sorted(str(w.category.__name__) for w in caught)
+
+
+_SPANNING = (1.0, 0.5, 0.0)
+
+
+def test_a_tolerance_below_the_score_range_is_not_degenerate() -> None:
+    """One ulp below the span, nothing fires -- and the groups are still
+    meaningful, which is what makes the warning above it a boundary rather than
+    a blanket."""
+    assert _diagnostics(_SPANNING, math.nextafter(1.0, 0.0)) == []
+
+
+@pytest.mark.parametrize("tau", [1.0, math.nextafter(1.0, math.inf), 2.0, math.inf])
+def test_a_tolerance_at_or_above_the_score_range_is_flagged(tau: float) -> None:
+    """ ">=" rather than ">": at tau equal to the range every ball is already the
+    whole corpus, so the degeneracy has begun rather than being about to."""
+    assert "TauExceedsScoreRangeWarning" in _diagnostics(_SPANNING, tau)
+
+
+def test_a_zero_range_at_zero_tolerance_is_the_exempted_baseline() -> None:
+    """An all-tied corpus at tau = 0 is the exact-tie baseline the whole
+    tie-break study is normalised against. Warning there would fire on the one
+    configuration that is least degenerate, and under `filterwarnings = error`
+    it would abort every sweep at its first point."""
+    assert _diagnostics((0.5, 0.5, 0.5), 0.0) == []
+
+
+def test_a_zero_range_at_any_positive_tolerance_reports_an_infinite_ratio() -> None:
+    """`tau / span` is `x / 0`. The errata require `inf` rather than the NaN a
+    naive `0.0 / 0.0` would give, because the message is read by a human
+    deciding whether to trust the point."""
+    with pytest.warns(TauExceedsScoreRangeWarning, match=r"tau/span=inf") as caught:
+        TieGroupIndex.build((0.5, 0.5), 5e-324)
+    assert "span=0.0" in str(caught[0].message)
+
+
+def test_an_empty_corpus_produces_no_diagnostic_at_all() -> None:
+    """There is no span to compare against and no ratio to inflate. Both
+    diagnostics are guarded on the corpus being non-empty."""
+    assert _diagnostics((), 1.0) == []
+    assert _diagnostics((), 0.0) == []
+
+
+def test_both_diagnostics_can_fire_for_one_index() -> None:
+    """They are independent conditions and neither suppresses the other. At tau
+    equal to the span the corpus is one chain and one clique, so rho is exactly
+    1 -- which a threshold below 1 still exceeds."""
+    assert _diagnostics(_SPANNING, 1.0, rho_warn_threshold=0.0) == [
+        "ChainInflationWarning",
+        "TauExceedsScoreRangeWarning",
+    ]
+
+
+def test_a_nan_inflation_threshold_silences_the_diagnostic_rather_than_raising() -> None:
+    """`rho > nan` is false for every rho, so a threshold that arrived as NaN
+    disables the check silently. Pinned: it is the one threshold value that
+    turns a diagnostic off without saying so, and a sweep computing its
+    threshold could produce one.
+    """
+    assert "ChainInflationWarning" not in _diagnostics(ladder(6), TAU, rho_warn_threshold=math.nan)
+    assert "ChainInflationWarning" in _diagnostics(ladder(6), TAU, rho_warn_threshold=2.0)
+
+
+@pytest.mark.parametrize(("threshold", "fires"), [(0.0, True), (2.0, True), (3.0, False)])
+def test_the_inflation_threshold_is_exclusive(threshold: float, fires: bool) -> None:
+    """`rho > threshold`, so a ratio exactly at the threshold does not fire. The
+    ladder's rho is exactly 3, which makes it the witness for both sides."""
+    assert chain_inflation_ratio(ladder(6), TAU) == 3.0
+    assert (
+        "ChainInflationWarning" in _diagnostics(ladder(6), TAU, rho_warn_threshold=threshold)
+    ) is fires
+
+
+def test_the_diagnostic_is_attributed_to_the_caller_not_to_the_module() -> None:
+    """`stacklevel=2`. Without it every warning points at `tie_groups.py`, and a
+    sweep emitting thousands of them gives the reader one location that is never
+    the one they need. Asserted by filename, since that is what a reader sees.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        TieGroupIndex.build(_SPANNING, 2.0)
+
+    assert caught
+    assert Path(caught[0].filename).name == Path(__file__).name
+
+
+# ---------------------------------------------------------------------------
+# chain_of
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("j", [-1, 3, 99])
+def test_asking_which_chain_holds_a_rank_outside_the_corpus_is_refused(j: int) -> None:
+    """The loop falls through rather than returning the last chain, which a
+    negative index would otherwise do silently."""
+    index = TieGroupIndex.build((1.0, 0.5, 0.0), 0.0)
+    with pytest.raises(IndexError, match=f"rank {j} is outside the corpus"):
+        index.chain_of(j)
+
+
+def test_every_rank_belongs_to_exactly_one_chain() -> None:
+    """Chains partition the corpus, so the lookup is total on valid ranks and
+    the intervals it returns are disjoint."""
+    # The threshold is lifted clear of the ladder's rho of 3 so the inflation
+    # diagnostic does not fire: `filterwarnings = ["error"]` would turn it into
+    # a failure of a test that is not about the diagnostic at all.
+    index = TieGroupIndex.build(ladder(6), TAU, rho_warn_threshold=10.0)
+    found = [index.chain_of(j) for j in range(6)]
+
+    assert all(lo <= j < hi for j, (lo, hi) in enumerate(found))
+    assert set(found) <= set(index.chains)
+
+
+def test_the_inflation_diagnostic_is_also_attributed_to_the_caller() -> None:
+    """The two warnings carry their own `stacklevel`, and testing one says
+    nothing about the other.
+
+    The range test above builds a corpus whose tau exceeds its span, which fires
+    only the range warning -- so the inflation warning's attribution went
+    unchecked. The category is selected explicitly here rather than taken as
+    `caught[0]`, so this stays about the inflation warning even if the other one
+    starts firing too.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        TieGroupIndex.build(ladder(6), TAU)
+
+    inflation = [w for w in caught if w.category is ChainInflationWarning]
+    assert len(inflation) == 1
+    assert Path(inflation[0].filename).name == Path(__file__).name
+
+
+def test_the_range_diagnostic_reports_how_far_past_the_range_the_tolerance_is() -> None:
+    """`tau / span` is the number that tells a reader whether the point is a
+    hair over the edge or far outside it, which decides whether the results are
+    worth reading at all.
+
+    The span is deliberately not 1.0: at a span of one the ratio equals tau and
+    an assertion on it would pass for any arithmetic that happens to be the
+    identity there.
+    """
+    with pytest.warns(TauExceedsScoreRangeWarning, match=r"tau/span=4\.0") as caught:
+        TieGroupIndex.build((1.0, 0.5), 2.0)
+
+    message = str(caught[0].message)
+    assert "span=0.5" in message
+    assert "tau=2.0" in message
+
+
+def test_an_empty_corpus_has_no_largest_group_rather_than_a_group_of_one() -> None:
+    """`max(..., default=0)`. A default of 1 would report a single-document
+    chain in a corpus with no documents, and `rho` would then be 1.0 -- a
+    perfectly-behaved ratio computed from nothing.
+    """
+    empty = TieGroupIndex.build((), 1.0)
+    assert empty.largest_chain == 0
+    assert empty.largest_clique == 0
+    assert math.isnan(empty.rho)
