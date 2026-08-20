@@ -21,13 +21,17 @@ from __future__ import annotations
 
 import math
 import random
+import sys
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from tfidf_stability.similarity.cosine import cosine
-from tfidf_stability.utils.numerics import Reduction, same_bits, ulps_between
+from tfidf_stability.utils.numerics import Reduction, same_bits, sqrt, ulps_between
 from tfidf_stability.vectorisation.idf import LogImpl, smoothed_idf_one
 from tfidf_stability.vectorisation.sparse import CsrMatrix, SparseVector, cosine_of, dot, l2_norm
+from tfidf_stability.vectorisation.tf import term_frequencies
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
 
 sklearn = pytest.importorskip("sklearn", reason="external oracle")
@@ -35,6 +39,22 @@ from sklearn.feature_extraction.text import TfidfVectorizer  # noqa: E402
 from sklearn.metrics.pairwise import linear_kernel  # noqa: E402
 
 _IDENTITY_ANALYSER = list  # bypass sklearn's own tokeniser; we supply features
+
+
+def _two_token_vocabulary():  # type: ignore[no-untyped-def]
+    """A vocabulary of exactly `a` and `b`, built rather than stubbed.
+
+    Local to this file by house convention; two tokens is the smallest size at
+    which a frequency can be something other than one.
+    """
+    from tfidf_stability.vectorisation.vocabulary import build_vocabulary
+
+    return build_vocabulary([["a", "b"], ["a"]])
+
+
+def _two_document_model():  # type: ignore[no-untyped-def]
+    """A fitted model over the same two documents."""
+    return TfidfVectoriser().fit([["a", "b"], ["a"]], ["d0", "d1"])
 
 
 @pytest.fixture(scope="module")
@@ -584,3 +604,393 @@ def test_a_query_is_weighted_by_multiplying_tf_into_idf(mini_model, mini_feature
         assert (
             not same_bits(weight, raw / mini_model.idf[term_id]) or mini_model.idf[term_id] == 1.0
         )
+
+
+# ---------------------------------------------------------------------------
+# SparseVector: what construction does and does not establish
+# ---------------------------------------------------------------------------
+# `__post_init__` checks only that the two arrays are parallel. Ascending,
+# in-range indices are established by the constructors (`from_mapping` sorts,
+# `zero` is empty) and asserted by `is_canonical`, never enforced. Everything
+# downstream -- the merge in `dot`, the native postings loop -- assumes them.
+def test_construction_checks_only_that_the_arrays_are_parallel() -> None:
+    """An index outside the ambient dimension builds without complaint. That is
+    why `is_canonical` exists as a separate question rather than an invariant."""
+    out_of_range = SparseVector(indices=(5,), values=(1.0,), dim=1)
+
+    assert out_of_range.nnz == 1
+    assert not out_of_range.is_canonical()
+
+
+@pytest.mark.parametrize(
+    ("label", "indices", "dim"),
+    [
+        ("a duplicated index", (1, 1), 4),
+        ("descending indices", (2, 1), 4),
+        ("a negative index", (-1,), 4),
+        ("an index equal to the dimension", (4,), 4),
+        ("any index at all in a zero-dimensional space", (0,), 0),
+    ],
+)
+def test_each_way_of_breaking_the_canonical_form_is_detected(
+    label: str, indices: tuple[int, ...], dim: int
+) -> None:
+    """One case per reject arm. Strict ascent makes a support a set, and the
+    range check is what keeps `to_dense` and the native loop inside their
+    arrays."""
+    vector = SparseVector(indices=indices, values=(1.0,) * len(indices), dim=dim)
+    assert not vector.is_canonical(), label
+
+
+def test_a_negative_index_writes_the_wrong_slot_rather_than_raising() -> None:
+    """`to_dense` assigns by index, so a negative one lands at the far end of
+    the dense array. Silent, and the reason `is_canonical` checks the lower
+    bound as well as the upper one."""
+    wrong_slot = SparseVector(indices=(-1,), values=(9.0,), dim=3)
+    assert wrong_slot.to_dense() == [0.0, 0.0, 9.0]
+
+
+def test_an_index_at_the_dimension_is_an_index_error_rather_than_a_wrong_slot() -> None:
+    """The upper bound is where the failure is loud, and the lower bound is
+    where it is silent -- an asymmetry worth having written down."""
+    with pytest.raises(IndexError, match="list assignment index out of range"):
+        SparseVector(indices=(3,), values=(9.0,), dim=3).to_dense()
+
+
+def test_a_mapping_is_sorted_whatever_order_it_arrived_in() -> None:
+    """The point at which dictionary ordering stops being able to influence any
+    downstream number."""
+    scrambled = SparseVector.from_mapping({3: 0.3, 1: 0.1, 2: 0.2}, dim=4)
+
+    assert scrambled.indices == (1, 2, 3)
+    assert scrambled.values == (0.1, 0.2, 0.3)
+    assert scrambled.is_canonical()
+
+
+def test_a_mapping_larger_than_its_declared_dimension_is_not_checked() -> None:
+    """`from_mapping` sorts but does not validate against `dim`, so a key past
+    the end builds a non-canonical vector. Pinned as the precondition it is."""
+    assert not SparseVector.from_mapping({9: 1.0}, dim=2).is_canonical()
+
+
+@pytest.mark.parametrize("dim", [0, 1, 100])
+def test_the_zero_vector_is_canonical_at_every_dimension(dim: int) -> None:
+    """No indices, so nothing can be out of range. Section 2.3 gives it a
+    similarity of zero rather than treating it as an error."""
+    zero = SparseVector.zero(dim)
+    assert zero.nnz == 0
+    assert len(zero) == dim
+    assert zero.is_canonical()
+
+
+# ---------------------------------------------------------------------------
+# dot: the merge, and the sign of nothing
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("left", "right"), [({0: 1.0}, {1: 1.0}), ({}, {0: 1.0}), ({0: 1.0}, {}), ({}, {})]
+)
+def test_a_dot_product_with_no_shared_terms_is_positive_zero(
+    left: dict[int, float], right: dict[int, float]
+) -> None:
+    """`+0.0` specifically. The result feeds a bitwise comparison against the
+    native backend, where `-0.0` is a different value."""
+    product = dot(SparseVector.from_mapping(left, 4), SparseVector.from_mapping(right, 4))
+    assert same_bits(product, 0.0)
+
+
+def test_a_negative_zero_term_does_not_make_the_product_negative_zero() -> None:
+    """`-0.0 * 1.0` is `-0.0`, but the reduction starts from `+0.0` and
+    `0.0 + -0.0` is `+0.0`. So the sign does not survive the sum -- which is
+    what makes "the dot product is zero" mean one thing."""
+    left = SparseVector.from_mapping({0: -0.0}, 4)
+    right = SparseVector.from_mapping({0: 1.0}, 4)
+    assert same_bits(dot(left, right), 0.0)
+
+
+@pytest.mark.parametrize(("left_dim", "right_dim"), [(4, 5), (5, 4), (0, 1)])
+def test_a_dot_product_across_dimensions_names_both(left_dim: int, right_dim: int) -> None:
+    """Merging two vectors over different vocabularies would silently compare
+    term ids that mean different things."""
+    with pytest.raises(ValueError, match=f"dimension mismatch: {left_dim} vs {right_dim}"):
+        dot(SparseVector.zero(left_dim), SparseVector.zero(right_dim))
+
+
+def test_the_merge_accumulates_in_ascending_term_order() -> None:
+    """The native backend's postings loop produces the same sequence, so the
+    order is the specification rather than an implementation detail. Asserted by
+    reproducing the fold rather than by trusting the total."""
+    left = SparseVector.from_mapping({0: 1e16, 1: 1.0, 2: -1e16}, 4)
+    right = SparseVector.from_mapping({0: 1.0, 1: 1.0, 2: 1.0}, 4)
+
+    expected = (1e16 * 1.0 + 1.0 * 1.0) + (-1e16 * 1.0)
+    assert same_bits(dot(left, right), expected)
+
+
+def test_an_infinite_term_against_a_zero_term_gives_nan() -> None:
+    """`inf * 0.0` is NaN, and nothing filters it. Another reason non-finite
+    weights are refused before they reach a vector."""
+    left = SparseVector.from_mapping({0: math.inf}, 4)
+    right = SparseVector.from_mapping({0: 0.0}, 4)
+    assert math.isnan(dot(left, right))
+
+
+# ---------------------------------------------------------------------------
+# l2_norm: the G18 underflow boundary, measured rather than quoted
+# ---------------------------------------------------------------------------
+#: `sqrt(DBL_MIN)`, defined in the numerics suite and quoted here rather than
+#: re-derived. Above it, squaring a coordinate is safe; below it the square
+#: drifts into the subnormals and eventually to zero.
+_UNDERFLOW_THRESHOLD = 1.4916681462400413e-154
+
+
+def test_the_threshold_is_the_one_the_numerics_suite_pins() -> None:
+    """Quoted, so the two suites cannot drift apart silently."""
+    assert sqrt(sys.float_info.min) == _UNDERFLOW_THRESHOLD
+
+
+def test_the_norm_is_the_square_root_of_the_sum_of_squares_in_that_order() -> None:
+    """No rescaling. A hypot-style formulation resists overflow better and
+    produces different digits, and section 6 forbids stabilising
+    transformations."""
+    assert same_bits(l2_norm(SparseVector.from_mapping({0: 3.0, 1: 4.0}, 4)), 5.0)
+
+
+def test_a_large_vector_overflows_to_infinity_rather_than_being_rescaled() -> None:
+    """Asserted as intended behaviour, not as a defect. The overflow is visible;
+    a rescaled norm would be quietly different from the native backend's."""
+    huge = SparseVector.from_mapping({0: 1e200, 1: 1e200}, 4)
+    assert l2_norm(huge) == math.inf
+
+
+@pytest.mark.parametrize("scale", [1.0, 1e-100, 1e-154, _UNDERFLOW_THRESHOLD, 1e-160, 1e-162])
+def test_above_the_underflow_floor_a_vector_is_similar_to_itself(scale: float) -> None:
+    """Down to about `1e-162` the squares stay representable -- subnormal below
+    `1e-160`, but non-zero -- and the self-similarity is still exactly one."""
+    vector = SparseVector.from_mapping({0: 3.0 * scale, 1: 4.0 * scale}, 4)
+
+    assert l2_norm(vector) > 0.0
+    # Within a rounding of one rather than exactly one: `dot / (norm * norm)`
+    # rounds three times, so the self-similarity lands either side of 1.0
+    # depending on the scale. What the floor guarantees is that it is a
+    # similarity at all, not that it is exact.
+    assert abs(ulps_between(1.0, cosine_of(vector, vector))) <= 3.0
+
+
+@pytest.mark.parametrize("scale", [1e-164, 1e-170, 5e-324])
+def test_below_the_underflow_floor_a_non_zero_vector_reports_a_zero_norm(scale: float) -> None:
+    """The squares flush to zero, so the norm does too -- and `cosine_of` then
+    takes its zero-vector branch and reports a similarity of zero for a vector
+    that is not zero.
+
+    This is the G18 regime stated at its starkest. The measured floor is around
+    `1e-163`, well below the `sqrt(DBL_MIN)` threshold at which *precision*
+    starts to degrade: the two are different boundaries and the addendum's
+    concern is the first, not this one.
+    """
+    vector = SparseVector.from_mapping({0: 3.0 * scale, 1: 4.0 * scale}, 4)
+
+    assert vector.nnz == 2, "the vector really does have stored entries"
+    assert l2_norm(vector) == 0.0
+    assert cosine_of(vector, vector) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# cosine_of: precomputed norms are trusted, not verified
+# ---------------------------------------------------------------------------
+def test_a_supplied_norm_is_used_as_given_rather_than_checked() -> None:
+    """The whole point of passing them is to avoid recomputing, so nothing
+    validates them. A norm that is wrong but positive gives a wrong similarity
+    with no complaint -- which is why `row_norms` and the scorer must be the
+    only things that produce them."""
+    unit = SparseVector.from_mapping({0: 1.0}, 4)
+    assert cosine_of(unit, unit) == 1.0
+    assert cosine_of(unit, unit, u_norm=2.0) == 0.5
+
+
+def test_a_supplied_zero_norm_short_circuits_a_non_zero_vector_to_zero() -> None:
+    """The zero-vector convention is triggered by the norm, not by the support,
+    so a zero norm supplied for a non-zero vector takes that branch."""
+    unit = SparseVector.from_mapping({0: 1.0}, 4)
+    assert cosine_of(unit, unit, u_norm=0.0) == 0.0
+
+
+@pytest.mark.parametrize(("norm", "check"), [(math.nan, math.isnan), (-1.0, lambda x: x == -1.0)])
+def test_a_degenerate_supplied_norm_propagates_rather_than_being_clamped(
+    norm: float, check: object
+) -> None:
+    """NaN propagates and a negative norm yields a negative cosine. Both are
+    outside `[0, 1]`, and neither is clamped -- consistent with G24's refusal to
+    clamp the ordinary excess."""
+    unit = SparseVector.from_mapping({0: 1.0}, 4)
+    assert check(cosine_of(unit, unit, u_norm=norm))  # type: ignore[operator]
+
+
+def test_the_expression_is_the_pinned_one_and_not_an_algebraic_equal() -> None:
+    """`dot / (nu * nv)`. `(dot / nu) / nv` and `dot * (1 / (nu * nv))` are
+    algebraically equal and numerically different; the native backend matches
+    this form, so the grouping is part of the specification."""
+    left = SparseVector.from_mapping({0: 1.0, 1: 2.0, 2: 3.0}, 4)
+    right = SparseVector.from_mapping({0: 3.0, 1: 2.0, 2: 1.0}, 4)
+    nu, nv = l2_norm(left), l2_norm(right)
+    numerator = dot(left, right)
+
+    assert same_bits(cosine_of(left, right), numerator / (nu * nv))
+
+
+# ---------------------------------------------------------------------------
+# G24: cosine exceeds one, and is deliberately not clamped
+# ---------------------------------------------------------------------------
+def test_self_similarity_can_exceed_one_by_a_single_ulp() -> None:
+    """`cos(v, v)` is `dot / (norm * norm)`, and the two roundings do not
+    cancel. G24 records the effect and rules out clamping: a clamp would change
+    published digits and hide the very quantity this project measures.
+
+    Bounded rather than merely observed -- an excess of more than a few ulp
+    would mean something other than rounding.
+    """
+    # A measured witness, not a guessed one: many ordinary vectors -- including
+    # {0.1, 0.2, 0.3} -- come out exactly 1.0, so the case has to be chosen
+    # rather than assumed.
+    witness = SparseVector.from_mapping({0: 2.663, 1: 5.162, 2: 4.109}, 4)
+    similarity = cosine_of(witness, witness)
+
+    assert similarity > 1.0, "the witness still exceeds one on this platform"
+    assert abs(ulps_between(1.0, similarity)) <= 3.0
+
+
+@pytest.mark.property
+@given(
+    st.lists(st.floats(min_value=0.1, max_value=10.0, allow_nan=False), min_size=2, max_size=8),
+)
+def test_the_excess_over_one_never_grows_beyond_a_few_ulp(values: list[float]) -> None:
+    """Searched rather than constructed. The claim is not that the excess never
+    happens -- it happens on about a quarter of ordinary vectors -- but that it
+    is always rounding and never a defect in the formula."""
+    vector = SparseVector.from_mapping(dict(enumerate(values)), len(values))
+    similarity = cosine_of(vector, vector)
+
+    assert similarity <= 1.0 or abs(ulps_between(1.0, similarity)) <= 3.0
+
+
+# ---------------------------------------------------------------------------
+# CsrMatrix
+# ---------------------------------------------------------------------------
+def test_a_matrix_of_no_rows_still_has_its_opening_offset() -> None:
+    """`indptr` is one longer than the row count, so an empty matrix has the
+    single entry zero rather than none. A bare empty tuple would fail every
+    canonical check downstream."""
+    empty = CsrMatrix.from_rows([], n_cols=4)
+
+    assert empty.indptr == (0,)
+    assert empty.nnz == 0
+    assert empty.is_canonical()
+    assert empty.row_norms() == ()
+
+
+@pytest.mark.parametrize("position", [0, 1, 2])
+def test_a_row_of_the_wrong_dimension_is_refused_wherever_it_sits(position: int) -> None:
+    """The check runs per row rather than on the first, so a mismatch in the
+    middle of a corpus is caught rather than assembled into a matrix whose
+    columns mean different things in different rows."""
+    rows = [SparseVector.zero(4)] * 3
+    rows[position] = SparseVector.zero(5)
+
+    with pytest.raises(ValueError, match="row dimension 5 does not match n_cols=4"):
+        CsrMatrix.from_rows(rows, n_cols=4)
+
+
+def test_a_negative_row_index_yields_an_empty_row_rather_than_raising() -> None:
+    """`indptr[-1]` is the final offset and `indptr[0]` is zero, so the slice
+    runs backwards and comes out empty. Silent, and the fourth instance of a
+    negative index being accepted where the positive side is checked.
+    """
+    matrix = CsrMatrix.from_rows(
+        [SparseVector.from_mapping({0: 1.0}, 4), SparseVector.from_mapping({1: 2.0}, 4)], n_cols=4
+    )
+    assert matrix.row(-1).nnz == 0
+    assert matrix.row(0).nnz == 1
+
+
+def test_a_row_index_past_the_end_is_an_index_error() -> None:
+    matrix = CsrMatrix.from_rows([SparseVector.from_mapping({0: 1.0}, 4)], n_cols=4)
+    with pytest.raises(IndexError, match="tuple index out of range"):
+        matrix.row(1)
+
+
+# ---------------------------------------------------------------------------
+# term_frequencies: what "length" counts
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("label", "features"), [("nothing at all", []), ("only out-of-vocabulary tokens", ["zzz"])]
+)
+def test_a_document_with_no_in_vocabulary_tokens_has_no_terms_and_no_length(
+    label: str, features: list[str]
+) -> None:
+    """Both routes to the zero vector. The length is zero as well as the
+    support, which is what stops `w / idf * length` dividing by a length the
+    document does not have."""
+    vocab = _two_token_vocabulary()
+    vector, length = term_frequencies(features, vocab)
+
+    assert vector.nnz == 0, label
+    assert length == 0
+    assert vector.dim == len(vocab)
+
+
+def test_the_length_counts_in_vocabulary_tokens_only() -> None:
+    """`tf = count / length` with `length` the in-vocabulary count, so an
+    out-of-vocabulary token must not dilute the frequencies of the tokens that
+    did survive -- otherwise a document's weights would depend on how much of it
+    the vocabulary happened to drop."""
+    vocab = _two_token_vocabulary()
+    vector, length = term_frequencies(["a", "zzz", "b"], vocab)
+
+    assert length == 2, "zzz is not counted"
+    assert sum(vector.values) == pytest.approx(1.0)
+
+
+def test_the_frequencies_of_an_in_vocabulary_document_sum_to_one() -> None:
+    """`||tf||_1 == 1` exactly. It is the premise of the `1/sqrt(nnz)` norm
+    lower bound, so it holds as an identity rather than approximately."""
+    vocab = _two_token_vocabulary()
+    vector, _ = term_frequencies(["a", "a", "b"], vocab)
+
+    assert vector.values == (2 / 3, 1 / 3)
+    assert sum(vector.values) == pytest.approx(1.0)
+
+
+def test_a_repeated_token_raises_its_frequency_rather_than_its_count() -> None:
+    """The vector is frequencies, not counts, so the length divides through."""
+    vocab = _two_token_vocabulary()
+    once, _ = term_frequencies(["a", "b"], vocab)
+    twice, length = term_frequencies(["a", "a", "b"], vocab)
+
+    assert length == 3
+    assert twice.values[0] > once.values[0]
+
+
+# ---------------------------------------------------------------------------
+# transform_query: G12, nothing is refitted
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("features", [[], ["zzz"], ["zzz", "qqq"]])
+def test_a_query_of_unknown_tokens_embeds_to_the_zero_vector(features: list[str]) -> None:
+    """Degenerate but legitimate: the ranking then falls entirely to the
+    tie-break, which is the regime section 4.5 studies. Not an error."""
+    model = _two_document_model()
+    query = TfidfVectoriser.transform_query(features, model)
+
+    assert query.nnz == 0
+    assert query.dim == len(model.vocabulary)
+
+
+def test_a_query_uses_the_fitted_models_own_idf_and_never_extends_it() -> None:
+    """G12. Refitting on the query would give a token an idf derived from one
+    document, and every score in the corpus would move."""
+    model = _two_document_model()
+    before = tuple(model.idf)
+
+    query = TfidfVectoriser.transform_query(["a", "zzz"], model)
+
+    assert tuple(model.idf) == before, "the model is unchanged"
+    assert query.dim == len(model.vocabulary), "and the query lives in its space"
+    assert all(i < len(model.vocabulary) for i in query.indices)
