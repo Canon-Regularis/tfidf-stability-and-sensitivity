@@ -474,3 +474,60 @@ def test_the_scratch_records_each_touched_document_once(
         assert len(scratch.touched) == len(set(scratch.touched)), (
             f"a document was recorded more than once under {policy}"
         )
+
+
+# ---------------------------------------------------------------------------
+# InvertedIndex accessors: the postings-list arithmetic
+# ---------------------------------------------------------------------------
+def test_the_document_frequency_of_a_term_is_the_length_of_its_postings_list() -> None:
+    """`colptr[t+1] - colptr[t]`. The transpose is what the TAAT loop walks, so
+    a df computed any other way would disagree with the postings it iterates."""
+    index = _index([0, 2, 3], [0, 2, 1], [1.0, 2.0, 3.0], n_rows=3, n_cols=2)
+
+    assert index.df(0) == 2
+    assert index.df(1) == 1
+    assert index.nnz == 3
+
+
+def test_a_term_with_no_postings_has_a_frequency_of_zero() -> None:
+    """`lo == hi`, which is a legitimate column rather than a malformed one --
+    a term can survive the vocabulary and appear in no document of a *subset*
+    the query protocol selected."""
+    index = _index([0, 1, 1, 2], [0, 2], [1.0, 2.0], n_rows=3, n_cols=3)
+
+    assert index.df(1) == 0
+    assert index.postings_begin(1) == index.postings_end(1)
+    assert index.is_canonical()
+
+
+def test_the_postings_bounds_are_the_slice_the_loop_takes() -> None:
+    """Stated as the pair rather than separately, because the scoring loop uses
+    them together and an off-by-one in either would read a neighbour's
+    postings."""
+    index = _index([0, 2, 3], [0, 2, 1], [1.0, 2.0, 3.0], n_rows=3, n_cols=2)
+
+    assert (index.postings_begin(0), index.postings_end(0)) == (0, 2)
+    assert (index.postings_begin(1), index.postings_end(1)) == (2, 3)
+
+
+def test_the_transpose_preserves_every_stored_entry(model: TfidfModel) -> None:
+    """`from_csr` is a counting sort, and the invariant that makes it safe to
+    skip re-checking is that nothing is lost or duplicated."""
+    index = InvertedIndex.from_csr(model.matrix)
+
+    assert index.nnz == model.matrix.nnz
+    assert sorted(index.values) == sorted(model.matrix.values)
+    assert index.is_canonical()
+
+
+def test_an_empty_corpus_transposes_to_an_index_of_all_empty_columns() -> None:
+    """Every term has an empty postings list rather than the index having no
+    columns: the column count comes from the vocabulary, which outlives any
+    particular document subset."""
+    empty = CsrMatrix.from_rows([], n_cols=3)
+    index = InvertedIndex.from_csr(empty)
+
+    assert index.n_cols == 3
+    assert index.nnz == 0
+    assert all(index.df(t) == 0 for t in range(3))
+    assert index.is_canonical()
