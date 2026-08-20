@@ -37,7 +37,11 @@ from tfidf_stability.preprocessing.pipeline import (
     PreprocessingPipeline,
     preprocess_all,
 )
-from tfidf_stability.preprocessing.stopwords import load_stopwords, remove_stopwords
+from tfidf_stability.preprocessing.stopwords import (
+    StopwordSet,
+    load_stopwords,
+    remove_stopwords,
+)
 from tfidf_stability.preprocessing.tokenise import (
     GAP,
     TokenisationConfig,
@@ -539,3 +543,165 @@ def test_the_default_ngram_orders_are_unigrams_and_bigrams() -> None:
         f"new{JOINER}york",
         f"york{JOINER}city",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Token length: the bounds are part of the hashed contract
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("length", [1, 2, 63, 64])
+def test_a_token_at_or_inside_the_length_bounds_survives(length: int) -> None:
+    """64 is the documented ceiling and it is inclusive. The bounds are applied
+    during tokenisation rather than downstream precisely so they are hashed with
+    the configuration -- a run that changed them would change its own digest."""
+    assert tokenise("x" * length) == ["x" * length]
+
+
+@pytest.mark.parametrize("length", [65, 200])
+def test_a_token_past_the_ceiling_is_dropped_rather_than_truncated(length: int) -> None:
+    """Truncating would manufacture a feature the document does not contain and
+    could collide two distinct long tokens onto one. The guard exists against
+    pathological input from fuzzing, where a megabyte-long 'word' is ordinary.
+    """
+    assert tokenise("x" * length) == []
+
+
+def test_the_two_length_bounds_are_independent() -> None:
+    """Each filters its own end, so a configuration can raise the floor without
+    touching the ceiling."""
+    text = "a bb ccc"
+    assert tokenise(text, TokenisationConfig(min_token_length=2)) == ["bb", "ccc"]
+    assert tokenise(text, TokenisationConfig(max_token_length=2)) == ["a", "bb"]
+
+
+def test_an_inverted_length_range_admits_nothing_rather_than_everything() -> None:
+    """`min > max` is an empty interval. It filters the corpus to nothing, which
+    the vocabulary builder then refuses -- a loud failure rather than a silent
+    inversion of the filter."""
+    assert tokenise("a bb ccc", TokenisationConfig(min_token_length=5, max_token_length=2)) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("don't", ["don", "t"]),
+        ("well-known", ["well", "known"]),
+        ("a_b", ["a", "b"]),
+        ("abc 123", ["abc", "123"]),
+    ],
+)
+def test_the_pattern_splits_on_everything_that_is_not_a_letter_or_digit(
+    text: str, expected: list[str]
+) -> None:
+    """Apostrophes, hyphens and underscores are all separators. Pinned because
+    the pattern is hashed into the manifest: a run that treated "don't" as one
+    token would have a different vocabulary and a different every-number."""
+    assert tokenise(text) == expected
+
+
+def test_the_gap_sentinel_cannot_survive_tokenisation() -> None:
+    """It is a control character, so the word pattern cannot match it. That is
+    what lets the sentinel be inserted afterwards without any risk of a document
+    having contained one."""
+    assert GAP not in tokenise("a" + GAP + "b")
+
+
+# ---------------------------------------------------------------------------
+# Stopword removal: where a gap goes, and where it does not
+# ---------------------------------------------------------------------------
+def _stopwords(*words: str) -> StopwordSet:
+    """A set built here rather than loaded, so these tests do not depend on the
+    frozen asset's contents. Local by house convention."""
+    return StopwordSet(words, name="test", digest="0" * 64)
+
+
+def test_an_interior_stopword_leaves_a_gap_behind() -> None:
+    """The whole point of G7's sentinel: without it, removing "of" from
+    "king of pop" yields the bigram "king pop", a feature that appears in no
+    document and is manufactured by the preprocessing order."""
+    assert remove_stopwords(["king", "of", "pop"], _stopwords("of")) == ["king", GAP, "pop"]
+
+
+def test_consecutive_stopwords_collapse_to_a_single_gap() -> None:
+    """One boundary, however many tokens were removed at it. A gap per stopword
+    would leave empty segments between them, which changes how many segments the
+    n-gram splitter sees without changing where the boundaries are."""
+    removed = remove_stopwords(["a", "of", "the", "b"], _stopwords("of", "the"))
+    assert removed == ["a", GAP, "b"]
+
+
+def test_a_leading_or_trailing_stopword_leaves_no_gap() -> None:
+    """There is nothing on the far side for an n-gram to span to, so a boundary
+    marker there would be a segment separator with one empty side."""
+    assert remove_stopwords(["of", "a", "the"], _stopwords("of", "the")) == ["a"]
+
+
+def test_a_document_of_nothing_but_stopwords_becomes_empty() -> None:
+    """Not a list of gaps. This is the all-stopword document that embeds to the
+    zero vector -- the degenerate case G3 names and the corpus fixture plants."""
+    assert remove_stopwords(["of", "the"], _stopwords("of", "the")) == []
+
+
+def test_removal_can_be_asked_not_to_mark_the_boundary() -> None:
+    """The ablation G7 offers. Kept so the seam-bigram effect can be measured
+    rather than only asserted."""
+    kept = remove_stopwords(["king", "of", "pop"], _stopwords("of"), insert_gaps=False)
+    assert kept == ["king", "pop"]
+
+
+def test_an_empty_stopword_set_removes_nothing_at_all() -> None:
+    """The configuration that disables stopword removal, which must be a
+    pass-through rather than a special case downstream."""
+    assert remove_stopwords(["a", "b"], StopwordSet.empty()) == ["a", "b"]
+    assert len(StopwordSet.empty()) == 0
+    assert StopwordSet.empty().name == "none"
+
+
+def test_membership_is_exact_and_expects_an_already_normalised_token() -> None:
+    """No case folding here -- normalisation has already run. A set that
+    lowercased on lookup would silently work on un-normalised input and then
+    disagree with the vocabulary."""
+    stopwords = _stopwords("of")
+    assert stopwords.is_stopword("of")
+    assert not stopwords.is_stopword("OF")
+
+
+def test_iterating_a_stopword_set_is_sorted_so_a_manifest_is_stable() -> None:
+    """The set is a frozenset internally, whose iteration order is not promised
+    stable across runs. Anything writing the list out needs the sort."""
+    assert list(_stopwords("z", "a", "m")) == ["a", "m", "z"]
+
+
+# ---------------------------------------------------------------------------
+# The pipeline end to end
+# ---------------------------------------------------------------------------
+def test_the_gap_is_what_stops_a_seam_bigram_being_manufactured() -> None:
+    """The two configurations side by side, which is the only way to see that
+    the sentinel does anything.
+
+    With gaps on, "king of pop" yields no bigram at all -- the two survivors sit
+    either side of a boundary. With gaps off it yields `king<JOINER>pop`, a
+    feature no document contains.
+    """
+    with_gaps = PreprocessingPipeline().preprocess("King of Pop")
+    without = PreprocessingPipeline(PreprocessingConfig(insert_gaps=False)).preprocess(
+        "King of Pop"
+    )
+
+    assert with_gaps == ["king", "pop"]
+    assert f"king{JOINER}pop" in without, "the seam bigram the sentinel exists to prevent"
+
+
+@pytest.mark.parametrize("text", ["", "   ", "the of a"])
+def test_a_document_with_no_surviving_tokens_preprocesses_to_nothing(text: str) -> None:
+    """Empty, whitespace, and all-stopword all reach the same place. The
+    vocabulary builder counts such a document towards the corpus size while it
+    contributes no features."""
+    assert PreprocessingPipeline().preprocess(text) == []
+
+
+def test_an_inverted_ngram_range_is_refused_by_the_pipeline() -> None:
+    """The guard lives in `generate_ngrams`, so the pipeline surfaces it rather
+    than silently producing no features."""
+    pipeline = PreprocessingPipeline(PreprocessingConfig(n_min=3, n_max=1))
+    with pytest.raises(ValueError, match=r"n_max \(1\) must be at least n_min \(3\)"):
+        pipeline.preprocess("a b c")
