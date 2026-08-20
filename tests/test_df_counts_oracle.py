@@ -150,3 +150,44 @@ def test_the_input_mapping_is_not_mutated() -> None:
     snapshot = dict(before)
     df_after_edit(before, removed=["a"], added=["c"])
     assert before == snapshot
+
+
+# ---------------------------------------------------------------------------
+# The two counts differ exactly where a document repeats a token
+# ---------------------------------------------------------------------------
+def test_a_repeated_token_counts_once_per_document_and_once_per_occurrence() -> None:
+    """The whole distinction between the two functions. `df` is set-valued per
+    document, `cf` is not, and G6's truncation policy ranks on both -- so a
+    collapse of one into the other would silently reorder the vocabulary at the
+    `max_features` boundary.
+    """
+    corpus = [["a", "a", "b"]]
+
+    assert document_frequencies(corpus) == {"a": 1, "b": 1}
+    assert collection_frequencies(corpus) == {"a": 2, "b": 1}
+
+
+@pytest.mark.parametrize("counter", [document_frequencies, collection_frequencies])
+def test_a_corpus_of_no_documents_has_no_counts(counter: object) -> None:
+    """An empty mapping rather than an error: counting is separable from
+    deciding whether the result can build a vocabulary, and only the second is
+    an error (G17)."""
+    assert counter([]) == {}  # type: ignore[operator]
+
+
+@pytest.mark.parametrize("counter", [document_frequencies, collection_frequencies])
+def test_documents_with_no_features_contribute_nothing_but_still_count(
+    counter: object,
+) -> None:
+    """An all-stopword document survives preprocessing as an empty feature
+    stream. It contributes no counts and must not be dropped from the corpus
+    size -- which is why `build_vocabulary` tracks `n_docs` separately from the
+    counters."""
+    assert counter([[], ["a"], []]) == {"a": 1}  # type: ignore[operator]
+
+
+def test_the_two_counts_agree_exactly_when_no_document_repeats_a_token() -> None:
+    """The condition under which the distinction collapses, stated so the tests
+    above are read as being about repetition rather than about the corpus."""
+    corpus = [["a", "b"], ["b", "c"]]
+    assert document_frequencies(corpus) == collection_frequencies(corpus)
