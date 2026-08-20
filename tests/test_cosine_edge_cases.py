@@ -574,3 +574,111 @@ def test_normalising_the_zero_vector_returns_it_rather_than_dividing_by_zero() -
 
     scaled = unit(sv({0: 3.0, 1: 4.0}))
     assert scaled.values == (3.0 / 5.0, 4.0 / 5.0)
+
+
+# ---------------------------------------------------------------------------
+# unit: the two vectors it cannot normalise
+# ---------------------------------------------------------------------------
+def test_a_vector_whose_norm_underflows_is_returned_unnormalised() -> None:
+    """The zero-vector branch is triggered by the norm, not by the support.
+
+    A vector of a single smallest subnormal has stored entries and a norm of
+    zero, so `unit` returns it unchanged -- still of "length" 5e-324 rather than
+    length one. Silent, and the G18 regime reaching a second function.
+    """
+    tiny = sv({0: 5e-324})
+    assert l2_norm(tiny) == 0.0
+    assert tiny.nnz == 1
+
+    normalised = unit(tiny)
+    assert normalised.values == (5e-324,), "returned as-is rather than scaled"
+
+
+def test_a_vector_whose_norm_overflows_normalises_to_all_zeros() -> None:
+    """The norm is infinite, so every coordinate divided by it is zero. Not an
+    error, and not a unit vector either -- the other end of the same problem."""
+    huge = sv({0: 1e200, 1: 1e200})
+    assert l2_norm(huge) == math.inf
+    assert unit(huge).values == (0.0, 0.0)
+
+
+def test_an_ordinary_vector_normalises_to_length_one() -> None:
+    """The reference point the two degenerate cases are read against."""
+    assert unit(sv({0: 3.0, 1: 4.0})).values == (0.6, 0.8)
+
+
+# ---------------------------------------------------------------------------
+# difference_norm
+# ---------------------------------------------------------------------------
+def test_a_vector_is_no_distance_from_itself() -> None:
+    """Exactly zero, not merely small: every coordinate difference is an exact
+    zero before the sum."""
+    same = sv({0: 3.0, 1: 4.0})
+    assert same_bits(difference_norm(same, same), 0.0)
+
+
+def test_the_two_zeros_are_no_distance_apart() -> None:
+    """`-0.0 - 0.0` is `-0.0`, and squaring it gives `+0.0`, so the sign does
+    not survive into the norm."""
+    assert same_bits(difference_norm(sv({0: -0.0}), sv({0: 0.0})), 0.0)
+
+
+def test_disjoint_supports_are_the_norm_of_the_two_together() -> None:
+    """The union is iterated in ascending index order, which is what makes this
+    agree bit for bit with the native implementation."""
+    assert same_bits(difference_norm(sv({0: 3.0}), sv({1: 4.0})), 5.0)
+
+
+# ---------------------------------------------------------------------------
+# lipschitz_constant: each of the four vectors in turn
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("position", [0, 1, 2, 3])
+def test_a_zero_vector_in_any_of_the_four_positions_is_refused(position: int) -> None:
+    """The bound is `C = 1 / L` with `L` the minimum of the four norms, so a
+    single zero makes it vacuous. Each position separately: a guard written
+    against only the first pair would pass three of these.
+    """
+    vectors = [sv({0: 1.0}), sv({0: 1.0}), sv({0: 2.0}), sv({0: 2.0})]
+    vectors[position] = SparseVector.zero(DIM)
+
+    with pytest.raises(ValueError, match="requires four non-zero vectors"):
+        lipschitz_constant(*vectors)
+
+
+def test_the_zero_vector_guard_is_what_keeps_the_constant_finite() -> None:
+    """`C = 1 / L`, so an infinite constant would need `L` below about
+    `5.6e-309`. No such norm exists that is not zero: the sum of squares
+    underflows first, and the smallest representable non-zero norm is around
+    `1e-161`, whose reciprocal is a comfortable `1e161`.
+
+    So the guard rejecting zero vectors is not one of several things standing
+    between the bound and an infinity -- it is the only one, and the bound is
+    finite for every input that gets past it.
+    """
+    smallest_live = sv({0: 1e-161})
+    assert l2_norm(smallest_live) > 0.0
+
+    bound = lipschitz_constant(smallest_live, smallest_live, smallest_live, smallest_live)
+    assert math.isfinite(bound.constant)
+    assert math.isfinite(bound.uniform)
+
+
+def test_the_uniform_and_tight_forms_are_reported_separately() -> None:
+    """Both travel on the result so a caller can say which one it quoted -- the
+    same reason the certificate carries two radii."""
+    bound = lipschitz_constant(sv({0: 4.0}), sv({0: 16.0}), sv({0: 8.0}), sv({0: 32.0}))
+    assert bound.uniform != bound.tight
+    assert bound.observed <= min(bound.uniform, bound.tight)
+
+
+# ---------------------------------------------------------------------------
+# norm_lower_bound at the large end
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("nnz", [2**20, 2**40, 2**53])
+def test_the_lower_bound_stays_positive_for_any_support_a_corpus_could_have(nnz: int) -> None:
+    """`1 / sqrt(nnz)`. Even at 2**53 distinct terms -- far beyond any real
+    vocabulary -- it is a small positive number rather than underflowing, so the
+    bound never degenerates into claiming nothing."""
+    bound = norm_lower_bound(nnz)
+    assert 0.0 < bound < 1.0
+    assert bound == 1.0 / math.sqrt(nnz)
