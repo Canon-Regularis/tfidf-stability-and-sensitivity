@@ -61,7 +61,19 @@ REPO = Path(__file__).resolve().parents[1]
 #: `data/` is not optional: preprocessing resolves the frozen stopword list as
 #: `parents[3] / "data" / "assets"`, so leaving it out fails the fixture that
 #: builds the normative pipeline and errors the suite before a mutant runs.
-_SANDBOX_CONTENTS = ("src", "tests", "configs", "data", "pyproject.toml")
+#:
+#: `cpp/` is here for the same reason one level along. test_public_api_surface.py
+#: checks `types.py`'s aliases against `cpp/include/tfidf/core/types.hpp`, so a
+#: sandbox without the headers fails that file outright -- and it is the file
+#: worth adding to a scoped campaign, because the contracts it asserts are the
+#: package-wide ones (frozen dataclasses, enum serialisation) that no single
+#: module's own test file covers.
+#:
+#: `scripts/` for the third instance of it: test_benchmark_smoke.py runs
+#: scripts/benchmark.py as a subprocess, so without it that file errors and
+#: the campaign exits before mutating anything -- which reads as a broken
+#: runner rather than a missing directory.
+_SANDBOX_CONTENTS = ("src", "tests", "configs", "cpp", "data", "scripts", "pyproject.toml")
 
 #: Comparison flips. The pairs that matter are the boundary ones: `<=` against
 #: `<` decides whether a score exactly `tau` away joins a clique, which is the
