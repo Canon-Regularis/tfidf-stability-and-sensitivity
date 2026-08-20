@@ -143,6 +143,7 @@ def test_singleton_disjoint_lists_are_maximally_distant() -> None:
     assert kendall_fks([1], [1]) == 0.0
 
 
+@pytest.mark.property
 @given(
     st.lists(st.integers(0, 9), min_size=0, max_size=6, unique=True),
     st.lists(st.integers(0, 9), min_size=0, max_size=6, unique=True),
@@ -271,6 +272,7 @@ def test_compare_top_k_truncates_to_k() -> None:
     assert compare_top_k(a, b, 3).sets_differ is True
 
 
+@pytest.mark.property
 @given(
     st.lists(st.integers(0, 9), min_size=1, max_size=6, unique=True),
     st.lists(st.integers(0, 9), min_size=1, max_size=6, unique=True),

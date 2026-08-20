@@ -115,6 +115,26 @@ def _empty_parametrize(deco: ast.expr) -> str | None:
     return None
 
 
+def _unmarked_property(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
+    """A Hypothesis test that does not carry the marker naming it as one.
+
+    `pyproject.toml` registers `property` and runs under `--strict-markers`, so
+    the category is declared; the marker is what makes it selectable. Nightly
+    runs the property tests at a raised example count and currently names the
+    files by hand, which drifts the moment a `@given` lands in a file nobody
+    thought to add. Enforcing the marker here means the selector can become
+    `-m property` and stay correct without anyone maintaining a list.
+    """
+    names = {
+        _call_name(d.func) if isinstance(d, ast.Call) else _call_name(d) for d in fn.decorator_list
+    }
+    if not any(n == "given" or n.endswith(".given") for n in names):
+        return None
+    if any(n.endswith("mark.property") for n in names):
+        return None
+    return "@given test is not marked `@pytest.mark.property`"
+
+
 def _broad_raises(node: ast.Call) -> str | None:
     if "raises" not in _call_name(node.func) or not node.args:
         return None
@@ -220,6 +240,9 @@ def scan(path: Path) -> list[Finding]:
         for deco in fn.decorator_list:
             if detail := _empty_parametrize(deco):
                 findings.append(Finding(path, fn.lineno, fn.name, "empty-parametrize", detail))
+
+        if detail := _unmarked_property(fn):
+            findings.append(Finding(path, fn.lineno, fn.name, "unmarked-property", detail))
 
         for node in ast.walk(fn):
             if isinstance(node, ast.Assert) and (detail := _constant_assert(node)):

@@ -86,6 +86,10 @@ markers = [
   "slow: long-running; deselected from the PR coverage run, full in nightly",
   "native: requires the compiled native backend",
   "sklearn: requires scikit-learn as an external oracle",
+  # Applied to every @given test and kept that way by check_test_vacuity.py,
+  # which reports an unmarked one. The marker is the selector nightly should
+  # use in place of naming files by hand, a list that drifts the moment a
+  # @given lands in a file nobody remembered to add.
   "property: Hypothesis property-based test",
   "differential: asserts reference/native bit-exactness",
 ]

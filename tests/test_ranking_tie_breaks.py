@@ -387,6 +387,7 @@ def test_key_digest_binds_the_attribute_table_not_just_the_priority() -> None:
 tie_prone = st.lists(st.sampled_from([0.0, 0.25, 0.5, 0.75, 1.0]), min_size=1, max_size=40)
 
 
+@pytest.mark.property
 @given(tie_prone)
 def test_the_order_is_always_a_permutation(scores: list[float]) -> None:
     table = table_of(len(scores), popularity=[i % 3 for i in range(len(scores))])
@@ -394,6 +395,7 @@ def test_the_order_is_always_a_permutation(scores: list[float]) -> None:
     assert sorted(r.order) == list(range(len(scores)))
 
 
+@pytest.mark.property
 @given(tie_prone)
 def test_scores_are_non_increasing_along_the_order(scores: list[float]) -> None:
     table = table_of(len(scores), popularity=[i % 3 for i in range(len(scores))])
@@ -403,6 +405,7 @@ def test_scores_are_non_increasing_along_the_order(scores: list[float]) -> None:
     assert along == list(r.sorted_scores)
 
 
+@pytest.mark.property
 @given(tie_prone, st.integers(min_value=1, max_value=20))
 def test_top_k_prefix_matches_the_full_ranking(scores: list[float], k: int) -> None:
     """Certifies partial selection against the normative full sort."""
@@ -413,6 +416,7 @@ def test_top_k_prefix_matches_the_full_ranking(scores: list[float], k: int) -> N
     assert full.order[: partial.n_selected] == partial.order
 
 
+@pytest.mark.property
 @given(tie_prone)
 def test_sorted_scores_desc_is_a_sorted_permutation(scores: list[float]) -> None:
     s = sorted_scores_desc(scores)

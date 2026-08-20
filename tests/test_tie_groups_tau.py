@@ -146,6 +146,7 @@ def test_the_ball_is_inclusive_at_exactly_tau() -> None:
     assert ball_members(s, 0, 0.25 - math.ulp(0.25)) == {0}
 
 
+@pytest.mark.property
 @given(
     st.lists(st.floats(min_value=0.0, max_value=1.0, allow_nan=False), min_size=1, max_size=40),
     st.floats(min_value=0.0, max_value=0.5, allow_nan=False),
@@ -194,6 +195,7 @@ def test_the_naive_bound_shortcut_would_actually_differ() -> None:
 # ---------------------------------------------------------------------------
 # Structural properties of the three objects
 # ---------------------------------------------------------------------------
+@pytest.mark.property
 @given(
     st.lists(st.floats(min_value=0.0, max_value=1.0, allow_nan=False), min_size=1, max_size=40),
     st.floats(min_value=0.0, max_value=0.3, allow_nan=False),
@@ -207,6 +209,7 @@ def test_chains_partition_the_corpus(scores: list[float], tau: float) -> None:
     assert covered == list(range(len(s))), "disjoint, contiguous and covering"
 
 
+@pytest.mark.property
 @given(
     st.lists(st.floats(min_value=0.0, max_value=1.0, allow_nan=False), min_size=1, max_size=25),
     st.floats(min_value=0.0, max_value=0.3, allow_nan=False),
@@ -217,6 +220,7 @@ def test_every_clique_has_diameter_at_most_tau(scores: list[float], tau: float) 
         assert s[lo] - s[hi - 1] <= tau
 
 
+@pytest.mark.property
 @given(
     st.lists(st.floats(min_value=0.0, max_value=1.0, allow_nan=False), min_size=1, max_size=12),
     st.floats(min_value=0.0, max_value=0.3, allow_nan=False),
@@ -239,6 +243,7 @@ def test_maximal_cliques_match_brute_force(scores: list[float], tau: float) -> N
     assert set(tie_cliques(s, tau)) == maximal
 
 
+@pytest.mark.property
 @given(
     st.lists(st.floats(min_value=0.0, max_value=1.0, allow_nan=False), min_size=1, max_size=25),
     st.floats(min_value=0.0, max_value=0.3, allow_nan=False),
@@ -252,6 +257,7 @@ def test_rho_is_at_least_one_and_cliques_sit_inside_chains(scores: list[float], 
         assert any(lo <= a and b <= hi for lo, hi in chains)
 
 
+@pytest.mark.property
 @given(
     st.lists(st.floats(min_value=0.0, max_value=1.0, allow_nan=False), min_size=2, max_size=25),
     st.floats(min_value=0.0, max_value=0.2, allow_nan=False),

@@ -49,6 +49,7 @@ def test_collection_frequency_agrees_with_the_vocabulary(mini_features) -> None:
         assert vocabulary.cf[term_id] == oracle[token], token
 
 
+@pytest.mark.property
 @settings(max_examples=200, deadline=None)
 @given(corpus=_CORPUS)
 def test_the_two_implementations_never_disagree(corpus: list[list[str]]) -> None:
@@ -94,6 +95,7 @@ def test_a_featureless_corpus_has_counts_but_no_vocabulary() -> None:
 # ---------------------------------------------------------------------------
 # The incremental update (section 4.1)
 # ---------------------------------------------------------------------------
+@pytest.mark.property
 @settings(max_examples=200, deadline=None)
 @given(corpus=_CORPUS, replacement=_DOCUMENT, index=st.integers(0, 9))
 def test_an_incremental_update_matches_recomputing_from_scratch(
@@ -113,6 +115,7 @@ def test_an_incremental_update_matches_recomputing_from_scratch(
     assert actual == expected
 
 
+@pytest.mark.property
 @settings(max_examples=100, deadline=None)
 @given(corpus=_CORPUS, replacement=_DOCUMENT, index=st.integers(0, 9))
 def test_an_edit_moves_each_term_by_at_most_one(

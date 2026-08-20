@@ -161,6 +161,7 @@ def test_trailing_bytes_are_rejected(valid_container) -> None:
     _assert_typed(model_from_bytes, valid_container + b"trailing garbage")
 
 
+@pytest.mark.property
 @settings(
     max_examples=400, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
@@ -207,6 +208,7 @@ def test_the_empty_input_is_rejected() -> None:
     _assert_typed(model_from_bytes, MAGIC)
 
 
+@pytest.mark.property
 @settings(max_examples=200, deadline=None)
 @given(data=st.binary(min_size=0, max_size=512))
 def test_arbitrary_bytes_never_escape_an_untyped_exception(data: bytes) -> None:
@@ -217,6 +219,7 @@ def test_arbitrary_bytes_never_escape_an_untyped_exception(data: bytes) -> None:
 # ---------------------------------------------------------------------------
 # The tokeniser
 # ---------------------------------------------------------------------------
+@pytest.mark.property
 @settings(max_examples=300, deadline=None)
 @given(text=st.text(max_size=400))
 def test_the_tokeniser_accepts_any_text(text: str) -> None:
@@ -226,6 +229,7 @@ def test_the_tokeniser_accepts_any_text(text: str) -> None:
     assert all(isinstance(f, str) for f in features)
 
 
+@pytest.mark.property
 @settings(max_examples=300, deadline=None)
 @given(
     text=st.text(
