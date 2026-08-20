@@ -134,6 +134,7 @@ def test_delta_idf_captures_the_two_competing_effects() -> None:
     assert delta_idf(3, 3, 10, 10) == 0.0
 
 
+@pytest.mark.property
 @given(
     st.integers(min_value=1, max_value=200),
     st.integers(min_value=0, max_value=200),
@@ -287,6 +288,7 @@ def sv(mapping: dict[int, float]) -> SparseVector:
     return SparseVector.from_mapping(mapping, DIM)
 
 
+@pytest.mark.property
 @settings(suppress_health_check=[HealthCheck.filter_too_much])
 @given(sparse_map, sparse_map, sparse_map, sparse_map)
 def test_lipschitz_bound_survives_an_adversarial_search(
@@ -410,6 +412,7 @@ def test_the_joint_radius_is_the_minimum_of_the_two() -> None:
     assert asserted > 0, "no (scores, k) pair had a defined order radius"
 
 
+@pytest.mark.property
 @given(
     st.lists(st.floats(0.0, 1.0, allow_nan=False), min_size=4, max_size=25),
     st.integers(1, 5),
@@ -469,6 +472,7 @@ def test_the_flip_witness_shows_the_radius_is_exact() -> None:
     assert before != after, "the witness must flip the top-k set"
 
 
+@pytest.mark.property
 @given(st.lists(st.floats(0.01, 1.0, allow_nan=False), min_size=4, max_size=15), st.integers(1, 3))
 def test_the_flip_witness_always_flips_when_it_exists(scores: list[float], k: int) -> None:
     """The same claim, searched rather than constructed."""
@@ -666,3 +670,194 @@ def test_a_document_that_did_not_move_has_no_churn_fraction() -> None:
     )
     assert still.churn_fraction == 0.0
     assert still.bound.holds, "a zero bound still bounds a zero shift"
+
+
+# ---------------------------------------------------------------------------
+# Vocabulary churn: what a token absent from one side is worth
+# ---------------------------------------------------------------------------
+def test_a_token_missing_from_a_model_contributes_zero_idf_not_one() -> None:
+    """`align_models` places both models over their union vocabulary, and a
+    token one side never saw has no idf there.
+
+    Zero rather than one matters because the smoothed idf floor *is* 1.0: a
+    token present in every document scores exactly 1.0, so treating "absent" as
+    1.0 makes a vanished token indistinguishable from a ubiquitous one and
+    silently shrinks every delta that G5's looseness is measured from.
+    """
+    before = TfidfVectoriser().fit([["alpha", "beta"], ["alpha"]])
+    after = TfidfVectoriser().fit([["gamma", "delta"], ["gamma"]])
+
+    alignment = align_models(before, after)
+    assert alignment.tokens == ("alpha", "beta", "delta", "gamma")
+    assert alignment.shared == (), "the premise: the two vocabularies are disjoint"
+
+    # N = 2 either side, so df of 2 gives 1.0 and df of 1 gives log(3/2) + 1.
+    common, rare = smoothed_idf_one(2, 2), smoothed_idf_one(1, 2)
+    assert common == 1.0, "the smoothed floor, which is why 0.0 and 1.0 differ here"
+
+    # after - before, over the union, in token order.
+    assert tuple(alignment.delta_idf()) == (-common, -rare, rare, common)
+
+
+def test_a_wholly_replaced_vocabulary_has_no_shared_movement_at_all() -> None:
+    """`linf_shared` is the maximum over the shared tokens, and there are none.
+    Zero is the truthful answer, and it is what makes `looseness` infinite --
+    the reading G5 asks for, that the bound is driven entirely by churn."""
+    before = TfidfVectoriser().fit([["alpha", "beta"], ["alpha"]])
+    after = TfidfVectoriser().fit([["gamma", "delta"], ["gamma"]])
+
+    shift = analyse_idf_shift(before, after)
+
+    assert shift.linf == smoothed_idf_one(1, 2), "the largest move is the rare token's"
+    assert shift.linf_shared == 0.0
+    assert shift.looseness == float("inf")
+    assert shift.worst_token in ("beta", "delta"), "one of the two rare tokens"
+    assert abs(shift.worst_delta) == shift.linf
+
+
+# ---------------------------------------------------------------------------
+# The two tolerance comparisons, at the tolerance
+# ---------------------------------------------------------------------------
+# Both `holds` and `pythagoras_holds` are one-sided assertions everywhere else in
+# this file, which is what let mutation testing move the slack around freely:
+# the tolerance could be divided by the scale instead of multiplied, or lose the
+# `max(1.0, ...)` floor, with every existing assertion still passing.
+def _three_term(local: float, glob: float, interaction: float, observed: float) -> ThreeTermBound:
+    return ThreeTermBound(local=local, glob=glob, interaction=interaction, observed=observed)
+
+
+def test_the_three_term_bound_admits_its_slack_exactly_and_no_further() -> None:
+    """The slack covers rounding incurred while evaluating the bound, and none
+    in the mathematics."""
+    total = 4.0
+    limit = total * (1.0 + 1e-12) + 1e-15
+    at = _three_term(local=1.0, glob=2.0, interaction=1.0, observed=limit)
+    assert at.total == total, "the premise: the three terms sum to the total"
+    assert at.holds, "an observed value sitting exactly on the slack is inside it"
+
+    assert not _three_term(1.0, 2.0, 1.0, observed=limit + 1e-9).holds
+
+
+def test_the_three_term_tightness_is_the_ratio_even_below_one() -> None:
+    """Guarded on `total > 0.0`. Raising that threshold to 1.0 would report a
+    tightness of zero for every bound smaller than one -- which is most of them,
+    since these are norms of small perturbations."""
+    assert _three_term(0.25, 0.25, 0.0, observed=0.25).tightness == 0.5
+    assert _three_term(2.0, 1.0, 1.0, observed=2.0).tightness == 0.5
+
+
+def _pythagoras(observed: float, shared: float, gained: float, lost: float) -> VectorPerturbation:
+    return VectorPerturbation(
+        doc_id="d0",
+        bound=_three_term(observed, 0.0, 0.0, observed),
+        alignment=_EMPTY_ALIGNMENT,
+        shared_shift=shared,
+        gained_mass=gained,
+        lost_mass=lost,
+    )
+
+
+def test_the_pythagorean_tolerance_has_a_floor_below_one() -> None:
+    """`1e-9 * max(1.0, lhs)`. Without the floor a small movement gets a
+    proportionally tiny tolerance, and the identity -- which is exact in the
+    reals and only approximate in binary64 -- starts failing on sound data.
+
+    2**-15 is used so its square is exact and the discrepancy below is the
+    number written here rather than one rounding away from it.
+    """
+    # observed = 0, so lhs = 0 and the floor is doing all the work.
+    tiny = _pythagoras(observed=0.0, shared=0.0, gained=2.0**-15, lost=0.0)
+    assert 2.0**-30 < 1e-9, "the discrepancy is inside the floored tolerance"
+    assert tiny.pythagoras_holds
+
+
+def test_the_pythagorean_tolerance_scales_with_the_movement_above_one() -> None:
+    """Above the floor it is proportional, so a large movement gets a large
+    tolerance. Dividing by the scale instead of multiplying inverts that."""
+    big = _pythagoras(observed=2.0, shared=2.0, gained=2.0**-15, lost=0.0)
+    # lhs = 4, rhs = 4 + 2**-30, tolerance 1e-9 * 4.
+    assert 2.0**-30 < 1e-9 * 4.0
+    assert 2.0**-30 > 1e-9 / 4.0, "and outside the tolerance a division would give"
+    assert big.pythagoras_holds
+
+
+def test_a_broken_pythagorean_split_is_reported_as_broken() -> None:
+    """The guard's purpose: a misaligned index breaks this identity long before
+    it breaks any inequality."""
+    assert not _pythagoras(observed=1.0, shared=1.0, gained=1.0, lost=1.0).pythagoras_holds
+
+
+# ---------------------------------------------------------------------------
+# Recovering tf across a churned vocabulary
+# ---------------------------------------------------------------------------
+def test_a_token_only_one_model_knows_contributes_no_term_frequency() -> None:
+    """`w / idf` recovers tf, and idf is 0.0 for a token the model never saw, so
+    that division is guarded. Both the guard's threshold and its fallback matter:
+    the smoothed idf floor is exactly 1.0, so comparing against 1.0 instead of
+    0.0 would zero the tf of every token appearing in every document.
+    """
+    before = TfidfVectoriser().fit([["alpha", "beta"], ["alpha", "gamma"]], ["d0", "d1"])
+    after = TfidfVectoriser().fit([["alpha", "delta"], ["alpha", "gamma"]], ["d0", "d1"])
+
+    # "alpha" is in every document on both sides, so its idf is exactly 1.0.
+    assert smoothed_idf_one(2, 2) == 1.0
+    result = analyse_vector_shift(before, after, "d0")
+
+    assert result.bound.holds
+    assert result.pythagoras_holds
+    # beta left and delta arrived, so both sides carry mass the other does not.
+    assert result.lost_mass > 0.0, "beta was in the before model only"
+    assert result.gained_mass > 0.0, "delta is in the after model only"
+    assert 0.0 < result.churn_fraction <= 1.0
+
+
+def test_a_ubiquitous_token_keeps_its_term_frequency() -> None:
+    """The smoothed idf floor is exactly 1.0, reached by a token in every
+    document. `w / idf` is guarded against a zero divisor; guarding against 1.0
+    instead would zero the tf of precisely those tokens, and the global term of
+    the section 4.2 bound is computed from ``||tf||_2``.
+
+    Two documents, vocabulary {alpha, beta}. In `d0` both tokens appear once, so
+    ``tf = (1/2, 1/2)`` and ``||tf||_2 = sqrt(1/2)``. Dropping alpha would leave
+    ``1/2``, which is a different number by a factor of sqrt(2).
+    """
+    before = TfidfVectoriser().fit([["alpha", "beta"], ["alpha"]], ["d0", "d1"])
+    after = TfidfVectoriser().fit([["alpha", "beta"], ["alpha", "beta"]], ["d0", "d1"])
+
+    assert smoothed_idf_one(2, 2) == 1.0, "alpha is in every document on both sides"
+    rare = smoothed_idf_one(1, 2)
+
+    result = analyse_vector_shift(before, after, "d0")
+
+    # glob = ||tf||_2 * ||delta_idf||_inf. Only beta's idf moved, by rare - 1.
+    expected = math.sqrt(0.5) * (rare - 1.0)
+    assert result.bound.glob == pytest.approx(expected, rel=1e-12)
+    assert result.bound.glob != pytest.approx(0.5 * (rare - 1.0), rel=1e-6)
+
+
+def test_a_token_absent_before_starts_from_zero_term_frequency() -> None:
+    """The fallback for a token whose idf is zero on one side, which is what
+    "the model never saw it" means after alignment.
+
+    Zero is the only value that makes ``delta_tf`` the genuine movement. One
+    would say the document used to be entirely that token, and the local term of
+    the bound is ``||delta_tf||_2 * ||idf||_inf``.
+
+    Deliberately asymmetric -- gamma arrives and nothing leaves -- because a
+    corpus edit that adds and removes one token each cancels the error out and
+    leaves the norm unchanged.
+    """
+    before = TfidfVectoriser().fit([["alpha", "beta"], ["alpha"]], ["d0", "d1"])
+    after = TfidfVectoriser().fit([["alpha", "beta", "gamma"], ["alpha"]], ["d0", "d1"])
+
+    rare = smoothed_idf_one(1, 2)
+    assert smoothed_idf_one(2, 2) == 1.0
+    assert rare > 1.0, "so the infinity-norm of idf_before is the rare token's"
+
+    result = analyse_vector_shift(before, after, "d0")
+
+    # d0 goes from (1/2, 1/2, -) to (1/3, 1/3, 1/3), so delta_tf is
+    # (-1/6, -1/6, 1/3) and its norm is sqrt(1/6).
+    assert result.bound.local == pytest.approx(math.sqrt(1.0 / 6.0) * rare, rel=1e-12)
+    # Starting gamma at 1.0 instead would make delta_tf (-1/6, -1/6, -2/3).
+    assert result.bound.local != pytest.approx(math.sqrt(0.5) * rare, rel=1e-6)

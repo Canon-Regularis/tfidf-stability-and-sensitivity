@@ -6,6 +6,7 @@ for a counterexample instead of spot-checking a few examples.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import sys
 
@@ -15,6 +16,7 @@ from hypothesis import strategies as st
 
 from tfidf_stability.similarity.cosine import cosine, cosine_against_corpus, cosine_matrix
 from tfidf_stability.similarity.geometry import (
+    LipschitzBound,
     corpus_lipschitz_bound,
     difference_norm,
     lipschitz_constant,
@@ -22,7 +24,7 @@ from tfidf_stability.similarity.geometry import (
     three_term_bound,
     unit,
 )
-from tfidf_stability.utils.numerics import Reduction
+from tfidf_stability.utils.numerics import Reduction, same_bits
 from tfidf_stability.vectorisation.sparse import SparseVector, dot, l2_norm
 
 DIM = 24
@@ -91,6 +93,7 @@ nonneg = st.floats(min_value=0.0, max_value=1e3, allow_nan=False, allow_infinity
 sparse_map = st.dictionaries(st.integers(0, DIM - 1), nonneg, min_size=0, max_size=DIM)
 
 
+@pytest.mark.property
 @given(sparse_map, sparse_map)
 def test_cosine_is_within_zero_and_one(a: dict[int, float], b: dict[int, float]) -> None:
     """Guaranteed only because TF-IDF coordinates are non-negative (section 2.3)."""
@@ -98,6 +101,7 @@ def test_cosine_is_within_zero_and_one(a: dict[int, float], b: dict[int, float])
     assert -1e-12 <= c <= 1.0 + 4 * math.ulp(1.0)
 
 
+@pytest.mark.property
 @given(sparse_map)
 def test_cosine_with_self_is_one_or_zero(a: dict[int, float]) -> None:
     v = sv(a)
@@ -121,6 +125,7 @@ NORM_UNDERFLOW_THRESHOLD = math.sqrt(sys.float_info.min)  # ~1.49e-154
 # library version: it passed locally and failed on the runner. Suppressing it
 # cannot hide a counterexample, since rejections are counted before the test body
 # runs.
+@pytest.mark.property
 @settings(suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.too_slow])
 @given(sparse_map, sparse_map, st.floats(min_value=1e-6, max_value=1e6))
 def test_cosine_is_invariant_under_positive_scaling(
@@ -178,6 +183,7 @@ def test_cosine_degrades_for_vectors_whose_squares_underflow() -> None:
     assert cosine(sv({0: 1e-170}), unit) == 0.0
 
 
+@pytest.mark.property
 @given(sparse_map, sparse_map)
 def test_dot_product_is_symmetric(a: dict[int, float], b: dict[int, float]) -> None:
     assert dot(sv(a), sv(b)) == dot(sv(b), sv(a))
@@ -186,6 +192,7 @@ def test_dot_product_is_symmetric(a: dict[int, float], b: dict[int, float]) -> N
 # ---------------------------------------------------------------------------
 # Section 4.3: the explicit Lipschitz bound (spec_addenda G4)
 # ---------------------------------------------------------------------------
+@pytest.mark.property
 @given(sparse_map, sparse_map, sparse_map, sparse_map)
 def test_lipschitz_bound_is_never_violated(
     a: dict[int, float], b: dict[int, float], c: dict[int, float], d: dict[int, float]
@@ -262,6 +269,7 @@ normal_sparse_map = st.dictionaries(
 )
 
 
+@pytest.mark.property
 @given(normal_sparse_map, normal_sparse_map, st.floats(1.0, 10.0), st.floats(0.0, 2.0))
 def test_three_term_bound_is_never_violated(
     tf_a: dict[int, float],
@@ -392,3 +400,177 @@ def test_a_difference_norm_across_dimensions_is_refused() -> None:
     """
     with pytest.raises(ValueError, match="dimension mismatch"):
         difference_norm(sv({0: 1.0}, dim=DIM), sv({0: 1.0}, dim=DIM + 1))
+
+
+def test_corpus_scoring_divides_by_both_norms_not_just_one() -> None:
+    """Every existing corpus-scoring test uses unit vectors, where the whole
+    denominator is 1.0 and the division is unobservable.
+
+    Mutation testing found it: turning `dot / (q_norm * dn)` into either
+    `dot * (q_norm * dn)` or `dot / (q_norm / dn)` left the suite green. On unit
+    input all three agree, so the normalisation -- the one thing cosine does that
+    a dot product does not -- was covered but never asserted.
+
+    Pythagorean triples, so every norm here is exact in binary64 and the expected
+    values can be written down rather than recomputed by the code under test.
+    """
+    query = sv({0: 3.0, 1: 4.0})  # norm 5
+    docs = [sv({0: 5.0, 1: 12.0}), sv({0: 8.0, 1: 6.0})]  # norms 13 and 10
+    norms = [13.0, 10.0]
+    assert [l2_norm(d) for d in docs] == norms, "the premise: neither norm is 1"
+    assert l2_norm(query) == 5.0
+
+    scores = cosine_against_corpus(query, docs, norms)
+
+    # dot = 3*5 + 4*12 = 63, over 5*13; and 3*8 + 4*6 = 48, over 5*10.
+    assert scores == [63.0 / 65.0, 48.0 / 50.0]
+    assert scores[0] != 63.0 * 65.0, "multiplying by the norms would pass on unit input"
+    assert scores[0] != 63.0 / (5.0 / 13.0), "so would dividing one norm by the other"
+
+
+def test_corpus_scoring_agrees_bitwise_with_scoring_each_document_alone() -> None:
+    """The batched path and the pairwise one must not be two different formulas.
+    Asserted on raw bit patterns: a denominator assembled in the other order
+    would agree to within rounding and disagree here."""
+    query = sv({0: 3.0, 1: 4.0, 2: 1.0})
+    docs = [sv({0: 5.0, 1: 12.0}), sv({0: 8.0, 1: 6.0, 2: 2.0}), sv({2: 7.0})]
+    norms = [l2_norm(d) for d in docs]
+
+    batched = cosine_against_corpus(query, docs, norms)
+    assert len(batched) == 3, "an empty comparison would assert nothing at all"
+    for score, doc in zip(batched, docs, strict=True):
+        assert same_bits(score, cosine(query, doc))
+
+
+# ---------------------------------------------------------------------------
+# The section 4.3 bound, by value rather than by inequality
+# ---------------------------------------------------------------------------
+# Everything above asserts that a bound holds. That is the property the paper
+# claims, and it is the reason mutation testing scored this module at 49%: an
+# inequality with slack is satisfied by a great many wrong constants, so
+# `C = 1/L` became `C = 1*L`, the Dunkl-Williams denominators inverted, and
+# `1/sqrt(nnz)` turned into `0/sqrt(nnz)` with the suite still green.
+#
+# These pin the arithmetic instead. Norms are powers of two and small integers
+# throughout, so every expected value below is exact in binary64 and is written
+# down rather than recomputed by the code under test.
+def test_the_lipschitz_bound_reports_each_of_its_pieces_by_value() -> None:
+    """One perturbation, worked by hand.
+
+    ``u`` and ``u'`` are 4e0 and 8e0; ``v`` and ``v'`` are 16e0 and 32e0. So
+    ``L = min(4, 16, 8, 32) = 4``, ``du = 4``, ``dv = 16``.
+    """
+    u, u_prime = sv({0: 4.0}), sv({0: 8.0})
+    v, v_prime = sv({0: 16.0}), sv({0: 32.0})
+
+    bound = lipschitz_constant(u, v, u_prime, v_prime)
+
+    assert bound.min_norm == 4.0
+    assert bound.constant == 0.25, "C = 1/L, not L and not 1"
+    assert bound.uniform == 0.25 * 20.0, "C * (du + dv)"
+    # Dunkl-Williams per vector: 2*du/(nu + nu') + 2*dv/(nv + nv').
+    assert bound.tight == 8.0 / 12.0 + 32.0 / 48.0
+    # Every vector here is a positive multiple of e0, so all four cosines are
+    # exactly 1 and the perturbation moves the similarity not at all.
+    assert bound.observed == 0.0
+    assert bound.holds
+
+
+def test_the_bound_object_cannot_be_edited_after_it_is_reported() -> None:
+    """It is a measurement, and it travels into a run manifest. A caller that
+    could adjust `observed` after the fact could make any bound hold."""
+    bound = lipschitz_constant(sv({0: 4.0}), sv({0: 16.0}), sv({0: 8.0}), sv({0: 32.0}))
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        bound.observed = 0.0  # type: ignore[misc]
+    assert not hasattr(bound, "__dict__"), "slots=True: no ad-hoc attributes either"
+
+
+# ---------------------------------------------------------------------------
+# `holds` has to be able to say no
+# ---------------------------------------------------------------------------
+def _bound(uniform: float, tight: float, observed: float) -> LipschitzBound:
+    return LipschitzBound(
+        constant=1.0, min_norm=1.0, uniform=uniform, tight=tight, observed=observed
+    )
+
+
+def test_a_violation_of_either_form_is_a_violation() -> None:
+    """Both bounds are claimed, so satisfying one is not enough. With `or` in
+    place of `and` every assertion of `holds` in this file still passed."""
+    assert not _bound(uniform=10.0, tight=0.5, observed=1.0).holds, "the tight form fails"
+    assert not _bound(uniform=0.5, tight=10.0, observed=1.0).holds, "the uniform form fails"
+    assert not _bound(uniform=0.5, tight=0.5, observed=1.0).holds, "both fail"
+    assert _bound(uniform=10.0, tight=10.0, observed=1.0).holds, "and neither, here"
+
+
+@pytest.mark.parametrize("scale", [0.5, 4.0])
+def test_the_rounding_slack_is_admitted_exactly_and_not_a_hair_further(scale: float) -> None:
+    """The slack covers rounding incurred while evaluating the bound, so an
+    observed value sitting exactly on it is inside.
+
+    Two scales because the slack is `1e-12 * max(1.0, uniform) + 1e-15`: below 1
+    the `max` decides it and above 1 the multiplication does, and a mutation of
+    either is invisible at the scale that does not exercise it.
+    """
+    slack = 1e-12 * max(1.0, scale) + 1e-15
+    assert _bound(uniform=scale, tight=scale, observed=scale + slack).holds
+
+    beyond = scale + slack + max(1e-9, 1e-9 * scale)
+    assert not _bound(uniform=scale, tight=scale, observed=beyond).holds
+
+
+def test_tightness_is_the_ratio_and_is_zero_where_there_is_no_bound() -> None:
+    """`observed / tight`, not the product: on the near-attained case both sit
+    close to 1 and the two are hard to tell apart."""
+    assert _bound(uniform=9.0, tight=4.0, observed=3.0).tightness == 0.75
+    # A zero tight form has no ratio. Guarding on `> 0` rather than `>= 0` is
+    # what keeps this from dividing by zero.
+    assert _bound(uniform=1.0, tight=0.0, observed=1.0).tightness == 0.0
+
+
+# ---------------------------------------------------------------------------
+# The two closed-form bounds
+# ---------------------------------------------------------------------------
+def test_the_norm_lower_bound_is_one_over_root_nnz() -> None:
+    """`||tf||_1 == 1` and `idf >= 1` termwise give `||w|| >= 1/sqrt(nnz)`.
+
+    The existing test asserts a model's norms clear this with slack, which
+    `0.0 / sqrt(nnz)` also satisfies. These are the values themselves.
+    """
+    assert norm_lower_bound(1) == 1.0
+    assert norm_lower_bound(4) == 0.5
+    assert norm_lower_bound(16) == 0.25
+    assert norm_lower_bound(2) == 1.0 / math.sqrt(2)
+
+
+def test_an_empty_support_has_no_lower_bound_rather_than_an_infinite_one() -> None:
+    """The vector is zero there. Returning 0.0 keeps the bound true; dividing by
+    sqrt(0) would raise, and the guard is what stops it."""
+    assert norm_lower_bound(0) == 0.0
+    assert norm_lower_bound(-1) == 0.0, "a negative support is degenerate, not an error"
+
+
+def test_the_corpus_bound_is_the_root_of_the_largest_support() -> None:
+    assert corpus_lipschitz_bound([1]) == 1.0
+    assert corpus_lipschitz_bound([4, 1, 2]) == 2.0
+    assert corpus_lipschitz_bound([9, 16]) == 4.0
+
+
+def test_a_corpus_with_no_live_document_is_unbounded_rather_than_zero() -> None:
+    """`C = 1/L` blows up as norms shrink, so the limit of an empty corpus is
+    infinity. Zero would claim the best possible conditioning for the case with
+    no evidence at all -- and section 6 reads this number as a warning."""
+    assert corpus_lipschitz_bound([]) == math.inf
+    assert corpus_lipschitz_bound([0, 0]) == math.inf
+    assert corpus_lipschitz_bound([0, 4]) == 2.0, "the zeros are skipped, not counted"
+
+
+def test_normalising_the_zero_vector_returns_it_rather_than_dividing_by_zero() -> None:
+    """The one input `unit` cannot normalise. Returning it unchanged keeps the
+    function total, which is what lets callers apply it across a corpus that
+    contains an all-stopword document."""
+    zero = SparseVector.zero(DIM)
+    assert unit(zero) is zero
+
+    scaled = unit(sv({0: 3.0, 1: 4.0}))
+    assert scaled.values == (3.0 / 5.0, 4.0 / 5.0)
