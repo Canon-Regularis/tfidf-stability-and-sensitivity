@@ -36,11 +36,14 @@ import json
 import math
 import os
 import struct
+import unicodedata
 from pathlib import Path
 
 import pytest
 
+from tfidf_stability.persistence.manifest import RunManifest
 from tfidf_stability.utils.hashing import (
+    _CHUNK,
     hash_bytes,
     hash_file,
     hash_floats,
@@ -51,6 +54,7 @@ from tfidf_stability.utils.hashing import (
     short,
 )
 from tfidf_stability.utils.io import (
+    VOLATILE_KEYS,
     atomic_write_bytes,
     atomic_write_text,
     canonical_json,
@@ -59,6 +63,17 @@ from tfidf_stability.utils.io import (
     write_json,
     write_jsonl,
 )
+
+
+def _refuse_constant(name: str) -> object:
+    """A `parse_constant` hook that rejects the non-standard JSON tokens.
+
+    `json.loads` accepts `NaN`, `Infinity` and `-Infinity` by default, so a
+    document Python writes is a document Python reads -- and the fact that no
+    other parser would is invisible unless a test refuses them explicitly.
+    """
+    raise ValueError(name)
+
 
 _SHA256_OF_EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
@@ -356,3 +371,458 @@ def test_a_scalar_payload_is_returned_as_is() -> None:
     assert strip_volatile(7) == 7
     assert strip_volatile("text") == "text"
     assert strip_volatile(None) is None
+
+
+# ---------------------------------------------------------------------------
+# The two canonical renderings, and where they disagree
+# ---------------------------------------------------------------------------
+# There are two paths from a payload to bytes and they are not the same path.
+# `canonical_json` sanitises non-finite floats to `null` before rendering, so
+# what lands on disk is strict JSON. `hash_json` does not: it calls `json.dumps`
+# directly, and Python's encoder emits the non-standard `NaN` and `Infinity`
+# tokens by default.
+#
+# For every finite payload the two agree, which is why nothing had noticed. For a
+# payload holding an undefined margin -- which G16 *requires* be reported as
+# undefined rather than coerced -- they disagree, and the digest of a file stops
+# matching the digest of the thing written into it.
+_UNDEFINED_PAYLOAD = {"tau": 1e-9, "median_margin": math.nan}
+
+
+def test_the_written_form_and_the_hashed_form_agree_on_every_finite_payload() -> None:
+    """The control. Without it the divergence below reads as a general fact
+    about the two functions rather than as a property of non-finite values."""
+    finite = {"tau": 1e-9, "k": 10, "name": "profile", "ratios": [0.5, 1.0]}
+    assert hash_text(canonical_json(finite, indent=None)) == hash_json(finite)
+
+
+def test_the_two_renderings_disagree_once_a_value_is_not_finite() -> None:
+    """`canonical_json` writes `null`; `hash_json` hashes the `NaN` token. Same
+    payload, two different digests, and no error from either."""
+    written = canonical_json(_UNDEFINED_PAYLOAD, indent=None)
+    assert '"median_margin":null' in written
+
+    assert hash_text(written) != hash_json(_UNDEFINED_PAYLOAD), (
+        "the file digest and the payload digest agreed; the divergence is gone"
+    )
+
+
+def test_the_hashed_form_emits_a_token_no_strict_reader_accepts() -> None:
+    """The reason the sanitiser exists at all. `json.loads` reads its own
+    extension back, so the divergence is invisible from Python; every other
+    parser rejects the document."""
+    strict = {"parse_constant": _refuse_constant}
+
+    assert json.loads(canonical_json(_UNDEFINED_PAYLOAD, indent=None), **strict) == {
+        "tau": 1e-9,
+        "median_margin": None,
+    }
+
+    with pytest.raises(ValueError, match="NaN"):
+        json.loads('{"m":NaN}', **strict)
+
+
+def test_a_manifest_holding_an_undefined_value_cannot_verify_against_its_own_file(
+    tmp_path,  # type: ignore[no-untyped-def]
+) -> None:
+    """The consequence, pinned rather than repaired.
+
+    `RunManifest.digest()` goes through `hash_json`, and `write()` goes through
+    `canonical_json`. So the `manifest_digest` embedded in the file is taken over
+    bytes the file does not contain, and a verifier that reads the manifest back
+    and recomputes the digest -- which is precisely what
+    ``docs/experiments.md`` describes as the check on a published number --
+    gets a different hex string.
+
+    Not reachable from a manifest today: the hashed fields carry `tau`, the `k`
+    set and artefact digests, all finite or textual. It is one undefined margin
+    away from being live, and the sanitiser's own docstring records that both
+    experiment result files did contain `NaN`.
+    """
+    manifest = RunManifest("stability_profile", parameters=dict(_UNDEFINED_PAYLOAD))
+    path = tmp_path / "manifest.json"
+    recorded = manifest.write(path)["manifest_digest"]
+
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    loaded.pop("manifest_digest")
+    payload = strip_volatile(loaded)
+    payload.pop("notes", None)
+
+    assert recorded != hash_json(payload), "the manifest now verifies; update this test"
+    assert loaded["parameters"]["median_margin"] is None, "the file itself holds null"
+
+
+def test_a_manifest_of_finite_values_does_verify_against_its_own_file(
+    tmp_path,  # type: ignore[no-untyped-def]
+) -> None:
+    """The same round trip on ordinary parameters, so the failure above is
+    attributable to the non-finite value and not to the round trip."""
+    manifest = RunManifest("stability_profile", parameters={"tau": 1e-9, "ks": [5, 10]})
+    path = tmp_path / "manifest.json"
+    recorded = manifest.write(path)["manifest_digest"]
+
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    loaded.pop("manifest_digest")
+    payload = strip_volatile(loaded)
+    payload.pop("notes", None)
+
+    assert recorded == hash_json(payload)
+
+
+# ---------------------------------------------------------------------------
+# hash_ints: the width is part of the identity
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("width", [0, 1, 2, 3, 16, -1, None, "8", True])
+def test_a_width_other_than_four_or_eight_is_refused(width: object) -> None:
+    """The format table has two entries. A width that fell through to a default
+    would digest the same integers into a different string, silently breaking
+    every comparison against a previously recorded digest."""
+    with pytest.raises(KeyError):
+        hash_ints([1], width=width)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("width", "value"),
+    [(4, 2**31 - 1), (4, -(2**31)), (8, 2**63 - 1), (8, -(2**63))],
+)
+def test_each_width_accepts_the_whole_range_it_names(width: int, value: int) -> None:
+    """Both ends, exactly. `struct` refuses one past either, so these are the
+    largest and smallest identifiers a corpus can carry at each width."""
+    assert len(hash_ints([value], width=width)) == 64
+
+
+@pytest.mark.parametrize(
+    ("width", "value"),
+    [(4, 2**31), (4, -(2**31) - 1), (8, 2**63), (8, -(2**63) - 1)],
+)
+def test_one_past_the_range_is_refused_rather_than_truncated(width: int, value: int) -> None:
+    """Truncation would fold two distinct identifiers onto one digest, which is
+    the one failure a content hash exists to prevent."""
+    with pytest.raises(struct.error, match="format requires"):
+        hash_ints([value], width=width)
+
+
+def test_a_float_width_is_accepted_because_it_equals_an_integer_key() -> None:
+    """The format table is a dict keyed on `int`, and `8.0 == 8` with the same
+    hash, so a width arriving as a float from a parsed config finds the entry.
+
+    Pinned rather than guarded, and worth knowing in both directions: `True`
+    equals 1, which is *not* a key, so a boolean width is refused while a float
+    one is not.
+    """
+    assert hash_ints([7], width=8.0) == hash_ints([7], width=8)  # type: ignore[arg-type]
+    assert hash_ints([7], width=4.0) == hash_ints([7], width=4)  # type: ignore[arg-type]
+
+
+def test_a_boolean_packs_as_the_integer_it_equals() -> None:
+    """`bool` is an `int`, so `True` digests as 1. Pinned because a JSON corpus
+    can carry `true` where a count is expected."""
+    assert hash_ints([True, False]) == hash_ints([1, 0])
+
+
+# ---------------------------------------------------------------------------
+# hash_file: the streaming boundary
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("size", [_CHUNK - 1, _CHUNK, _CHUNK + 1, 2 * _CHUNK])
+def test_a_file_at_the_streaming_boundary_hashes_as_its_bytes(size: int, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The read loop is `while chunk := handle.read(_CHUNK)`. Exactly at the
+    boundary the second read returns empty and ends the loop; one byte over, it
+    returns a single byte. An off-by-one there would silently hash a prefix.
+    """
+    data = bytes(range(256)) * (size // 256) + bytes(size % 256)
+    path = tmp_path / "blob.bin"
+    path.write_bytes(data)
+
+    assert len(data) == size
+    assert hash_file(path) == hash_bytes(data)
+
+
+def test_an_empty_file_hashes_as_nothing_rather_than_failing(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The loop body never runs. The digest of no bytes is a real digest, and a
+    zero-length artefact is a legitimate result."""
+    path = tmp_path / "empty.bin"
+    path.write_bytes(b"")
+    assert hash_file(path) == hash_bytes(b"")
+
+
+def test_hashing_a_binary_file_as_text_refuses_rather_than_mangling(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """`text=True` decodes as UTF-8 first. A binary file is not text, and the
+    refusal is better than a digest over replacement characters."""
+    path = tmp_path / "binary.bin"
+    path.write_bytes(b"\xff\xfe\x00\x01")
+    with pytest.raises(UnicodeDecodeError):
+        hash_file(path, text=True)
+
+
+# ---------------------------------------------------------------------------
+# hash_text and hash_floats: what the digest is sensitive to
+# ---------------------------------------------------------------------------
+def test_text_that_cannot_be_encoded_is_refused() -> None:
+    """A lone surrogate has no UTF-8 encoding. It can reach here from a corpus
+    read with `errors="surrogateescape"`, so the refusal is the boundary between
+    "text this project can hash" and "bytes pretending to be text"."""
+    with pytest.raises(UnicodeEncodeError):
+        hash_text("\ud800")
+
+
+def test_two_unicode_normalisations_of_one_string_hash_differently() -> None:
+    """The digest is over bytes, not over graphemes. Preprocessing normalises to
+    NFKC precisely so this difference is resolved before anything is hashed --
+    the hash itself does not resolve it."""
+    composed = unicodedata.normalize("NFC", "café")
+    decomposed = unicodedata.normalize("NFD", "café")
+
+    assert composed != decomposed, "the premise: two spellings of one word"
+    assert hash_text(composed) != hash_text(decomposed)
+
+
+def test_the_order_of_floats_is_part_of_their_digest() -> None:
+    """A digest over a multiset would call two different vectors equal. These
+    are sequences, and the sequence is the thing."""
+    assert hash_floats([1.0, 2.0]) != hash_floats([2.0, 1.0])
+
+
+def test_hashing_an_iterator_consumes_it_once() -> None:
+    """`hash_floats` takes an `Iterable`, so a generator is spent by the call.
+    Pinned because hashing the same generator twice to compare digests would
+    silently compare a full sequence against an empty one."""
+    values = iter([1.0, 2.0, 3.0])
+    first = hash_floats(values)
+    second = hash_floats(values)
+
+    assert first != second
+    assert second == hash_floats([]), "the second pass saw nothing at all"
+
+
+# ---------------------------------------------------------------------------
+# short: a display helper with a slicing trap
+# ---------------------------------------------------------------------------
+def test_a_negative_length_drops_from_the_end_instead_of_truncating() -> None:
+    """`digest[:-1]` is a legal slice, so a length arriving as -1 returns almost
+    the whole digest rather than an empty string or an error. Pinned: the
+    function is documented as "never for identity comparison", and this is the
+    shape that most looks like a full digest while not being one.
+    """
+    digest = "a" * 64
+    assert len(short(digest, -1)) == 63
+    assert len(short(digest, 0)) == 0
+    assert short(digest, 999) == digest
+
+
+# ---------------------------------------------------------------------------
+# canonical_json: rendering choices that reach disk
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("indent", [None, 0, 2, -1])
+def test_every_indent_carries_the_same_data(indent: int | None) -> None:
+    """Indentation is presentation. The compact form is what gets hashed and the
+    readable form is what gets written, and they must not differ in content."""
+    payload = {"b": [1, 2], "a": {"z": 1.5}}
+    assert json.loads(canonical_json(payload, indent=indent)) == payload
+
+
+def test_only_the_compact_form_omits_the_trailing_newline() -> None:
+    """The written form ends with a newline so a file is POSIX-clean; the hashed
+    form does not, because a trailing byte would be in the digest."""
+    assert canonical_json({"a": 1}, indent=None) == '{"a":1}'
+    assert canonical_json({"a": 1}, indent=2).endswith("}\n")
+
+
+def test_negative_zero_is_written_as_negative_zero() -> None:
+    """It is finite, so the sanitiser leaves it, and `-0.0` is a different bit
+    pattern from `0.0` that the rest of the project compares on."""
+    assert canonical_json({"z": -0.0}, indent=None) == '{"z":-0.0}'
+
+
+def test_a_value_json_cannot_represent_is_rendered_through_str() -> None:
+    """`default=str` means nothing raises mid-experiment. It also means the
+    rendering is lossy and one-way, so two distinct objects with the same `str`
+    become the same bytes."""
+    assert canonical_json({"b": b"hi"}, indent=None) == '{"b":"b\'hi\'"}'
+
+
+@pytest.mark.parametrize(
+    ("label", "payload"),
+    [
+        ("at the top of a dict", {"m": math.inf}),
+        ("inside a list", {"m": [math.nan]}),
+        ("inside a nested list", {"m": [[-math.inf]]}),
+        ("inside a tuple", {"m": (1.0, math.nan)}),
+        ("as a dict value two levels down", {"a": {"b": math.nan}}),
+    ],
+)
+def test_a_non_finite_value_is_replaced_wherever_it_sits(label: str, payload: object) -> None:
+    """The sanitiser recurses through dicts, lists and tuples alike. One missed
+    container leaves a document no strict parser can read."""
+    rendered = canonical_json(payload, indent=None)
+    assert "NaN" not in rendered, label
+    assert "Infinity" not in rendered, label
+    assert json.loads(rendered, parse_constant=_refuse_constant) is not None
+
+
+def test_a_tuple_becomes_a_list_because_json_has_no_tuple() -> None:
+    """A type change the caller does not choose. Worth stating: a payload that
+    round-trips through a file comes back with lists where it had tuples, so an
+    equality comparison against the original fails on type alone."""
+    assert canonical_json({"t": (1, 2)}, indent=None) == '{"t":[1,2]}'
+
+
+# ---------------------------------------------------------------------------
+# Atomic writes: the cleanup arm, without mocking anything
+# ---------------------------------------------------------------------------
+def test_writing_onto_an_existing_directory_leaves_no_temporary_behind(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The `except BaseException` arm, reached by a real failure rather than a
+    patched `os.replace`.
+
+    The temporary is created in the target's own directory, so a rename that
+    fails and does not clean up leaves a `.tmp` file beside the real outputs --
+    where the next run's globbing would find it.
+    """
+    occupied = tmp_path / "results"
+    occupied.mkdir()
+
+    # The exception type is platform-dependent -- PermissionError on Windows,
+    # IsADirectoryError on Linux -- so the target's name is what is matched.
+    with pytest.raises(OSError, match="results"):
+        atomic_write_bytes(occupied, b"payload")
+
+    assert not list(tmp_path.glob("*.tmp")), "a temporary survived the failed rename"
+    assert occupied.is_dir(), "and the existing entry is untouched"
+
+
+@pytest.mark.parametrize(("writer", "empty"), [(atomic_write_bytes, b""), (atomic_write_text, "")])
+def test_writing_nothing_produces_an_empty_file_rather_than_no_file(
+    writer: object, empty: object, tmp_path
+) -> None:  # type: ignore[no-untyped-def]
+    """An empty result is a result. A missing file and an empty one are
+    different things to the next stage of a pipeline."""
+    path = tmp_path / "out"
+    writer(path, empty)  # type: ignore[operator]
+    assert path.is_file()
+    assert path.read_bytes() == b""
+
+
+def test_a_lone_carriage_return_survives_an_atomic_text_write(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Only CRLF is normalised, matching `hash_text`. A bare CR is data -- it
+    can appear inside a document -- and rewriting it would change the corpus."""
+    path = tmp_path / "cr.txt"
+    atomic_write_text(path, "a\rb\r\nc")
+    assert path.read_bytes() == b"a\rb\nc"
+
+
+# ---------------------------------------------------------------------------
+# read_jsonl
+# ---------------------------------------------------------------------------
+def test_a_record_written_with_an_undefined_value_reads_back_as_none(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The round trip is lossy in exactly one place, and it is the place G16
+    cares about: an undefined margin goes out as `null` and comes back as
+    `None`, not as `NaN`. A reader comparing against `float("nan")` finds
+    nothing; a reader checking `is None` finds it."""
+    path = tmp_path / "records.jsonl"
+    write_jsonl(path, [{"doc_id": "d0", "margin": math.nan}])
+
+    (record,) = read_jsonl(path)
+    assert record["margin"] is None
+    assert not isinstance(record["margin"], float)
+
+
+def test_a_line_that_is_not_json_is_refused_rather_than_skipped(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Blank lines are skipped deliberately; a corrupt line is not blank.
+    Skipping it would silently shorten a corpus."""
+    path = tmp_path / "broken.jsonl"
+    path.write_bytes(b'{"a": 1}\nnot json at all\n')
+
+    with pytest.raises(json.JSONDecodeError):
+        list(read_jsonl(path))
+
+
+def test_a_file_without_a_trailing_newline_still_yields_its_last_record(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Iterating a file yields the final partial line. A reader that required
+    the terminator would drop one document from a hand-edited corpus."""
+    path = tmp_path / "no_terminator.jsonl"
+    path.write_bytes(b'{"a": 1}\n{"a": 2}')
+    assert [r["a"] for r in read_jsonl(path)] == [1, 2]
+
+
+def test_whitespace_only_lines_are_skipped_like_blank_ones(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The guard is `line.strip()`, so a line of spaces is as empty as an empty
+    one -- which is what a hand-edited file tends to contain."""
+    path = tmp_path / "spaced.jsonl"
+    path.write_bytes(b'{"a": 1}\n   \n\t\n{"a": 2}\n')
+    assert [r["a"] for r in read_jsonl(path)] == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# strip_volatile
+# ---------------------------------------------------------------------------
+def test_a_value_that_looks_like_a_volatile_key_is_left_alone() -> None:
+    """Keys are dropped, not values. A configuration recording the string
+    "timestamp" as a column name must survive into the digest."""
+    assert strip_volatile({"sort_by": "timestamp"}) == {"sort_by": "timestamp"}
+
+
+def test_stripping_turns_a_tuple_into_a_list() -> None:
+    """A type change the caller does not ask for, and one that matters: the
+    stripped payload is what gets hashed, and `hash_json` renders both as an
+    array, so this is invisible in the digest and visible in an equality check.
+    """
+    assert strip_volatile({"ks": (5, 10)}) == {"ks": [5, 10]}
+
+
+def test_stripping_reaches_a_volatile_key_three_levels_down() -> None:
+    """Manifests nest. The existing tests reach two levels; three is where a
+    non-recursive implementation that special-cased the top two would pass."""
+    payload = {"a": {"b": {"c": {"timestamp": 1, "keep": 2}}}}
+    assert strip_volatile(payload) == {"a": {"b": {"c": {"keep": 2}}}}
+
+
+@pytest.mark.parametrize("key", sorted(VOLATILE_KEYS))
+def test_every_declared_volatile_key_is_actually_dropped(key: str) -> None:
+    """The set is the contract. A name listed but not honoured would leave a
+    hostname or a working directory inside a published digest."""
+    assert strip_volatile({key: "x", "keep": 1}) == {"keep": 1}
+
+
+# ---------------------------------------------------------------------------
+# Renderings that are recorded rather than incidental
+# ---------------------------------------------------------------------------
+def test_a_non_ascii_token_is_hashed_as_itself_rather_than_as_an_escape() -> None:
+    """`ensure_ascii=False` is why a token digests the same however it arrived.
+
+    With ASCII escaping on, the accented character renders as a six-character
+    ASCII escape sequence instead, so a config written by a tool that escapes and
+    one written by a tool that does not would carry different digests for the
+    same vocabulary.
+    """
+    token = "caf" + chr(0xE9)
+    digest = hash_json({"token": token})
+
+    assert digest == hash_text('{"token":"' + token + '"}')
+    assert digest != hash_text('{"token":"caf' + chr(92) + 'u00e9"}')
+
+
+def test_a_non_ascii_value_is_written_to_disk_as_itself(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The same choice on the writing side. A results file is read by people as
+    well as parsers, and an escaped token is unrecognisable in both."""
+    token = "caf" + chr(0xE9)
+    path = tmp_path / "out.json"
+    write_json(path, {"token": token})
+
+    written = path.read_text(encoding="utf-8")
+    assert token in written
+    assert chr(92) + "u00e9" not in written
+
+
+def test_the_readable_form_is_indented_by_two_spaces() -> None:
+    """The default is what every results file on disk is written with, so it is
+    part of the bytes the snapshot test compares -- not a formatting
+    preference."""
+    assert canonical_json({"a": {"b": 1}}) == '{\n  "a": {\n    "b": 1\n  }\n}\n'
+
+
+def test_a_written_file_uses_the_same_two_space_indent(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """`write_json` carries its own default. If the two drifted apart, a file
+    written through one path would not match one written through the other."""
+    path = tmp_path / "out.json"
+    write_json(path, {"a": {"b": 1}})
+    assert path.read_text(encoding="utf-8") == canonical_json({"a": {"b": 1}})
+    assert '\n  "a"' in path.read_text(encoding="utf-8")
