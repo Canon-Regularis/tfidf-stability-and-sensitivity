@@ -375,6 +375,16 @@ jobs:
         # The implementation notes cross-reference the code heavily. A stale link
         # is a silent lie about where something lives.
         run: python scripts/check_docs.py
+      - name: Every place that states the version must agree
+        # Four files name it and nothing made them agree: pyproject.toml and
+        # __init__.py said 0.2.0 while CITATION.cff still said 0.1.0. A citation
+        # carrying the wrong version is a claim about which code produced a
+        # published number, which is the one thing this repository asserts about
+        # everything else it does.
+        #
+        # release.yml passes the tag as well, so a tag that disagrees with the
+        # tree cannot reach the build.
+        run: python scripts/check_versions.py
 
   cli:
     name: cli end to end
