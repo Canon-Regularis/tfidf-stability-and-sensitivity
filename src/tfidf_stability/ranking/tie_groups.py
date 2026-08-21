@@ -16,13 +16,13 @@ scores". The definition is a ball rather than an equivalence class:
 
 G1's resolution is three separately named objects, never conflated:
 
-===============  ==========================================  =========  ==========
-object           definition                                  cost       partition?
-===============  ==========================================  =========  ==========
-:func:`tie_ball`  verbatim section 2.3.3                     O(log N)   no
-:func:`tie_chains` single-linkage: adjacent gaps <= tau      O(N)       **yes**
-:func:`tie_cliques` complete-linkage: diameter <= tau        O(N)       no
-===============  ==========================================  =========  ==========
+======================  =====================================  =========  ==========
+object                  definition                             cost       partition?
+======================  =====================================  =========  ==========
+:func:`tie_ball_interval` verbatim section 2.3.3               O(log N)   no
+:func:`tie_chains`      single-linkage: adjacent gaps <= tau   O(N)       **yes**
+:func:`tie_cliques`     complete-linkage: diameter <= tau      O(N)       no
+======================  =====================================  =========  ==========
 
 The ball stays the primary reported object, being what the paper defines. Chains
 are reported alongside it wherever a partition is required, and the
