@@ -705,3 +705,84 @@ def test_an_inverted_ngram_range_is_refused_by_the_pipeline() -> None:
     pipeline = PreprocessingPipeline(PreprocessingConfig(n_min=3, n_max=1))
     with pytest.raises(ValueError, match=r"n_max \(1\) must be at least n_min \(3\)"):
         pipeline.preprocess("a b c")
+
+
+def test_a_pipeline_agreeing_with_its_config_digests_as_the_config_alone() -> None:
+    """The backward-compatibility half of the override rule, stated absolutely.
+
+    The two assertions in `test_an_injected_lemmatiser_reaches_the_digest` are
+    both relative -- plain differs from injected, agreeing equals plain -- and a
+    rule that recorded the override on exactly the wrong side would satisfy both:
+    it would simply move the key from one pipeline to the other and leave every
+    comparison between them intact.
+
+    What pins it down is that a pipeline using the lemmatiser its config already
+    names must digest exactly as the config does with no override key at all.
+    Otherwise every recorded digest in the repository would have churned when the
+    override was introduced, which is the thing the docstring promises did not
+    happen.
+    """
+    from tfidf_stability.preprocessing.lemmatise import LemmatiserKind, make_lemmatiser
+    from tfidf_stability.preprocessing.pipeline import (
+        PreprocessingConfig,
+        PreprocessingPipeline,
+    )
+
+    config = PreprocessingConfig()
+    plain = PreprocessingPipeline(config)
+
+    assert plain.digest() == config.digest(stopword_digest=plain.stopwords.digest)
+
+    injected = PreprocessingPipeline(config, lemmatiser=make_lemmatiser(LemmatiserKind.NONE))
+    assert injected.digest() == config.digest(
+        stopword_digest=injected.stopwords.digest, lemmatiser_override="none"
+    )
+    assert injected.digest() != plain.digest()
+
+
+def test_the_config_digest_is_over_the_canonical_form_not_the_field_order() -> None:
+    """`json.dumps(..., sort_keys=True)`. `to_dict()` returns its fields in
+    declaration order, which is not alphabetical, so a digest taken over the
+    payload as-built would depend on the order the dataclass happens to list its
+    fields in -- and reordering two fields for readability would invalidate every
+    recorded result.
+    """
+    import hashlib
+    import json
+
+    from tfidf_stability.preprocessing.pipeline import PreprocessingConfig
+
+    config = PreprocessingConfig()
+    payload = config.to_dict()
+    assert list(payload) != sorted(payload), "the natural order is not the canonical one"
+
+    reordered = dict(reversed(list(payload.items())))
+    blob = json.dumps(reordered, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    assert config.digest() == hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def test_the_config_digest_keeps_a_non_ascii_field_as_itself() -> None:
+    """`ensure_ascii=False`. The token pattern is a regex a caller supplies and
+    may hold non-ASCII; escaping it to `\\uXXXX` before hashing would give the
+    same configuration two identities depending on which serialiser wrote it.
+
+    The character is built with `chr` so the assertion does not depend on how
+    this file's own bytes survive an editor.
+    """
+    import hashlib
+    import json
+
+    from tfidf_stability.preprocessing.pipeline import PreprocessingConfig
+    from tfidf_stability.preprocessing.tokenise import TokenisationConfig
+
+    e_acute = chr(0xE9)
+    config = PreprocessingConfig(tokenisation=TokenisationConfig(pattern=f"[a-z{e_acute}]+"))
+
+    payload = config.to_dict()
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    assert e_acute in blob, "the character reaches the hashed bytes unescaped"
+    assert config.digest() == hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+    escaped = json.dumps(payload, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    assert escaped != blob, "the two serialisations really do differ"
+    assert config.digest() != hashlib.sha256(escaped.encode("utf-8")).hexdigest()
