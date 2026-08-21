@@ -786,3 +786,82 @@ def test_the_config_digest_keeps_a_non_ascii_field_as_itself() -> None:
     escaped = json.dumps(payload, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
     assert escaped != blob, "the two serialisations really do differ"
     assert config.digest() != hashlib.sha256(escaped.encode("utf-8")).hexdigest()
+
+
+def test_the_asset_header_does_not_become_part_of_the_stopword_set() -> None:
+    """`if s and not s.startswith("#")`. The frozen list carries a 15-line
+    header explaining why it is frozen, and those lines are not stopwords.
+
+    Both halves of that condition matter and neither is obviously load-bearing:
+    with `or` in place of `and`, every comment line and every blank one is
+    appended verbatim. Nothing downstream would raise -- `is_stopword` would
+    simply answer True for a handful of strings no tokeniser can produce, and
+    the set would silently grow, changing `len()` and the ablation counts while
+    leaving every score identical.
+    """
+    from tfidf_stability.preprocessing import stopwords as module
+
+    lines = (
+        (module._ASSET_DIR / module.DEFAULT_STOPWORD_ASSET).read_text(encoding="utf-8").splitlines()
+    )
+    loaded = module.load_stopwords()
+
+    assert sum(1 for line in lines if line.strip().startswith("#")) == 15, (
+        "the premise: the asset really does carry a comment header"
+    )
+    assert not any(word.startswith("#") for word in loaded), "no comment survived the load"
+    assert all(word for word in loaded), "and no blank line became an empty stopword"
+    assert len(loaded) == sum(
+        1 for line in lines if line.strip() and not line.strip().startswith("#")
+    )
+
+
+def test_a_stopword_set_holds_only_stripped_words() -> None:
+    """Each line is stripped before the comment test and before storing, so
+    trailing whitespace in the asset cannot produce a word that never matches a
+    token."""
+    loaded = load_stopwords()
+
+    assert all(word == word.strip() for word in loaded)
+    assert all(" " not in word for word in loaded), "a stopword is one token"
+
+
+# ---------------------------------------------------------------------------
+# tokenise_with_offsets selects the same tokens as tokenise
+# ---------------------------------------------------------------------------
+# The two functions carry independent copies of the length filter. The offsets
+# variant is what README section 1.2's provenance reads, so a variant selecting a
+# different token stream would describe a document that was never scored --
+# and it would do it while every score stayed correct.
+@pytest.mark.parametrize("length", [1, 2, 63, 64])
+def test_a_token_at_the_length_bounds_survives_the_offsets_variant(length: int) -> None:
+    """Both bounds are inclusive here as well. `tokenise` is covered at these
+    exact lengths above; this is the second implementation of the same rule."""
+    text = "x" * length
+
+    assert [t.text for t in tokenise_with_offsets(text)] == [text]
+    assert [t.text for t in tokenise_with_offsets(text)] == tokenise(text)
+
+
+@pytest.mark.parametrize("length", [65, 200])
+def test_a_token_past_the_ceiling_is_dropped_by_the_offsets_variant(length: int) -> None:
+    assert tokenise_with_offsets("x" * length) == []
+
+
+def test_the_two_tokenisers_agree_on_a_mixed_document() -> None:
+    """One document holding a token at each bound and one past it, so the two
+    implementations are compared where they could actually diverge rather than
+    on text neither filter touches."""
+    text = " ".join(("a", "bb", "x" * 64, "y" * 65, "cc"))
+
+    assert [t.text for t in tokenise_with_offsets(text)] == tokenise(text)
+    assert [t.text for t in tokenise_with_offsets(text)] == ["a", "bb", "x" * 64, "cc"]
+
+
+def test_the_offsets_point_at_the_token_they_describe() -> None:
+    """The reason the variant exists: the span must recover the token from the
+    source text, or the provenance cannot be checked against the document."""
+    text = "alpha beta gamma"
+
+    for token in tokenise_with_offsets(text):
+        assert text[token.start : token.end] == token.text
