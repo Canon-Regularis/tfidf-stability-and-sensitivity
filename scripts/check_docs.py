@@ -101,6 +101,15 @@ _ADDENDA = re.compile(r"spec_addenda\.md#(g\d+)", re.IGNORECASE)
 
 _SRC = REPO / "src" / "tfidf_stability"
 
+# `src/` on sys.path, for the same reason `tests/conftest.py` does it: this check
+# runs with no install and no compiler. The docs job installs nothing at all --
+# not even requirements-dev.txt -- because until now the check was pure text, and
+# making it depend on `pip install -e .` would drag cmake and ninja into a job
+# that reads Markdown. Resolving a cross-reference needs the package importable,
+# so the script puts it on the path itself rather than asking CI to.
+if str(REPO / "src") not in sys.path:
+    sys.path.insert(0, str(REPO / "src"))
+
 
 def _module_name(path: Path) -> str:
     relative = path.relative_to(_SRC).with_suffix("")
