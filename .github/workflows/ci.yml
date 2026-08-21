@@ -55,6 +55,10 @@ jobs:
           # inside numpy's own .pyi. Resolving the dependencies on 3.11 gets the
           # numpy a 3.11 user has.
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       # ruff and mypy are pinned in requirements-dev.txt; see the note there.
       # Installing them by name here reintroduces the drift the pins stop.
       - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
@@ -93,6 +97,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: Test the normative backend
         # No compiler involved. This is the suite that defines correctness.
@@ -124,6 +132,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       # Pinned to a commit hash. A tag can be moved; @master cannot be
       # reproduced at all, and is currently ahead of the v6 release. An unpinned
       # third-party action also makes a CI run something other than a function
@@ -267,6 +279,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       # The compiled backend has to be present for this job to measure what it
@@ -330,6 +346,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - run: python -m pip install -e . -C cmake.define.TFIDF_BUILD_NATIVE=OFF
       - name: The .tfsx parser and the tokeniser must never leak an untyped error
@@ -350,6 +370,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - run: python -m pip install --upgrade pip -r requirements-dev.txt matplotlib
       - run: python -m pip install -e . -C cmake.define.TFIDF_BUILD_NATIVE=OFF
       - name: Every notebook must run top to bottom
@@ -371,6 +395,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - name: Relative links in docs/ must point at files that exist
         # The implementation notes cross-reference the code heavily. A stale link
         # is a silent lie about where something lives.
@@ -399,6 +427,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: Build, verify and inspect
         run: |

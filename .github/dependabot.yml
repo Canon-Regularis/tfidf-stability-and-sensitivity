@@ -1,0 +1,43 @@
+# Automated update proposals, for the two ecosystems where a silent drift would
+# change what CI proves.
+#
+# GitHub Actions first. Most `uses:` here name a mutable tag, and a tag can be
+# moved: `@v4` today and `@v4` next month need not be the same code, which makes
+# a CI run something other than a function of this repository's contents -- the
+# one claim this project makes about everything else it does. The fix is to pin
+# each `uses:` to a full commit SHA, and the reason that has not happened is that
+# hand-maintaining forty pinned SHAs is not work anyone sustains. Dependabot
+# understands the `<sha>  # v4` form and rewrites both halves, which is what makes
+# pinning affordable rather than aspirational.
+#
+# `gha-setup-ninja` is already pinned by hand with its rationale beside it at
+# ci.yml; this generalises that decision to the rest.
+#
+# Python is deliberately *not* watched by version. requirements-dev.txt states
+# floors for libraries and exact pins for ruff and mypy, and the comment there
+# explains why: a linter floor is a promise that every future release agrees with
+# this one, and they do not. A bot proposing `ruff==0.17` weekly would either be
+# merged unread or ignored until ignoring it became a habit. Security advisories
+# are a different question and reach this repository through Dependabot alerts,
+# which need no configuration here.
+
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # One pull request carrying every action bump, rather than eight. The
+    # updates are near-always mechanical and reviewing them together is how they
+    # actually get read.
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+    open-pull-requests-limit: 3

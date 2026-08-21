@@ -21,9 +21,19 @@ on:
 permissions:
   contents: read
 
+# One run per ref at a time. Without this every push to a branch leaves its
+# predecessor running to completion against code nobody will merge, which on a
+# matrix this wide is the difference between a queue that drains and one that
+# does not. Scheduled runs are keyed by workflow rather than ref so a nightly
+# cannot cancel a push.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   sdist:
     name: source distribution
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +42,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - run: python -m pip install --upgrade pip build
       - run: python -m build --sdist
       - name: The sdist must build from vendored C++ sources alone
@@ -55,6 +69,7 @@ jobs:
 
   wheels:
     name: wheels ${{ matrix.os }}
+    timeout-minutes: 60
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -65,6 +80,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.21
         env:
@@ -101,12 +120,17 @@ jobs:
 
   determinism-gate:
     name: the release must be reproducible
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: A release build must not be fast-math or arch-tuned
         # The manifest refuses to stamp such a run as reproducible, so shipping
@@ -125,6 +149,7 @@ jobs:
   publish:
     name: attach to the release
     needs: [sdist, wheels, determinism-gate]
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
