@@ -994,3 +994,42 @@ def test_a_query_uses_the_fitted_models_own_idf_and_never_extends_it() -> None:
     assert tuple(model.idf) == before, "the model is unchanged"
     assert query.dim == len(model.vocabulary), "and the query lives in its space"
     assert all(i < len(model.vocabulary) for i in query.indices)
+
+
+# ---------------------------------------------------------------------------
+# is_canonical: term id zero is a term id
+# ---------------------------------------------------------------------------
+def test_a_vector_holding_the_first_term_is_canonical() -> None:
+    """`0 <= i < dim`. Term ids are assigned from zero by UTF-8 byte order, so
+    index 0 is the alphabetically first term in the vocabulary and appears in
+    ordinary documents -- it is not a sentinel or an off-by-one.
+
+    A bound that excluded it would declare a well-formed vector non-canonical,
+    and since `is_canonical` is the opt-in integrity check rather than a
+    constructor guard, the rejection would surface far from its cause.
+    """
+    holds_first = SparseVector(indices=(0, 2), values=(1.5, 2.5), dim=4)
+
+    assert holds_first.is_canonical()
+    assert holds_first.indices[0] == 0, "the premise: the first term really is index 0"
+
+
+def test_a_vector_of_only_the_first_term_is_canonical() -> None:
+    """The degenerate form of the same case: a single-term document whose one
+    term is the alphabetically first. Nothing else in the vector can carry the
+    check."""
+    assert SparseVector(indices=(0,), values=(1.0,), dim=3).is_canonical()
+
+
+def test_an_index_at_or_past_the_dimension_is_not_canonical() -> None:
+    """The other end of the same bound, which is exclusive: `dim` is one past
+    the last valid term id, so a vector naming it describes a term the
+    vocabulary does not have."""
+    assert not SparseVector(indices=(0, 4), values=(1.0, 2.0), dim=4).is_canonical()
+    assert SparseVector(indices=(0, 3), values=(1.0, 2.0), dim=4).is_canonical()
+
+
+def test_a_negative_index_is_not_canonical() -> None:
+    """The lower bound is a bound, not a formality: a negative index reads from
+    the far end of the dense expansion instead of failing."""
+    assert not SparseVector(indices=(-1, 2), values=(1.0, 2.0), dim=4).is_canonical()
