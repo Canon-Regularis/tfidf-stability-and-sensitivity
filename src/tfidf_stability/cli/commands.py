@@ -45,7 +45,23 @@ _LOG = get_logger(__name__)
 _E = TypeVar("_E", bound=Enum)
 
 _REPO = Path(__file__).resolve().parents[3]
-_DEFAULT_CONFIG = _REPO / "configs" / "default.yaml"
+
+
+def _resolve_default_config(module: Path) -> Path:
+    """The normative configuration, installed or in-tree.
+
+    Same two layouts as the stopword asset, and the same reason: resolving only
+    through ``parents[3]`` finds the repository from a checkout and the
+    directory above ``site-packages`` from a wheel, so ``tfidf-stability
+    build-corpus`` could not find its own default config once installed.
+    """
+    packaged = module.resolve().parents[1] / "configs" / "default.yaml"
+    if packaged.is_file():
+        return packaged
+    return module.resolve().parents[3] / "configs" / "default.yaml"
+
+
+_DEFAULT_CONFIG = _resolve_default_config(Path(__file__))
 
 
 def load_config(path: Path | str | None = None) -> dict[str, Any]:

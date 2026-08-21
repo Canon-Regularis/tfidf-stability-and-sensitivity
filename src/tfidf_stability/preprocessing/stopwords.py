@@ -23,8 +23,36 @@ from tfidf_stability.utils.validation import DataIntegrityError
 
 __all__ = ["StopwordSet", "load_stopwords", "remove_stopwords"]
 
-#: Repository-relative location of the frozen assets.
-_ASSET_DIR: Final = Path(__file__).resolve().parents[3] / "data" / "assets"
+
+def _resolve_asset_dir(module: Path) -> Path:
+    """Where the frozen stopword list lives, installed or in-tree.
+
+    Takes the module's own path rather than reading ``__file__`` directly, so
+    both layouts can be exercised: in a source checkout only one of them exists,
+    and the branch that matters for a wheel is the one that cannot be reached
+    from here.
+
+    Two layouts, checked in that order. In a wheel the assets sit inside the
+    package, at ``tfidf_stability/data/assets``. In a source checkout they sit at
+    the repository root, ``data/assets``, beside ``data/README.md`` which
+    explains the licence position -- and they stay there, because the manifest,
+    ``scripts/check_vendored.py`` and the docs all address them by that path.
+
+    The repository-root form used to be the only one. It resolves through
+    ``parents[3]``, which is the repository from ``src/tfidf_stability/
+    preprocessing/``, and the directory *above* ``site-packages`` from an
+    installed distribution -- so an installed package could not load its own
+    stopword list. Nothing caught it because ``tests/conftest.py`` put ``src/``
+    on ``sys.path`` unconditionally, which meant even the wheel's own test
+    command imported the source tree.
+    """
+    packaged = module.resolve().parents[1] / "data" / "assets"
+    if packaged.is_dir():
+        return packaged
+    return module.resolve().parents[3] / "data" / "assets"
+
+
+_ASSET_DIR: Final = _resolve_asset_dir(Path(__file__))
 
 #: The recorded digests, in the format ``scripts/check_vendored.py`` parses, so
 #: the asset is covered both at load and by the repository-wide gate.

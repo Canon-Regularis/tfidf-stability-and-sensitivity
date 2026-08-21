@@ -8,6 +8,7 @@ inequalities).
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 from collections.abc import Sequence
@@ -15,18 +16,31 @@ from pathlib import Path
 
 import pytest
 
-# src/ on sys.path: the suite runs with no install, and before the native
-# backend has ever been built.
-_SRC = Path(__file__).resolve().parents[1] / "src"
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+# src/ on sys.path, but only when the package cannot be imported without it: the
+# suite runs with no install, and before the native backend has ever been built.
+#
+# The guard matters more than the insertion. Unconditionally prepending `src/`
+# means the suite always tests the source tree, even when it was pointed at an
+# installed distribution on purpose. `release.yml`'s CIBW_TEST_COMMAND runs
+# `pytest {project}/tests` against a freshly built wheel for exactly that
+# purpose, and got the source tree instead -- so nothing in the wheel was ever
+# under test, and a wheel missing its data files would pass.
+#
+# Checked by import rather than by looking for a marker file, because that is
+# the question being asked: can this interpreter import the package as it
+# stands? An editable install resolves back to `src/` anyway, so a developer
+# checkout behaves exactly as before.
+if importlib.util.find_spec("tfidf_stability") is None:  # pragma: no cover
+    _SRC = Path(__file__).resolve().parents[1] / "src"
+    if str(_SRC) not in sys.path:
+        sys.path.insert(0, str(_SRC))
 
-from tfidf_stability.preprocessing.pipeline import (  # noqa: E402
+from tfidf_stability.preprocessing.pipeline import (
     PreprocessingConfig,
     PreprocessingPipeline,
 )
-from tfidf_stability.ranking.attributes import AttributeTable  # noqa: E402
-from tfidf_stability.vectorisation.tfidf import TfidfModel, TfidfVectoriser  # noqa: E402
+from tfidf_stability.ranking.attributes import AttributeTable
+from tfidf_stability.vectorisation.tfidf import TfidfModel, TfidfVectoriser
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
