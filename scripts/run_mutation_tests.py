@@ -50,6 +50,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -289,6 +291,35 @@ def _campaign(
     return killed, skipped, survivors
 
 
+#: Claims that a surviving mutant is behaviourally indistinguishable, with the
+#: reason. The file's own header carries the format and says why an entry that
+#: matches nothing is a failure rather than a shrug.
+_EQUIVALENTS = REPO / "configs" / "equivalent_mutants.txt"
+
+_Key = tuple[int, str, str, str]
+
+
+def _load_equivalents(module: Path) -> dict[_Key, str]:
+    """Documented equivalent mutants for one module, keyed by what was mutated.
+
+    A line without a reason is ignored rather than honoured: an entry that does
+    not say why the mutation cannot be observed is a suppression, and this file
+    exists to hold arguments, not to silence output.
+    """
+    if not _EQUIVALENTS.exists():
+        return {}
+
+    wanted = module.as_posix()
+    claims: dict[_Key, str] = {}
+    for raw in _EQUIVALENTS.read_text(encoding="utf-8").splitlines():
+        statement, _, reason = raw.partition("#")
+        fields = statement.split()
+        if len(fields) < 6 or fields[0] != wanted or fields[4] != "->" or not reason.strip():
+            continue
+        claims[(int(fields[1]), fields[2], fields[3], fields[5])] = reason.strip()
+    return claims
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="module to mutate, relative to the repository")
@@ -337,8 +368,48 @@ def main() -> int:
         print("\nEach survivor is behaviour no test asserts:", file=sys.stderr)
         for mutant in survivors:
             print(f"  {relative}:{mutant.line}: {mutant.describe()}", file=sys.stderr)
-        return 1
-    return 0
+
+    return _verdict(relative, survivors)
+
+
+def _verdict(relative: Path, survivors: Sequence[Mutant]) -> int:
+    """Exit code, once documented equivalents are accounted for.
+
+    Two ways to fail, both deliberate. A survivor nobody has explained is the
+    gap this tool exists to find. An explanation that matches no survivor is
+    just as bad in the other direction: the mutant is killed now, or the line
+    moved, and an argument nobody re-reads is how an equivalents file turns into
+    a blanket suppression.
+    """
+    claims = _load_equivalents(relative)
+    if not claims:
+        return 1 if survivors else 0
+
+    # Counted, not just collected: two mutable sites on one line can produce the
+    # same key -- `@dataclass(frozen=True, slots=True)` gives two identical
+    # `constant True -> False` mutants -- and reporting "1 documented" against
+    # two survivors would read as though one were still unaccounted for.
+    counts = Counter((m.line, m.kind, m.before, m.after) for m in survivors)
+    unexplained = [key for key in counts if key not in claims]
+    stale = [key for key in claims if key not in counts]
+    covered = sum(n for key, n in counts.items() if key in claims)
+
+    print(f"\n{covered} of {len(survivors)} survivor(s) documented as equivalent")
+
+    if unexplained:
+        print(f"\nUndocumented survivors in {relative}:", file=sys.stderr)
+        for line, kind, before, after in sorted(unexplained):
+            print(f"  {relative}:{line}: {kind} {before} -> {after}", file=sys.stderr)
+
+    if stale:
+        print(f"\nStale entries in {_EQUIVALENTS.name}:", file=sys.stderr)
+        for line, kind, before, after in sorted(stale):
+            print(
+                f"  {relative}:{line}: {kind} {before} -> {after} no longer survives",
+                file=sys.stderr,
+            )
+
+    return 1 if unexplained or stale else 0
 
 
 if __name__ == "__main__":
