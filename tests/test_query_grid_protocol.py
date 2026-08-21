@@ -223,6 +223,12 @@ def test_an_out_of_vocabulary_query_is_counted_as_zero_vector_not_degenerate() -
     grid = evaluate(query_set, model(), records(), DOC_IDS)
     assert grid.n_degenerate == 0, "the query has features, so it is not degenerate"
 
+    # The count this test is named for. Asserting only `n_degenerate` left the
+    # tally itself unchecked, so a `n_zero_vector` that never counted anything
+    # would have passed here under a name promising it did.
+    assert grid.n_zero_vector == 1, "the out-of-vocabulary fold is the zero-vector one"
+    assert [q.is_zero_vector for q in grid.queries] == [True, False]
+
 
 def test_a_cap_equal_to_the_query_count_leaves_the_set_untouched() -> None:
     uncapped = built()
@@ -410,3 +416,21 @@ def test_a_threshold_no_user_reaches_produces_an_empty_grid() -> None:
     interactions, features, doc_ids = _grid_inputs()
     grid = build_query_grid(interactions, features, doc_ids, min_interactions=99)
     assert len(grid) == 0
+
+
+def test_the_profile_items_are_excluded_unless_the_caller_says_otherwise() -> None:
+    """`exclude_profile_items: bool = True`. G10 decision 3 is the default, not
+    an opt-in: a fold that could retrieve the items its own query was built from
+    would score its own input and report the retrieval as a success.
+
+    Both arms are covered above, but each passes the flag explicitly, so the
+    default itself -- what every caller that does not think about it gets -- was
+    never exercised.
+    """
+    default = evaluate(built(), model(), records(), DOC_IDS)
+    asked_for = evaluate(built(exclude_profile_items=True), model(), records(), DOC_IDS)
+
+    assert default.exclude_profile_items is True
+    assert default.provenance()["exclude_profile_items"] is True
+    assert [q.n_excluded for q in default.queries] == [q.n_excluded for q in asked_for.queries]
+    assert all(q.n_excluded > 0 for q in default.queries)
