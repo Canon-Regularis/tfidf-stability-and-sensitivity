@@ -525,9 +525,17 @@ def _index_comparison(fixture: _Fixture, native: _NativeFixture | None, repeats:
         return module.NativeIndex(csr[0], csr[1], csr[2], n_docs, n_features, policy)
 
     def verify() -> str:
+        # Checks what `native_call` builds, not the index `_build_native_fixture`
+        # prepared earlier. The two take the same arguments, so they agree -- but
+        # only the timed expression has to be right for the ratio to mean
+        # anything, and an argument wrong here alone would have been timed and
+        # reported as a speedup without ever being compared against the
+        # reference. Every other row verifies the object it times; this one did
+        # not, and the difference is invisible until the two disagree.
+        built = native_call()
         return check_same_bits(
             model.matrix.row_norms(Reduction.NAIVE),
-            [float(x) for x in native.index.norms],
+            [float(x) for x in built.norms],  # type: ignore[attr-defined]
             "row norms",
         )
 

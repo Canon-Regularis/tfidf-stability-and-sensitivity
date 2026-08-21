@@ -673,3 +673,24 @@ def test_a_workload_asking_for_no_queries_is_not_validated_and_fails_late() -> N
 
     with pytest.raises(IndexError, match="list index out of range"):
         _build_fixture(empty)
+
+
+@pytest.mark.skipif(not native_available(), reason=unavailable_reason() or "no native backend")
+def test_the_index_row_verifies_the_construction_it_times() -> None:
+    """The index row used to check an index built earlier by the fixture, while
+    timing a fresh one built inside `native_call`. Both take the same arguments,
+    so they agreed -- but only the timed expression has to be right for the
+    ratio to mean anything, and a wrong argument confined to it would have been
+    timed and published as a speedup without ever meeting the reference.
+
+    Every other native row verifies the object it times. This asserts the check
+    covers a full corpus of norms rather than a stale or partial set, which is
+    what distinguishes verifying the construction from verifying something
+    beside it.
+    """
+    report = run_benchmarks(TINY, repeats=1)
+    index = next(c for c in report.comparisons if c.name.startswith("build index"))
+
+    assert index.native is not None, "the native backend is available in this run"
+    assert index.verified == f"{TINY.n_docs} values bit-identical"
+    assert "not like-for-like" in index.note, "and the row still declares its scope mismatch"
