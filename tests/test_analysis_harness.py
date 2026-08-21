@@ -23,6 +23,7 @@ from tfidf_stability.analysis.noise_floor import (
     verify_band_invariance,
 )
 from tfidf_stability.analysis.stability_profile import (
+    DEFAULT_RATIOS,
     CertificateAudit,
     TransitionPoint,
     certificate_audit,
@@ -1010,9 +1011,19 @@ def test_the_counted_categories_partition_every_query(a1_setup) -> None:
     trials = 4
     audit = certificate_audit(vectors, table, k=2, seed=7, trials=trials)
 
-    counted = audit.n_certified + audit.uncertified_unchanged + audit.uncertified_changed
-    trialled = counted // trials
-    assert audit.n_undefined + audit.n_exact_tie + trialled == len(vectors)
+    trialled = len(vectors) - audit.n_undefined - audit.n_exact_tie
+    counted = (
+        audit.certified_unchanged
+        + audit.certified_changed
+        + audit.uncertified_unchanged
+        + audit.uncertified_changed
+    )
+
+    # Exact, not `counted // trials`: integer division rounds a miscount away.
+    # With four cells and one of them reading the wrong key, the total can be
+    # wrong by less than `trials` and still floor to the right answer.
+    assert counted == trialled * trials
+    assert trialled > 0, "every query was excluded, so the table below is empty"
 
 
 def test_the_audit_is_reproducible_from_its_seed(a1_setup) -> None:
@@ -1209,3 +1220,187 @@ def test_the_two_shortcut_guards_agree_with_the_general_case_at_their_boundaries
     assert math.ceil(100.0 / 100.0 * n) == n
     assert percentile(sample, 0.0) == sample[max(1, 0) - 1]
     assert percentile(sample, 100.0) == sample[n - 1]
+
+
+# ---------------------------------------------------------------------------
+# The transition curve has to transition
+# ---------------------------------------------------------------------------
+def test_perturbations_well_outside_the_radius_do_flip_the_top_k(a1_setup) -> None:
+    """The complement of the certificate. Section 4.4 guarantees no flip inside
+    the radius, and the suite asserts that; nothing asserted that flips happen
+    outside it, so a counter that never counted would satisfy every existing
+    check -- including the monotonicity one, since `0 >= 0` holds.
+
+    Without this the curve could be flat at zero everywhere and still be
+    published as evidence that the radius is the boundary, when it would in fact
+    be evidence of nothing.
+    """
+    vectors, table = a1_setup
+    points, n_used, _ = transition_curve(vectors, table, 2, seed=1, trials=25)
+
+    assert n_used > 0, "the curve is over an empty query set"
+    by_ratio = {p.ratio: p for p in points}
+
+    assert by_ratio[20.0].n_flips > 0, "a twentyfold perturbation must move the top-k"
+    assert by_ratio[5.0].n_flips > 0
+    assert by_ratio[20.0].flip_rate > by_ratio[1.1].flip_rate, "and the curve rises"
+
+
+def test_the_curve_is_flat_at_zero_across_the_whole_certified_region(a1_setup) -> None:
+    """Every certified ratio, not merely the smallest. The certificate is an
+    interval, so one probe below the radius would leave the rest of it
+    untested."""
+    vectors, table = a1_setup
+    points, _, _ = transition_curve(vectors, table, 2, seed=1, trials=25)
+    inside = [p for p in points if p.within_certificate]
+
+    assert len(inside) >= 4, "the grid samples the certified region more than once"
+    assert all(p.n_flips == 0 for p in inside)
+    assert all(p.n_trials > 0 for p in inside), "and each of them actually ran"
+
+
+def test_the_default_ratio_grid_straddles_the_certified_radius() -> None:
+    """The grid is the x-axis of section 7.3's transition plot. It has to sample
+    both sides of 1.0 and the point itself, or the plot cannot show where the
+    transition happens -- only that it happened somewhere.
+
+    The two points either side at 0.99 and 1.01 are what make the boundary
+    visible rather than inferred from a gap between 0.9 and 1.1.
+    """
+    assert 1.0 in DEFAULT_RATIOS, "the certified radius itself is sampled"
+    assert min(DEFAULT_RATIOS) < 1.0 < max(DEFAULT_RATIOS)
+    assert 0.99 in DEFAULT_RATIOS, "just inside, where the certificate still holds"
+    assert 1.01 in DEFAULT_RATIOS, "and just outside, where it no longer does"
+    assert list(DEFAULT_RATIOS) == sorted(DEFAULT_RATIOS), "an unsorted grid plots as a zigzag"
+    assert len([r for r in DEFAULT_RATIOS if r < 1.0]) >= 3, "the certified side is sampled too"
+
+
+def test_an_audit_that_ran_no_trials_reports_every_cell_as_zero(a1_setup) -> None:
+    """The 2x2 table starts empty and is only ever incremented. When every query
+    is excluded -- here because `k` is past the end of all of them -- all four
+    cells must read zero rather than carrying a seeded count.
+
+    A non-zero start would put trials into the published conservatism that never
+    ran, and would do it invisibly: the table would simply look like a small
+    audit rather than an empty one.
+    """
+    vectors, table = a1_setup
+    audit = certificate_audit(vectors, table, k=999, seed=1, trials=5)
+
+    assert audit.n_undefined == len(vectors), "nothing was trialled"
+    assert audit.certified_unchanged == 0
+    assert audit.certified_changed == 0
+    assert audit.uncertified_unchanged == 0
+    assert audit.uncertified_changed == 0
+    assert sum(audit.as_dict()[k] for k in ("certified_unchanged", "certified_changed")) == 0
+
+
+def test_an_audit_that_met_no_exact_ties_records_none() -> None:
+    """`n_exact_tie: int = 0` is the field's default, and A2's regime is the
+    exception rather than the rule -- most corpora hit it rarely. A default of
+    anything else would report exclusions that never happened on every audit
+    that did not bother to pass the field.
+    """
+    audit = CertificateAudit(
+        certified_unchanged=3,
+        certified_changed=0,
+        uncertified_unchanged=1,
+        uncertified_changed=2,
+        n_undefined=0,
+    )
+
+    assert audit.n_exact_tie == 0
+    assert audit.as_dict()["n_exact_tie"] == 0
+    assert audit.is_sound, "no certified change, so section 4.4 holds here"
+
+
+# ---------------------------------------------------------------------------
+# measure_noise_floor: what an instrument reports when it found nothing
+# ---------------------------------------------------------------------------
+def _diverging_corpus() -> tuple[object, list[object]]:
+    """A corpus long enough that the norm summation actually diverges.
+
+    Local by house convention, and the same construction the divergence test
+    above uses: short documents keep every policy in exact agreement, which
+    would make the measurements below vacuous.
+    """
+    rng = random.Random(11)
+    vocab = [f"t{i}" for i in range(150)]
+    documents = [[rng.choice(vocab) for _ in range(80)] for _ in range(50)]
+    model = TfidfVectoriser().fit(documents, [f"d{i}" for i in range(50)])
+    queries = [
+        TfidfVectoriser.transform_query([rng.choice(vocab) for _ in range(40)], model)
+        for _ in range(5)
+    ]
+    return model, queries
+
+
+def test_a_policy_that_never_strayed_reports_no_error_rather_than_an_inherited_one() -> None:
+    """The accumulators start at zero and only ever rise, so a policy that
+    agreed with exact arithmetic everywhere must report exactly zero.
+
+    Neumaier is that policy here, and it is the one the project recommends: a
+    non-zero starting value would give the recommended policy a fabricated error
+    bar, and it would look like a real measurement rather than an artefact.
+    """
+    model, queries = _diverging_corpus()
+    by_policy = {p.policy: p for p in measure_noise_floor(model, queries).per_policy}
+    clean = by_policy["neumaier"]
+
+    assert clean.n_differing == 0, "the premise: this policy strayed nowhere"
+    assert clean.max_abs == 0.0
+    assert clean.max_ulps == 0.0
+
+
+def test_every_instrument_compares_every_score_it_was_given() -> None:
+    """`n_compared` is the denominator of every rate the noise floor publishes,
+    so a counter that skipped would inflate each of them. Each policy sees one
+    comparison per (query, document) pair."""
+    model, queries = _diverging_corpus()
+    floor = measure_noise_floor(model, queries)
+    expected = len(queries) * model.n_documents
+
+    assert expected == 250
+    for policy in floor.per_policy:
+        assert policy.n_compared == expected, policy.policy
+        assert policy.n_differing <= policy.n_compared
+
+
+def test_the_recorded_error_is_a_difference_and_not_a_sum() -> None:
+    """`abs(a - b)`. Cosine scores live in [0, 1], so summing the two instead of
+    differencing them yields a number near 1 rather than near zero -- and it
+    would still be positive, still rise with corpus size, and still look
+    entirely like a noise floor.
+
+    What separates them is scale: a genuine floor is many orders of magnitude
+    below the scores it was measured on.
+    """
+    model, queries = _diverging_corpus()
+    floor = measure_noise_floor(model, queries)
+    naive = {p.policy: p for p in floor.per_policy}["naive"]
+
+    assert naive.n_differing > 0, "the premise: something strayed"
+    assert 0.0 < naive.max_abs < 1e-12, "a floor, not a score"
+    assert floor.eta == naive.max_abs
+
+
+def test_each_cell_of_the_audit_reads_its_own_category(a1_setup) -> None:
+    """The 2x2 table is indexed by `(certified, unchanged)`, and the four keys
+    are easy to transpose. A cell reading a neighbour's key still produces a
+    plausible table -- four non-negative counts -- and the totals can still look
+    right, so what pins each one down is the ratio it feeds.
+
+    `conservatism` is the share of *uncertified* cases that were nonetheless
+    unchanged, which is the published measure of how pessimistic section 4.4's
+    bound is. It reads `uncertified_unchanged` alone, so it separates that cell
+    from the other three.
+    """
+    vectors, table = a1_setup
+    audit = certificate_audit(vectors, table, k=2, seed=7, trials=4)
+
+    assert (audit.certified_unchanged, audit.certified_changed) == (6, 0)
+    assert (audit.uncertified_unchanged, audit.uncertified_changed) == (4, 6)
+
+    assert audit.n_certified == 6, "the certified row is its two cells"
+    assert audit.conservatism == 4 / 10, "and conservatism is the uncertified row's share"
+    assert audit.is_sound, "no certified perturbation changed the top-k"
