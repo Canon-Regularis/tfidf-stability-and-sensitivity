@@ -23,18 +23,25 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      # One job per module, each scoped to that module's own test file. Mutation
-      # cost is (sites x suite time), so pointing every module at the whole suite
-      # would turn a twenty-minute run into days. Splitting also means a survivor
-      # names the module it came from without any further digging.
+      # One job per module, each scoped to that module's own test file plus the
+      # package surface suite. Mutation cost is (sites x suite time), so pointing
+      # every module at the whole suite would turn a twenty-minute run into days.
+      # Splitting also means a survivor names the module it came from without any
+      # further digging.
+      #
+      # test_public_api_surface.py is in every entry because it pins invariants
+      # every module participates in -- frozen, slots, `__all__` -- and without it
+      # a mutated `@dataclass(frozen=True)` survives in each of them at once.
+      # Measured: scoping sort_keys.py to its own suite alone left two decorator
+      # mutants surviving that the surface suite kills outright.
       matrix:
         include:
           - module: src/tfidf_stability/ranking/tie_groups.py
-            tests: tests/test_tie_groups_tau.py
+            tests: tests/test_tie_groups_tau.py tests/test_public_api_surface.py
           - module: src/tfidf_stability/ranking/margins.py
-            tests: tests/test_margins_and_flip_radii.py
+            tests: tests/test_margins_and_flip_radii.py tests/test_public_api_surface.py
           - module: src/tfidf_stability/ranking/sort_keys.py
-            tests: tests/test_ranking_tie_breaks.py
+            tests: tests/test_ranking_tie_breaks.py tests/test_public_api_surface.py
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,7 +53,7 @@ jobs:
         # for the right reason. Nightly rather than per-PR because the cost is
         # the suite time multiplied by the number of mutable sites.
         run: |
-          python scripts/run_mutation_tests.py "${{ matrix.module }}"             --tests "${{ matrix.tests }}" --timeout 180
+          python scripts/run_mutation_tests.py "${{ matrix.module }}"             --tests ${{ matrix.tests }} --timeout 180
 
   deep-property-search:
     name: hypothesis at 100k examples
