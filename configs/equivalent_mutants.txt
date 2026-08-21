@@ -60,7 +60,7 @@ src/tfidf_stability/ranking/attributes.py  452  constant  0 -> 1  # the missing-
 src/tfidf_stability/ranking/ranker.py  181  compare  Lt -> LtE  # sort keys terminate in the unique doc id, so no two compare equal and the tie branch is unreachable
 
 # --- ranking/tie_groups.py -------------------------------------------------
-src/tfidf_stability/ranking/tie_groups.py  219  boolop  Or -> And  # chains and cliques are always both empty or both non-empty; verified across four score shapes
+src/tfidf_stability/ranking/tie_groups.py  219  boolop  Or -> And  # chains and cliques are always both empty or both non-empty, both being covers of the same input; asserted by test_chains_and_cliques_are_empty_together and checked over 31248 (scores, tau) combinations
 src/tfidf_stability/ranking/tie_groups.py  310  boolop  Or -> And  # the same pair on the cached property
 
 # --- ranking/margins.py ----------------------------------------------------
