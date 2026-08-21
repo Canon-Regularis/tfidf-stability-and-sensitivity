@@ -13,6 +13,7 @@ disagree maximally, which is what the ``rho`` diagnostic exists to flag.
 
 from __future__ import annotations
 
+import itertools
 import math
 import sys
 import warnings
@@ -791,19 +792,37 @@ def test_chains_and_cliques_are_empty_together(scores: list[float], tau: float) 
     assert bool(chains) == bool(scores), "and both are empty exactly when the input is"
 
 
-@pytest.mark.property
-@given(
-    scores=st.lists(st.floats(min_value=-10, max_value=10, allow_nan=False), max_size=8),
-    tau=st.floats(min_value=0.0, max_value=5.0, allow_nan=False),
-)
-def test_every_score_lands_in_a_chain_and_in_a_clique(scores: list[float], tau: float) -> None:
+def test_every_score_lands_in_a_chain_and_in_a_clique() -> None:
     """The reason they are empty together: both are covers of the same input, so
-    neither can be empty while the other is not."""
-    ordered = sorted(scores, reverse=True)
-    chains = tie_chains(ordered, tau)
-    cliques = tie_cliques(ordered, tau)
+    neither can be empty while the other is not.
 
-    # Half-open intervals: `[lo, hi)`, so a chain's size is `hi - lo`. Chains
-    # partition, so the sizes sum to the input length exactly.
-    assert sum(hi - lo for lo, hi in chains) == len(ordered)
-    assert bool(chains) == bool(cliques)
+    Enumerated rather than generated. The interesting inputs here are the gap
+    patterns -- all tied, all separated, and every mixture -- and there are few
+    enough to write down, so a sweep states them by name and runs in
+    milliseconds. An earlier `@given` version of this covered the same ground
+    non-deterministically and hung a CI job for 47 minutes on one interpreter
+    while passing on three others; nothing about the property needed random
+    input to express.
+    """
+    gaps = (0.0, 0.5, 1.0, 2.0)
+    taus = (0.0, 1e-320, 0.5, 1.0, math.inf)
+    checked = 0
+
+    for width in range(5):
+        for pattern in itertools.product(gaps, repeat=max(0, width - 1)):
+            ordered = [0.0]
+            for gap in reversed(pattern):
+                ordered.append(ordered[-1] - gap)
+            scores = ordered[:width]
+            for tau in taus:
+                chains = tie_chains(scores, tau)
+                cliques = tie_cliques(scores, tau)
+                checked += 1
+
+                # Half-open intervals: `[lo, hi)`, so a chain's size is
+                # `hi - lo`. Chains partition, so the sizes sum to the input
+                # length exactly.
+                assert sum(hi - lo for lo, hi in chains) == len(scores)
+                assert bool(chains) == bool(cliques)
+
+    assert checked == 430, "the sweep shrank without anyone noticing"
