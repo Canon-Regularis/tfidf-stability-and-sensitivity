@@ -14,7 +14,7 @@ from itertools import pairwise
 
 import pytest
 
-from tfidf_stability.utils.numerics import correctly_rounded_log_ratio, same_bits
+from tfidf_stability.utils.numerics import correctly_rounded_log_ratio, same_bits, ulps_between
 from tfidf_stability.utils.validation import EmptyVocabularyError, TfidfStabilityError
 from tfidf_stability.vectorisation.idf import (
     LogImpl,
@@ -701,3 +701,81 @@ def test_the_smoothing_constant_cancels_in_the_difference() -> None:
     why its result can be negative where an idf cannot."""
     by_hand = smoothed_idf_one(2, 10) - smoothed_idf_one(5, 10)
     assert delta_idf(5, 2, 10, 10) == pytest.approx(by_hand, rel=1e-15)
+
+
+def test_the_default_keeps_a_term_seen_in_a_single_document() -> None:
+    """`min_df: int | float = 1`. One is the identity threshold -- every term
+    appears in at least one document -- so the default filters nothing.
+
+    A hapax is not noise here: a term in exactly one document has the highest
+    idf in the corpus, and idf is what separates near-ties. Raising the default
+    would silently discard the terms carrying the most weight, and the discard
+    would be invisible because the vocabulary would still build.
+    """
+    docs = [["shared", "once_only"], ["shared", "elsewhere"]]
+
+    vocab = build_vocabulary(docs)
+    assert set(vocab.tokens) == {"shared", "once_only", "elsewhere"}
+    assert vocab.df[vocab.tokens.index("once_only")] == 1
+    assert vocab.n_discarded == 0, "the default threshold discards nothing"
+
+
+def test_the_default_and_an_explicit_threshold_of_one_agree() -> None:
+    """The default is a value, not a separate code path: naming it must produce
+    the same vocabulary, digest included."""
+    docs = [["shared", "once_only"], ["shared", "elsewhere"]]
+
+    assert (
+        build_vocabulary(docs).digest()
+        == build_vocabulary(docs, VocabularyConfig(min_df=1)).digest()
+    )
+
+
+def test_a_threshold_of_two_does_discard_the_hapax() -> None:
+    """The premise of the default mattering: at min_df = 2 the same corpus loses
+    exactly the terms the default kept, so the default is doing work rather than
+    describing a corpus with nothing to filter."""
+    docs = [["shared", "once_only"], ["shared", "elsewhere"]]
+
+    filtered = build_vocabulary(docs, VocabularyConfig(min_df=2))
+    assert set(filtered.tokens) == {"shared"}
+    assert filtered.n_discarded == 2
+
+
+@pytest.mark.parametrize(("df", "n"), [(1, 10), (5, 100), (1, 1), (9741, 9742), (0, 4)])
+def test_the_platform_branch_computes_section_two_ones_formula(df: int, n: int) -> None:
+    """`log((1 + N) / (1 + df)) + 1`, evaluated through the platform libm.
+
+    The G13 test above asserts only that the two implementations *differ*, which
+    a branch computing an entirely different expression would satisfy even more
+    convincingly. What pins the formula is an independent evaluation: both
+    smoothing terms, the ratio taken before the logarithm, and the additive one.
+    """
+    assert smoothed_idf_one(df, n, LogImpl.PLATFORM) == math.log((1 + n) / (1 + df)) + 1.0
+
+
+@pytest.mark.parametrize(("df", "n"), [(1, 10), (5, 100), (9741, 9742), (3, 9742)])
+def test_the_two_log_implementations_disagree_only_in_the_last_bits(df: int, n: int) -> None:
+    """G13 is a statement about rounding, not about arithmetic. The platform
+    logarithm is not correctly rounded, so it may land an ulp or two away -- but
+    a gap wider than that would mean the two branches were computing different
+    quantities, and the exact-log default would be correcting a bug rather than
+    a rounding.
+    """
+    exact = smoothed_idf_one(df, n, LogImpl.CORRECTLY_ROUNDED)
+    platform = smoothed_idf_one(df, n, LogImpl.PLATFORM)
+
+    assert abs(ulps_between(exact, platform)) <= 2.0, f"{exact!r} vs {platform!r}"
+
+
+def test_a_term_in_every_document_still_carries_the_additive_one() -> None:
+    """`df == N` makes the ratio `(1+N)/(1+N) = 1` and its logarithm zero, so the
+    idf is exactly 1.0 -- the smoothing's whole purpose.
+
+    Without the `+ 1` such a term would weigh nothing and drop out of every
+    score; without the two `+ 1` smoothings the ratio would be `N/N` and the
+    same, but `df = N = 0` would divide by zero instead of being defined.
+    """
+    for impl in (LogImpl.CORRECTLY_ROUNDED, LogImpl.PLATFORM):
+        assert smoothed_idf_one(9742, 9742, impl) == 1.0, impl
+        assert smoothed_idf_one(0, 0, impl) == 1.0, "the empty-corpus edge is defined, not a div0"
