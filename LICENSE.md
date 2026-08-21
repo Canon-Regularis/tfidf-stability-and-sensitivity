@@ -22,10 +22,6 @@ Full texts are in [`LICENSES/`](LICENSES/). Individual files carry an
 
 ## Software: Apache License 2.0
 
-Chosen over MIT for its **express patent grant** (§3) and its explicit
-contribution terms, both of which matter for a research artefact that others may
-build on or cite.
-
 You may use, modify and redistribute the code, including commercially, provided
 you retain the copyright and licence notices, state significant changes, and
 include a copy of the licence. See [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt).
