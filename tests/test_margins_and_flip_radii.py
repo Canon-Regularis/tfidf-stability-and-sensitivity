@@ -1091,3 +1091,37 @@ def test_the_delta_floor_is_measured_at_one_rather_than_at_the_score() -> None:
     excess = eps - tiny_margin / 2.0
     assert excess >= 4.0 * math.ulp(1.0), "the floor is taken at one"
     assert excess > 4.0 * math.ulp(0.5), "and not at the score, which is half as coarse"
+
+
+def test_a_perturbation_landing_exactly_on_a_tie_is_not_a_witness() -> None:
+    """`if not perturbed[b] > perturbed[a]: return None`. Strictly greater, and
+    the boundary is reachable exactly: with `delta = 0` the shift is `margin / 2`
+    on each side, which for a dyadic margin only moves an exponent, so the two
+    scores meet precisely rather than nearly.
+
+    A tie is not a reversal. Accepting one would hand back a "witness" that
+    demonstrates the ranks became indistinguishable, not that they swapped --
+    and every flip radius derived from it would be a half-step short.
+    """
+    scores = [1.0, 0.5, 0.25, 0.0]
+    order = [0, 1, 2, 3]
+
+    assert flip_witness(scores, order, 1, delta=0.0) is None
+
+    exactly_tied = 1.0 - 0.25, 0.5 + 0.25
+    assert exactly_tied[0] == exactly_tied[1] == 0.75, "the two scores really do meet"
+
+
+def test_the_smallest_delta_that_does_reverse_the_pair_is_a_witness() -> None:
+    """The other side of the same comparison, so the refusal above is about the
+    tie rather than about `delta` being small."""
+    scores = [1.0, 0.5, 0.25, 0.0]
+    order = [0, 1, 2, 3]
+
+    witness = flip_witness(scores, order, 1, delta=0.125)
+    assert witness is not None
+
+    perturbed, eps = witness
+    assert eps == 0.375, "margin / 2 plus the delta asked for"
+    assert perturbed[1] > perturbed[0], "the pair is genuinely reversed"
+    assert (perturbed[0], perturbed[1]) == (0.625, 0.875)
