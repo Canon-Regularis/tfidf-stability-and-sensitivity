@@ -963,3 +963,63 @@ def test_an_edit_leaves_the_original_corpus_untouched() -> None:
 
     assert _CORPUS[0] == before[0]
     assert tuple(tuple(d) for d in _CORPUS[1]) == before[1]
+
+
+@pytest.mark.parametrize(
+    ("label", "edit", "delta"),
+    [
+        ("add", lambda: add_document(_CORPUS, "d2", ["c"]), 1),
+        ("remove", lambda: remove_document(_CORPUS, "d0"), -1),
+        ("edit", lambda: edit_document(_CORPUS, "d0", ["z"]), 0),
+        ("duplicate", lambda: duplicate_document(_CORPUS, "d0", "copy"), 1),
+    ],
+)
+def test_the_record_reports_the_corpus_it_came_with(label: str, edit: object, delta: int) -> None:
+    """`n_before` and `n_after` are read off the record, not recomputed, and
+    section 4.2's bounds are stated in terms of both: `N` sits inside the idf of
+    every term, so an edit that misreported the direction of the size change
+    would invert the bound rather than loosen it.
+
+    `changes_corpus_size` cannot catch that on its own -- it asks only whether
+    the two differ, which is true whichever way round they are.
+    """
+    (ids, _), record = edit()  # type: ignore[operator]
+
+    assert record.n_before == len(_CORPUS[0]), "the corpus the edit was handed"
+    assert record.n_after == len(ids), "and the one it produced"
+    assert record.n_after - record.n_before == delta
+
+
+def test_an_edit_that_leaves_the_size_alone_says_so_rather_than_omitting_it() -> None:
+    """The `delta == 0` row above, stated on its own because it is the case
+    section 4.1 isolates: with `N` fixed, any idf movement comes from `df`."""
+    _, record = edit_document(_CORPUS, "d0", ["z"])
+
+    assert record.n_before == record.n_after == len(_CORPUS[0])
+    assert record.changes_corpus_size is False
+
+
+def test_a_discrepancy_exactly_on_the_tolerance_is_accepted() -> None:
+    """`<=`, not `<`. The identity is exact in the reals and approximate only by
+    rounding, so a discrepancy that lands precisely on the permitted bound is
+    sound data at the edge of the allowance, not data outside it.
+
+    `sqrt(1e-9)` squares back to exactly `1e-9` in binary64, so the boundary is
+    reachable rather than a limit that can only be approached: with
+    `observed = 0` the left side is zero and the tolerance is the floor `1e-9`,
+    which the right side then equals to the last bit.
+    """
+    at_the_edge = _pythagoras(observed=0.0, shared=math.sqrt(1e-9), gained=0.0, lost=0.0)
+
+    assert math.sqrt(1e-9) ** 2 == 1e-9, "the discrepancy is exactly the tolerance"
+    assert at_the_edge.pythagoras_holds
+
+
+def test_a_discrepancy_one_ulp_past_the_tolerance_is_refused() -> None:
+    """The other side of the same comparison, one representable step away, so
+    the boundary above is shown to be the boundary rather than a wide margin."""
+    just_over = math.nextafter(math.sqrt(1e-9), math.inf)
+    outside = _pythagoras(observed=0.0, shared=just_over, gained=0.0, lost=0.0)
+
+    assert just_over**2 > 1e-9
+    assert not outside.pythagoras_holds
