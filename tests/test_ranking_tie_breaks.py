@@ -27,6 +27,7 @@ from tfidf_stability.ranking.attributes import (
     AttributeTable,
     Direction,
     MissingPolicy,
+    _build_column,
     _ratio_cmp,
     check_ratio_fits_int64,
     ratio_less,
@@ -1420,6 +1421,32 @@ def test_the_guard_looks_past_the_single_largest_numerator_and_denominator() -> 
         check_ratio_fits_int64(same_document, "rating")
 
 
+def test_the_scan_keeps_looking_after_the_first_admissible_combination() -> None:
+    """The maximum is over all four combinations, not the first one that fits.
+
+    The test above overflows on the first admissible pair, so a scan that
+    stopped there would still pass it. Here the first pair the loop reaches is
+    the largest numerator against the *second* largest denominator, whose
+    product is comfortably inside int64; the pair that overflows is the second
+    numerator against the largest denominator, and the loop only sees it by
+    carrying on.
+
+    A selection rule that ranked the candidates by anything other than their
+    product -- the quotient, say -- would settle on the first pair and pass a
+    column the C++ mirror cannot represent, which is the failure this guard
+    exists to prevent.
+    """
+    pairs = [(4_000_000_000, 4_000_000_000), (3_000_000_000, 2)]
+    first_admissible = 4_000_000_000 * 2
+    the_overflowing_one = 3_000_000_000 * 4_000_000_000
+
+    assert first_admissible < (1 << 63) - 1, "the loop's first valid pair fits"
+    assert the_overflowing_one > (1 << 63) - 1, "and a later one does not"
+
+    with pytest.raises(TfidfStabilityError, match="numerator of 3000000000"):
+        check_ratio_fits_int64(pairs, "rating")
+
+
 @pytest.mark.parametrize(
     ("a", "b", "expected"),
     [
@@ -1460,3 +1487,159 @@ def test_a_missing_first_column_shifts_every_present_value_up_by_one() -> None:
         records, specs=(AttributeSpec("p", missing_policy=MissingPolicy.LAST),)
     )
     assert last.column("p").ranks == (0, 2, 1), "and no shift is needed the other way"
+
+
+# ---------------------------------------------------------------------------
+# The overflow scan reads the two *largest* of each column
+# ---------------------------------------------------------------------------
+def test_the_scan_takes_the_largest_pairs_and_not_the_smallest() -> None:
+    """`sorted(..., reverse=True)[:2]`. With more than two documents the top-two
+    selection actually excludes something, and taking the wrong end excludes the
+    overflow.
+
+    The two-document cases above cannot see this: with two pairs, both orderings
+    reach the same four combinations, so ascending and descending agree and the
+    guard looks correct either way.
+    """
+    pairs = [(2**62, 2**62), (2**40, 2**40), (1, 1)]
+
+    assert 2**62 * 2**40 > (1 << 63) - 1, "the largest admissible pair overflows"
+    assert 2**40 * 1 < (1 << 63) - 1, "the smallest admissible pair does not"
+
+    with pytest.raises(TfidfStabilityError, match="overflows int64"):
+        check_ratio_fits_int64(pairs, "rating")
+
+
+def test_a_column_of_small_ratios_is_accepted_however_many_documents() -> None:
+    """The other side, so the scan above is refusing the overflow rather than
+    refusing every column with three entries in it."""
+    check_ratio_fits_int64([(2**20, 2**20), (2**10, 2**10), (1, 1)], "rating")
+
+
+# ---------------------------------------------------------------------------
+# Values and their presence bits are one column, read in step
+# ---------------------------------------------------------------------------
+# `_build_column` is reached directly, as `test_datasets.py` reaches the
+# generator's primitives. Through `AttributeTable.from_records` the two lists are
+# built together by `_extract` and cannot disagree; the guard is what keeps that
+# true if anything ever builds a column another way.
+def test_a_column_whose_presence_bits_run_short_is_refused() -> None:
+    """`zip(values, has_value, strict=True)`. Truncating instead would drop the
+    tail of the column: those documents would carry no attribute at all, and the
+    ranking would silently fall through to the next tie-break for them."""
+    spec = AttributeSpec("popularity", Direction.DESC, AttributeDType.INT64)
+
+    with pytest.raises(ValueError, match="argument 2 is shorter"):
+        _build_column(spec, [3, 1, 2], [True, True])
+
+
+def test_a_column_with_more_presence_bits_than_values_is_refused() -> None:
+    """The other direction of the same mismatch, which `zip` would also swallow.
+
+    Both `zip` calls in the encoder are guarded -- the one that filters to the
+    present values and the one that reads the ranks back out -- so a column
+    cannot pass the first and fail the second.
+    """
+    spec = AttributeSpec("popularity", Direction.DESC, AttributeDType.INT64)
+
+    with pytest.raises(ValueError, match="argument 2 is longer"):
+        _build_column(spec, [3, 1], [True, True, True])
+
+
+def test_a_column_in_step_ranks_every_document_it_was_given() -> None:
+    """The passing side: dense ranks by descending value, one per document."""
+    spec = AttributeSpec("popularity", Direction.DESC, AttributeDType.INT64)
+    column = _build_column(spec, [3, 1, 2], [True, True, True])
+
+    assert column.ranks == (0, 2, 1)
+    assert len(column.ranks) == 3
+
+
+# ---------------------------------------------------------------------------
+# What a Ranking records about the run that produced it
+# ---------------------------------------------------------------------------
+def test_a_query_with_any_score_at_all_is_not_degenerate() -> None:
+    """`query_degenerate=all(s == 0.0 for s in scores)`. The all-zero case is
+    covered above; the complement is what makes the field mean anything.
+
+    A degenerate query is ranked by attributes alone, so mislabelling an
+    ordinary query as degenerate -- or the reverse -- changes which of section
+    2.3.1's mechanisms the published number is attributed to.
+    """
+    table = table_of(3, popularity=[3, 2, 1], rating=[3, 2, 1], engagement=[3, 2, 1])
+
+    assert rank([0.0, 0.0, 0.0], table, PI).query_degenerate is True
+    assert rank([0.0, 1e-300, 0.0], table, PI).query_degenerate is False
+    assert rank([1.0, 0.5, 0.25], table, PI).query_degenerate is False
+
+
+def test_a_single_subnormal_score_is_enough_to_leave_the_degenerate_case() -> None:
+    """The boundary of `s == 0.0`: the smallest positive double is a score, and a
+    comparison against any other constant would swallow it."""
+    table = table_of(2, popularity=[2, 1], rating=[2, 1], engagement=[2, 1])
+
+    assert rank([5e-324, 0.0], table, PI).query_degenerate is False
+    assert rank([-0.0, 0.0], table, PI).query_degenerate is True, "negative zero is still zero"
+
+
+def test_a_ranking_reports_no_zero_norm_documents_unless_told_of_any() -> None:
+    """`n_zero_norm_docs: int = 0`. The count is passed in by whoever fitted the
+    model, since the ranker never sees the norms. Defaulting to anything else
+    would put a number into a run record that nothing measured.
+    """
+    assert _ranked().n_zero_norm_docs == 0
+    assert _ranked(k=2).n_zero_norm_docs == 0
+
+
+def test_a_ranking_carries_the_zero_norm_count_it_was_given() -> None:
+    """The other side, so the default above is a default rather than the only
+    value the field can hold."""
+    table = table_of(3, popularity=[3, 2, 1], rating=[3, 2, 1], engagement=[3, 2, 1])
+    told = rank([1.0, 0.5, 0.25], table, PI, n_zero_norm_docs=2)
+
+    assert told.n_zero_norm_docs == 2
+
+
+def test_a_ranking_over_the_whole_corpus_excluded_nothing() -> None:
+    """`n_excluded=0`. Candidate exclusion is the query grid's job (G10 decision
+    3), not the ranker's: `rank` is handed every document it is to order.
+
+    Reported rather than omitted so the two paths produce the same shape of
+    record, and a reader can tell "nothing was excluded" from "nobody said".
+    """
+    assert _ranked().n_excluded == 0
+    assert _ranked(k=2).n_excluded == 0
+    assert _ranked().n_documents == 4, "and all four were ranked"
+
+
+def test_a_truncated_ranking_records_the_same_degeneracy_as_a_full_one() -> None:
+    """`rank_top_k` builds its own `Ranking`, so it carries a second copy of the
+    `query_degenerate` computation. The flag is a property of the query -- were
+    all its scores zero -- and not of how many documents were selected, so
+    truncating to k must not change it.
+
+    Tested here because the existing degenerate cases all go through `rank`, and
+    the two constructions can drift apart without either one being wrong on its
+    own.
+    """
+    table = table_of(4, popularity=[4, 3, 2, 1], rating=[4, 3, 2, 1], engagement=[4, 3, 2, 1])
+    zeros = [0.0] * 4
+    scored = [1.0, 0.5, 0.25, 0.125]
+
+    for k in (1, 2, 4):
+        assert rank_top_k(zeros, table, PI, k=k).query_degenerate is True, k
+        assert rank_top_k(scored, table, PI, k=k).query_degenerate is False, k
+
+    assert rank(zeros, table, PI).query_degenerate is True, "and the full path agrees"
+
+
+def test_a_truncated_ranking_leaves_the_degenerate_case_on_one_real_score() -> None:
+    """The boundary of `s == 0.0` on the truncated path, matching the full one:
+    a single subnormal anywhere in the score vector is a score, even when the
+    selection never reaches it."""
+    table = table_of(4, popularity=[4, 3, 2, 1], rating=[4, 3, 2, 1], engagement=[4, 3, 2, 1])
+    tail_only = [0.0, 0.0, 0.0, 5e-324]
+
+    assert rank_top_k(tail_only, table, PI, k=1).query_degenerate is False, (
+        "the flag reads every score, not only the selected ones"
+    )
