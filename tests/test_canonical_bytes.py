@@ -162,7 +162,11 @@ def test_an_unsupported_integer_width_is_rejected_not_silently_widened() -> None
 
 def test_an_integer_beyond_the_chosen_width_is_rejected_rather_than_truncated() -> None:
     """Truncation would make two different corpora hash alike."""
-    with pytest.raises(struct.error, match=r"'i' format requires"):
+    # Two spellings: CPython 3.13 and earlier raise "argument out of range",
+    # 3.14 raises "'i' format requires -2147483648 <= number <= 2147483647".
+    # The alternation keeps the assertion about the refusal rather than about
+    # which interpreter ran it; CI spans both.
+    with pytest.raises(struct.error, match=r"format requires|argument out of range"):
         hash_ints([2**31], width=4)
 
 
@@ -499,7 +503,9 @@ def test_each_width_accepts_the_whole_range_it_names(width: int, value: int) -> 
 def test_one_past_the_range_is_refused_rather_than_truncated(width: int, value: int) -> None:
     """Truncation would fold two distinct identifiers onto one digest, which is
     the one failure a content hash exists to prevent."""
-    with pytest.raises(struct.error, match="format requires"):
+    # The interpreter's wording differs across the versions CI spans; see the
+    # note on the width-domain test above.
+    with pytest.raises(struct.error, match=r"format requires|argument out of range"):
         hash_ints([value], width=width)
 
 

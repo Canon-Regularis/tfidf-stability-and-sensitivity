@@ -688,7 +688,10 @@ def test_the_square_root_keeps_the_sign_of_a_negative_zero() -> None:
 def test_a_negative_square_root_is_refused_however_small(value: float) -> None:
     """A magnitude test in place of a sign test would let the subnormal through
     and return a NaN norm from a vector that merely had a rounding error."""
-    with pytest.raises(ValueError, match="expected a nonnegative input"):
+    # CPython 3.13 and earlier raise "math domain error"; 3.14 names the input
+    # instead. Matched either way, so this pins the refusal and not the
+    # interpreter version.
+    with pytest.raises(ValueError, match=r"math domain error|expected a nonnegative input"):
         sqrt(value)
 
 
