@@ -37,6 +37,11 @@ concurrency:
 jobs:
   lint:
     name: lint and types
+    # A hang is a failure, and an untimed job turns one into a cancelled run
+    # hours later with no diagnosis. Measured: a property test that hung only
+    # on windows py3.13 burned 47 minutes before anyone stopped it, while the
+    # same job on every other interpreter finished in three.
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,6 +77,11 @@ jobs:
 
   reference:
     name: reference ${{ matrix.os }} py${{ matrix.python }}
+    # A hang is a failure, and an untimed job turns one into a cancelled run
+    # hours later with no diagnosis. Measured: a property test that hung only
+    # on windows py3.13 burned 47 minutes before anyone stopped it, while the
+    # same job on every other interpreter finished in three.
+    timeout-minutes: 20
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -98,6 +108,11 @@ jobs:
 
   native:
     name: native ${{ matrix.os }} py${{ matrix.python }}
+    # A hang is a failure, and an untimed job turns one into a cancelled run
+    # hours later with no diagnosis. Measured: a property test that hung only
+    # on windows py3.13 burned 47 minutes before anyone stopped it, while the
+    # same job on every other interpreter finished in three.
+    timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -220,6 +235,11 @@ jobs:
 
   cppcheck:
     name: static analysis (C++)
+    # A hang is a failure, and an untimed job turns one into a cancelled run
+    # hours later with no diagnosis. Measured: a property test that hung only
+    # on windows py3.13 burned 47 minutes before anyone stopped it, while the
+    # same job on every other interpreter finished in three.
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -236,6 +256,11 @@ jobs:
 
   coverage:
     name: coverage
+    # A hang is a failure, and an untimed job turns one into a cancelled run
+    # hours later with no diagnosis. Measured: a property test that hung only
+    # on windows py3.13 burned 47 minutes before anyone stopped it, while the
+    # same job on every other interpreter finished in three.
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -294,6 +319,11 @@ jobs:
 
   fuzz:
     name: parser fuzzing
+    # A hang is a failure, and an untimed job turns one into a cancelled run
+    # hours later with no diagnosis. Measured: a property test that hung only
+    # on windows py3.13 burned 47 minutes before anyone stopped it, while the
+    # same job on every other interpreter finished in three.
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -309,6 +339,11 @@ jobs:
 
   notebooks:
     name: notebooks execute
+    # A hang is a failure, and an untimed job turns one into a cancelled run
+    # hours later with no diagnosis. Measured: a property test that hung only
+    # on windows py3.13 burned 47 minutes before anyone stopped it, while the
+    # same job on every other interpreter finished in three.
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -325,6 +360,11 @@ jobs:
 
   docs:
     name: docs links resolve
+    # A hang is a failure, and an untimed job turns one into a cancelled run
+    # hours later with no diagnosis. Measured: a property test that hung only
+    # on windows py3.13 burned 47 minutes before anyone stopped it, while the
+    # same job on every other interpreter finished in three.
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -338,6 +378,11 @@ jobs:
 
   cli:
     name: cli end to end
+    # A hang is a failure, and an untimed job turns one into a cancelled run
+    # hours later with no diagnosis. Measured: a property test that hung only
+    # on windows py3.13 burned 47 minutes before anyone stopped it, while the
+    # same job on every other interpreter finished in three.
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
