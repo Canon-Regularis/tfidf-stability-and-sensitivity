@@ -754,3 +754,56 @@ def test_an_empty_corpus_has_no_largest_group_rather_than_a_group_of_one() -> No
     assert empty.largest_chain == 0
     assert empty.largest_clique == 0
     assert math.isnan(empty.rho)
+
+
+# ---------------------------------------------------------------------------
+# Chains and cliques are populated together
+# ---------------------------------------------------------------------------
+# `chain_inflation_ratio` and `TieGroupIndex.rho` both guard with
+# `if not chains or not cliques`, and the two operands never disagree: every
+# score belongs to at least one chain and at least one clique, so both are empty
+# exactly when the score vector is.
+#
+# That invariant is why swapping the `or` for an `and` there cannot be observed,
+# which is recorded in `configs/equivalent_mutants.txt`. The claim rests on this
+# property rather than on the guard's wording, so the property is asserted here:
+# if it ever stopped holding, the recorded argument would become wrong while the
+# guard still looked reasonable.
+@pytest.mark.parametrize(
+    "scores",
+    [
+        [],
+        [1.0],
+        [1.0, 1.0],
+        [3.0, 2.0, 1.0],
+        [1.0, 1.0, 0.0, 0.0],
+        [5e-324, 0.0],
+        [0.0, -0.0],
+    ],
+)
+@pytest.mark.parametrize("tau", [0.0, 1e-320, 0.5, 1.0, math.inf])
+def test_chains_and_cliques_are_empty_together(scores: list[float], tau: float) -> None:
+    """Never one without the other, at any tau including zero and infinity."""
+    chains = tie_chains(scores, tau)
+    cliques = tie_cliques(scores, tau)
+
+    assert bool(chains) == bool(cliques)
+    assert bool(chains) == bool(scores), "and both are empty exactly when the input is"
+
+
+@pytest.mark.property
+@given(
+    scores=st.lists(st.floats(min_value=-10, max_value=10, allow_nan=False), max_size=8),
+    tau=st.floats(min_value=0.0, max_value=5.0, allow_nan=False),
+)
+def test_every_score_lands_in_a_chain_and_in_a_clique(scores: list[float], tau: float) -> None:
+    """The reason they are empty together: both are covers of the same input, so
+    neither can be empty while the other is not."""
+    ordered = sorted(scores, reverse=True)
+    chains = tie_chains(ordered, tau)
+    cliques = tie_cliques(ordered, tau)
+
+    # Half-open intervals: `[lo, hi)`, so a chain's size is `hi - lo`. Chains
+    # partition, so the sizes sum to the input length exactly.
+    assert sum(hi - lo for lo, hi in chains) == len(ordered)
+    assert bool(chains) == bool(cliques)
