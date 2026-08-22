@@ -395,10 +395,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
       - name: Relative links in docs/ must point at files that exist
         # The implementation notes cross-reference the code heavily. A stale link
         # is a silent lie about where something lives.

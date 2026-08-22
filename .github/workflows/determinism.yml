@@ -54,10 +54,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
       - name: Compute the pipeline digest
         id: digest
         shell: bash
