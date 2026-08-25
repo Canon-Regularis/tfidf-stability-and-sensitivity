@@ -88,6 +88,11 @@ class PolicyError:
     n_compared: int
     n_differing: int
     max_abs: float
+    #: A distance, so unsigned. `ulps_between` is signed -- negative where the
+    #: policy value sits above the exact one -- and this field aggregates its
+    #: magnitude. Taking the signed value instead would silently drop every
+    #: stray in one direction: on a corpus straying 6 ulps down and 2 up, the
+    #: reading was 2, and `tau_floor` below is derived from it.
     max_ulps: float
 
     @property
@@ -256,7 +261,9 @@ def measure_noise_floor(
                 if bits_of(a) != bits_of(b):
                     n_differing += 1
                     max_abs = max(max_abs, abs(a - b))
-                    max_ulps = max(max_ulps, ulps_between(a, b))
+                    # abs(): `ulps_between` is signed, and `max_ulps` starts at
+                    # zero, so without it no downward stray ever survives the max.
+                    max_ulps = max(max_ulps, abs(ulps_between(a, b)))
         per_policy.append(PolicyError(str(policy), n_compared, n_differing, max_abs, max_ulps))
 
     return NoiseFloor(

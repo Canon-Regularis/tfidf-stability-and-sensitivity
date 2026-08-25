@@ -1404,3 +1404,100 @@ def test_each_cell_of_the_audit_reads_its_own_category(a1_setup) -> None:
     assert audit.n_certified == 6, "the certified row is its two cells"
     assert audit.conservatism == 4 / 10, "and conservatism is the uncertified row's share"
     assert audit.is_sound, "no certified perturbation changed the top-k"
+
+
+# ---------------------------------------------------------------------------
+# measure_noise_floor: the ulp distance is a magnitude, not a signed offset
+# ---------------------------------------------------------------------------
+def _asymmetrically_straying_corpus() -> tuple[object, list[object]]:
+    """A corpus whose naive strays lean one way: down 6 ulps, up only 2.
+
+    Local by house convention. The seed is load-bearing rather than arbitrary,
+    and it is the reason this builder exists beside :func:`_diverging_corpus`
+    instead of reusing it. On that corpus the naive policy strays symmetrically,
+    +4 ulps and -4, so the largest signed offset and the largest magnitude are
+    both 4 and a measurement taking either one reports the same number. Here
+    they differ: the most negative offset is -6 and the most positive is +2, so
+    a `max` over signed values reports 2 where the true distance is 6.
+
+    Found by sweeping seeds and comparing the two quantities through the real
+    code path; 2 is the first that separates them at this shape.
+    """
+    rng = random.Random(2)
+    vocab = [f"t{i}" for i in range(120)]
+    documents = [[rng.choice(vocab) for _ in range(60)] for _ in range(20)]
+    model = TfidfVectoriser().fit(documents, [f"d{i}" for i in range(20)])
+    queries = [
+        TfidfVectoriser.transform_query([rng.choice(vocab) for _ in range(30)], model)
+        for _ in range(3)
+    ]
+    return model, queries
+
+
+def test_a_stray_below_the_exact_value_counts_as_far_as_one_above() -> None:
+    """`ulps_between` is signed, so a `max` over its results is not a distance.
+
+    The measurement read `max_ulps = max(max_ulps, ulps_between(a, b))`, with
+    `max_ulps` starting at zero. `ulps_between` returns a negative offset when
+    the policy value sits above the exact one, and no negative number ever
+    survives that `max`: every downward stray was discarded, and the reported
+    figure was the worst stray in *one* direction rather than the worst overall.
+
+    On this corpus the naive policy strays 6 ulps down and 2 up. The unfixed
+    expression reports 2.0. That is not a conservative error bar, which would at
+    least stay honest; it is a published noise floor a third the size of the
+    noise, and section 7's tau band is derived from it.
+
+    Asserted against a recomputation rather than the literal 6.0, so the test
+    keeps its meaning if the corpus construction ever shifts -- while
+    `_asymmetrically_straying_corpus`'s own docstring records the premise the
+    recomputation has to satisfy for this test to be discriminating at all.
+    """
+    from tfidf_stability.utils.numerics import Reduction, bits_of, ulps_between
+
+    model, queries = _asymmetrically_straying_corpus()
+    documents = [model.document(i) for i in range(model.n_documents)]
+    exact_norms = model.matrix.row_norms(Reduction.EXACT)
+    policy_norms = model.matrix.row_norms(Reduction.NAIVE)
+
+    signed: list[float] = []
+    for query in queries:
+        exact = cosine_against_corpus(query, documents, exact_norms, Reduction.EXACT)
+        got = cosine_against_corpus(query, documents, policy_norms, Reduction.NAIVE)
+        signed += [
+            ulps_between(a, b) for a, b in zip(got, exact, strict=True) if bits_of(a) != bits_of(b)
+        ]
+
+    assert signed, "the premise: this corpus makes the naive policy stray at all"
+    largest_signed = max(signed)
+    true_distance = max(abs(offset) for offset in signed)
+    assert true_distance > largest_signed, (
+        "the premise this test exists for: the strays must be asymmetric, or the "
+        "signed and unsigned readings agree and the assertion below is vacuous"
+    )
+
+    recorded = {p.policy: p for p in measure_noise_floor(model, queries).per_policy}
+    assert recorded[str(Reduction.NAIVE)].max_ulps == true_distance
+
+
+def test_a_policy_that_strayed_cannot_report_a_zero_ulp_distance() -> None:
+    """The three fields describe one set of differences, so they agree on whether
+    it is empty.
+
+    Weaker than the test above and true on every corpus, which is the point: it
+    holds wherever the noise floor is measured rather than only where the strays
+    happen to be asymmetric, and it is the invariant a future refactor would
+    break first. A record showing `n_differing = 38` beside `max_ulps = 0.0`
+    contradicts itself whatever the cause.
+    """
+    for build in (_diverging_corpus, _asymmetrically_straying_corpus):
+        model, queries = build()
+        for policy in measure_noise_floor(model, queries).per_policy:
+            where = f"{build.__name__}/{policy.policy}"
+            assert policy.max_ulps >= 0.0, f"{where}: a distance cannot be negative"
+            if policy.n_differing:
+                assert policy.max_ulps > 0.0, f"{where}: {policy.n_differing} values differed"
+                assert policy.max_abs > 0.0, f"{where}: and they differed by something"
+            else:
+                assert policy.max_ulps == 0.0, f"{where}: nothing differed"
+                assert policy.max_abs == 0.0, f"{where}: nor by any absolute amount"
