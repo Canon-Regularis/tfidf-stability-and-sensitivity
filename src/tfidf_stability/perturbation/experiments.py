@@ -67,6 +67,8 @@ class PerturbationReport:
         certificate does not cover this perturbation, and the ranking may be
         unchanged anyway. Section 7.2 uses these as certificates of stability.
         """
+        if self.edit.changes_corpus_size:
+            return None
         for cert in self.certificates_before:
             if cert.k == k:
                 if not cert.defined:
