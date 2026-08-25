@@ -16,6 +16,7 @@ ever prunes them, and the campaign goes green whatever the tests do.
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -213,3 +214,102 @@ def test_a_claim_does_not_cover_the_same_mutation_one_line_over() -> None:
     moved = [_mutant(runner, 156, "compare", "LtE", "Lt")]
 
     assert runner._verdict(module, moved) == 1, "the claim at 155 must not cover 156"
+
+
+# ---------------------------------------------------------------------------
+# The sandbox: the campaign must execute the mutant, not the working tree
+# ---------------------------------------------------------------------------
+# Everything above tests the verdict. None of it tests the premise the verdict
+# rests on -- that the tests a campaign runs import the *mutated copy*. They did
+# not, and nothing noticed, because a campaign in that state reports every
+# mutant as a survivor and a survivor is a normal result.
+#
+# scikit-build-core's editable `.pth` has two lines: one installs a
+# `sys.meta_path` finder, the other appends the real `src/` to `sys.path`.
+# `_make_sandbox` undid the first. The second still put the working tree on the
+# path, and `tests/conftest.py` adds `src/` only `if find_spec("tfidf_stability")
+# is None` -- which it then was not, so the sandbox was never inserted.
+#
+# Measured while the second line stood: `margins.py` scored 0 killed of 6 and
+# `stratify.py` 0 of 29, including flips their own test files fail on when run
+# by hand. Both score normally once the sandbox really is first.
+#
+# It bit a developer checkout rather than the nightly: `requirements-dev.txt`
+# does not install this package, so in CI `find_spec` returns None and conftest
+# inserts the sandbox's own `src/`. The editable install is what supplies the
+# competing answer. That is precisely why it needs a test -- the environment
+# where it breaks is the one no job runs in.
+@pytest.mark.slow
+def test_a_test_run_inside_the_sandbox_imports_the_sandbox_copy() -> None:
+    """A module written only into the sandbox must be the one a test sees.
+
+    Marked slow, and its faster sibling below is the one the PR tier runs. That
+    sibling is strictly stronger -- proving the sandbox wins subsumes proving it
+    is reachable -- so the PR tier keeps the assertion that matters and this one
+    adds the cleaner diagnostic on the nightly, where the campaign it guards
+    runs anyway. Both spend their time copying the tree and starting a pytest
+    subprocess; neither has a cheap form.
+
+    The probe is a new module rather than an edit to an existing one, so the
+    assertion cannot pass by coincidence: if the working tree is imported
+    instead, the module is simply not there and the run fails on ImportError.
+    That is the same signal a mutated module gives, arrived at without having to
+    mutate anything.
+    """
+    runner = _runner()
+    sandbox = runner._make_sandbox()
+    try:
+        probe = sandbox / "src" / "tfidf_stability" / "_sandbox_probe.py"
+        probe.write_text('VALUE = "sandbox"\n', encoding="utf-8", newline="")
+        test = sandbox / "tests" / "test_zz_sandbox_probe.py"
+        test.write_text(
+            "from tfidf_stability._sandbox_probe import VALUE\n\n\n"
+            "def test_probe() -> None:\n"
+            '    assert VALUE == "sandbox"\n',
+            encoding="utf-8",
+            newline="",
+        )
+
+        assert not (REPO / "src" / "tfidf_stability" / "_sandbox_probe.py").exists(), (
+            "the premise: this module exists only inside the sandbox"
+        )
+        assert runner._run_tests(["tests/test_zz_sandbox_probe.py"], timeout=180.0, cwd=sandbox), (
+            "the sandbox copy of the package was not what the test imported"
+        )
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+def test_the_sandbox_shadows_the_working_tree_rather_than_sitting_behind_it() -> None:
+    """The stronger half: not merely reachable, but *first*.
+
+    A probe module is enough to prove the sandbox is on the path somewhere. It
+    is not enough to prove it wins, and winning is the whole question -- every
+    module a campaign mutates exists in both trees. Here the sandbox's copy of a
+    real module is replaced outright, so the only way the run can fail is if the
+    sandbox is what got imported.
+    """
+    runner = _runner()
+    sandbox = runner._make_sandbox()
+    try:
+        shadowed = sandbox / "src" / "tfidf_stability" / "utils" / "numerics.py"
+        assert shadowed.exists(), "the premise: the sandbox holds its own copy of this module"
+        shadowed.write_text(
+            'raise RuntimeError("the sandbox copy was imported")\n',
+            encoding="utf-8",
+            newline="",
+        )
+        test = sandbox / "tests" / "test_zz_sandbox_shadow.py"
+        test.write_text(
+            "import tfidf_stability.utils.numerics  # noqa: F401\n\n\n"
+            "def test_import() -> None:\n"
+            "    pass\n",
+            encoding="utf-8",
+            newline="",
+        )
+
+        assert not runner._run_tests(
+            ["tests/test_zz_sandbox_shadow.py"], timeout=180.0, cwd=sandbox
+        ), "the working tree's numerics.py shadowed the sandbox's, so no mutant is ever executed"
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)

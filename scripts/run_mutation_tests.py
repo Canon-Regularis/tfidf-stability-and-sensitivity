@@ -208,15 +208,38 @@ def _make_sandbox() -> Path:
             shutil.copy2(source, sandbox / name)
 
     # Copying the tree is not enough on its own. This project is installed
-    # editable, and scikit-build-core does that by putting a
-    # ScikitBuildRedirectingFinder on sys.meta_path pointing at the real src/.
-    # Meta-path finders are consulted before sys.path, so conftest.py inserting
-    # the sandbox at sys.path[0] loses and the tests import the working tree.
-    # Measured: replacing the sandbox module with `raise RuntimeError` still gave
-    # 26 passed, which would have scored every mutant a survivor.
+    # editable, and scikit-build-core's `.pth` does two separate things:
     #
-    # sitecustomize is imported during interpreter startup, before pytest or
-    # conftest, so it is the one place early enough to drop that finder.
+    #   import _editable_skbc_tfidf_stability      <- a sys.meta_path finder
+    #   C:/.../tfidf-stability-and-sensitivity/src <- a plain sys.path entry
+    #
+    # Both point at the real working tree, and each is enough on its own to make
+    # every mutant survive. Removing only the first was the bug this campaign
+    # shipped with: `sitecustomize` dropped the finder, the second line still put
+    # the real `src/` on `sys.path` during site initialisation, and
+    # `tests/conftest.py` adds the sandbox only `if find_spec("tfidf_stability")
+    # is None` -- which by then it is not. So conftest inserted nothing, every
+    # test imported the working tree, and the mutated copy was never executed.
+    #
+    # Measured on a tree with the guard in place: `margins.py` and `stratify.py`
+    # both scored 0 killed of every mutant tried, including flips their own test
+    # files demonstrably catch when run by hand. A campaign in that state cannot
+    # fail: every mutant is a survivor, and a survivor is a normal result.
+    #
+    # Scope, checked rather than assumed: this bites a *developer* checkout, not
+    # the nightly. `requirements-dev.txt` does not install this package, so in CI
+    # `find_spec` returns None, and the conftest that runs is the sandbox's own
+    # copy -- `parents[1] / "src"` from there is the sandbox. The editable
+    # install is what supplies a competing answer, so the campaign was sound in
+    # CI and silently vacuous for anyone running it locally. Undoing both `.pth`
+    # lines here makes the two agree, and is a no-op where nothing installed the
+    # package.
+    #
+    # sitecustomize is imported during interpreter startup, before pytest and
+    # before conftest, so it is the one place early enough to undo both lines.
+    # It prepends the sandbox's own `src/` as well, rather than relying on
+    # conftest's guard, so the campaign does not depend on what that guard
+    # decides.
     (sandbox / "sitecustomize.py").write_text(
         chr(10).join(
             (
@@ -227,6 +250,18 @@ def _make_sandbox() -> Path:
                 "    if 'Redirecting' not in type(finder).__name__",
                 "    and 'editable' not in getattr(finder, '__module__', '')",
                 "]",
+                "import os",
+                f"_real = {str(REPO / 'src')!r}",
+                f"_mine = {str(sandbox / 'src')!r}",
+                # normcase because the `.pth` entry and this string are written
+                # by different tools, and on Windows they can differ in drive
+                # case or separator while naming one directory. The insert below
+                # would win anyway; this keeps the real tree off the path
+                # entirely rather than merely behind, so a later prepend by
+                # something else cannot reorder them.
+                "_key = lambda p: os.path.normcase(os.path.abspath(p))",
+                "sys.path[:] = [p for p in sys.path if _key(p) != _key(_real)]",
+                "sys.path.insert(0, _mine)",
             )
         ),
         encoding="utf-8",
