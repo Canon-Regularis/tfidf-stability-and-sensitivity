@@ -25,6 +25,7 @@ from tfidf_stability.persistence.save_load import (
     _decode_block,
     load_model,
     model_bytes,
+    model_from_bytes,
     save_model,
 )
 from tfidf_stability.utils.hashing import hash_bytes, hash_floats
@@ -428,6 +429,106 @@ def test_a_descending_pair_is_reported_in_the_order_it_was_found() -> None:
     up editing the wrong end of a file."""
     with pytest.raises(TfsxFormatError, match="not strictly increasing: 3 then 1"):
         _check_csr([0, 2], [3, 1], [1.0, 2.0], n_rows=1, n_cols=4)
+
+
+# ---------------------------------------------------------------------------
+# Erroneous: the token block gets the same scrutiny as the document-id block
+# ---------------------------------------------------------------------------
+# `load_model` is, by its own docstring, the only parser here reading untrusted
+# input, and it validated the two identifier blocks unequally: `check_unique_ids`
+# on `doc_ids`, nothing on `tokens`. `Vocabulary` is frozen with no
+# `__post_init__`, so constructing one directly bypassed the `is_sorted` guard
+# that `build_vocabulary` runs.
+def _three_token_model() -> object:
+    """A model whose vocabulary is short enough to locate inside the container.
+
+    Local by house convention. Two-character tokens make the token block
+    ``aa|ab|cc`` (LF-separated), so a single byte identifies a single token
+    unambiguously.
+    """
+    return TfidfVectoriser().fit(
+        [["aa", "aa", "cc"], ["ab", "cc"], ["aa", "ab"]], ["d0", "d1", "d2"]
+    )
+
+
+def _flip_to_duplicate_a_token(payload: bytes) -> tuple[bytes, int]:
+    """Turn the token ``ab`` into a second ``aa``, returning the byte changed.
+
+    Located by searching rather than by a hard-coded offset: the offset moves
+    with any header change, and a stale one would silently corrupt some other
+    field and test nothing.
+    """
+    block = b"aa\nab\ncc"
+    at = payload.index(block) + len(b"aa\na")
+    mutated = bytearray(payload)
+    mutated[at] = ord("a")
+    return bytes(mutated), at
+
+
+def test_a_vocabulary_that_repeats_a_token_is_refused_rather_than_loaded() -> None:
+    """One byte, and every score afterwards is against the wrong column.
+
+    Measured before the guard existed, on the 301-byte container this builds:
+    flipping the ``b`` of ``ab`` gives the token block ``aa aa cc``, which
+    ``model_from_bytes`` accepted. ``_index`` is built by enumeration, so the
+    later ``aa`` wins and the token maps to column 1. The query ``["aa"]`` then
+    scored ``d0`` -- which contains "aa" twice -- at exactly 0.0, and ``d1``,
+    which contains no "aa" at all, at 0.707.
+
+    Nothing downstream would have caught it: the mutated container re-serialises
+    to itself, so the round-trip property the fuzz suite checks still holds.
+    """
+    payload = model_bytes(_three_token_model())
+    mutated, at = _flip_to_duplicate_a_token(payload)
+
+    assert mutated != payload, f"the flip at byte {at} changed nothing"
+    assert len(mutated) == len(payload), "one byte overwritten, not inserted"
+    with pytest.raises(TfsxFormatError, match="not in UTF-8 byte order"):
+        model_from_bytes(mutated)
+
+
+def test_a_vocabulary_merely_out_of_order_is_refused_too_not_only_a_repeated_one() -> None:
+    """Uniqueness is not the invariant; ascent is.
+
+    A permuted block passes any uniqueness test while breaking the binary
+    searches in ``tf.py`` and the merge in ``align_models``, both of which are
+    correct only on a sorted vocabulary. This is why the guard checks the order
+    rather than reusing ``check_unique_ids`` a second time.
+    """
+    payload = model_bytes(_three_token_model())
+    mutated = payload.replace(b"aa\nab\ncc", b"ab\naa\ncc", 1)
+
+    assert mutated != payload, "the permutation changed nothing"
+    assert len(mutated) == len(payload), "a permutation, not a resize"
+    with pytest.raises(TfsxFormatError, match="not in UTF-8 byte order"):
+        model_from_bytes(mutated)
+
+
+def test_the_document_id_block_was_already_guarded_which_is_the_asymmetry_closed() -> None:
+    """The contrast that makes the two tests above a fix rather than a new rule.
+
+    The equivalent flip one block along -- turning ``d1`` into a second ``d0`` --
+    was always rejected. The parser was not lax; it was inconsistent.
+    """
+    payload = model_bytes(_three_token_model())
+    mutated = payload.replace(b"d0\nd1\nd2", b"d0\nd0\nd2", 1)
+
+    assert mutated != payload, "the flip changed nothing"
+    assert len(mutated) == len(payload), "one byte overwritten, not inserted"
+    with pytest.raises(TfsxFormatError, match="appears at positions 0 and 1"):
+        model_from_bytes(mutated)
+
+
+def test_an_untouched_container_still_loads_so_the_guard_admits_valid_files() -> None:
+    """The guard's other half: a check that rejects everything is not a check."""
+    model = _three_token_model()
+    payload = model_bytes(model)
+
+    restored = model_from_bytes(payload)
+
+    assert restored.vocabulary.tokens == model.vocabulary.tokens
+    assert restored.vocabulary.is_sorted()
+    assert model_bytes(restored) == payload, "and the round trip is still bit-identical"
 
 
 # ---------------------------------------------------------------------------

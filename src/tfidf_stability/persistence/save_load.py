@@ -407,8 +407,39 @@ def model_from_bytes(data: bytes) -> TfidfModel:
     # its cause.
     _check_csr(indptr, indices, values, n_rows=head.n_docs, n_cols=head.n_terms)
 
+    vocabulary = Vocabulary(
+        tokens=tokens,
+        df=df,
+        cf=cf,
+        n_documents=head.n_docs,
+        n_discarded=0,  # not part of the identity; recomputable only by refitting
+        _index={t: i for i, t in enumerate(tokens)},
+    )
+
     try:
         check_unique_ids(doc_ids)
+        # The token block gets the same treatment as the document-id block one
+        # line up, and for the same reason. It did not: `check_unique_ids` was
+        # applied to `doc_ids` alone, and `Vocabulary` is frozen with no
+        # `__post_init__`, so constructing it here bypassed the `is_sorted`
+        # guard that `build_vocabulary` runs -- the one vocabulary.py:287 calls
+        # "the one check standing between a mis-sorted vocabulary and silently
+        # wrong weights".
+        #
+        # Measured on a 301-byte container over the vocabulary ('aa','ab','cc'):
+        # flipping byte 288 from 'b' to 'a' gives ('aa','aa','cc'), which this
+        # parser accepted. `_index` then maps 'aa' to column 1, so the query
+        # ['aa'] scored the document containing "aa" twice at 0.0 and a document
+        # containing no "aa" at all at 0.707. Flipping the equivalent byte in
+        # the document-id block was already rejected, which is the asymmetry
+        # this closes -- and `load_model` is, by its own docstring, the only
+        # parser here that reads untrusted input.
+        #
+        # Ascent rather than mere uniqueness: it subsumes uniqueness and also
+        # catches a permuted block, which passes a uniqueness test while making
+        # the binary searches in tf.py and the merge in align_models wrong.
+        if not vocabulary.is_sorted():
+            raise TfidfStabilityError("vocabulary identifiers are not in UTF-8 byte order")
         check_finite(idf_values, "idf")
         check_finite(values, "weights")
         check_finite(norms, "norms")
@@ -418,15 +449,6 @@ def model_from_bytes(data: bytes) -> TfidfModel:
         raise TfsxFormatError(
             f"container is structurally valid but its contents are not: {exc}"
         ) from exc
-
-    vocabulary = Vocabulary(
-        tokens=tokens,
-        df=df,
-        cf=cf,
-        n_documents=head.n_docs,
-        n_discarded=0,  # not part of the identity; recomputable only by refitting
-        _index={t: i for i, t in enumerate(tokens)},
-    )
     return TfidfModel(
         vocabulary=vocabulary,
         idf=IdfVector(
