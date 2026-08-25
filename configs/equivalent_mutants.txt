@@ -139,14 +139,14 @@ src/tfidf_stability/perturbation/vector_perturb.py  200  constant  0.0 -> 1.0  #
 src/tfidf_stability/perturbation/vector_perturb.py  201  constant  0.0 -> 1.0  # likewise
 
 # --- perturbation/experiments.py -------------------------------------------
-src/tfidf_stability/perturbation/experiments.py  74  compare  Lt -> LtE  # separable only by a shift landing exactly on the certified radius
-src/tfidf_stability/perturbation/experiments.py  143  constant  True -> False  # doc ids and scores both come from the same model
+src/tfidf_stability/perturbation/experiments.py  92  compare  Lt -> LtE  # separable only by a shift landing exactly on the certified radius
+src/tfidf_stability/perturbation/experiments.py  161  constant  True -> False  # doc ids and scores both come from the same model
 
 # --- preprocessing/tokenise.py ---------------------------------------------
 src/tfidf_stability/preprocessing/tokenise.py  39  constant  1 -> 0  # the pattern matches at least one character, so minimum lengths of 0 and 1 admit the same tokens
 
 # --- preprocessing/stopwords.py --------------------------------------------
-src/tfidf_stability/preprocessing/stopwords.py  39  boolop  Or -> And  # a blank or comment line that is not skipped still fails the `name == asset` test two lines later
+src/tfidf_stability/preprocessing/stopwords.py  67  boolop  Or -> And  # a blank or comment line that is not skipped still fails the `name == asset` test two lines later
 
 # --- preprocessing/ngrams.py -----------------------------------------------
 src/tfidf_stability/preprocessing/ngrams.py  77  constant  1 -> 0  # the unigram fast path and the general path produce identical output at n = 1
@@ -168,15 +168,15 @@ src/tfidf_stability/analysis/summarise.py  74  compare  GtE -> Gt  # at p = 100 
 src/tfidf_stability/analysis/query_grid.py  183  compare  Gt -> GtE  # truncating a set to exactly its own length is a no-op
 
 # --- analysis/noise_floor.py -----------------------------------------------
-src/tfidf_stability/analysis/noise_floor.py  121  constant  0.0 -> 1.0  # the default fires only if _INSTRUMENTS is empty, which it never is
-src/tfidf_stability/analysis/noise_floor.py  254  constant  True -> False  # both score vectors come from cosine_against_corpus over the same documents
-src/tfidf_stability/analysis/noise_floor.py  298  compare  LtE -> Lt  # n_in_band is zero by the band's definition, as the comment beside it states
-src/tfidf_stability/analysis/noise_floor.py  298  constant  1 -> 0  # counting zero of them either way
-src/tfidf_stability/analysis/noise_floor.py  335  constant  0.0 -> 1.0  # every probe stays inside the band, and the tie structure is constant across it
-src/tfidf_stability/analysis/noise_floor.py  347  binop  Sub -> Add  # the top probe is pinned to the band edge on the line below, so the spacing cannot move it out
-src/tfidf_stability/analysis/noise_floor.py  347  constant  1 -> 0  # likewise
-src/tfidf_stability/analysis/noise_floor.py  350  compare  LtE -> Lt  # no positive gap lies below tau_floor, so tau = 0 gives the same chains as any tau inside the band
-src/tfidf_stability/analysis/noise_floor.py  350  constant  0.0 -> 1.0  # likewise
+src/tfidf_stability/analysis/noise_floor.py  126  constant  0.0 -> 1.0  # the default fires only if _INSTRUMENTS is empty, which it never is
+src/tfidf_stability/analysis/noise_floor.py  259  constant  True -> False  # both score vectors come from cosine_against_corpus over the same documents
+src/tfidf_stability/analysis/noise_floor.py  305  compare  LtE -> Lt  # n_in_band is zero by the band's definition, as the comment beside it states
+src/tfidf_stability/analysis/noise_floor.py  305  constant  1 -> 0  # counting zero of them either way
+src/tfidf_stability/analysis/noise_floor.py  342  constant  0.0 -> 1.0  # every probe stays inside the band, and the tie structure is constant across it
+src/tfidf_stability/analysis/noise_floor.py  354  binop  Sub -> Add  # the top probe is pinned to the band edge on the line below, so the spacing cannot move it out
+src/tfidf_stability/analysis/noise_floor.py  354  constant  1 -> 0  # likewise
+src/tfidf_stability/analysis/noise_floor.py  357  compare  LtE -> Lt  # no positive gap lies below tau_floor, so tau = 0 gives the same chains as any tau inside the band
+src/tfidf_stability/analysis/noise_floor.py  357  constant  0.0 -> 1.0  # likewise
 
 # --- analysis/stability_profile.py -----------------------------------------
 src/tfidf_stability/analysis/stability_profile.py  207  compare  GtE -> Gt  # at k == n the margin is undefined, so both paths exclude the query
@@ -201,7 +201,7 @@ src/tfidf_stability/cli/main.py  104  constant  False -> True  # argparse always
 src/tfidf_stability/cli/main.py  110  constant  False -> True  # likewise for version
 
 # --- cli/commands.py -------------------------------------------------------
-src/tfidf_stability/cli/commands.py  353  constant  True -> False  # write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
+src/tfidf_stability/cli/commands.py  369  constant  True -> False  # write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
 
 # --- datasets/synthetic.py -------------------------------------------------
 src/tfidf_stability/datasets/synthetic.py  136  constant  1 -> 0  # the quotient reaches zero only above a vocabulary of 2**40 terms
