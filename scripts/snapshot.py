@@ -16,6 +16,15 @@ Usage::
     python scripts/snapshot.py                 # print the digest
     python scripts/snapshot.py --verbose       # print each stage's digest too
     python scripts/snapshot.py --json          # machine-readable
+    python scripts/snapshot.py --check         # compare against the recorded value
+
+``--check`` answers the question the cross-job comparison cannot. That comparison
+proves every platform agrees with every other; it says nothing about whether they
+agree with what was published. A change that moves all of them together -- an
+edited stopword list alters every df, idf and score identically everywhere --
+passes it untouched, and the suite compares runs against each other rather than
+against a recorded value, so it passes there too.
+``configs/pipeline_digest.txt`` is that recorded value.
 """
 
 from __future__ import annotations
@@ -96,11 +105,83 @@ def compute() -> dict[str, str]:
     return stages
 
 
+#: The digests this repository is expected to produce, one stage per line.
+#: See `--check`.
+PINNED = Path(__file__).resolve().parents[1] / "configs" / "pipeline_digest.txt"
+
+
+def _pinned() -> dict[str, str]:
+    """The recorded digests, in the two-column form ``--check`` writes."""
+    recorded: dict[str, str] = {}
+    for line in PINNED.read_text(encoding="utf-8").splitlines():
+        statement, _, _comment = line.partition("#")
+        fields = statement.split()
+        if len(fields) == 2:
+            recorded[fields[0]] = fields[1]
+    return recorded
+
+
+def check() -> list[str]:
+    """Compare the computed digests against the recorded ones, stage by stage.
+
+    `determinism.yml` proves the digest is the *same everywhere*; nothing proved
+    it was the *expected value*. Those are different claims, and only the second
+    catches a change that moves every platform together -- editing the stopword
+    list, say, which alters every df, idf and score identically on all of them.
+    The suite could not catch it either: it compares runs against each other
+    rather than against a pinned value.
+
+    Reported per stage rather than on the overall digest alone, because which
+    stage moved says what changed. `idf` alone points at the logarithm (G13),
+    `preprocessing` at the tokeniser or the word list, `norms` onwards at the
+    reduction policy.
+    """
+    recorded = _pinned()
+    if not recorded:
+        return [f"{PINNED} records no digests; the check would pass vacuously"]
+
+    stages = compute()
+    problems = [
+        f"{name}: expected {recorded[name]}, computed {stages[name]}"
+        for name in sorted(recorded)
+        if name in stages and stages[name] != recorded[name]
+    ]
+    # A stage appearing or disappearing matters as much as one changing value:
+    # either the pipeline grew a step nobody recorded, or a recorded step is no
+    # longer computed and its digest has been standing unchecked.
+    problems += [
+        f"{name}: recorded but no longer computed" for name in sorted(recorded - stages.keys())
+    ]
+    problems += [f"{name}: computed but not recorded" for name in sorted(stages.keys() - recorded)]
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verbose", action="store_true", help="print every stage")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help=f"compare against {PINNED.name} and exit non-zero on any difference",
+    )
     args = parser.parse_args()
+
+    if args.check:
+        problems = check()
+        if problems:
+            print("::error::the pipeline digest has moved", file=sys.stderr)
+            for problem in problems:
+                print(f"  {problem}", file=sys.stderr)
+            print(
+                "\nIf this change was intended, update configs/pipeline_digest.txt "
+                "in the same commit that caused it -- that file is the record of "
+                "which code produced the published numbers.",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"every stage matches {PINNED.name}")
+        return 0
 
     stages = compute()
     if args.json:

@@ -1,0 +1,32 @@
+# The digests this repository is expected to produce, one stage per line.
+#
+# `determinism.yml` proves the digest is the SAME on every platform and build.
+# It cannot prove it is the EXPECTED value: a change that moves every platform
+# together -- editing the frozen stopword list, say, which alters every df, idf
+# and score identically everywhere -- passes that gate untouched. The test suite
+# could not catch it either, because it compares runs against each other rather
+# than against a recorded value. This file is that recorded value.
+#
+# Checked by `python scripts/snapshot.py --check`, which reports per stage, so a
+# difference says what moved:
+#
+#   preprocessing   the tokeniser, the n-gram map, or the stopword list
+#   idf             the logarithm (see docs/spec_addenda.md#g13)
+#   norms onwards   the reduction policy or the scoring kernel
+#   attributes      the tie-break columns or their encoding
+#
+# If a change here is intended, update this file in the same commit that caused
+# it. A digest edited on its own is a record of nothing.
+
+attributes      56c5d2f02eae8f9a4ca10a4c9e1f496b91897c78ebfb711086721860ad712a1f
+container       b38363422a04b2bf0c962d6923a682c63a60e4bfbd1e1679e1ca11ff91c1c2c2
+idf             ce84a38cf8834388aae19b19c4133e43632e0d37f199224f9426f2433b3f671a
+margins         b27d8ae03ddb25a6ae5eecbf594072baedc0d2d92aabb65712031ac41272cfaa
+norms           a5df6e81ffe214da27dcdb18cbd02827cf628d9d2d11e48504eeb87a18906f86
+overall         be6239af8ecf61eba8c20b0e226b7eb0468971e683db6111b20be3d47a85ad68
+preprocessing   ddb0b8c711ee31d87ba33838c815c1804c123de85aa7d08e943eecf2c7d08e9a
+rankings        9a223992bf0ae2576163c860d1c0271fbfc8140ef0a5d6287c7fb9fb67394e9c
+scores          d79429db34ed1531dd490c73081e956e062f09f0d6b4923b6bfc410de02fa424
+structure       0fd4ac072f21a14bb88e1b4a88ebfb55967aeb2d3df37a50e0bf34e14c2fe96c
+vocabulary      ef941d005e859da28fb355df5a9e1e877b2e94a10e6579a5545c77fb566f8c0e
+weights         673b35125ae584f1f7c0c9af73d5e2cca5d1cf744293c60046d6355fadb9eaf7
