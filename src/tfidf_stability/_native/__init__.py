@@ -59,7 +59,14 @@ except ImportError as exc:  # pragma: no cover - depends on whether a build exis
     )
 else:
     _abi = getattr(_loaded, "__abi__", None)
-    if _abi != REQUIRED_ABI:
+    # pragma: no cover on the mismatch arm, for the same reason as the ImportError
+    # arm above: selection happens once, at import, against whichever extension is
+    # on disk. A process that has imported this module cannot replay it against a
+    # differently-versioned build, so the branch is unreachable from a test rather
+    # than merely untested. `test_validation_contracts.py` covers what the
+    # mismatch *causes* -- AbiVersionMismatchError -- by substituting the resolved
+    # state, which is the part a caller can observe.
+    if _abi != REQUIRED_ABI:  # pragma: no cover - needs a stale build on disk
         _ABI_MISMATCH = True
         _REASON = (
             f"the compiled extension reports ABI {_abi!r} but this Python "

@@ -166,7 +166,15 @@ follow_imports = "skip"
 branch = true
 source = ["src/tfidf_stability"]
 omit = [
-  "*/_native/*",
+  # The compiled extension only, not the package beside it. This read
+  # `*/_native/*`, which was aimed at the .pyd and also caught
+  # `_native/__init__.py` -- 44 statements of this project's own Python that
+  # choose the backend, guard the ABI and self-test the floating-point
+  # environment. The repository reported 100% while that file sat at 69%, and
+  # what the gap hid was that `check_float_environment` had no test and no
+  # caller, though it is the guard against a BLAS setting flush-to-zero and
+  # flushing the subnormal margins this project is a study of.
+  "*/_native/_tfidf_native*",
   # Vendored Porter2, already excluded from ruff and mypy for the same reason:
   # it is identified by hash against MANIFEST.sha256, and reformatting it breaks
   # that identity. Covering it would test snowballstemmer 3.1.1, not this project.
