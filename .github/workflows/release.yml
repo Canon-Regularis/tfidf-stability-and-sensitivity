@@ -30,6 +30,15 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# See ci.yml for why these are `-o` settings and not flags: pytest derives
+# verbosity from count(-v) minus count(-q), and every run here passes -q.
+env:
+  PYTEST_ADDOPTS: >-
+    -o verbosity_test_cases=1
+    -o faulthandler_timeout=300
+    -o faulthandler_exit_on_timeout=1
+    --durations=25
+
 jobs:
   sdist:
     name: source distribution

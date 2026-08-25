@@ -25,6 +25,17 @@ concurrency:
   group: nightly-${{ github.ref }}
   cancel-in-progress: false
 
+# See ci.yml for why these are `-o` settings and not flags. The cap is an hour
+# rather than five minutes: this workflow runs Hypothesis at 100,000 examples,
+# where a single property test legitimately runs for many minutes, and a short
+# cap would kill the search this workflow exists to perform.
+env:
+  PYTEST_ADDOPTS: >-
+    -o verbosity_test_cases=1
+    -o faulthandler_timeout=3600
+    -o faulthandler_exit_on_timeout=1
+    --durations=25
+
 jobs:
   mutation:
     name: mutation testing
