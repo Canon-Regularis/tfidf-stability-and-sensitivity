@@ -22,6 +22,8 @@ every feature would quietly stop being lemmatised.
 
 from __future__ import annotations
 
+import unicodedata
+
 import pytest
 
 from tfidf_stability.preprocessing.lemmatise import (
@@ -274,3 +276,101 @@ def test_an_identity_is_stable_across_two_constructions_of_the_same_table() -> N
 
     assert first is not second
     assert lemmatiser_identity(first) == lemmatiser_identity(second)
+
+
+# ---------------------------------------------------------------------------
+# The identity's serialisation is a contract, not an implementation detail
+# ---------------------------------------------------------------------------
+# The tests above compare one identity against another, so they hold whatever
+# canonical form the digest is taken over: change `sort_keys` or `ensure_ascii`
+# in `LookupLemmatiser` and every identity shifts together, leaving all of those
+# assertions true. A mutation campaign said the same thing more precisely --
+# both flags survived every mutant, leaving the module at 60%.
+#
+# They are not free to change. A digest that shifts silently turns every
+# previously recorded identity into a miss: a cache keyed on it re-runs work it
+# already holds, and a manifest compared against an older one reports a
+# difference where the features are identical. That is the same reason
+# `configs/pipeline_digest.txt` holds literals rather than recomputing them.
+#
+# So the literals are pinned here. They are not magic numbers to be refreshed
+# when they fail: a failure means the canonical form moved, and the question to
+# answer is whether every identity this project has recorded was meant to move
+# with it.
+_PINNED_IDENTITIES = {
+    "empty table": (
+        LookupLemmatiser({}),
+        "f4cf92413f98e0975b55412da824873aaa8ae1572901360fa8e83ca98afcc62e",
+    ),
+    "ascii table": (
+        LookupLemmatiser({"cats": "cat", "mice": "mouse"}),
+        "711ea4ce892d7c4ff0c32863ead450c4ebf833156c7aa5960771d59fa9bdc876",
+    ),
+    # Non-ASCII on purpose: it is the only case `ensure_ascii` can be seen from.
+    # Under `ensure_ascii=True` the table serialises as escape sequences instead
+    # of the characters themselves, giving a different digest for the same
+    # mapping -- and every other test in this file would still pass.
+    "non-ascii table": (
+        LookupLemmatiser({"café": "cafe", "naïve": "naive"}),
+        "efa0acd32e054aa157801d0207e75a6460eb201dc96977d5939bf9ad3dfd25d7",
+    ),
+    "table with a stemming fallback": (
+        LookupLemmatiser({"cats": "cat"}, fallback=Porter2Stemmer()),
+        "a9add8e75a9c513543a761fafd61c624c78dcb659c8645c03fb6d873bdfbd765",
+    ),
+}
+
+
+def test_the_recorded_identity_of_a_known_table_is_the_value_this_repository_pins() -> None:
+    """Four tables, four digests, fixed. See the comment above for why literals.
+
+    The count is asserted outside the loop, so a case quietly dropped from the
+    table fails rather than shrinking the sweep.
+    """
+    checked = 0
+    for name, (lemmatiser, expected) in _PINNED_IDENTITIES.items():
+        assert lemmatiser.digest == expected, f"{name}: the canonical form moved"
+        assert lemmatiser_identity(lemmatiser) == f"lookup:{expected}", f"{name}: identity"
+        checked += 1
+
+    assert checked == 4, "every pinned case was exercised"
+
+
+def test_a_table_holding_the_same_mapping_written_differently_digests_the_same() -> None:
+    """The property those literals exist to protect, stated directly.
+
+    Insertion order is not part of a mapping, so it must not be part of the
+    identity -- otherwise two runs reading the same table file in a different
+    order would disagree about whether they are the same experiment. This is
+    what `sort_keys=True` buys, and it is asserted here rather than inferred
+    from the flag.
+    """
+    forwards = LookupLemmatiser({"cats": "cat", "mice": "mouse"})
+    backwards = LookupLemmatiser({"mice": "mouse", "cats": "cat"})
+
+    assert list(forwards._table) != list(backwards._table), "the premise: order differs"
+    assert forwards.digest == backwards.digest
+    assert forwards.digest == _PINNED_IDENTITIES["ascii table"][1]
+
+
+def test_a_non_ascii_table_is_digested_as_its_characters_rather_than_as_escapes() -> None:
+    """`ensure_ascii=False`, asserted rather than assumed.
+
+    Two tables carrying the same accented key in the two Unicode normal forms
+    are different mappings -- NFC's single code point against NFD's letter plus
+    combining accent -- so they must have different identities. Normalisation is
+    the pipeline's job, upstream of this; the digest reports the table it was
+    handed. Under `ensure_ascii=True` both still differ, which is why the
+    literal above carries the rest of the contract.
+    """
+    composed = unicodedata.normalize("NFC", "café")
+    decomposed = unicodedata.normalize("NFD", "café")
+
+    assert composed != decomposed, "the premise: two spellings of one word"
+    assert LookupLemmatiser({composed: "cafe"}).digest != (
+        LookupLemmatiser({decomposed: "cafe"}).digest
+    )
+    assert (
+        LookupLemmatiser({composed: "cafe", "naïve": "naive"}).digest
+        == (_PINNED_IDENTITIES["non-ascii table"][1])
+    ), "and the pinned case is the composed form, as written in this file"
