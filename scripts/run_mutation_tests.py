@@ -361,8 +361,23 @@ def main() -> int:
 
     elapsed = time.monotonic() - started
     scored = killed + len(survivors)
-    score = 100.0 * killed / scored if scored else 100.0
     print(f"\n{killed} killed, {len(survivors)} survived, {skipped} skipped in {elapsed:.0f}s")
+
+    if scored == 0:
+        # `100.0% (0 killed, 0 survived)` is what a campaign prints when it
+        # mutated nothing: a module with no mutable sites, a `--max-mutants 0`
+        # typo, or every mutant timing out and being skipped. The old expression
+        # was `score = ... if scored else 100.0`, so the emptiest possible run
+        # reported the best possible score and exited 0. A gate that reports
+        # perfection for having done nothing is worse than one that fails.
+        print(
+            f"::error::no mutant was scored for {relative}: {skipped} skipped. "
+            f"This gate proved nothing.",
+            file=sys.stderr,
+        )
+        return 2
+
+    score = 100.0 * killed / scored
     print(f"mutation score: {score:.1f}%")
     if survivors:
         print("\nEach survivor is behaviour no test asserts:", file=sys.stderr)
