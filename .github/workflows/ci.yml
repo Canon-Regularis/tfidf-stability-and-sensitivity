@@ -16,6 +16,34 @@ on:
 permissions:
   contents: read
 
+# What every pytest invocation in this workflow reports, set once.
+#
+# Written as `-o` settings rather than flags because pytest derives verbosity
+# from count(-v) minus count(-q), and every run here passes -q: a `-v` added
+# here would cancel against it and leave the output quieter than before.
+# Measured, not assumed.
+#
+#   verbosity_test_cases=1  names each test as it starts, so the last line of a
+#                           truncated log is the test that hung. A property test
+#                           hung one matrix cell for 47 minutes; the log held
+#                           only progress dots, and finding the cell meant
+#                           comparing job durations across nine legs.
+#   faulthandler_timeout    dumps a stack trace for every thread after 300s in
+#                           one test and, with exit_on_timeout, ends the run
+#                           there. pytest ships this; pytest-timeout is not
+#                           needed, and no dependency is added.
+#   --durations=25          prints the slowest 25, so the outlier is in the log
+#                           rather than reconstructed from the job list.
+#
+# The cap is per test, well under every job-level timeout-minutes, so it fires
+# first and leaves a diagnosis behind instead of a cancelled job.
+env:
+  PYTEST_ADDOPTS: >-
+    -o verbosity_test_cases=1
+    -o faulthandler_timeout=300
+    -o faulthandler_exit_on_timeout=1
+    --durations=25
+
 # bash on every runner, including Windows, where the default is pwsh.
 #
 # GitHub runs bash with `set -eo pipefail`, so a failed command aborts the step.
@@ -113,6 +141,13 @@ jobs:
         run: python -m pytest tests/ -q -k "hash_seed or determinism or reproducib"
         env:
           PYTHONHASHSEED: random
+          # A step's `env:` applies to that step alone. HYPOTHESIS_PROFILE was
+          # set on the step above, so this one saw no profile and conftest.py
+          # fell back to its default of `dev`: 50 examples against the 1,000 the
+          # run above uses. The selection here is 105 tests, several of them
+          # property tests, and they were being searched twenty times less hard
+          # than in the preceding step, silently.
+          HYPOTHESIS_PROFILE: ci
 
   native:
     name: native ${{ matrix.os }} py${{ matrix.python }}
