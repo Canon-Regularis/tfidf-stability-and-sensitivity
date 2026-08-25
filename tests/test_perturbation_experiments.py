@@ -305,3 +305,105 @@ def test_a_corpus_of_identical_documents_moves_every_score_together() -> None:
     untouched = [report.score_after[d] for d in report.score_after if d != "d0"]
     assert len(set(untouched)) == 1, "documents that are exact copies must still tie after the edit"
     assert report.all_bounds_hold
+
+
+# ---------------------------------------------------------------------------
+# An edit that changes the corpus size has no certificate at any k
+# ---------------------------------------------------------------------------
+# Section 4.4 bounds how far the scores of *existing* documents move, and
+# `max_score_shift` measures exactly that: the maximum over documents present on
+# both sides. A document that did not exist in the "before" ranking is outside
+# both, so it can take rank 1 however little the survivors moved.
+def _displacing_add() -> tuple[object, object]:
+    """A corpus and an added document that matches the query exactly.
+
+    Local by house convention. Five documents on distinct topics so the scores
+    separate cleanly, and the addition is a perfect match, so it outranks the
+    incumbent while the surviving scores move only by the change in N.
+    """
+    corpus = (
+        ("d0", "d1", "d2", "d3", "d4"),
+        (
+            ["alpha", "beta", "gamma"],
+            ["delta", "epsilon"],
+            ["zeta", "eta"],
+            ["theta", "iota"],
+            ["kappa", "lambda"],
+        ),
+    )
+    return corpus, add_document(corpus, "NEW", ["alpha", "beta"])
+
+
+def test_an_added_document_can_take_rank_one_while_every_survivor_barely_moves() -> None:
+    """The premise, measured. Without it the guard below is protecting nothing.
+
+    The surviving scores move by about 0.06 -- only because N changed, which
+    moves every idf -- and that is well inside the certified radius at k=1. The
+    added document scores 1.0 and takes the rank outright.
+    """
+    corpus, (perturbed, edit) = _displacing_add()
+    report = run_perturbation(corpus, perturbed, edit, ("alpha", "beta"), ks=(1, 2))
+
+    before = sorted(report.score_before.items(), key=lambda kv: -kv[1])
+    after = sorted(report.score_after.items(), key=lambda kv: -kv[1])
+
+    assert before[0][0] == "d0"
+    assert after[0][0] == "NEW", "the addition takes rank 1"
+    assert report.max_score_shift < 0.1, "while no surviving score moved far"
+
+
+@pytest.mark.parametrize(
+    ("label", "make"),
+    [
+        ("adding", lambda c: add_document(c, "NEW", ["alpha", "beta"])),
+        ("removing", lambda c: remove_document(c, "d1")),
+        ("duplicating", lambda c: duplicate_document(c, "d0", "copy")),
+    ],
+)
+def test_an_edit_that_changes_the_corpus_size_certifies_nothing(label: str, make: object) -> None:
+    """`None`, never `True`.
+
+    This returned `True` for the adding case: `max_score_shift` was inside the
+    k=1 radius, so the comparison passed, while the top-1 set went from `{d0}`
+    to the new document. `True` is documented as a proof and section 7.2 uses it
+    as a certificate of stability, so that was a false proof -- worse than no
+    proof, because `False` and `None` both invite a check and `True` ends the
+    enquiry.
+
+    Removal is the same hole from the other side: a document can leave the top-k
+    without any score moving at all.
+    """
+    corpus = (
+        ("d0", "d1", "d2", "d3", "d4"),
+        (
+            ["alpha", "beta", "gamma"],
+            ["delta", "epsilon"],
+            ["zeta", "eta"],
+            ["theta", "iota"],
+            ["kappa", "lambda"],
+        ),
+    )
+    perturbed, edit = make(corpus)  # type: ignore[operator]
+    report = run_perturbation(corpus, perturbed, edit, ("alpha", "beta"), ks=(1, 2, 3))
+
+    assert edit.changes_corpus_size is True, "the premise of the guard"
+    for k in (1, 2, 3):
+        assert report.certified_stable(k) is None, f"{label} certified k={k}"
+
+
+def test_an_edit_that_keeps_the_corpus_size_still_certifies() -> None:
+    """The guard must not swallow the case section 4.4 does cover.
+
+    Replacing a document's features perturbs existing scores and leaves the
+    candidate set alone, which is exactly the hypothesis of the theorem, so a
+    verdict is still available here -- otherwise the fix would have removed the
+    certificate rather than corrected it.
+    """
+    corpus = corpus_of(10)
+    _ids, docs = corpus
+    perturbed, edit = edit_document(corpus, "d5", docs[5])
+    report = run_perturbation(corpus, perturbed, edit, ("alpha", "beta"), ks=(1, 2, 3))
+
+    assert edit.changes_corpus_size is False
+    verdicts = [report.certified_stable(k) for k in (1, 2, 3)]
+    assert any(v is True for v in verdicts), "the certificate is still reachable"

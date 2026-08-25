@@ -66,9 +66,25 @@ class PerturbationReport:
         matters: ``True`` is a proof, while ``False`` says only that the
         certificate does not cover this perturbation, and the ranking may be
         unchanged anyway. Section 7.2 uses these as certificates of stability.
+
+        An edit that changes the corpus size has no certificate at any ``k``.
+        Section 4.4 bounds how far the scores of *existing* documents move, and
+        :attr:`max_score_shift` measures exactly that -- over the documents
+        present on both sides. A document that did not exist in the "before"
+        ranking is outside both, so it can take rank 1 however little the
+        survivors moved, and a removal drops a document out of the top-k without
+        moving any score at all.
+
+        Measured before this guard existed: adding a document matching the query
+        exactly moved the surviving scores by 0.059, inside the k=1 radius, and
+        this returned ``True`` while the top-1 set went from ``{d0}`` to the new
+        document. That is a false proof, which is worse here than no proof --
+        ``False`` and ``None`` both invite a check, and ``True`` ends the
+        enquiry.
         """
         if self.edit.changes_corpus_size:
             return None
+
         for cert in self.certificates_before:
             if cert.k == k:
                 if not cert.defined:
