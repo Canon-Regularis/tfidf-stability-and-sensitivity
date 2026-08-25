@@ -21,6 +21,8 @@ from hypothesis import strategies as st
 from tfidf_stability.preprocessing.lemmatise import (
     IdentityLemmatiser,
     LemmatiserKind,
+    LookupLemmatiser,
+    Porter2Stemmer,
     make_lemmatiser,
     porter2_stem,
 )
@@ -865,3 +867,91 @@ def test_the_offsets_point_at_the_token_they_describe() -> None:
 
     for token in tokenise_with_offsets(text):
         assert text[token.start : token.end] == token.text
+
+
+# ---------------------------------------------------------------------------
+# The pipeline digest binds the lemmatiser by content, not by its backend name
+# ---------------------------------------------------------------------------
+def test_three_pipelines_producing_three_feature_streams_have_three_digests() -> None:
+    """The digest binds what the map does, and the backend name is not that.
+
+    ``PreprocessingPipeline.digest`` already covered the injected-lemmatiser
+    hole, but bound the override to ``Lemmatiser.name``. For
+    ``LookupLemmatiser`` that is the constant ``"lookup"`` on every instance
+    while the output comes from a table handed in at construction, so the fix
+    covered only the case where the *kind* differed.
+
+    Measured before this: the three pipelines below map "the cats running" to
+    ``cat|running``, ``feline|running`` and ``cat|run``, and all three reported
+    ``88ba29504223faaf...``. A cache keyed on that digest serves one run's
+    features for another's, which is the failure the method exists to prevent.
+    """
+    config = PreprocessingConfig()
+    pipelines = {
+        "table maps to cat": PreprocessingPipeline(
+            config, lemmatiser=LookupLemmatiser({"cats": "cat"})
+        ),
+        "table maps to feline": PreprocessingPipeline(
+            config, lemmatiser=LookupLemmatiser({"cats": "feline"})
+        ),
+        "same table, stemming fallback": PreprocessingPipeline(
+            config, lemmatiser=LookupLemmatiser({"cats": "cat"}, fallback=Porter2Stemmer())
+        ),
+    }
+
+    features = {name: tuple(p.preprocess("the cats running")) for name, p in pipelines.items()}
+    digests = {name: p.digest() for name, p in pipelines.items()}
+
+    assert len(set(features.values())) == 3, f"the premise: three distinct maps, got {features}"
+    assert len(set(digests.values())) == 3, f"three maps must have three identities, got {digests}"
+
+
+def test_a_lookup_table_is_bound_even_when_the_config_already_names_that_kind() -> None:
+    """The half the ``==`` short-circuit hid.
+
+    The override was skipped whenever the injected backend's name matched the
+    config's, which is sound only where the name is the whole identity. With
+    ``LemmatiserKind.LOOKUP`` in the config both sides read ``"lookup"``, so
+    nothing was bound at all and every table shared one digest -- the same
+    defect, reached by the opposite branch.
+    """
+    config = PreprocessingConfig(lemmatiser=LemmatiserKind.LOOKUP)
+    one = PreprocessingPipeline(config, lemmatiser=LookupLemmatiser({"cats": "cat"}))
+    other = PreprocessingPipeline(config, lemmatiser=LookupLemmatiser({"cats": "feline"}))
+
+    assert one.lemmatiser.name == other.lemmatiser.name == str(config.lemmatiser)
+    assert one.digest() != other.digest()
+
+
+def test_the_digest_of_a_config_only_pipeline_is_unmoved_by_binding_content() -> None:
+    """No recorded digest changes, which is what makes this a fix and not a break.
+
+    The short-circuit still applies to the two backends whose class fixes their
+    output, so a pipeline built from a config alone -- every current caller --
+    digests exactly as it did. Asserted against the config's own digest rather
+    than a literal, so the two cannot drift apart silently.
+    """
+    config = PreprocessingConfig()
+    from_config = PreprocessingPipeline(config)
+    injected_same = PreprocessingPipeline(config, lemmatiser=make_lemmatiser(config.lemmatiser))
+
+    expected = config.digest(stopword_digest=from_config.stopwords.digest)
+
+    assert from_config.digest() == expected, "no override key is added when none is needed"
+    assert injected_same.digest() == expected, "and injecting the config's own backend is a no-op"
+
+
+def test_injecting_a_different_kind_still_moves_the_digest_by_its_bare_name() -> None:
+    """The behaviour the previous fix established, kept intact by this one.
+
+    ``IdentityLemmatiser`` carries no content, so its override stays the bare
+    ``"none"`` -- not ``"none:<sha>"`` -- and any digest recorded for such a run
+    still matches.
+    """
+    config = PreprocessingConfig()
+    injected = PreprocessingPipeline(config, lemmatiser=make_lemmatiser(LemmatiserKind.NONE))
+
+    assert injected.digest() == config.digest(
+        stopword_digest=injected.stopwords.digest, lemmatiser_override="none"
+    )
+    assert injected.digest() != PreprocessingPipeline(config).digest()

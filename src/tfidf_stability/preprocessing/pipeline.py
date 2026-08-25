@@ -30,6 +30,7 @@ from typing import Any
 from tfidf_stability.preprocessing.lemmatise import (
     Lemmatiser,
     LemmatiserKind,
+    lemmatiser_identity,
     make_lemmatiser,
 )
 from tfidf_stability.preprocessing.ngrams import JOINER, generate_ngrams
@@ -188,9 +189,32 @@ class PreprocessingPipeline:
         turn "running cats" into ``run|cat`` and ``running|cats``, hashed to the
         same string. The sibling ``stopwords=`` injection was always bound by
         content. No current caller injects, so no recorded digest changes.
+
+        Bound by :func:`~tfidf_stability.preprocessing.lemmatise.lemmatiser_identity`
+        rather than by ``Lemmatiser.name``, because for
+        :class:`~tfidf_stability.preprocessing.lemmatise.LookupLemmatiser` the
+        name is the constant ``"lookup"`` while the output comes from a table
+        handed in at construction. Reading the name bound all such pipelines to
+        one digest: three of them producing ``cat|running``, ``feline|running``
+        and ``cat|run`` from the same input reported the same identity, which is
+        the failure this whole method exists to prevent, one field further in.
+
+        A backend carrying content is bound *unconditionally*, not only when it
+        disagrees with the config. The ``==`` short-circuit is sound exactly when
+        the name is the whole identity, and it was the second half of the same
+        hole: ``lemmatiser=LOOKUP`` in the config plus an injected table matched
+        by name and so bound nothing at all.
+
+        Recorded digests are unmoved. The short-circuit still applies to
+        :class:`IdentityLemmatiser` and :class:`Porter2Stemmer`, whose output is
+        fixed by their class, and no config-only route to a lookup pipeline
+        exists: :func:`make_lemmatiser` refuses that kind without a table.
         """
-        effective = self._lemmatiser.name
-        override = None if effective == str(self.config.lemmatiser) else effective
+        identity = lemmatiser_identity(self._lemmatiser)
+        if identity == self._lemmatiser.name and identity == str(self.config.lemmatiser):
+            override = None
+        else:
+            override = identity
         return self.config.digest(
             stopword_digest=self._stopwords.digest, lemmatiser_override=override
         )

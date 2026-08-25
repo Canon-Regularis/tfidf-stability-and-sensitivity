@@ -29,6 +29,7 @@ from tfidf_stability.preprocessing.lemmatise import (
     LemmatiserKind,
     LookupLemmatiser,
     Porter2Stemmer,
+    lemmatiser_identity,
     make_lemmatiser,
     porter2_stem,
 )
@@ -189,3 +190,87 @@ def test_the_porter2_backend_preserves_the_gap_sentinel() -> None:
 def test_every_backend_applies_elementwise_over_an_empty_token_list() -> None:
     for backend in (IdentityLemmatiser(), Porter2Stemmer(), LookupLemmatiser({})):
         assert backend.apply([]) == []
+
+
+# ---------------------------------------------------------------------------
+# Identity: the name says which backend, not which instance of it
+# ---------------------------------------------------------------------------
+# `test_the_three_backend_names_are_distinct` above states the invariant a run
+# manifest depends on -- a shared name makes two different preprocessing maps
+# indistinguishable. It holds across the three kinds and failed within one of
+# them: `name` is a class attribute on `LookupLemmatiser`, whose answers come
+# from a table handed in at construction.
+def test_two_lookup_tables_that_disagree_have_different_identities() -> None:
+    """The within-kind case of the invariant one test up.
+
+    Both instances report ``name == "lookup"``, because the name says which
+    backend and these are the same backend. What differs is the table, and the
+    table is what produces the features -- so the identity a manifest records
+    has to differ too.
+    """
+    cat = LookupLemmatiser({"cats": "cat"})
+    feline = LookupLemmatiser({"cats": "feline"})
+
+    assert cat("cats") != feline("cats"), "the premise: these produce different features"
+    assert cat.name == feline.name == "lookup", "and the name cannot tell them apart"
+    assert lemmatiser_identity(cat) != lemmatiser_identity(feline)
+
+
+def test_the_fallback_is_part_of_the_identity_and_not_only_the_table() -> None:
+    """Two instances with the same table, differing only in what handles a miss.
+
+    On a real corpus most tokens miss the table, so the fallback decides most
+    features. An identity covering the table alone would be the same defect one
+    constructor argument along.
+    """
+    identical_table = {"cats": "cat"}
+    passthrough = LookupLemmatiser(identical_table)
+    stemming = LookupLemmatiser(identical_table, fallback=Porter2Stemmer())
+
+    assert passthrough("running") != stemming("running"), (
+        "the premise: a table miss is handled differently"
+    )
+    assert passthrough("cats") == stemming("cats") == "cat", "while a hit is not"
+    assert lemmatiser_identity(passthrough) != lemmatiser_identity(stemming)
+
+
+def test_the_same_table_gives_the_same_identity_whatever_order_it_was_built_in() -> None:
+    """An identity, not a fingerprint of the construction.
+
+    A digest over `dict` insertion order would make a manifest depend on how the
+    table's file happened to be read, so two runs of the same experiment could
+    disagree for no reason a reader could act on. The canonical sorted form is
+    what removes that.
+    """
+    forwards = LookupLemmatiser({"cats": "cat", "mice": "mouse", "geese": "goose"})
+    backwards = LookupLemmatiser({"geese": "goose", "mice": "mouse", "cats": "cat"})
+
+    assert list(forwards._table) != list(backwards._table), "the premise: insertion order differs"
+    assert lemmatiser_identity(forwards) == lemmatiser_identity(backwards)
+
+
+def test_a_backend_whose_class_fixes_its_output_is_identified_by_name_alone() -> None:
+    """The contrast, and the reason `digest` is absent from the Protocol.
+
+    `IdentityLemmatiser` and `Porter2Stemmer` take no arguments that can change
+    an answer -- Porter2's memo is a cache over a pure function -- so for them
+    the name already is the whole identity, and qualifying it would move every
+    digest this project has recorded for no gain.
+    """
+    for backend, expected in ((IdentityLemmatiser(), "none"), (Porter2Stemmer(), "porter2")):
+        assert lemmatiser_identity(backend) == expected
+        assert not hasattr(backend, "digest"), f"{expected} needs no content digest"
+
+    assert lemmatiser_identity(LookupLemmatiser({})).startswith("lookup:"), (
+        "while the backend that does need one says so in its identity"
+    )
+
+
+def test_an_identity_is_stable_across_two_constructions_of_the_same_table() -> None:
+    """Two processes fitting the same experiment must agree, so the digest cannot
+    depend on anything per-instance such as an object address."""
+    first = LookupLemmatiser({"cats": "cat"}, fallback=Porter2Stemmer())
+    second = LookupLemmatiser({"cats": "cat"}, fallback=Porter2Stemmer())
+
+    assert first is not second
+    assert lemmatiser_identity(first) == lemmatiser_identity(second)

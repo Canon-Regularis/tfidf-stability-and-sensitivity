@@ -21,6 +21,8 @@ true lemmas.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Sequence
 from enum import Enum
 from typing import Protocol, runtime_checkable
@@ -34,6 +36,7 @@ __all__ = [
     "LemmatiserKind",
     "LookupLemmatiser",
     "Porter2Stemmer",
+    "lemmatiser_identity",
     "make_lemmatiser",
     "porter2_stem",
 ]
@@ -52,9 +55,20 @@ class LemmatiserKind(str, Enum):
 
 @runtime_checkable
 class Lemmatiser(Protocol):
-    """The contract every backend satisfies."""
+    """The contract every backend satisfies.
 
-    #: Stable identity of this backend, recorded in the run manifest.
+    ``name`` says which backend. It is a complete identity only for a
+    backend whose output is fixed by its class -- true of
+    :class:`IdentityLemmatiser` and :class:`Porter2Stemmer`, false of
+    :class:`LookupLemmatiser`, whose answers come from a table handed in at
+    construction. A backend in that position also carries a ``digest``
+    attribute; :func:`lemmatiser_identity` is what callers should read, and
+    ``digest`` is deliberately absent from this Protocol so that adding one to a
+    backend is not a breaking change for the two that need none.
+    """
+
+    #: Which backend this is, recorded in the run manifest. Not necessarily the
+    #: whole identity: see the class docstring.
     name: str
 
     def __call__(self, token: str) -> str:
@@ -123,6 +137,13 @@ class LookupLemmatiser:
 
     The table comes from a frozen, hash-verified asset, so the mapping is part of
     the run's recorded provenance instead of an ambient property of the machine.
+
+    Unlike its two siblings this backend is *stateful in a way that changes
+    results*: ``name`` is the class-level string ``"lookup"`` on every
+    instance, while the output is a function of ``table`` and ``fallback``. So it
+    carries a ``digest`` as well, and the two fields answer different
+    questions -- which backend, and which instance of it. See the class comment
+    on :class:`Lemmatiser` for who reads it.
     """
 
     name = "lookup"
@@ -130,6 +151,20 @@ class LookupLemmatiser:
     def __init__(self, table: dict[str, str], fallback: Lemmatiser | None = None) -> None:
         self._table = table
         self._fallback: Lemmatiser = fallback or IdentityLemmatiser()
+        #: SHA-256 over everything that can change this instance's output: the
+        #: table in canonical sorted form, and the fallback's own identity.
+        #: The fallback matters as much as the table -- it handles every token
+        #: the table misses, which on a real corpus is most of them.
+        payload = json.dumps(
+            {
+                "table": dict(sorted(table.items())),
+                "fallback": lemmatiser_identity(self._fallback),
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        self.digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def __call__(self, token: str) -> str:
         hit = self._table.get(token)
@@ -149,3 +184,18 @@ def make_lemmatiser(kind: LemmatiserKind | str = LemmatiserKind.PORTER2) -> Lemm
     raise ValueError(
         f"the {k.value!r} backend needs an explicit table; construct LookupLemmatiser directly"
     )
+
+
+def lemmatiser_identity(lemmatiser: Lemmatiser) -> str:
+    """Everything about ``lemmatiser`` that can change a feature stream.
+
+    ``"porter2"`` for a backend the name fully identifies, ``"lookup:<sha256>"``
+    for one it does not. Callers recording provenance -- the run manifest by way
+    of :meth:`PreprocessingPipeline.digest` -- must use this rather than
+    ``Lemmatiser.name``. Measured before it existed: three pipelines mapping
+    "the cats running" to ``cat|running``, ``feline|running`` and ``cat|run``
+    all reported the digest ``88ba29504223faaf...``, so a cache keyed on it
+    would serve one run's features for another's.
+    """
+    content = getattr(lemmatiser, "digest", None)
+    return lemmatiser.name if content is None else f"{lemmatiser.name}:{content}"
