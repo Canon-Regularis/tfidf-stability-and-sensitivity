@@ -138,12 +138,27 @@ def stratify_by_margin(
     buckets: dict[tuple[str, int], list[OperatorPair]] = {
         (label, k): [] for label in labels for k in ks
     }
+    # `pair.margin.k`, not `pair.k`. An OperatorPair carries two k values, not
+    # one: `ablate_query` builds `comparison` at `k_eff = min(k, N)` and `margin`
+    # at the requested `k`, and `pair.k` forwards the former. Above N they
+    # diverge, and `ablate_query`'s own `mode` argument calls a k larger than the
+    # corpus "a legitimate grid point in a sweep rather than a configuration
+    # error", so this is a supported input rather than a misuse.
+    #
+    # The band comes from the margin, so the bucket must too. Reading `pair.k`
+    # lost pairs two ways. Where the clamped value was itself in `ks` they
+    # merged: 10 documents under the default grid put k=10, 20 and 50 all in
+    # bucket 10, which reported n=3 while 20 and 50 reported n=0 -- a
+    # disagreement rate whose denominator is threefold and drawn from other grid
+    # points. Where it was not in `ks` the same expression acted as a filter and
+    # dropped them: 8 documents under (5, 10, 20) clamp to 8, and 2 of 3 pairs
+    # were discarded, so the totals reconciled to 1 where the query supplied 3.
     for result in results:
         for pair in result.pairs:
-            if pair.baseline != baseline or pair.variant != variant or pair.k not in ks:
+            if pair.baseline != baseline or pair.variant != variant or pair.margin.k not in ks:
                 continue
             label = _band_of(pair.margin.value, pair.margin.defined, bands)
-            buckets[(label, pair.k)].append(pair)
+            buckets[(label, pair.margin.k)].append(pair)
 
     strata: list[Stratum] = []
     for k in ks:

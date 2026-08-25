@@ -14,6 +14,7 @@ asserted rather than assumed.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from itertools import pairwise
 
@@ -22,6 +23,7 @@ import pytest
 from tfidf_stability.analysis.stratify import (
     EXACT_TIE_BAND,
     UNDEFINED_BAND,
+    Stratum,
     _band_of,
     margin_bands,
     stratify_by_margin,
@@ -232,6 +234,68 @@ def test_every_pair_lands_in_exactly_one_band() -> None:
     strata = stratify_by_margin(results, tau=0.1, variant="pi_alt", ks=KS)
     for k in KS:
         assert sum(s.n for s in strata if s.k == k) == len(results)
+
+
+# ---------------------------------------------------------------------------
+# Boundary: a k larger than the corpus, which ablate_query calls a legitimate
+# grid point rather than a configuration error
+# ---------------------------------------------------------------------------
+def test_a_k_larger_than_the_corpus_is_stratified_under_the_k_that_was_asked_for() -> None:
+    """Two ``k`` values above ``N`` are two strata, not one stratum counted twice.
+
+    ``ablate_query`` builds each pair from two ``k`` values, not one:
+    ``comparison`` is taken at ``k_eff = min(k, N)`` and ``margin`` at the
+    requested ``k``. Above ``N`` those diverge, and ``stratify_by_margin`` reads
+    the margin's band while previously keying the bucket off the comparison --
+    so every ``k`` above ``N`` collapsed onto the single bucket ``N``.
+
+    Ten documents under the default grid is the live case: 20 and 50 both clamp
+    to 10, so the ``k=10`` stratum reported ``n=3`` -- its own pair plus two
+    belonging to other ``k`` values -- while ``k=20`` and ``k=50`` reported
+    ``n=0``. A disagreement rate is ``n_disagree / n``, so that is a denominator
+    inflated threefold by data from a different grid point, and two grid points
+    published as "no evidence" while holding evidence.
+    """
+    table = table_of([9, 3, 7, 1, 8, 2, 6, 4, 5, 0])
+    results = ablate_queries([("a", [0.9, 0.9, 0.8, 0.75, 0.6, 0.6, 0.5, 0.4, 0.3, 0.1])], table)
+    above = (20, 50)
+
+    strata = stratify_by_margin(results, tau=1e-9, ks=(5, 10, *above))
+
+    for k in (10, *above):
+        placed = [s for s in strata if s.k == k and s.n]
+        assert len(placed) == 1, f"k={k}: exactly one band holds this query's single pair"
+        assert placed[0].n == 1, (
+            f"k={k}: n={placed[0].n} means pairs from another k were counted here"
+        )
+        assert placed[0].label == UNDEFINED_BAND, (
+            f"k={k}: k >= N, so m_k has no r_(k+1) and the margin is undefined"
+        )
+
+
+def test_no_pair_is_dropped_when_the_clamped_k_is_absent_from_the_requested_set() -> None:
+    """The silent half of the same defect: a filter, not merely a mislabel.
+
+    The bucket key was also the filter -- ``pair.k not in ks: continue`` -- so
+    where the clamped ``k`` is not itself a requested grid point the pair matched
+    no bucket and was discarded rather than misplaced. Eight documents under
+    ``(5, 10, 20)`` clamp to 8, which is not in that set, and two of the three
+    pairs vanished: the totals reconciled to 1 where the query supplied 3.
+
+    Contrastive with the test above, where the clamped value *was* in ``ks`` and
+    the pairs were silently merged instead. One defect, two ways of losing.
+    """
+    table = table_of([9, 3, 7, 1, 8, 2, 6, 4])
+    results = ablate_queries([("a", [0.9, 0.9, 0.8, 0.75, 0.6, 0.6, 0.5, 0.1])], table)
+    ks = (5, 10, 20)
+
+    strata = stratify_by_margin(results, tau=1e-9, ks=ks)
+
+    assert sum(s.n for s in strata) == len(ks), (
+        "one query, one pair per requested k, every one of them placed"
+    )
+    for k in ks:
+        assert sum(s.n for s in strata if s.k == k) == 1, f"k={k} lost its pair"
 
 
 def test_stratify_rejects_a_negative_tau() -> None:
@@ -462,3 +526,37 @@ def test_the_rate_matches_on_all_three_of_operator_pair_and_k() -> None:
         rate, count = disagreement_rate(results, baseline, variant, k)
         assert (rate, count) == (0.0, 0), f"({baseline}, {variant}, k={k}) matched something"
     assert matched in (0.0, 1.0)
+
+
+def test_a_stratum_cannot_be_edited_after_it_is_measured() -> None:
+    """A published cell of table A2, so an editable one is a rewritable result.
+
+    `n` and `n_disagree` are the numerator and denominator of the disagreement
+    rate section 7.3 reports, and a Stratum travels into a run manifest. Nothing
+    downstream re-derives them, so a caller that could assign to either could
+    change a published rate after the fact and leave the digest agreeing with it.
+
+    Both halves of `@dataclass(frozen=True, slots=True)` are asserted, because
+    both are mutable sites a mutation campaign flips and neither was pinned:
+    `frozen=True -> False` and `slots=True -> False` were the only undocumented
+    survivors on this module. Documenting them as equivalent would have been
+    wrong -- they are detectable, which is what this test does.
+    """
+    stratum = Stratum(
+        label="(0, tau/100]",
+        k=5,
+        lo=0.0,
+        hi=1e-11,
+        n=4,
+        n_disagree=1,
+        mean_fks=0.25,
+        mean_jaccard=0.75,
+    )
+
+    assert stratum.disagreement_rate == 0.25, "the premise: it reports a rate from these two"
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign to field 'n'"):
+        stratum.n = 400  # type: ignore[misc]
+    denominator = "cannot assign to field 'n_disagree'"
+    with pytest.raises(dataclasses.FrozenInstanceError, match=denominator):
+        stratum.n_disagree = 0  # type: ignore[misc]
+    assert not hasattr(stratum, "__dict__"), "slots=True: no ad-hoc attributes either"
