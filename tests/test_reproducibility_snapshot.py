@@ -209,6 +209,98 @@ def test_the_manifest_digest_ignores_volatile_fields() -> None:
     assert a.digest() == b.digest()
 
 
+def test_the_manifest_digest_agrees_across_machines_and_not_only_across_clocks() -> None:
+    """The "different machines" half of the sentence above, actually exercised.
+
+    Its sibling builds both manifests in one process, so ``environment_block()``
+    returns byte-identical dictionaries and only the time-varying half is tested.
+    Substituting a foreign environment block is what makes the claim falsifiable,
+    and it did falsify it: ``environment["platform"]`` is ``platform.platform()``
+    including the operating system build number, so the digest moved between any
+    two machines -- and on one machine, across an OS update.
+
+    The substituted block is a real one, a Linux CI leg of the shape
+    ``determinism.yml`` runs. That workflow requires one identical pipeline
+    digest across 18 legs, which is the repository asserting in the strongest
+    form available that these three keys move no number.
+    """
+    base = {"run_kind": "stability_profile", "parameters": {"tau": 1e-9, "ks": [5, 10]}}
+    here = RunManifest(**base)  # type: ignore[arg-type]
+    there = RunManifest(**base)  # type: ignore[arg-type]
+    there.environment = {
+        **there.environment,
+        "platform": "Linux-6.8.0-51-generic-x86_64-with-glibc2.39",
+        "machine": "x86_64",
+        "python": "3.12.7",
+    }
+
+    assert there.environment != here.environment, "the premise: a genuinely foreign machine"
+    assert there.environment["float"] == here.environment["float"], (
+        "and one whose arithmetic is the same, which is why the digests must agree"
+    )
+    assert here.digest() == there.digest()
+
+
+def test_each_machine_identifying_key_is_stripped_from_the_digest_on_its_own() -> None:
+    """One key at a time, so a partial fix cannot pass by way of the others.
+
+    The sibling above substitutes all three at once and would still pass if two
+    were stripped and one were not, provided the third happened to match.
+
+    A loop rather than ``parametrize`` because this module imports ``pytest``
+    inside the tests that need it, never at module scope -- see the file
+    docstring -- and a decorator is evaluated at import time. The count is
+    asserted outside the loop, which is what ``check_test_vacuity.py`` requires
+    of a loop carrying the assertions.
+    """
+    checked = 0
+    for key in ("platform", "machine", "python"):
+        a = RunManifest("stability_profile", parameters={"tau": 1e-9})
+        b = RunManifest("stability_profile", parameters={"tau": 1e-9})
+        b.environment = {**b.environment, key: "a value from some other machine"}
+
+        assert b.environment[key] != a.environment[key], f"{key}: the premise, it really differs"
+        assert a.digest() == b.digest(), f"{key} still reaches the digest"
+        checked += 1
+
+    assert checked == 3, "every machine-identifying key was exercised on its own"
+
+
+def test_the_environment_keys_that_move_numbers_still_move_the_digest() -> None:
+    """The other side of the same edit, and the reason it is three keys and not
+    the whole environment block.
+
+    A fast-math or arch-tuned build changes ``native``; a flush-to-zero mode
+    changes ``float``; both change the numbers, so both must change the digest.
+    ``implementation`` stays covered because nothing in this repository claims
+    CPython and PyPy agree bit for bit -- ``determinism.yml`` varies the
+    interpreter *version*, never its implementation.
+    """
+    checked = 0
+    for key in ("float", "native", "implementation"):
+        a = RunManifest("stability_profile", parameters={"tau": 1e-9})
+        b = RunManifest("stability_profile", parameters={"tau": 1e-9})
+        b.environment = {**b.environment, key: "changed"}
+
+        assert a.digest() != b.digest(), f"{key} must remain covered by the digest"
+        checked += 1
+
+    assert checked == 3, "every number-moving key was exercised on its own"
+
+
+def test_the_manifest_still_writes_the_machine_it_ran_on_for_a_human() -> None:
+    """Stripped from the digest, not from the record.
+
+    Same treatment as ``hostname`` and ``cwd``: a reader chasing a discrepancy
+    needs to know which machine produced the file, and that is a different job
+    from deciding whether two runs match.
+    """
+    manifest = RunManifest("stability_profile", parameters={"tau": 1e-9})
+
+    for key in ("platform", "machine", "python"):
+        assert manifest.to_dict()["environment"][key], f"{key} is absent from the written record"
+
+
 def test_the_manifest_digest_notices_a_parameter_change() -> None:
     """Everything that could move a number must move the digest."""
     a = RunManifest("stability_profile", parameters={"tau": 1e-9})

@@ -450,11 +450,31 @@ def test_a_manifest_holding_an_undefined_value_cannot_verify_against_its_own_fil
 
     loaded = json.loads(path.read_text(encoding="utf-8"))
     loaded.pop("manifest_digest")
-    payload = strip_volatile(loaded)
-    payload.pop("notes", None)
+    payload = _as_the_manifest_hashes_it(loaded)
 
     assert recorded != hash_json(payload), "the manifest now verifies; update this test"
     assert loaded["parameters"]["median_margin"] is None, "the file itself holds null"
+
+
+def _as_the_manifest_hashes_it(loaded: dict[str, object]) -> object:
+    """Apply the exact stripping rule `RunManifest.digest` applies.
+
+    Local by house convention, and shared between the two tests around it so
+    they cannot drift apart. It reproduces the rule rather than calling
+    `digest()`, because what these tests model is an outside verifier working
+    from the written file -- calling the method would assert only that it equals
+    itself.
+
+    `_MACHINE_KEYS` is read from the class rather than restated, so a key added
+    there is covered here without an edit. Its absence was not a cosmetic
+    mismatch: without it the sibling above would still report `!=` and would
+    have gone on passing for the wrong reason, recording a machine identity
+    where it means to record the NaN round trip.
+    """
+    payload = strip_volatile(loaded, extra=RunManifest._MACHINE_KEYS)
+    assert isinstance(payload, dict)
+    payload.pop("notes", None)
+    return payload
 
 
 def test_a_manifest_of_finite_values_does_verify_against_its_own_file(
@@ -468,8 +488,7 @@ def test_a_manifest_of_finite_values_does_verify_against_its_own_file(
 
     loaded = json.loads(path.read_text(encoding="utf-8"))
     loaded.pop("manifest_digest")
-    payload = strip_volatile(loaded)
-    payload.pop("notes", None)
+    payload = _as_the_manifest_hashes_it(loaded)
 
     assert recorded == hash_json(payload)
 

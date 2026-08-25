@@ -22,7 +22,7 @@ import platform
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from tfidf_stability.utils.hashing import hash_json
 from tfidf_stability.utils.io import strip_volatile, write_json
@@ -104,6 +104,24 @@ class RunManifest:
             "notes": self.notes,
         }
 
+    #: Environment keys that identify the *machine* rather than the arithmetic.
+    #: Stripped for the digest and kept in the written JSON, exactly as
+    #: ``hostname`` and ``cwd`` are, and for the same reason.
+    #:
+    #: They belong here by this module's own inclusion rule -- "could changing
+    #: this move a published number?" -- and the repository answers no in the
+    #: strongest available form: ``.github/workflows/determinism.yml`` requires
+    #: one identical pipeline digest across 18 legs, 3 operating systems by 3
+    #: interpreters plus 3 operating systems by 3 build types. G13's
+    #: correctly-rounded logarithm is what buys that, replacing the platform
+    #: libm precisely so ``idf`` does not vary with it.
+    #:
+    #: ``implementation`` is deliberately absent: CPython and PyPy are not
+    #: claimed to agree, and nothing in CI asserts they do. ``float`` and
+    #: ``native`` stay covered too, so a fast-math or arch-tuned build still
+    #: moves the digest -- those change the numbers, which is the whole test.
+    _MACHINE_KEYS: ClassVar[tuple[str, ...]] = ("platform", "machine", "python")
+
     def digest(self) -> str:
         """SHA-256 over the manifest with volatile fields stripped.
 
@@ -112,8 +130,27 @@ class RunManifest:
         record. The environment block is covered, so a different compiler or
         reduction policy changes the digest; both change the numbers. ``notes``
         are excluded.
+
+        :data:`_MACHINE_KEYS` is stripped alongside
+        :data:`~tfidf_stability.utils.io.VOLATILE_KEYS`, which the sentence above
+        requires and the code did not do. ``environment["platform"]`` is
+        ``platform.platform()``, carrying the OS build number -- ``10.0.26200``
+        on the machine this was found on -- so the digest changed on an operating
+        system update, and no two machines ever agreed. Measured: two manifests
+        for the same run, one with a Linux environment block substituted, gave
+        ``1f223e30...`` and ``c88f892f...`` while their ``float`` and ``native``
+        blocks were identical.
+
+        Stripped here rather than added to ``VOLATILE_KEYS`` because that set is
+        shared with every other report this package hashes, and a machine
+        identity is only meaningless to *this* digest.
+
+        The sibling identity in this package had it right already:
+        :meth:`~tfidf_stability.analysis.summarise.ExperimentResult.digest`
+        hashes payload and parameters and omits the environment block outright,
+        which is why no published ``result_digest`` moves with this change.
         """
-        payload = strip_volatile(self.to_dict())
+        payload = strip_volatile(self.to_dict(), extra=self._MACHINE_KEYS)
         payload.pop("notes", None)
         return hash_json(payload)
 
