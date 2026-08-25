@@ -19,12 +19,31 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]          # digests are taken over LF-normalised bytes
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.4
+  # ruff runs from the environment, not from a mirror pinned here.
+  #
+  # This used `astral-sh/ruff-pre-commit` at rev v0.7.4 while requirements-dev.txt
+  # pins ruff==0.16.2, so a contributor's hook and CI enforced two different
+  # linters nine minor versions apart -- and the newer one is strictly stricter.
+  # That is precisely the drift the exact pin exists to prevent: ruff 0.16
+  # stabilised PLR0917, which the tree had never been checked against, and the
+  # lint job failed on a commit that changed no Python at all. A local hook makes
+  # requirements-dev.txt the single place the version is stated.
+  #
+  # The cost is that `pre-commit` no longer installs ruff itself, so the hook
+  # needs the dev requirements present. That is already true of every other
+  # local hook here.
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix]
+        name: ruff (from requirements-dev.txt)
+        entry: python -m ruff check --fix
+        language: system
+        types_or: [python, pyi]
       - id: ruff-format
+        name: ruff-format (from requirements-dev.txt)
+        entry: python -m ruff format
+        language: system
+        types_or: [python, pyi]
         stages: [manual]          # opt-in: formatting churn obscures real diffs
 
   - repo: local
