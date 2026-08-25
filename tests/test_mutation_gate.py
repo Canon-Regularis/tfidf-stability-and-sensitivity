@@ -15,6 +15,7 @@ ever prunes them, and the campaign goes green whatever the tests do.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import shutil
 import sys
@@ -313,3 +314,114 @@ def test_the_sandbox_shadows_the_working_tree_rather_than_sitting_behind_it() ->
         ), "the working tree's numerics.py shadowed the sandbox's, so no mutant is ever executed"
     finally:
         shutil.rmtree(sandbox, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# The allowlist is keyed by line number, so an edit above one invalidates it
+# ---------------------------------------------------------------------------
+# Every entry names `(path, line, kind, before, after)`. Insert a comment above
+# one and the mutation it describes moves; the entry now points at whatever else
+# is on that line, or at nothing. The campaign then reports the same mutant
+# twice over -- stale here, undocumented there -- which reads as two findings
+# and is neither.
+#
+# That went unchecked because a campaign is the only thing that noticed, and
+# `nightly.yml` runs campaigns for three modules while this file documents
+# twenty. Adding five comment lines to `noise_floor.py` shifted nine of its
+# entries and no gate anywhere would have said so.
+#
+# It does not need a campaign. Whether a line still carries the mutation an
+# entry describes is answerable from the AST alone, in about a second for the
+# whole file, so it belongs in the PR tier rather than the nightly.
+def _sites_by_key(runner: ModuleType, module: Path) -> set[tuple[int, str, str, str]]:
+    """Every mutable site in `module`, keyed the way the allowlist keys them.
+
+    One pass rather than one per site. `_Mutator` is built to apply a single
+    mutation chosen by index, so the obvious enumeration re-parses the module
+    once per site: over the twenty modules this file documents that was 23
+    seconds through `_apply`, which also unparses, and 11 through the mutator
+    alone. `_hit` is called at every site whatever the target, so overriding it
+    records the lot in a single visit and mutates nothing -- `target=-1` matches
+    no index, so the base call always declines.
+
+    The count is cross-checked against `_count_sites`, which walks the same
+    visitor independently. If the two ever disagree this enumeration has missed
+    a site and the check above would silently stop covering it.
+    """
+    source = module.read_text(encoding="utf-8")
+
+    class _Recorder(runner._Mutator):  # type: ignore[name-defined,misc]
+        def __init__(self) -> None:
+            super().__init__(target=-1)
+            self.sites: list[tuple[int, str, str, str]] = []
+
+        def _hit(self, node: ast.AST, kind: str, before: str, after: str) -> bool:
+            declined = super()._hit(node, kind, before, after)
+            self.sites.append((getattr(node, "lineno", 0), kind, before, after))
+            return declined
+
+    recorder = _Recorder()
+    recorder.visit(ast.parse(source))
+    assert len(recorder.sites) == runner._count_sites(source), (
+        f"{module.name}: recorded {len(recorder.sites)} sites but the campaign counts "
+        f"{runner._count_sites(source)}"
+    )
+    return set(recorder.sites)
+
+
+def test_every_allowlist_entry_still_names_a_mutation_that_exists() -> None:
+    """An entry pointing at a line that no longer carries that mutation is dead.
+
+    Dead in a way that costs twice: the argument it records is lost, and the
+    mutant it was written for is now undocumented and will fail a campaign that
+    should have passed. Both were true of eleven entries after a round of edits
+    that changed no behaviour at all.
+
+    The failure message carries the whole key, because the fix is a renumber and
+    the only thing needed to make it is the line the mutation moved to.
+    """
+    runner = _runner()
+    entries = [
+        line.split()
+        for line in ALLOWLIST.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert entries, "the premise: the allowlist is not empty"
+
+    by_module: dict[str, list[list[str]]] = {}
+    for fields in entries:
+        by_module.setdefault(fields[0], []).append(fields)
+
+    dangling: list[str] = []
+    checked = 0
+    for path, fields_list in by_module.items():
+        module = REPO / path
+        assert module.exists(), f"{path}: the allowlist names a module that is gone"
+        sites = _sites_by_key(runner, module)
+        for fields in fields_list:
+            key = (int(fields[1]), fields[2], fields[3], fields[5])
+            if key not in sites:
+                dangling.append(f"{path}:{fields[1]} {fields[2]} {fields[3]} -> {fields[5]}")
+            checked += 1
+
+    assert checked == len(entries), "every entry was looked up"
+    assert not dangling, "allowlist entries naming a mutation that is no longer there:\n  " + (
+        "\n  ".join(dangling)
+    )
+
+
+def test_the_allowlist_names_only_modules_that_are_still_in_the_package() -> None:
+    """A renamed or deleted module leaves entries that can never match again.
+
+    Separate from the test above so the message says which of the two happened:
+    a moved line and a moved file need different fixes.
+    """
+    named = {
+        line.split()[0]
+        for line in ALLOWLIST.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert named, "the premise: the allowlist names some modules"
+    missing = sorted(path for path in named if not (REPO / path).exists())
+
+    assert not missing, f"the allowlist names modules that no longer exist: {missing}"
