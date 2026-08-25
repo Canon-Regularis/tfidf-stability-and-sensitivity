@@ -19,7 +19,16 @@ on:
   schedule:
     - cron: "0 3 * * *"
   pull_request:
-    paths: ["cpp/**", ".github/workflows/sanitizers.yml"]
+    # The root build files are in the filter because the sanitizer option lives
+    # there, not under cpp/: `TFIDF_SANITIZERS` is declared at CMakeLists.txt:42
+    # and set at CMakePresets.json:56. A change that disabled or misspelled it
+    # would not have run this workflow, so the sanitizers would have silently
+    # stopped being applied while the job kept reporting success.
+    paths:
+      - "cpp/**"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - ".github/workflows/sanitizers.yml"
   workflow_dispatch:
 
 permissions:
