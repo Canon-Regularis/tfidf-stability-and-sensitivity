@@ -96,8 +96,27 @@ def native_available() -> bool:
 
 
 def unavailable_reason() -> str | None:
-    """Why the native backend is unavailable, or ``None`` if it is available."""
-    return _REASON
+    """Why the native backend is unavailable, or ``None`` if it is available.
+
+    Derived from :func:`native_available` rather than returned raw. The two
+    globals are set on mutually exclusive paths during this module's import --
+    ``_REASON`` on the two failure branches, ``_MODULE`` only in the ``else`` --
+    so returning ``_REASON`` alone gave the documented answer for every state
+    this module can actually reach, and the sentence above was true by
+    construction rather than by the code.
+
+    It stopped being true the moment anything set ``_MODULE`` without clearing
+    ``_REASON``, which is what a test substituting a stub backend does. On a
+    machine where the extension had been built ``_REASON`` was already ``None``
+    and nothing showed; on one where it had not, the stale explanation came back
+    beside a backend reporting itself available. That is the state
+    ``tests/test_native_selection.py`` calls "a stale explanation in every
+    manifest", and it failed all nine reference legs of the CI matrix while all
+    nine native legs passed -- the answer depended on the runner, not the code.
+
+    One line, and no behaviour changes for any state reachable by import alone.
+    """
+    return None if native_available() else _REASON
 
 
 def require_native() -> Any:

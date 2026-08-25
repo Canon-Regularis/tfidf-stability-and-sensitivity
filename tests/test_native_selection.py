@@ -87,10 +87,27 @@ def test_availability_and_its_reason_are_complementary(
 ) -> None:
     """Exactly one of them is informative at a time: a reason when unavailable,
     `None` when available. A reason left set alongside a working backend would
-    put a stale explanation into every manifest."""
+    put a stale explanation into every manifest.
+
+    `_REASON` is set to a stale value *before* the backend is declared
+    available, which is the point of the test and was the omission. Setting only
+    `_MODULE` left `_REASON` at whatever this machine's import had produced, so
+    the assertion asked about a different state depending on where it ran:
+    `None` where the extension had been built, a full "could not be imported"
+    string where it had not. It passed all nine native legs of the CI matrix and
+    failed all nine reference legs, for eight consecutive pushes.
+
+    Reproduced before the fix on a machine with the extension present, by
+    setting `_REASON` by hand: `native_available()` returned True beside that
+    explanation.
+    """
+    monkeypatch.setattr(_native, "_REASON", "a reason left over from an earlier attempt")
     monkeypatch.setattr(_native, "_MODULE", object())
     assert _native.native_available() is True
-    assert _native.unavailable_reason() is None
+    assert _native.unavailable_reason() is None, (
+        "a backend reporting itself available must report no reason, whatever the "
+        "import left behind"
+    )
 
     monkeypatch.setattr(_native, "_MODULE", None)
     monkeypatch.setattr(_native, "_REASON", "no build here")
