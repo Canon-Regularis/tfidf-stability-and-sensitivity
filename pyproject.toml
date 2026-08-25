@@ -62,6 +62,24 @@ Repository = "https://github.com/Canon-Regularis/tfidf-stability-and-sensitivity
 minimum-version = "0.10"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["src/tfidf_stability"]
+
+# The two data files the package cannot run without live outside the package
+# directory, so `wheel.packages` alone did not ship them: `pip install
+# tfidf-stability` produced a distribution that could not load its own
+# hash-verified stopword list -- the asset that fixes the vocabulary and
+# therefore every number this project publishes -- nor its normative config.
+#
+# Verified by building a wheel and listing it: before this, neither
+# `stopwords_en_v1.txt` nor `default.yaml` was present.
+#
+# They stay at the repository root rather than moving under src/, because
+# `data/README.md` states the licence position beside them, and
+# `scripts/check_vendored.py`, `data/assets/MANIFEST.sha256` and the docs all
+# address them by that path. `force-include` copies them into the wheel at the
+# location the loaders look for first; see `_resolve_asset_dir` in
+# preprocessing/stopwords.py and `_resolve_default_config` in cli/commands.py,
+# which try the packaged location and fall back to the checkout.
+wheel.force-include = { "data/assets" = "tfidf_stability/data/assets", "configs" = "tfidf_stability/configs" }
 cmake.version = ">=3.20"
 cmake.build-type = "Release"
 sdist.exclude = [".github", "build", "data/raw", "reports/figures"]
