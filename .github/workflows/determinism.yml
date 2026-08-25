@@ -35,6 +35,15 @@ concurrency:
   group: determinism-${{ github.ref }}
   cancel-in-progress: true
 
+# See ci.yml for why these are `-o` settings and not flags: pytest derives
+# verbosity from count(-v) minus count(-q), and every run here passes -q.
+env:
+  PYTEST_ADDOPTS: >-
+    -o verbosity_test_cases=1
+    -o faulthandler_timeout=300
+    -o faulthandler_exit_on_timeout=1
+    --durations=25
+
 jobs:
   # --------------------------------------------------------------------------
   # The reference backend is normative and needs no compiler, so its digest must
@@ -64,7 +73,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p digests
-          printf '%s' "${{ steps.digest.outputs.value }}" \
+          printf '%s\n' "${{ steps.digest.outputs.value }}" \
             > "digests/reference-${{ matrix.os }}-py${{ matrix.python }}.txt"
       - uses: actions/upload-artifact@v7
         with:
@@ -161,7 +170,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p digests
-          printf '%s' "${{ steps.digest.outputs.value }}" \
+          printf '%s\n' "${{ steps.digest.outputs.value }}" \
             > "digests/native-${{ matrix.os }}-${{ matrix.build }}.txt"
       - uses: actions/upload-artifact@v7
         with:
@@ -194,12 +203,29 @@ jobs:
           # is satisfied by a single collected digest, so if every matrix job
           # but one failed to upload, this would report "all digests identical"
           # having compared a value with itself.
+          # 18, not 6. The reference matrix is 3 OS x 3 interpreters and the
+          # native matrix 3 OS x 3 build types, and every leg uploads one digest.
+          # At a threshold of 6, twelve legs could fail to upload and the
+          # comparison would still pass on whatever survived -- which is the
+          # same failure the paragraph above describes, one level out.
+          expected=18
           collected=$(ls collected/*.txt | wc -l)
-          if [ "$collected" -lt 6 ]; then
-            echo "::error::only $collected digests collected; expected one per matrix job"
+          if [ "$collected" -ne "$expected" ]; then
+            echo "::error::collected $collected digests, expected $expected (one per matrix leg)"
+            ls collected/*.txt
             exit 1
           fi
-          unique=$(cat collected/*.txt | sort -u | wc -l)
+          # `sort -u collected/*.txt`, never `cat ... | sort -u`. Each digest file
+          # holds one line, and a file written without a trailing newline runs
+          # into its neighbour under `cat`: three files holding AAA, AAA and BBB
+          # concatenate to the single line AAABBBAAA, which sorts to one unique
+          # value. `unique` was therefore always 1, and this gate -- the
+          # project's flagship reproducibility claim -- could not fail. Verified
+          # by construction before fixing it.
+          #
+          # `sort` reads each path as its own input and terminates the final line
+          # itself, so this stays correct even if a writer regresses.
+          unique=$(sort -u collected/*.txt | wc -l)
           if [ "$unique" -ne 1 ]; then
             echo
             echo "::error::the pipeline digest is NOT identical across builds"
