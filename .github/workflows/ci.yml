@@ -434,6 +434,11 @@ jobs:
         # The implementation notes cross-reference the code heavily. A stale link
         # is a silent lie about where something lives.
         run: python scripts/check_docs.py
+      - name: The pipeline must still produce the digest this repository records
+        # Cheap (one fixed six-document corpus) and it belongs on every PR, not
+        # only on a release: this is the check that catches a change moving all
+        # platforms together, which determinism.yml is blind to by construction.
+        run: python scripts/snapshot.py --check
       - name: Every place that states the version must agree
         # Four files name it and nothing made them agree: pyproject.toml and
         # __init__.py said 0.2.0 while CITATION.cff still said 0.1.0. A citation

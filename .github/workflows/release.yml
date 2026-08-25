@@ -55,8 +55,16 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
-      - run: python -m pip install --upgrade pip build
+      - run: python -m pip install --upgrade pip build twine
       - run: python -m build --sdist
+      - name: The distribution metadata must be valid before it is published
+        # `twine check --strict` is what PyPI itself applies on upload, so
+        # without it the first time the metadata is validated is the moment it
+        # is rejected -- after the tag exists, the wheels are built and the
+        # release is half-made. --strict makes a rendering warning on the long
+        # description an error too, since a README that will not render is a
+        # published page nobody can read.
+        run: python -m twine check --strict dist/*
       - name: The sdist must build from vendored C++ sources alone
         # Renamed: the old name, "must build without network access", is not what
         # this does and cannot be. `[build-system] requires`
@@ -114,9 +122,18 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "10.15"
           # Test the INSTALLED wheel rather than the checkout.
           CIBW_TEST_REQUIRES: "pytest hypothesis scikit-learn"
+          # Asserted, not printed. This read `print(..., n.native_available())`,
+          # which succeeds whether the answer is True or False -- so a wheel
+          # whose extension built but could not load (a missing runtime DLL is
+          # the usual cause, and this matrix covers three platforms) shipped
+          # green. `sys.exit(str)` exits 1 with the message, which is what makes
+          # this a gate rather than a log line.
           CIBW_TEST_COMMAND: >
-            python -c "import tfidf_stability, tfidf_stability._native as n;
-            print(tfidf_stability.__version__, n.native_available())" &&
+            python -c "import sys, tfidf_stability as t, tfidf_stability._native as n;
+            print('version', t.__version__);
+            sys.exit(None if n.native_available() else
+            '::error::the wheel imports but its extension does not load: '
+            + (n.unavailable_reason() or 'unknown'))" &&
             python -m pytest {project}/tests -q -x
       - uses: actions/upload-artifact@v7
         with:
@@ -149,7 +166,15 @@ jobs:
           m.require_reproducible()
           print("build is reproducible:", m.is_reproducible_build)
           PY
-      - run: python scripts/snapshot.py --verbose
+      - name: The pipeline digest must be the value this repository records
+        # `--verbose` alone printed the digest and exited 0 whatever it said, so
+        # this job asserted nothing: there was no recorded value to compare
+        # against, and `determinism.yml` proves only that every platform agrees
+        # with every other -- not that they agree with what was published.
+        # A change moving all platforms together passed both.
+        run: |
+          python scripts/snapshot.py --verbose
+          python scripts/snapshot.py --check
 
   publish:
     name: attach to the release
