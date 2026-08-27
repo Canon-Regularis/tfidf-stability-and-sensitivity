@@ -531,6 +531,79 @@ def test_an_untouched_container_still_loads_so_the_guard_admits_valid_files() ->
     assert model_bytes(restored) == payload, "and the round trip is still bit-identical"
 
 
+def _flip_idf(payload: bytes, model: object, to: float) -> bytes:
+    """Overwrite the first idf entry, located by its bytes rather than an offset.
+
+    A hard-coded offset moves with any header change and would silently corrupt
+    some other field, testing nothing.
+    """
+    at = payload.index(struct.pack("<d", model.idf.values[0]))  # type: ignore[attr-defined]
+    mutated = bytearray(payload)
+    mutated[at : at + 8] = struct.pack("<d", to)
+    return bytes(mutated)
+
+
+def test_a_negative_idf_is_refused_rather_than_loaded() -> None:
+    """It cannot come from a fit, and it inverts the ranking if it is let in.
+
+    Section 2.2 fixes ``idf(t) = log((1 + N) / (1 + df(t))) + 1`` and ``df <= N``
+    always, so the ratio is at least 1 and ``idf`` at least 1. A negative entry
+    is not a value this project can produce; it is a corrupt file.
+
+    The parser checked ``idf`` for finiteness and, unlike the two arrays beside
+    it, not for sign. Measured before the guard: flipping the eight bytes of
+    ``idf[0]`` to ``-5.0`` in a 301-byte container was accepted, and the query
+    ``["aa"]`` scored ``[-0.894, 0.0, -0.707]`` against a genuine
+    ``[+0.894, 0.0, +0.707]``. Every score is outside the ``[0, 1]`` that section
+    2.3 documents, and no error was raised on load, on scoring or on ranking --
+    ``ranker.py`` checks scores for finiteness but not for sign.
+    """
+    model = _three_token_model()
+    payload = model_bytes(model)
+
+    mutated = _flip_idf(payload, model, -5.0)
+    assert len(mutated) == len(payload), "eight bytes overwritten, not inserted"
+    with pytest.raises(TfsxFormatError, match=r"idf.*negative"):
+        model_from_bytes(mutated)
+
+
+def test_the_weights_and_norms_were_already_guarded_which_is_the_asymmetry_closed() -> None:
+    """The contrast that makes the test above a fix rather than a new rule.
+
+    ``check_non_negative`` was already applied to the weight and norm arrays. It
+    was the third array of the same kind that went unchecked, so the parser was
+    not lax -- it was inconsistent, the same shape as the token block against the
+    document-id block one field along.
+    """
+    model = _three_token_model()
+    payload = model_bytes(model)
+    first_weight = model.matrix.values[0]
+
+    at = payload.index(struct.pack("<d", first_weight))
+    mutated = bytearray(payload)
+    mutated[at : at + 8] = struct.pack("<d", -1.0)
+    with pytest.raises(TfsxFormatError, match=r"weights.*negative"):
+        model_from_bytes(bytes(mutated))
+
+
+def test_an_idf_of_exactly_one_is_admitted_because_a_full_df_term_produces_it() -> None:
+    """The guard's other half: the boundary a real fit reaches must still load.
+
+    A term appearing in every document has ``df == N``, so the ratio is exactly 1
+    and ``idf`` exactly ``1.0``. A guard rejecting that would refuse ordinary
+    corpora. ``cc`` is not in every document here, so the value is constructed
+    rather than fitted, which is the point -- the parser must accept the whole
+    legitimate range, not merely the values this fixture happens to produce.
+    """
+    model = _three_token_model()
+    payload = model_bytes(model)
+
+    restored = model_from_bytes(_flip_idf(payload, model, 1.0))
+
+    assert restored.idf.values[0] == 1.0
+    assert model_from_bytes(model_bytes(restored)) is not None, "and it round-trips"
+
+
 # ---------------------------------------------------------------------------
 # The schema: an orphan module describing the container above
 # ---------------------------------------------------------------------------

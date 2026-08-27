@@ -443,6 +443,30 @@ def model_from_bytes(data: bytes) -> TfidfModel:
         check_finite(idf_values, "idf")
         check_finite(values, "weights")
         check_finite(norms, "norms")
+        # `idf` gets the same treatment as the two arrays below it, and did not.
+        # README section 2.2 fixes idf(t) = log((1 + N) / (1 + df(t))) + 1, and
+        # df <= N always, so the ratio is at least 1, the logarithm at least 0
+        # and idf at least 1. A negative entry cannot come from any fit.
+        #
+        # It could come from a corrupt file, and nothing downstream would notice.
+        # `similarity/cosine.py` opens by saying coordinates are non-negative so
+        # `cos` lies in [0, 1], and that "a negative coordinate anywhere upstream
+        # would void that silently, so check_non_negative exists to catch it" --
+        # this is the path where it was not called. `ranker.py` checks scores for
+        # finiteness but not for sign, so negative scores sort like any other.
+        #
+        # Measured on a 301-byte container over ('aa','ab','cc'): flipping the
+        # eight bytes of idf[0] to -5.0 was accepted, and the query ['aa'] scored
+        # [-0.894, 0.0, -0.707] where the genuine model gives [+0.894, 0.0,
+        # +0.707]. The ranking inverted -- the document holding "aa" twice went
+        # last, one holding no "aa" at all went first -- with no error raised on
+        # load, on scoring or on ranking, and with every score outside the range
+        # section 2.3 documents.
+        #
+        # Non-negativity rather than the tighter `>= 1`: it is what the sibling
+        # checks assert, it catches the sign flip that does the damage, and it
+        # bakes no smoothing convention into the parser.
+        check_non_negative(idf_values, "idf")
         check_non_negative(values, "weights")
         check_non_negative(norms, "norms")
     except TfidfStabilityError as exc:
