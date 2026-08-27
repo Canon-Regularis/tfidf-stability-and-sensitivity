@@ -302,7 +302,10 @@ The claim that tie-break effects are independent of numerical error is earned
 structurally. \code{rank\_all\_operators} shares one sorted-score object across
 $\pi$, $\pi_{\text{score}}$ and $\pi_{\text{alt}}$, so no arithmetic separates
 them and a disagreement admits a single cause. The runner verifies this with
-bit comparison before reporting anything, and aborts otherwise.
+an identity check before reporting anything, and aborts otherwise.
+Identity rather than bit comparison: the three share one score array, so
+comparing values would compare that array with itself and pass whatever
+happened, including after the sharing was removed.
 
 Against $\pi_{\text{score}}$ disagreement concentrates sharply at $k=1$:
 $42.5\%$, against at most $10\%$ at every other $k$ measured. The leading

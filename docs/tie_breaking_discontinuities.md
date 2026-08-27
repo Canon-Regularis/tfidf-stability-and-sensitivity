@@ -14,9 +14,20 @@ arithmetic between the three operators that could differ. A disagreement
 therefore has one possible cause.
 
 `scripts/run_tie_break_ablations.py` does not take this on trust: before
-reporting anything it checks with `same_bits` that all three operators saw
-bit-identical scores, and **aborts** if not, because every disagreement rate
-below that point would be uninterpretable.
+reporting anything it checks that all three operators hold the **same score
+array object**, and **aborts** if not, because every disagreement rate below
+that point would be uninterpretable.
+
+Identity rather than value equality, which is what it checked until it was
+corrected. `rank_all_operators` builds one `sorted_scores` tuple and hands it to
+every operator, so an elementwise `same_bits` comparison against
+`rankings["pi"].sorted_scores` compared that object with itself and was true on
+every input -- the abort was unreachable. Nor would it have caught the
+regression it exists for: with the sharing removed each operator recomputes the
+same sort of the same scores, giving three distinct but bit-identical tuples.
+`tests/test_ranking_tie_breaks.py::test_every_operator_sees_one_and_the_same_score_array`
+sets the standard, and says why: "two equal arrays computed twice would leave a
+second explanation".
 
 The complementary check runs from the other side: when all scores are distinct,
 π = π_score = π_alt exactly. That validates A2's premise directly, since any

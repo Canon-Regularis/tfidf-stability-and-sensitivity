@@ -54,7 +54,6 @@ from tfidf_stability.ranking.tie_groups import (  # noqa: E402
     tie_cliques,
 )
 from tfidf_stability.utils.io import write_json  # noqa: E402
-from tfidf_stability.utils.numerics import same_bits  # noqa: E402
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser  # noqa: E402
 
 DEFAULT_KS = (1, 5, 10, 20, 50)
@@ -382,17 +381,33 @@ def main() -> int:
     tables = [q.table for q in grid.queries]
     print(f"section 7.1 grid: {len(grid)} {args.query_mode} queries")
 
-    # A2's premise, checked here: the three operators consume bit-identical
-    # scores, so any disagreement comes from the tie-break.
+    # A2's premise, checked here: the three operators consume the same scores,
+    # so any disagreement comes from the tie-break.
+    #
+    # `is`, not `same_bits`. `rank_all_operators` computes `sorted_scores_desc`
+    # once and hands the same tuple to every operator, so the three
+    # `sorted_scores` attributes are one object -- and the previous check,
+    # `same_bits` elementwise against `rankings["pi"].sorted_scores`, compared
+    # that object with itself. `same_bits(x, x)` is True for every double
+    # including NaN, so the predicate was a tautology and the abort below was
+    # unreachable, on every input.
+    #
+    # It would not have caught the regression it exists for either. Remove the
+    # sharing and each operator recomputes `sorted_scores_desc` from the same
+    # score vector, giving three distinct but bit-identical tuples: measured,
+    # three separate objects and the old check still passed. Identity is the
+    # property that makes a disagreement attributable, because two equal arrays
+    # computed twice leave a second explanation --
+    # `tests/test_ranking_tie_breaks.py::test_every_operator_sees_one_and_the_same_score_array`
+    # says exactly that and asserts `id()`. This is the harness applying the
+    # standard its own unit test already sets.
     for scores, active in zip(scores_by_query, tables, strict=True):
         rankings = rank_all_operators(scores, active)
         reference = rankings["pi"].sorted_scores
         for name, ranking in rankings.items():
-            if not all(
-                same_bits(a, b) for a, b in zip(ranking.sorted_scores, reference, strict=True)
-            ):
+            if ranking.sorted_scores is not reference:
                 print(
-                    f"operator {name} saw different scores from pi. A2's premise is "
+                    f"operator {name} did not share pi's score array. A2's premise is "
                     f"false and every disagreement rate below is uninterpretable.",
                     file=sys.stderr,
                 )
