@@ -16,6 +16,7 @@ from tfidf_stability.cli.commands import load_config, write_report
 from tfidf_stability.cli.main import main
 from tfidf_stability.persistence.manifest import RunManifest
 from tfidf_stability.utils.hashing import hash_file
+from tfidf_stability.utils.numerics import same_bits
 from tfidf_stability.utils.validation import ConfigError
 
 REPO = Path(__file__).resolve().parents[1]
@@ -683,3 +684,113 @@ def test_an_undocumented_log_level_is_refused_rather_than_defaulted() -> None:
     with pytest.raises(SystemExit) as excinfo:
         main(["--log-level", "verbose", "schema"])
     assert excinfo.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# scripts/export_intermediates.py: the payload must carry what it advertises
+# ---------------------------------------------------------------------------
+# `ci.yml` runs this script and asserts only that it exits 0, so for as long as
+# it wrote *a* file it passed. It wrote one missing two of the six quantities its
+# own docstring names first, and `reports/intermediates_d000000.json` shipped
+# that way: term counts and term frequencies were absent, because the record was
+# built by zipping the CSR row rather than through `TfidfModel.intermediates`,
+# and the row does not carry them.
+#
+# `tf` is the one quantity here that cannot be read off: `w / idf` does not
+# recover it, missing by an ulp in 9.01% of a 184,080-case sweep. So the field
+# the export dropped was precisely the one needing the care the library already
+# takes, in the only file this project publishes with raw bit patterns beside
+# the decimals.
+def _export(tmp_path: Path) -> dict[str, object]:
+    """Run the exporter into a temp directory and return its payload.
+
+    Imported and called rather than shelled out, so a traceback survives.
+    """
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "_export_intermediates", REPO / "scripts" / "export_intermediates.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["_export_intermediates"] = module
+    spec.loader.exec_module(module)
+
+    argv = ["export_intermediates.py", "--dataset", "synthetic_tiny", "-o", str(tmp_path)]
+    old = sys.argv
+    sys.argv = argv
+    try:
+        assert module.main() == 0
+    finally:
+        sys.argv = old
+
+    written = list(tmp_path.glob("intermediates_*.json"))
+    assert len(written) == 1, f"expected one export, got {[p.name for p in written]}"
+    payload = json.loads(written[0].read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
+
+
+def test_the_export_carries_every_quantity_its_docstring_names(tmp_path: Path) -> None:
+    """Six quantities are promised; the record carried four.
+
+    The docstring opens "Term counts, term frequencies, document frequencies,
+    IDF, the tf-idf weights and the norm". Counts and frequencies were missing.
+    Asserted per name rather than as a set comparison, so a failure says which
+    one went.
+    """
+    payload = _export(tmp_path)
+    terms = payload["terms"]
+    assert isinstance(terms, list), "the payload carries a term list"
+    assert terms, "the fixture document has vocabulary terms"
+
+    promised = ("count", "tf", "df", "idf", "weight")
+    for entry in terms:
+        for field in promised:
+            assert field in entry, f"the export dropped {field!r}; its docstring promises it"
+    assert "norm" in payload, "the sixth quantity is per-document, not per-term"
+    assert "in_vocabulary_length" in payload, (
+        "L, the denominator of every tf above; without it no reader can check a count"
+    )
+
+
+def test_every_float_in_the_export_has_its_bit_pattern_beside_it(tmp_path: Path) -> None:
+    """The docstring's stated reason for existing.
+
+    "each with its raw bit pattern beside the decimal ... A decimal rendering of
+    a binary64 is a lossy summary at whatever precision the formatter chose, so
+    two values one ulp apart, the difference this study is about, can print
+    identically." A float exported without its hex defeats the point of the file,
+    and `tf` was exported with neither.
+    """
+    payload = _export(tmp_path)
+
+    checked = 0
+    for entry in payload["terms"]:  # type: ignore[union-attr]
+        for field in ("tf", "idf", "weight"):
+            assert float.fromhex(entry[f"{field}_hex"]) == entry[field], (
+                f"{field}_hex does not round-trip to {field}"
+            )
+            checked += 1
+    assert float.fromhex(payload["norm_hex"]) == payload["norm"]  # type: ignore[arg-type]
+    assert checked == 3 * len(payload["terms"]), "every term contributed all three"  # type: ignore[arg-type]
+
+
+def test_the_exported_weight_is_exactly_tf_times_idf(tmp_path: Path) -> None:
+    """The check the count and tf make possible, and the reason they matter.
+
+    With only `weight` and `idf` published a reader cannot verify the weight
+    without dividing, which is the operation that loses an ulp. With `count`, `L`
+    and `tf` present the identity is checkable bit for bit, which is what makes
+    this file evidence rather than a listing.
+    """
+    payload = _export(tmp_path)
+    length = payload["in_vocabulary_length"]
+
+    for entry in payload["terms"]:  # type: ignore[union-attr]
+        assert entry["count"] / length == entry["tf"], "tf is count / L, one division"
+        assert same_bits(entry["tf"] * entry["idf"], entry["weight"]), (
+            "w = fl(tf * idf), bit for bit"
+        )

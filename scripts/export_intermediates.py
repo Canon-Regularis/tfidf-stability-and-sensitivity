@@ -48,15 +48,38 @@ def main() -> int:
         return 1
     index = data.doc_ids.index(doc_id)
 
-    vector = model.document(index)
+    # Through `TfidfModel.intermediates`, not by zipping the CSR row directly.
+    # The row carries the weight; `tf` and the integer count behind it are not in
+    # it and have to be recovered, and `w / idf` does not recover them -- two
+    # roundings do not cancel, and that round trip misses by an ulp in 9.01% of a
+    # sweep over 184,080 realistic cases. `_exact_tf` recovers the count instead
+    # and divides once. Building the record here by hand bypassed all of that and
+    # simply dropped both fields, so this export -- the one file in the project
+    # that carries raw bit patterns -- omitted the two quantities its own
+    # docstring names first, and `reports/intermediates_d000000.json` shipped
+    # without them.
+    #
+    # The keys stay as they were (`term`, `column`) rather than adopting
+    # `intermediates`' own (`token`, `term_id`), because the shipped artefact and
+    # the `tfidf inspect` payload are read by different consumers and renaming
+    # fields here would break the former to match the latter.
+    detail = model.intermediates(index)
+    length = int(detail["in_vocabulary_length"])
     terms = []
-    for column, weight in zip(vector.indices, vector.values, strict=True):
-        term = model.vocabulary.token_of(column)
-        idf = model.idf.values[column]
+    for entry in detail["terms"]:
+        term = str(entry["token"])
+        idf = float(entry["idf"])
+        weight = float(entry["weight"])
+        tf = float(entry["tf"])
         terms.append(
             {
                 "term": term,
-                "column": column,
+                "column": int(entry["term_id"]),
+                # The integer numerator of `tf = count / L`, recovered the way
+                # `_exact_tf` recovers it rather than by dividing the weight.
+                "count": round(tf * length) if length else 0,
+                "tf": tf,
+                "tf_hex": float.hex(tf),
                 "df": model.vocabulary.df_of(term),
                 "idf": idf,
                 "idf_hex": float.hex(idf),
@@ -72,6 +95,10 @@ def main() -> int:
         "index": index,
         "n_features": len(features[index]),
         "n_terms_in_vocabulary": len(terms),
+        # `L`, the denominator of every `tf` above. Distinct from `n_features`,
+        # which counts the document's feature stream before the vocabulary is
+        # applied; without `L` no reader can check a count against its `tf`.
+        "in_vocabulary_length": length,
         "norm": norm,
         "norm_hex": float.hex(norm),
         "is_zero_norm": norm == 0.0,
