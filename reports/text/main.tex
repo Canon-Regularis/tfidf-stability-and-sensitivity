@@ -259,6 +259,7 @@ $\varepsilon / (m_k/2)$ & flip rate \\
 \midrule
 $0.25$ to $0.99$ & $0.00\%$ \\
 $1.00$         & $0.00\%$ \\
+$1.01$         & $0.00\%$ \\
 $1.10$         & $0.15\%$ \\
 $2.00$         & $22.35\%$ \\
 $5.00$         & $60.61\%$ \\
@@ -303,10 +304,17 @@ $\pi$, $\pi_{\text{score}}$ and $\pi_{\text{alt}}$, so no arithmetic separates
 them and a disagreement admits a single cause. The runner verifies this with
 bit comparison before reporting anything, and aborts otherwise.
 
-Disagreement concentrates at $k=1$ ($42.5\%$ for $\pi$ against
-$\pi_{\text{score}}$, $2.5\%$ against $\pi_{\text{alt}}$), because the leading
-document frequently sits in an exact-tie block. The decision-level discontinuity
-therefore lands at the rank where a recommender's output is most visible.
+Against $\pi_{\text{score}}$ disagreement concentrates sharply at $k=1$:
+$42.5\%$, against at most $10\%$ at every other $k$ measured. The leading
+document frequently sits in an exact-tie block, so the decision-level
+discontinuity lands at the rank where a recommender's output is most visible.
+
+Against $\pi_{\text{alt}}$ it does not concentrate there at all. That pair reads
+$2.5\%$ at $k=1$ and peaks at $7.5\%$ at $k=20$, which is the more ordinary
+shape: the two operators differ in the priority order of the tie-break
+attributes, and the deeper the cut the more tied blocks it can fall inside. The
+distinction matters because it is the $k=1$ column of one pair, not a property of
+tie-breaking in general, that puts the effect where users see it.
 
 \resultfigure{fig_ablation}{0.78}{\ablationcmd}{%
 Disagreement by operator pair and $k$. The three operators consume one shared
@@ -384,11 +392,14 @@ corpus-edit perturbation           & $10^{-4}$ to $10^{-1}$ \\
 \end{tabular}
 \end{table}
 
-Roughly thirteen orders of magnitude separate the numerical-error regime from the
-corpus-perturbation regime, and numerical error never came within seven orders of
-closing a real gap. A1's bounded perturbations are therefore entirely about
-semantic perturbation; floating-point error is not a threat to ranking at any
-scale this system operates at. That is a positive result for the numerical
+Twelve orders of magnitude separate the two regimes at their nearest edges ---
+the smallest corpus-edit shift measured, $1.694\times10^{-4}$, against a noise
+floor of $1.665\times10^{-16}$ on that corpus --- widening to fifteen at the far
+ends. Twelve is the figure the argument needs, being the closest the two regimes
+ever come. Numerical error never came within seven orders of closing a real gap.
+A1's bounded perturbations are therefore entirely about semantic perturbation;
+floating-point error is not a threat to ranking at any scale this system operates
+at. That is a positive result for the numerical
 design of \S6,
 and it is what leaves A1 and A2 as separable questions rather than two names for
 one effect.
@@ -409,9 +420,12 @@ canonical and was corrected. The same draft claimed the interval $(0, 10^{-9})$
 was invariably empty, and that does not survive either. It holds on the seeded
 generator, where a test enforces it and says in its own docstring that it
 generalises no further. MovieLens falsifies it: $197$ of $114{,}504$ adjacent
-pairs fall below $\tau_{\text{floor}}$, and the smallest strictly-positive gap is
-$1.4\times10^{-11}$ even with the scores recomputed exactly, so the emptiness is a
-property of the generator rather than of TF-IDF (\addendum{22}).
+pairs fall below that corpus's own $\tau_{\text{floor}}$ of $4.441\times10^{-16}$
+--- not the $1.110\times10^{-15}$ derived above, which belongs to the synthetic
+corpus, though the count is $197$ against either threshold --- and the smallest
+strictly-positive gap is $1.4\times10^{-11}$ even with the scores recomputed
+exactly, so the emptiness is a property of the generator rather than of TF-IDF
+(\addendum{22}).
 
 \paragraph{Synthetic data.} The controlled results use a seeded generator.
 MovieLens supplies external validity but may not be redistributed, so results on
