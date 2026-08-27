@@ -425,6 +425,82 @@ def test_the_near_tie_interval_below_tau_is_empty() -> None:
     assert min(positive) > 1e-12
 
 
+@pytest.mark.slow
+def test_the_gap_table_g22_publishes_is_the_one_this_corpus_produces() -> None:
+    """G22 prints a five-row table of measured gap counts. This recomputes it.
+
+    Its sibling above pins the row the section's argument rests on, `(0, 1e-9)`
+    being empty, and nothing pinned the rest. Three of them drifted: the
+    addendum read 104, 2323 and 19 with a smallest positive gap of 2.0e-08,
+    against the 130, 2292, 24 and 1.575e-08 measured here. The two figures that
+    identify the corpus -- 553 exact ties and 2524 documents scoring above zero
+    -- never moved, and no other seed reproduces either, so the generator was
+    never in question; the drift is downstream of it.
+
+    The wording drifted with the numbers. "Seed as specified" and "the first six
+    tokens of document 0" did not determine a run: document 0 is five words,
+    which become nine features once bigrams are added, so "six tokens" has no
+    reading in raw words and the two available readings give different tables.
+    G22 now names the spec and writes the query as the expression below.
+
+    Marked slow for the 3000-document fit, about six seconds, almost all of it
+    preprocessing. There is no cheaper form -- the table is a property of that
+    corpus at that size -- and the fast sibling above covers the load-bearing
+    claim on a 600-document corpus, so no line depends on this test alone.
+    """
+    corpus = synthetic.generate(
+        synthetic.SyntheticSpec(
+            n_docs=3000,
+            vocab_size=5000,
+            n_exact_duplicates=30,
+            n_twin_pairs=60,
+            seed=20260811,
+        )
+    )
+    pipeline = PreprocessingPipeline()
+    features = [pipeline.preprocess(str(r["text"])) for r in corpus.records()]
+    model = TfidfVectoriser().fit(features, list(corpus.doc_ids))
+    documents = [model.document(i) for i in range(model.n_documents)]
+
+    query = TfidfVectoriser.transform_query(list(features[0])[:6], model)
+    scores = cosine_against_corpus(query, documents, model.norms)
+    gaps = [above - below for above, below in pairwise(sorted(scores, reverse=True))]
+
+    positive = [g for g in gaps if g > 0.0]
+    counted = {
+        "exactly 0": sum(1 for g in gaps if g == 0.0),
+        "(0, 1e-9)": sum(1 for g in positive if g < 1e-9),
+        "[1e-9, 1e-6)": sum(1 for g in positive if 1e-9 <= g < 1e-6),
+        "[1e-6, 1e-3)": sum(1 for g in positive if 1e-6 <= g < 1e-3),
+        ">= 1e-3": sum(1 for g in positive if g >= 1e-3),
+    }
+    published = {
+        "exactly 0": 553,
+        "(0, 1e-9)": 0,
+        "[1e-9, 1e-6)": 130,
+        "[1e-6, 1e-3)": 2292,
+        ">= 1e-3": 24,
+    }
+
+    assert len(gaps) == 2999, "3000 documents give 2999 adjacent pairs"
+    assert sum(counted.values()) == len(gaps), "the bands partition the gaps"
+    assert counted == published, (
+        "G22's table no longer matches this corpus. Update the table in "
+        "docs/spec_addenda.md and this test together, and say in the addendum "
+        "what moved -- a silent edit to either one is how it drifted before."
+    )
+    # Exact, not approximate: the corpus is seeded and the arithmetic is fixed,
+    # so this is a reproducibility assertion like every other float in this
+    # repository. A tolerance would let the value drift the way the counts did.
+    assert min(positive) == 1.575373397705304e-08, (
+        "G22 quotes the smallest strictly-positive gap as 1.575e-08"
+    )
+    assert sum(1 for s in scores if s > 0.0) == 2524, (
+        "G22: 2524 of 3000 documents score above zero, so the exact-tie mass is "
+        "not merely the zero block"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Writing the corpus out: the committed bytes are the artefact
 # ---------------------------------------------------------------------------
