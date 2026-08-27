@@ -801,25 +801,50 @@ score-level perturbations are not interchangeable at fine scales.
 
 ### What occurs naturally instead
 
-Measured on a synthetic corpus of 3000 documents (`vocab_size=5000`,
-`n_exact_duplicates=30`, `n_twin_pairs=60`, seed as specified, queried with the
-first six tokens of document 0), over all 2999 adjacent pairs of the sorted
-score vector:
+Measured on a synthetic corpus of 3000 documents (`SyntheticSpec(n_docs=3000,
+vocab_size=5000, n_exact_duplicates=30, n_twin_pairs=60, seed=20260811)`, queried
+with `features[0][:6]` — the first six *features* of document 0), over all 2999
+adjacent pairs of the sorted score vector:
 
 | adjacent gap `m_k` | count | share |
 | --- | --- | --- |
 | exactly 0 | 553 | 18.4% |
 | in (0, 1e−9) | **0** | **0.0%** |
-| in [1e−9, 1e−6) | 104 | 3.5% |
-| in [1e−6, 1e−3) | 2323 | 77.5% |
-| ≥ 1e−3 | 19 | 0.6% |
+| in [1e−9, 1e−6) | 130 | 4.3% |
+| in [1e−6, 1e−3) | 2292 | 76.4% |
+| ≥ 1e−3 | 24 | 0.8% |
 
-Smallest strictly-positive gap: **2.0e−08**. 2524 of 3000 documents score above
+Smallest strictly-positive gap: **1.575e−08**. 2524 of 3000 documents score above
 zero, so the exact-tie mass is not merely the zero block.
+
+The spec is now written out in full, and the query as the expression that
+produces it, because the previous wording was not enough to reproduce the table.
+It said "seed as specified" and "the first six tokens of document 0". Document 0
+is `w00002 w00006 w00076 w00046 w00001` — five words, which become nine features
+once bigrams are added — so "six tokens" cannot mean six words, and the two
+readings give different tables. The seed is the one every other experiment here
+uses, and it is the only one of the seeds tried that reproduces `exactly 0 = 553`
+and `2524 of 3000` — the two figures that came out the same under every reading
+of the query, which is what identifies the corpus independently of it.
 
 **The shares are configuration-dependent, and so, it turns out, is the empty
 interval.** Repeating this with a different corpus size, vocabulary or query
 moves every row of that table by a few percent.
+
+Three of the rows above were previously recorded as 104, 2323 and 19, with a
+smallest positive gap of 2.0e−08, and they no longer reproduce; the values in the
+table are the measured ones. What did not move is the part the section rests on:
+`exactly 0 = 553`, `2524 of 3000` above zero, and the `(0, 1e−9)` row at **0**,
+which holds at every seed and under every reading of the query that was tried.
+Those first two fix the corpus — no other seed reproduces either — so the drift
+is in the scoring path between the corpus and the gaps, not in the generator.
+The lesson is the one this repository applies everywhere else and did not apply
+here: a hand-maintained table of measured numbers with nothing recomputing it
+will drift, and only the rows nobody re-derives will drift silently. The table is
+now recomputed by
+`tests/test_datasets.py::test_the_gap_table_g22_publishes_is_the_one_this_corpus_produces`,
+which fails on any cell that moves and says to change the addendum and the test
+together.
 
 An earlier version of this addendum went further and claimed the *middle* row was
 invariant: that no run had ever placed an adjacent pair in (0, 1e−9), and that
@@ -861,9 +886,9 @@ on real data in a way they did not on synthetic:
 Which convention is correct is a question for the paper rather than for the code,
 and it is not answered here. What is settled is that §7.4's regime cannot be
 described as "the interval is empty, so the near-tie regime is the exact-tie
-regime" on real data. On MovieLens the exact-tie share is 2.7%, down from the
-synthetic 17 to 18%, and there is a genuine population of sub-noise separations
-besides.
+regime" on real data. On MovieLens the exact-tie share is 2.7%, down from 18.4%
+on the synthetic corpus measured above, and there is a genuine population of
+sub-noise separations besides.
 
 The regression test
 `tests/test_datasets.py::test_the_near_tie_interval_below_tau_is_empty` remains
@@ -1033,7 +1058,16 @@ over 40,000 random non-negative sparse vectors (2 to 40 non-zeros, values in
 | trials where the result exceeded 1.0 | **10,947 (27.37%)** |
 | max `cos(v, v)` | 1.0000000000000002 |
 | max `cos(v, s·v)` | 1.0000000000000007 |
-| worst excess | 6.661e−16 (3 ulp) |
+| largest excess in this sample | 6.661e−16 (3 ulp) |
+
+Every figure in that table is a **sample maximum over 40,000 trials, not a
+bound**. Resampling with a different generator reproduced `max cos(v, v) =
+1.0000000000000002` exactly — self-similarity is pinned by the structure, since
+numerator and denominator are the same sum rounded twice — but reached **4 ulp**
+on the scaled case where this sample reached 3. The rate is stable (27.4% here,
+27.9% on the resample); the extreme is not, and nothing here establishes a
+maximum. This is the same caveat the report attaches to η, and for the same
+reason: a maximum over finitely many draws is a lower bound on the worst case.
 
 The cause is straightforward: `cos = dot / (‖u‖ ‖v‖)` performs three independent
 roundings (the dot product, each norm, and the division), and nothing forces the
