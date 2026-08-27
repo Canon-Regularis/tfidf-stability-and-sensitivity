@@ -81,7 +81,11 @@ Measured over 40 corpus edits (add, remove, edit) on a 200-document corpus:
 | corpus edit | 1.694e−04 to 1.405e−01 |
 | arithmetic noise floor | ≤ 1.665e−16 |
 
-**Thirteen orders of magnitude.** §5's injected score-level noise can reach any
+**Twelve orders of magnitude at the nearest edges** (1.694e−04 against
+1.665e−16), widening to fifteen at the far ends. Twelve is the honest single
+figure: it is the closest the two regimes come, and an earlier draft of this
+line and of the report said thirteen, which is neither endpoint. §5's injected
+score-level noise can reach any
 magnitude by construction, but *text-level* perturbation cannot go below roughly
 `1/L`; see [G22](spec_addenda.md#g22). The two perturbation models are not
 interchangeable at fine scales, and the paper should say which it means.

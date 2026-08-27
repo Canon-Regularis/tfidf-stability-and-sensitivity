@@ -228,7 +228,9 @@ cos(u, v) ∈ [0, 1]
 
 **in exact arithmetic**. In binary64 the computed value may exceed 1 by a few units in the last
 place, because the dot product, the two norms and the division round independently; this was
-observed in 27% of random trials, with a worst case of 3 ulp. No clamping is applied, in keeping
+observed in 27% of 40,000 random trials, the largest excess in that sample being 3 ulp. That
+figure is a sample maximum and not a bound — an independent resample reached 4 ulp — so a
+consumer must not treat 3 ulp as a limit. No clamping is applied, in keeping
 with the numerical commitments of section 6, so a consumer converting a similarity to an angle
 must clamp at its own call site. See `docs/spec_addenda.md`, G24.
 
