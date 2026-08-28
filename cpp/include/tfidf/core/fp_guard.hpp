@@ -65,6 +65,47 @@ enum Failure : std::uint32_t {
     kDenormalsAreZero   = 1u << 5,  ///< subnormal inputs treated as zero
 };
 
+/// Whether a subnormal survived being loaded, and being produced.
+struct SubnormalSurvival {
+    bool inputs;   ///< false when subnormal operands are read as zero (DAZ-like)
+    bool results;  ///< false when a subnormal result collapses to zero (FTZ-like)
+};
+
+/// Probe whether subnormals survive this process, on both sides.
+///
+/// Split out of `selftest()`'s portable fallback so it can be tested on a
+/// machine that can actually set the modes. The fallback is the ONLY detection
+/// on targets without MXCSR -- aarch64, which ships as a macOS wheel -- and it
+/// was untestable there and wrong.
+///
+/// It read `tiny > 0.0 && tiny * 2.0 == 0.0`, which asks whether a subnormal
+/// RESULT collapses. A mode that also zeroes subnormal INPUTS makes `tiny`
+/// itself read as zero, so the `&&` short-circuits and the probe reports a
+/// clean environment. Measured on x86 by setting MXCSR directly:
+///
+///     mode                        subnormals flushed   old probe   this
+///     clean                       no                   no          no
+///     FTZ only                    yes                  YES         yes
+///     DAZ only                    yes                  no          yes
+///     FTZ + DAZ                   yes                  no          yes
+///
+/// The last row is what a BLAS sets, and what AArch64's single FPCR.FZ bit does,
+/// so the one platform relying on this probe was blind to the one mode that
+/// occurs. Both halves are reported, and neither is guarded by the other.
+[[nodiscard]] inline SubnormalSurvival subnormals_survive() noexcept {
+    // `denorm_min()` is the smallest positive subnormal, or `min()` where the
+    // type has no subnormals at all -- non-zero either way, so a platform
+    // without them is not misreported as flushing.
+    volatile double tiny = std::numeric_limits<double>::denorm_min();
+    const bool inputs = (tiny != 0.0);
+    // Doubling the smallest subnormal gives another subnormal, so a flushed
+    // result collapses to zero. Computed unconditionally: guarding it behind
+    // `inputs` is the short-circuit that hid the combined mode.
+    volatile double doubled = tiny * 2.0;
+    const bool results = (doubled != 0.0);
+    return SubnormalSurvival{inputs, results};
+}
+
 /// Probe the live floating-point behaviour of this process.
 ///
 /// A handful of arithmetic ops plus one `stmxcsr`, so it is cheap enough to run
@@ -114,10 +155,15 @@ enum Failure : std::uint32_t {
         if (mxcsr & 0x0040u) f |= kDenormalsAreZero;  // DAZ  (bit 6)
     }
 #else
-    // Portable fallback: if subnormals survive arithmetic, FTZ cannot be on.
+    // Portable fallback. See `subnormals_survive()` for why both halves are
+    // needed and why neither may guard the other.
     {
-        volatile double tiny = std::numeric_limits<double>::denorm_min();
-        if (tiny > 0.0 && tiny * 2.0 == 0.0) f |= kFlushToZero;
+        const SubnormalSurvival s = subnormals_survive();
+        // Inputs zeroed is DAZ's defining behaviour; results flushed is FTZ's.
+        // AArch64 has one bit doing both, so it reports as DAZ, which is
+        // accurate -- inputs really are being zeroed -- and enough to warn.
+        if (!s.inputs) f |= kDenormalsAreZero;
+        else if (!s.results) f |= kFlushToZero;
     }
 #endif
 

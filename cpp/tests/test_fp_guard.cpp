@@ -51,6 +51,73 @@ TEST_CASE("fp: subnormals survive (FTZ/DAZ clear)") {
     CHECK((tfidf::fp::selftest() & tfidf::fp::kDenormalsAreZero) == 0u);
 }
 
+// The portable probe, exercised under the modes it exists to catch.
+//
+// `subnormals_survive()` is the ONLY flush detection on targets without MXCSR
+// (aarch64, shipped as a macOS wheel). Those targets cannot set the modes from
+// a test, so the probe went unexercised there and was wrong: it asked only
+// whether a subnormal RESULT collapses, guarded by whether a subnormal INPUT
+// survives, so a mode zeroing both short-circuited to "clean".
+//
+// x86 can set FTZ and DAZ independently, so the aarch64-only code path is
+// tested here, on the one architecture able to produce every combination.
+// AArch64's FPCR.FZ is the FTZ+DAZ row.
+#if TFIDF_HAS_MXCSR
+TEST_CASE("fp: the portable probe detects every flushing mode") {
+    const unsigned int original = _mm_getcsr();
+    const unsigned int clean = original & ~0x8040u;
+
+    SUBCASE("clean: no false positive") {
+        _mm_setcsr(clean);
+        const auto s = tfidf::fp::subnormals_survive();
+        CHECK(s.inputs);
+        CHECK(s.results);
+        _mm_setcsr(original);
+    }
+
+    SUBCASE("FTZ only: results are flushed") {
+        _mm_setcsr(clean | 0x8000u);
+        const auto s = tfidf::fp::subnormals_survive();
+        CHECK(s.inputs);        // inputs still load
+        CHECK_FALSE(s.results); // but a subnormal result collapses
+        _mm_setcsr(original);
+    }
+
+    SUBCASE("DAZ only: inputs are zeroed, which the old probe missed") {
+        _mm_setcsr(clean | 0x0040u);
+        const auto s = tfidf::fp::subnormals_survive();
+        CHECK_FALSE(s.inputs);
+        _mm_setcsr(original);
+    }
+
+    SUBCASE("FTZ and DAZ together, the mode a BLAS sets and AArch64's FZ bit") {
+        _mm_setcsr(clean | 0x8040u);
+        const auto s = tfidf::fp::subnormals_survive();
+        CHECK_FALSE(s.inputs);
+        _mm_setcsr(original);
+    }
+
+    // Restored, or every later test in this binary runs under a flushing mode.
+    CHECK((_mm_getcsr() & 0x8040u) == (original & 0x8040u));
+}
+
+TEST_CASE("fp: selftest raises a flag for every flushing mode") {
+    const unsigned int original = _mm_getcsr();
+    const unsigned int clean = original & ~0x8040u;
+    const std::uint32_t flushing = tfidf::fp::kFlushToZero | tfidf::fp::kDenormalsAreZero;
+
+    for (const unsigned int bits : {0x8000u, 0x0040u, 0x8040u}) {
+        _mm_setcsr(clean | bits);
+        const std::uint32_t f = tfidf::fp::selftest();
+        INFO("MXCSR flush bits = " << bits << " -> " << tfidf::fp::describe(f));
+        CHECK((f & flushing) != 0u);
+    }
+
+    _mm_setcsr(original);
+    CHECK((tfidf::fp::selftest() & flushing) == 0u);
+}
+#endif
+
 TEST_CASE("fp: rounding mode is to-nearest-even") {
     CHECK(std::fegetround() == FE_TONEAREST);
     // Ties-to-even: 0.5 and 2.5 both round to an even integer.
