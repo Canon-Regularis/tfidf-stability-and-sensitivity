@@ -43,7 +43,16 @@ VOLATILE_KEYS: frozenset[str] = frozenset(
         "hostname",
         "username",
         "cwd",
-        "output_path",
+        # The key provenance blocks actually write. `datasets/loaders.py` puts a
+        # full absolute path here for a jsonl corpus, so without this a manifest
+        # digest is a function of where the file happened to live: the same run
+        # on two machines gave two digests, which is what `RunManifest.digest`
+        # promises not to do.
+        #
+        # It replaces "output_path", which was in this set and is written
+        # nowhere -- the only occurrence in the repository was the entry itself.
+        # One dead key stripped, one live key kept.
+        "path",
         "pid",
     }
 )
@@ -152,9 +161,22 @@ def strip_volatile(payload: Any, extra: Iterable[str] = ()) -> Any:
     Recursive because manifests nest: a timestamp two levels down breaks a
     snapshot as thoroughly as one at the top.
     """
+    # `extra` is materialised once and the frozenset is what recurses. It used
+    # to pass `extra` itself down, which is correct for the tuples this
+    # repository happens to pass and wrong for the `Iterable[str]` the signature
+    # advertises: a generator is exhausted by the `frozenset` at the top level,
+    # so every nested call rebuilt an empty set and stripped nothing below the
+    # first layer. Measured on {"secret": ..., "nested": {"secret": ...}}: the
+    # tuple form removed both, the generator form left the nested one in the
+    # payload and therefore in the digest.
     drop = VOLATILE_KEYS | frozenset(extra)
+    return _strip(payload, drop)
+
+
+def _strip(payload: Any, drop: frozenset[str]) -> Any:
+    """Recurse with the key set already resolved."""
     if isinstance(payload, Mapping):
-        return {k: strip_volatile(v, extra) for k, v in payload.items() if k not in drop}
+        return {k: _strip(v, drop) for k, v in payload.items() if k not in drop}
     if isinstance(payload, (list, tuple)):
-        return [strip_volatile(v, extra) for v in payload]
+        return [_strip(v, drop) for v in payload]
     return payload
