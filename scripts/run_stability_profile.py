@@ -57,6 +57,12 @@ from tfidf_stability.vectorisation.tfidf import TfidfVectoriser  # noqa: E402
 
 DEFAULT_KS = (1, 5, 10, 20, 50)
 
+#: Trials per query for the certificate audit, recorded in the parameters block
+#: under its own key. Separate from `--trials`, which drives the transition
+#: curve: the two sample independently, and one `trials` key describing both
+#: said 40 while this ran at the library default of 20.
+_AUDIT_TRIALS = 20
+
 
 def _margin_distributions(
     scores_by_query: list[list[float]], n_documents: int
@@ -74,11 +80,21 @@ def _margin_distributions(
         # neither bounds the other.
         interior = [min_adjacent_margin_top(s, k) for s in sorted_vectors]
 
-        # G3: degenerate queries are excluded here, counted so the exclusion is
+        # Undefined margins are excluded here, counted so the exclusion is
         # auditable. Both lists are counted: the counter once covered the boundary
         # margins alone, which are defined whenever k < n (guaranteed above), so
         # it read a structural zero while G16 left m_min^top undefined at k = 1
         # and all 40 queries dropped out of the interior distribution.
+        #
+        # Undefined, not degenerate. This comment said "G3: degenerate queries
+        # are excluded here", which `m.defined` does not do and does not need to:
+        # a feature-less profile never reaches this function, because `evaluate`
+        # skips it and reports it as `n_degenerate_profiles`. A query whose
+        # features are all out of vocabulary does reach here, with an all-zero
+        # score vector and a boundary margin of exactly 0.0 -- defined, and
+        # counted in the distribution. Whether that belongs in an m_k
+        # distribution is a question for section 7.2; it is not what this filter
+        # decides, and both published runs record `n_zero_vector_queries: 0`.
         usable = [m.value for m in margins if m.defined]
         usable_top = [m.value for m in interior if m.defined]
         excluded[f"k{k}"] = {
@@ -271,7 +287,22 @@ def main() -> int:
     trajectories = _rank_trajectories(
         list(grid.queries[0].scores), grid.queries[0].table, args.k, seed=args.seed + 2
     )
-    audit = certificate_audit(scores_by_query, table, args.k, seed=args.seed + 1, tables=tables)
+    # `--trials` is deliberately NOT forwarded here, and the parameters block
+    # records the count this actually runs at under its own key. The audit's
+    # default was already 20 while the transition curve above took `--trials`,
+    # so one report carried a transition curve at 33x40 = 1320 and an audit at
+    # 33x20 = 660 beneath a single `trials: 40`. A reader multiplying the
+    # recorded parameter by the query count could not reconcile it with the 2x2
+    # table, and `--trials` silently did not move the audit at all.
+    #
+    # Recording rather than forwarding, so the published audit does not move:
+    # at 40 it gives 172 certified and 51.39% conservatism against the 81 and
+    # 51.12% in section 7.2 and docs/ranking_stability.md. Forwarding it is a
+    # defensible change, but it is a republication, not a bug fix.
+    audit_trials = _AUDIT_TRIALS
+    audit = certificate_audit(
+        scores_by_query, table, args.k, seed=args.seed + 1, tables=tables, trials=audit_trials
+    )
 
     print(f"\nE2  k={args.k}  queries used={n_used} excluded (m_k == 0, A2's regime)={n_excluded}")
     for point in points:
@@ -308,7 +339,11 @@ def main() -> int:
             "n_queries": len(grid),
             **grid.provenance(),
             "k": args.k,
+            # Two counts, because two things are sampled at different rates.
+            # `trials` drives the transition curve; `audit_trials` the 2x2
+            # certificate table. One key for both said 40 while the audit ran 20.
             "trials": args.trials,
+            "audit_trials": audit_trials,
             "seed": args.seed,
             "reduction": str(model.reduction),
             "model_digest": model.digest(),
