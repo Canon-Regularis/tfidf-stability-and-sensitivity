@@ -1,9 +1,12 @@
 # =============================================================================
 # cpp/: the native core, its bindings, tests and benchmarks.
 #
-# Layout mirrors the Python package one-for-one:
-#     cpp/include/tfidf/<sub>/   <->   src/tfidf_stability/<sub>/
-# A CI check asserts the correspondence, so the two trees cannot drift.
+# Every C++ subpackage mirrors a Python one:
+#     cpp/include/tfidf/<sub>/   ->   src/tfidf_stability/<sub>/
+# Not the converse: only the hot paths were ported, so most Python subpackages
+# have no C++ counterpart. `scripts/check_layout.py` asserts the direction that
+# holds, which stops a header appearing here with nothing behind it; it cannot
+# and does not stop the Python tree growing on its own.
 # =============================================================================
 include(NumericsFlags)
 include(Warnings)
