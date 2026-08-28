@@ -605,3 +605,61 @@ def test_no_threshold_at_all_keeps_every_interaction() -> None:
     every = [Interaction("u", "m1", 0.5), Interaction("u", "m2", 5.0)]
     assert group_interactions(every) == {"u": ("m1", "m2")}
     assert group_interactions(every, min_weight=None) == {"u": ("m1", "m2")}
+
+
+# ---------------------------------------------------------------------------
+# The grid carries features, so it must refuse an aggregation that has none
+# ---------------------------------------------------------------------------
+# `Profile.features` is documented as "Empty for the vector-space aggregations,
+# which never build one" -- those carry the profile as a vector, and nothing in
+# the grid layer embeds one. So `vector_mean` and `vector_sum` produced queries
+# with no features, `evaluate` counted every one as a degenerate profile and
+# skipped it, and the caller received an empty grid with `n_degenerate` equal to
+# its own size. No exception, no queries, and two of the three documented
+# aggregations behaved that way.
+def test_a_vector_space_aggregation_is_refused_rather_than_silently_emptied() -> None:
+    """Both builders, both vector aggregations, and the error names the fix.
+
+    Refused at the point of the choice rather than discovered as an empty result
+    later, in the style `build_query_grid` already uses for the item-as-query
+    mode it declines to run.
+    """
+    grouped = group_interactions(interactions(), min_weight=4.0)
+    vector_space = [ProfileAggregation.VECTOR_MEAN, ProfileAggregation.VECTOR_SUM]
+
+    checked = 0
+    for aggregation in vector_space:
+        for builder in (leave_one_out_queries, user_profile_queries):
+            with pytest.raises(ValueError, match="profile vector rather than a feature stream"):
+                builder(
+                    grouped,
+                    FEATURES,
+                    min_interactions=5,
+                    doc_ids=DOC_IDS,
+                    aggregation=aggregation,
+                )
+            checked += 1
+
+    assert checked == 4, "two aggregations across two builders"
+
+
+def test_the_text_concatenation_aggregation_is_still_accepted() -> None:
+    """The guard's other half: it must not refuse the normative default.
+
+    Section 7.1's wording is the concatenation, and it is what every published
+    number uses, so a guard rejecting it would take the whole grid with it.
+    """
+    grouped = group_interactions(interactions(), min_weight=4.0)
+
+    queries = leave_one_out_queries(
+        grouped,
+        FEATURES,
+        min_interactions=5,
+        doc_ids=DOC_IDS,
+        aggregation=ProfileAggregation.TEXT_CONCAT,
+    )
+
+    assert queries.queries, "the default builds a non-empty grid"
+    assert all(q.features for q in queries.queries), (
+        "and every query in it carries features, which is what the grid transports"
+    )

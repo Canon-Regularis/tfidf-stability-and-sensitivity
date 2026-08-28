@@ -262,6 +262,10 @@ def test_the_environment_block_reports_every_field_the_manifest_records() -> Non
         "max",
         "min_normal",
         "rounds",
+        # What the interpreter was BUILT with, and what it is doing NOW. The
+        # guard reads the second: `sys.float_info.rounds` is a frozen constant,
+        # so the arm that reads it could not fire on any input.
+        "rounds_live",
         "subnormals_supported",
         "constant_folding_ok",
         "no_reassociation",
@@ -294,7 +298,14 @@ def test_a_rounding_mode_other_than_to_nearest_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     real = numerics.float_environment
+    # `rounds_live`, not `rounds`. Patching the build-time constant used to raise
+    # because the guard read it; it now reads a probe of the live mode, which is
+    # the only one a BLAS changing the mode after import would move. Patching
+    # `rounds` alone must therefore NOT raise, and this asserts both halves.
     monkeypatch.setattr(numerics, "float_environment", lambda: {**real(), "rounds": 0})
+    numerics.assert_sane_float_environment()
+
+    monkeypatch.setattr(numerics, "float_environment", lambda: {**real(), "rounds_live": False})
     with pytest.raises(NumericEnvironmentError, match="rounding mode"):
         numerics.assert_sane_float_environment()
 
@@ -323,7 +334,9 @@ def test_several_problems_are_reported_together_rather_than_one_at_a_time(
     monkeypatch.setattr(
         numerics,
         "float_environment",
-        lambda: {**real(), "rounds": 0, "subnormals_supported": False},
+        # `rounds_live` is the flag the guard reads; see the test above for why
+        # patching the build-time `rounds` no longer trips it.
+        lambda: {**real(), "rounds_live": False, "subnormals_supported": False},
     )
     with pytest.raises(
         NumericEnvironmentError, match="floating-point environment is not trustworthy"

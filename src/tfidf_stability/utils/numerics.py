@@ -278,6 +278,39 @@ def ulps_between(a: float, b: float) -> float:
 # ---------------------------------------------------------------------------
 # Floating-point environment
 # ---------------------------------------------------------------------------
+def _rounding_is_to_nearest() -> bool:
+    """Whether the process is rounding to nearest, ties to even, right now.
+
+    Three probes, each a directed mode's disagreement with to-nearest-even. All
+    operands are variables so CPython cannot constant-fold them at compile time
+    and answer under the compiler's mode instead of this process's:
+
+    * ``1 + ulp/2`` is an exact tie between ``1`` and ``1 + ulp``; nearest-even
+      picks ``1``, upward picks ``1 + ulp``.
+    * the same one magnitude down catches downward.
+    * ``1 + 1.5 ulp`` is a tie between ``1 + ulp`` and ``1 + 2 ulp``; nearest-even
+      picks ``1 + 2 ulp`` (even), toward-zero and downward truncate to
+      ``1 + ulp``.
+
+    Python cannot itself change the mode. A C extension can, and a BLAS doing so
+    on load is exactly the hazard this module guards against, so the question is
+    worth asking of the live process rather than of the build.
+    """
+    one = 1.0
+    ulp = 2.0**-52
+    half = 2.0**-53
+
+    # One expression rather than three early returns: each probe must run for
+    # the answer to mean anything, and a chain of `if ... return False` leaves
+    # two arcs that only a machine in the wrong rounding mode could take, so
+    # they could never be covered and the 100% gate would have to be waived for
+    # a guard whose whole point is that it can fire.
+    no_upward = (one + half) == one
+    no_downward = (-one - half) == -one
+    no_toward_zero = (one + (ulp + half)) == (one + 2.0 * ulp)
+    return no_upward and no_downward and no_toward_zero
+
+
 def float_environment() -> dict[str, object]:
     """Describe the live floating-point environment, for the run manifest.
 
@@ -296,7 +329,11 @@ def float_environment() -> dict[str, object]:
         "epsilon": sys.float_info.epsilon,
         "max": sys.float_info.max,
         "min_normal": sys.float_info.min,
+        # What CPython was COMPILED with, kept for provenance. It is a frozen
+        # constant and cannot answer the question the guard asks; see
+        # "rounds_live" below.
         "rounds": sys.float_info.rounds,  # 1 == round-to-nearest
+        "rounds_live": _rounding_is_to_nearest(),
         "subnormals_supported": subnormal_survives,
         "constant_folding_ok": (a + b) != 0.3,
         "no_reassociation": ((c + d) - c) == 0.0,
@@ -313,8 +350,17 @@ def assert_sane_float_environment() -> None:
     """
     env = float_environment()
     problems = []
-    if env["rounds"] != 1:
-        problems.append(f"rounding mode is {env['rounds']}, expected 1 (to-nearest)")
+    # `rounds_live`, not `rounds`. `sys.float_info.rounds` is FLT_ROUNDS captured
+    # when the interpreter was built, so it is the same value whatever the
+    # process later does to the rounding mode -- this arm could not fire, on any
+    # input, which is the failure mode it exists to catch. The C++ half of this
+    # guard reads `std::fegetround()` and always did; only the Python half was
+    # asking a build-time constant a run-time question.
+    if not env["rounds_live"]:
+        problems.append(
+            f"the live rounding mode is not round-to-nearest-even "
+            f"(the interpreter was built with FLT_ROUNDS={env['rounds']})"
+        )
     if not env["subnormals_supported"]:
         problems.append("subnormals are flushed to zero (a BLAS may have set MXCSR.FTZ)")
     if sys.float_info.mant_dig != 53:

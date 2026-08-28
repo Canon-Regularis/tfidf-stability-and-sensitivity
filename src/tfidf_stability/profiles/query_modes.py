@@ -162,6 +162,29 @@ class QuerySet:
         }
 
 
+def _require_feature_bearing(aggregation: ProfileAggregation) -> None:
+    """Reject an aggregation the query grid cannot carry.
+
+    A `Query` travels as a feature stream, and `Profile.features` is documented
+    as "Empty for the vector-space aggregations, which never build one" -- those
+    carry the profile as a vector instead. Nothing in the grid layer embeds one,
+    so a vector aggregation produced a query with no features, `evaluate` counted
+    every one of them as a degenerate profile and skipped it, and the caller got
+    an empty grid and an `n_degenerate` equal to its size. No error, no queries.
+
+    Two of the three documented aggregations behaved that way. Raising here says
+    so at the point of the choice, in the style `build_query_grid` already uses
+    for the item-as-query mode it declines to run.
+    """
+    if aggregation is not ProfileAggregation.TEXT_CONCAT:
+        raise ValueError(
+            f"{aggregation} builds a profile vector rather than a feature stream, "
+            f"and the query grid carries features; use "
+            f"{ProfileAggregation.TEXT_CONCAT} here, or embed the profile vector "
+            f"directly with profile_vector()"
+        )
+
+
 def user_profile_queries(
     grouped: Mapping[str, Sequence[str]],
     features_by_doc: Mapping[str, Sequence[str]],
@@ -177,6 +200,7 @@ def user_profile_queries(
     still leave the candidate set by default, for the same reason as in a fold:
     they contributed the query text and would otherwise retrieve themselves.
     """
+    _require_feature_bearing(aggregation)
     users = (
         eligible_users(grouped, max(min_interactions, 2))
         if min_interactions >= 2
@@ -241,6 +265,7 @@ def leave_one_out_queries(
         The :class:`QuerySet`. Query count is ``sum(len(items))`` over eligible
         users: a function of the data alone, no sampling and no seed.
     """
+    _require_feature_bearing(aggregation)
     users = eligible_users(grouped, min_interactions)
     total_docs = len(doc_ids) if doc_ids is not None else len(features_by_doc)
 

@@ -80,10 +80,10 @@ src/tfidf_stability/ranking/sort_keys.py  155  compare  LtE -> Lt  # the self-ch
 src/tfidf_stability/utils/numerics.py  112  compare  GtE -> Gt  # at equal magnitude both Neumaier branches compute the same compensation; verified across sign combinations and at 1e300
 src/tfidf_stability/utils/numerics.py  273  constant  0.0 -> 1.0  # marked `# pragma: no cover`; reachable only if ulp() returns zero
 src/tfidf_stability/utils/numerics.py  274  constant  0.0 -> 1.0  # the same unreachable arm
-src/tfidf_stability/utils/numerics.py  289  binop  Div -> Mult  # the flush-to-zero probe: both forms report the same boolean on a machine that is not flushing, which is the only kind a test can run on
-src/tfidf_stability/utils/numerics.py  289  compare  Gt -> GtE  # same probe, same reason
-src/tfidf_stability/utils/numerics.py  301  binop  Add -> Sub  # the constant-folding probe answers the same on a conforming interpreter
-src/tfidf_stability/utils/numerics.py  302  binop  Add -> Sub  # the reassociation probe, likewise
+src/tfidf_stability/utils/numerics.py  322  binop  Div -> Mult  # the flush-to-zero probe: both forms report the same boolean on a machine that is not flushing, which is the only kind a test can run on
+src/tfidf_stability/utils/numerics.py  322  compare  Gt -> GtE  # same probe, same reason
+src/tfidf_stability/utils/numerics.py  338  binop  Add -> Sub  # the constant-folding probe answers the same on a conforming interpreter
+src/tfidf_stability/utils/numerics.py  339  binop  Add -> Sub  # the reassociation probe, likewise
 
 # --- utils/io.py -----------------------------------------------------------
 src/tfidf_stability/utils/io.py  114  constant  True -> False  # the temp file always exists in the except arm, so missing_ok never fires
@@ -152,7 +152,7 @@ src/tfidf_stability/preprocessing/stopwords.py  67  boolop  Or -> And  # a blank
 src/tfidf_stability/preprocessing/ngrams.py  77  constant  1 -> 0  # the unigram fast path and the general path produce identical output at n = 1
 
 # --- profiles/query_modes.py -----------------------------------------------
-src/tfidf_stability/profiles/query_modes.py  181  constant  2 -> 1  # the clamp sits behind `if min_interactions >= 2`, which makes it dead
+src/tfidf_stability/profiles/query_modes.py  205  constant  2 -> 1  # the clamp sits behind `if min_interactions >= 2`, which makes it dead
 
 # --- profiles/user_profile.py ----------------------------------------------
 src/tfidf_stability/profiles/user_profile.py  257  constant  True -> False  # strict zip behind SparseVector.__post_init__
