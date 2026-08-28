@@ -32,12 +32,18 @@
 \newcommand{\addendum}[1]{\textsf{G#1}}
 \newcommand{\code}[1]{\texttt{\small #1}}
 
-% reports/figures/ is gitignored: a figure is a rendering of a recorded result,
-% and matplotlib stamps its own version into every PNG, so committing the bytes
-% would tie them to the plotting library rather than to the result. A fresh clone
-% therefore has the JSON but not the images, and an unguarded \includegraphics
-% would fail the build of the document that is meant to be the deliverable.
-% The fallback prints the two commands that produce the missing figure.
+% reports/figures/ is committed -- seven PNGs, tracked, with no .gitignore entry.
+% This comment used to say the opposite, and the argument it gave for that is
+% still worth stating: matplotlib stamps its own version into every PNG, so the
+% committed bytes are tied to the plotting library as well as to the result, and
+% a matplotlib upgrade shows up as a diff in files nobody edited. Measured while
+% checking this: the seven regenerate byte-identically under matplotlib 3.11.1,
+% and four of them changed the moment a report digest they are stamped with
+% moved -- which is the stamp doing its job and the coupling being real.
+%
+% Because they are committed, the fallback below cannot fire in this repository.
+% It is kept for a tree where the figures have not been generated yet, and it
+% prints the two commands that produce the missing figure.
 %   #1 basename  #2 width as a fraction of \textwidth  #3 producing command
 %   #4 caption   #5 label
 \newcommand{\resultfigure}[5]{%
