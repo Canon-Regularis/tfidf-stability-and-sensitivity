@@ -49,11 +49,27 @@ from tfidf_stability.utils.io import read_jsonl  # noqa: E402
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser  # noqa: E402
 
 CORPUS = REPO / "tests" / "fixtures" / "mini_corpus.jsonl"
+#: Digest queries as raw text, put through the same preprocessing as the corpus.
+#:
+#: They were tuples of raw English handed straight to `transform_query`, which
+#: takes *features* -- the stemmed, n-grammed form the vocabulary is built from.
+#: So "cosine" was looked up in a vocabulary holding "cosin", and missed. Three
+#: of the four embedded to the zero vector when only `q4` was meant to:
+#:
+#:     q1 ("quick", "brown", "fox")            nnz=3, 2 non-zero scores
+#:     q2 ("numerical", "stability", "sparse") nnz=0   <- vocabulary has numer, stabil, spars
+#:     q3 ("cosine", "similarity", "vectors")  nnz=0   <- cosin, similar, vector
+#:     q4 ("the", "of", "and")                 nnz=0   <- intended: all stopwords
+#:
+#: The `scores`, `rankings` and `margins` stages therefore covered one real
+#: query, and `rankings` was mostly ordering an all-zero vector by attributes
+#: alone. The digests were stable across platforms, so nothing failed; they were
+#: just checking far less than they appeared to.
 QUERIES = (
-    ("q1", ("quick", "brown", "fox")),
-    ("q2", ("numerical", "stability", "sparse")),
-    ("q3", ("cosine", "similarity", "vectors")),
-    ("q4", ("the", "of", "and")),  # all stopwords: the zero-vector query
+    ("q1", "quick brown fox"),
+    ("q2", "numerical stability sparse"),
+    ("q3", "cosine similarity vectors"),
+    ("q4", "the of and"),  # all stopwords: the zero-vector query, on purpose
 )
 
 
@@ -87,8 +103,10 @@ def compute() -> dict[str, str]:
     score_parts: list[str] = []
     order_parts: list[str] = []
     margin_parts: list[str] = []
-    for _, query_features in QUERIES:
-        query = TfidfVectoriser.transform_query(list(query_features), model)
+    for _, query_text in QUERIES:
+        # Through the same pipeline the corpus went through, so a query term is
+        # looked up in the form the vocabulary actually holds.
+        query = TfidfVectoriser.transform_query(pipeline.preprocess(query_text), model)
         scores = cosine_against_corpus(query, docs, model.norms)
         score_parts.append(hash_floats(scores))
 
