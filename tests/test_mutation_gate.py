@@ -16,6 +16,7 @@ ever prunes them, and the campaign goes green whatever the tests do.
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import shutil
 import sys
@@ -425,3 +426,101 @@ def test_the_allowlist_names_only_modules_that_are_still_in_the_package() -> Non
     missing = sorted(path for path in named if not (REPO / path).exists())
 
     assert not missing, f"the allowlist names modules that no longer exist: {missing}"
+
+
+def _stamped_entries() -> list[tuple[str, int, str, str]]:
+    """Every allowlist entry as `(path, line, stamp, reason)`.
+
+    Local by house convention, and separate from `_sites_by_key` above because
+    this asks a different question: not whether the mutation exists, but whether
+    the line it sits on is still the line the entry was written about.
+    """
+    entries: list[tuple[str, int, str, str]] = []
+    for raw in ALLOWLIST.read_text(encoding="utf-8").splitlines():
+        statement, _, reason = raw.partition("#")
+        fields = statement.split()
+        if len(fields) < 6 or raw.lstrip().startswith("#"):
+            continue
+        head, _, rest = reason.strip().partition(" ")
+        entries.append((fields[0], int(fields[1]), head, rest))
+    return entries
+
+
+def _fingerprint(line: str) -> str:
+    """Hash of the source line with whitespace collapsed.
+
+    Whitespace only, so reindenting a block does not invalidate every entry in
+    it while a changed expression still does.
+    """
+    return hashlib.sha256(" ".join(line.split()).encode("utf-8")).hexdigest()[:8]
+
+
+def test_every_allowlist_entry_still_describes_the_line_it_names() -> None:
+    """The half `..._still_names_a_mutation_that_exists` does not cover.
+
+    That test asks whether a site with the entry's `(line, kind, before, after)`
+    exists. It does not ask whether that site is the one the entry was written
+    about, and the difference is not academic: when a round of edits shifted
+    lines, a repair tool mapped three of five entries onto the *nearest*
+    same-signature site -- the wrong expression each time, since the edits had
+    inserted closer ones -- and reported "0 need a human". The test passed on all
+    three. They were caught by reading each entry's recorded reason by hand.
+
+    A fingerprint of the source line closes it. `src=<8 hex>` prefixes each
+    reason; a renumbering onto a different expression no longer matches, and the
+    failure prints the line now sitting there so the fix is visible rather than
+    inferred.
+    """
+    entries = _stamped_entries()
+    assert entries, "the premise: the allowlist is not empty"
+
+    sources: dict[str, list[str]] = {}
+    drifted: list[str] = []
+    checked = 0
+
+    for path, line_no, stamp, reason in entries:
+        assert stamp.startswith("src="), (
+            f"{path}:{line_no} carries no source stamp; regenerate it rather than "
+            f"leaving an entry nothing can check"
+        )
+        if path not in sources:
+            sources[path] = (REPO / path).read_text(encoding="utf-8").splitlines()
+        body = sources[path]
+        assert 1 <= line_no <= len(body), f"{path}:{line_no} is past the end of the file"
+
+        actual = _fingerprint(body[line_no - 1])
+        if stamp != f"src={actual}":
+            drifted.append(
+                f"{path}:{line_no}\n"
+                f"      recorded {stamp}, actual src={actual}\n"
+                f"      the line now reads: {body[line_no - 1].strip()[:88]}\n"
+                f"      the entry says:     {reason[:88]}"
+            )
+        checked += 1
+
+    assert checked == len(entries), "every entry was fingerprinted"
+    assert not drifted, (
+        "allowlist entries whose line no longer holds what they describe. Renumber "
+        "by matching each entry's recorded reason against the source, not by "
+        "nearest line, then restamp:\n  " + "\n  ".join(drifted)
+    )
+
+
+def test_a_stamp_pointing_at_a_different_expression_is_rejected() -> None:
+    """The guard's own discrimination, shown rather than assumed.
+
+    Two real entries from the same file, with their stamps exchanged: both still
+    name a site that exists and both have a well-formed stamp, so only the
+    fingerprint separates them. If this passes, the check above is decorative.
+    """
+    entries = [e for e in _stamped_entries() if e[0].endswith("numerics.py")]
+    assert len(entries) >= 2, "the premise: numerics.py carries several entries"
+
+    (_, first_line, first_stamp, _), (_, second_line, second_stamp, _) = entries[0], entries[1]
+    assert first_stamp != second_stamp, "the premise: the two lines differ"
+
+    body = (REPO / entries[0][0]).read_text(encoding="utf-8").splitlines()
+    assert _fingerprint(body[first_line - 1]) == first_stamp.removeprefix("src=")
+    assert _fingerprint(body[second_line - 1]) != first_stamp.removeprefix("src="), (
+        "swapping two entries' stamps must not still verify"
+    )
