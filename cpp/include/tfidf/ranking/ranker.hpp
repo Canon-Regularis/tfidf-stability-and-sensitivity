@@ -124,9 +124,28 @@ inline void select_top(std::span<SortKey> keys,
 /// Sorted as raw doubles, independently of any ranking. One array serves every
 /// operator, every `k` and every `tau`, which is what makes margins provably
 /// independent of the tie-break.
+///
+/// `std::stable_sort`, because the normative Python is `sorted(..., reverse=True)`
+/// and `sorted` is stable. For doubles that matters in exactly one case, and it
+/// is a real one: `-0.0 == 0.0` compares equal while the two differ in bits, so
+/// an unstable sort is free to return them in either order. It did.
+///
+/// Measured against the reference on 17 alternating signed zeros: this returned
+/// `0.0, 0.0, -0.0, 0.0, ...` where the reference returns `0.0, -0.0, 0.0, ...`,
+/// and `boundary_margin` over the two arrangements then disagreed in bits at
+/// k = 2, 3 and 4 -- the sign of zero flipping between the backends. Seventeen
+/// is where it starts: libstdc++'s introsort falls back to insertion sort below
+/// sixteen elements, which is incidentally stable, so every smaller fixture in
+/// the differential suite agreed and none of them could have caught this.
+///
+/// Latent rather than live: TF-IDF coordinates are non-negative, so a dot
+/// product is `+0.0` or positive and the zero-vector convention returns a
+/// literal `0.0` -- scoring cannot produce a `-0.0` to sort. But
+/// `sorted_scores_desc` and `boundary_margin` are both exposed through the
+/// bindings and take caller-supplied arrays, and `check_finite` admits `-0.0`.
 [[nodiscard]] inline std::vector<Real> sorted_scores_desc(std::span<const Real> scores) {
     std::vector<Real> out(scores.begin(), scores.end());
-    std::sort(out.begin(), out.end(), std::greater<>());
+    std::stable_sort(out.begin(), out.end(), std::greater<>());
     return out;
 }
 

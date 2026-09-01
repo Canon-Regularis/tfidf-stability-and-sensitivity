@@ -296,3 +296,61 @@ def test_the_two_backends_disagree_only_on_invalid_k_and_only_in_kind() -> None:
         for mode in (StrictMode.STRICT, StrictMode.LENIENT):
             with pytest.raises(KOutOfRangeError, match="k must be positive, got 0"):
                 reference_fn([1.0, 0.5, 0.25], 0, mode=mode)
+
+
+# ---------------------------------------------------------------------------
+# Signed zeros: the one case where sort stability is observable
+# ---------------------------------------------------------------------------
+# `-0.0 == 0.0` is true while the two differ in bits, so an unstable sort may
+# return them in either order. The reference is `sorted(..., reverse=True)`,
+# which is stable; the core used `std::sort`, which is not, and the two
+# disagreed.
+#
+# Every fixture in this file was under sixteen elements, and libstdc++'s
+# introsort falls back to insertion sort below that -- incidentally stable. So
+# the suite agreed everywhere and could not have caught it. Seventeen is where
+# it started.
+_SIGNED_ZERO_SIZES = (17, 33, 64, 129)
+
+
+@pytest.mark.parametrize("size", _SIGNED_ZERO_SIZES)
+def test_sorting_signed_zeros_agrees_bit_for_bit_with_the_reference(size: int) -> None:
+    """Stability is observable here, so the two sorts must make the same choice.
+
+    Asserted on bit patterns rather than values, because every value in this
+    array is zero and `==` cannot tell the two apart -- which is the whole
+    reason an unstable sort could diverge here unnoticed.
+    """
+    scores = [(-0.0 if i % 2 else 0.0) for i in range(size)]
+
+    reference = sorted_scores_desc(scores)
+    native = list(nat.sorted_scores_desc(np.asarray(scores, dtype=np.float64)))
+
+    assert len(native) == len(reference)
+    for i, (a, b) in enumerate(zip(reference, native, strict=True)):
+        assert same_bits(a, b), (
+            f"position {i}: reference {a!r} and native {b!r} are equal but not "
+            f"bit-identical, so the two sorts ordered the signed zeros differently"
+        )
+
+
+def test_the_margin_over_signed_zeros_agrees_bit_for_bit() -> None:
+    """The consequence, and why the sort mattered rather than being cosmetic.
+
+    ``m_k`` is a difference of adjacent sorted scores. Over zeros, ``0.0 - 0.0``
+    is ``+0.0`` while ``-0.0 - 0.0`` is ``-0.0``, so a different arrangement
+    produces a differently-signed zero. Measured before the fix: the two
+    backends disagreed in bits at k = 2, 3 and 4.
+    """
+    scores = [(-0.0 if i % 2 else 0.0) for i in range(17)]
+    reference = list(sorted_scores_desc(scores))
+    native = list(nat.sorted_scores_desc(np.asarray(scores, dtype=np.float64)))
+
+    checked = 0
+    for k in (1, 2, 3, 4):
+        a = boundary_margin(reference, k, mode=StrictMode.LENIENT).value
+        b = boundary_margin(native, k, mode=StrictMode.LENIENT).value
+        assert same_bits(a, b), f"m_{k} differs in bits: {a!r} against {b!r}"
+        checked += 1
+
+    assert checked == 4, "every k was compared"
