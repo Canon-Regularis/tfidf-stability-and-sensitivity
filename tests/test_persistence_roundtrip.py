@@ -19,6 +19,7 @@ import pytest
 from tfidf_stability.persistence.model import MODEL_FIELDS, describe_schema
 from tfidf_stability.persistence.save_load import (
     _FLAG_MASK,
+    _HEADER,
     FORMAT_VERSION,
     MAGIC,
     _check_csr,
@@ -602,6 +603,112 @@ def test_an_idf_of_exactly_one_is_admitted_because_a_full_df_term_produces_it() 
 
     assert restored.idf.values[0] == 1.0
     assert model_from_bytes(model_bytes(restored)) is not None, "and it round-trips"
+
+
+# ---------------------------------------------------------------------------
+# The integer arrays get the same scrutiny as the float ones
+# ---------------------------------------------------------------------------
+# `model_bytes` writes ten fields. Seven were validated -- the CSR triple, the
+# three float arrays, and both string blocks -- and the three int64 arrays
+# (`lengths`, `df`, `cf`) were not, so values no fit can produce loaded without
+# complaint. Same shape as the token block and the idf sign before them: a
+# sibling treated differently, in the one parser that reads untrusted input.
+def _int_offsets(model: object) -> tuple[int, int, int]:
+    """Byte offsets of `lengths`, `df` and `cf`, derived from the layout.
+
+    Computed rather than hard-coded, so a field added ahead of them moves these
+    with it. Searching the bytes for a value does not work here: several of
+    these arrays hold the same small integers, and a search finds whichever
+    comes first.
+    """
+    n_docs = model.n_documents  # type: ignore[attr-defined]
+    n_terms = len(model.vocabulary.tokens)  # type: ignore[attr-defined]
+    nnz = len(model.matrix.values)  # type: ignore[attr-defined]
+    lengths = (
+        _HEADER.size
+        + 8 * (n_docs + 1)  # indptr, q
+        + 4 * nnz  # indices, i
+        + 8 * nnz  # values, d
+        + 8 * n_terms  # idf, d
+        + 8 * n_docs  # norms, d
+    )
+    return lengths, lengths + 8 * n_docs, lengths + 8 * n_docs + 8 * n_terms
+
+
+def _poke(payload: bytes, at: int, value: int) -> bytes:
+    mutated = bytearray(payload)
+    mutated[at : at + 8] = struct.pack("<q", value)
+    return bytes(mutated)
+
+
+def test_a_document_frequency_outside_one_to_n_is_refused() -> None:
+    """`1 <= df[t] <= N`, because a term reaches the vocabulary by appearing.
+
+    Zero would say the term is in the vocabulary and in no document; greater
+    than `N` would say it is in more documents than exist. Both were accepted.
+    """
+    model = _three_token_model()
+    payload = model_bytes(model)
+    _, df_at, _ = _int_offsets(model)
+
+    for impossible in (-1, 0, model.n_documents + 1, 999):
+        with pytest.raises(TfsxFormatError, match=r"df\[0\]"):
+            model_from_bytes(_poke(payload, df_at, impossible))
+
+
+def test_a_collection_frequency_below_its_document_frequency_is_refused() -> None:
+    """`cf[t] >= df[t]`: a term occurs at least once in each document holding it.
+
+    Checked against `df` rather than against zero, because the interesting
+    corruption is the one that stays positive and still cannot have come from a
+    fit.
+    """
+    model = _three_token_model()
+    payload = model_bytes(model)
+    _, _, cf_at = _int_offsets(model)
+    df_zero = model.vocabulary.df[0]
+
+    assert df_zero > 1, "the premise: there is room below df to be wrong in"
+    with pytest.raises(TfsxFormatError, match=r"cf\[0\]"):
+        model_from_bytes(_poke(payload, cf_at, df_zero - 1))
+
+
+def test_a_length_below_the_row_it_describes_is_refused() -> None:
+    """`lengths[i] >= nnz(row i)`, since each distinct term occurs at least once.
+
+    A lower bound and no more: the exact length cannot be recovered from the
+    container, because a term occurring three times and one occurring once are
+    one non-zero either way. Measured before the guard: `lengths[0]` moved from
+    3 to 7 was accepted and `intermediates(0)` published `count=5, tf=0.714`
+    against the genuine `count=2, tf=0.667`. That value is still accepted, and
+    the test says so rather than pretending otherwise.
+    """
+    model = _three_token_model()
+    payload = model_bytes(model)
+    lengths_at, _, _ = _int_offsets(model)
+    row_nnz = model.matrix.indptr[1] - model.matrix.indptr[0]
+
+    for below in range(row_nnz):
+        with pytest.raises(TfsxFormatError, match=r"lengths\[0\]"):
+            model_from_bytes(_poke(payload, lengths_at, below))
+
+    assert model_from_bytes(_poke(payload, lengths_at, row_nnz)) is not None, (
+        "equal to the row's non-zero count is the boundary and is legitimate"
+    )
+    assert model_from_bytes(_poke(payload, lengths_at, row_nnz + 5)) is not None, (
+        "and a longer document is not something this format can refute"
+    )
+
+
+def test_an_untouched_container_still_loads_with_its_integer_arrays_intact() -> None:
+    """The guards' other half: three new checks that reject nothing valid."""
+    model = _three_token_model()
+
+    restored = model_from_bytes(model_bytes(model))
+
+    assert restored.lengths == model.lengths
+    assert restored.vocabulary.df == model.vocabulary.df
+    assert restored.vocabulary.cf == model.vocabulary.cf
 
 
 # ---------------------------------------------------------------------------

@@ -469,6 +469,51 @@ def model_from_bytes(data: bytes) -> TfidfModel:
         check_non_negative(idf_values, "idf")
         check_non_negative(values, "weights")
         check_non_negative(norms, "norms")
+        # The three integer arrays, which had no semantic check at all while
+        # every float array and both string blocks had one. Seven of the ten
+        # fields `model_bytes` writes were validated; these were the three.
+        #
+        # Each carries a constraint a real fit cannot violate. `lengths[i]` is a
+        # count of in-vocabulary terms, so it is non-negative -- zero for a
+        # document whose tokens are all stopwords, which the mini corpus has.
+        # `df[t]` counts documents containing `t`, and a term reaches the
+        # vocabulary only by appearing, so `1 <= df[t] <= N`. `cf[t]` counts
+        # total occurrences, and a term occurs at least once in each document
+        # holding it, so `cf[t] >= df[t]`.
+        #
+        # Measured on a 301-byte container: `lengths[0]` moved from 3 to 7 was
+        # accepted, and `intermediates(0)` then published `count=5, tf=0.714`
+        # where the genuine model gives `count=2, tf=0.667` -- the two fields
+        # that need `_exact_tf` to be recovered at all, wrong in the one file
+        # this project publishes with raw bit patterns beside the decimals. No
+        # error on load or on export.
+        check_non_negative(lengths, "lengths")
+        for doc, length in enumerate(lengths):
+            # Each distinct in-vocabulary term in row `doc` occurs at least
+            # once, so the document's in-vocabulary length is at least its
+            # number of non-zeros. A lower bound only: the exact value cannot be
+            # recovered from the container, since a term occurring three times
+            # and one occurring once are one non-zero either way. `lengths[0]`
+            # moved from 3 to 7 is still accepted, and no check available here
+            # could refuse it -- what this catches is a length shrunk below the
+            # row it describes.
+            row_nnz = indptr[doc + 1] - indptr[doc]
+            if length < row_nnz:
+                raise TfidfStabilityError(
+                    f"lengths[{doc}] = {length} is below the {row_nnz} distinct terms "
+                    f"row {doc} holds; each occurs at least once"
+                )
+        for term, (d, c) in enumerate(zip(df, cf, strict=True)):
+            if not 1 <= d <= head.n_docs:
+                raise TfidfStabilityError(
+                    f"df[{term}] = {d} is outside 1..{head.n_docs}; a term in the "
+                    f"vocabulary appears in at least one document and at most all"
+                )
+            if c < d:
+                raise TfidfStabilityError(
+                    f"cf[{term}] = {c} is below df[{term}] = {d}; a term occurs at "
+                    f"least once in each document that contains it"
+                )
     except TfidfStabilityError as exc:
         raise TfsxFormatError(
             f"container is structurally valid but its contents are not: {exc}"
