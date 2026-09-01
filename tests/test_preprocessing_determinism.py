@@ -9,6 +9,7 @@ be measuring interpreter noise.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 import unicodedata
@@ -709,6 +710,17 @@ def test_an_inverted_ngram_range_is_refused_by_the_pipeline() -> None:
         pipeline.preprocess("a b c")
 
 
+def _bound_stopwords(pipeline: PreprocessingPipeline) -> str:
+    """The stopword component of the pipeline identity, as `digest()` binds it.
+
+    Two digests joined: `digest` is provenance (the asset's raw file bytes) and
+    `content_digest` is identity (derived from the words). Reconstructed here
+    rather than restated as a literal, so a change to how they are joined fails
+    the pipeline's own tests rather than silently agreeing with a stale copy.
+    """
+    return f"{pipeline.stopwords.digest}:{pipeline.stopwords.content_digest}"
+
+
 def test_a_pipeline_agreeing_with_its_config_digests_as_the_config_alone() -> None:
     """The backward-compatibility half of the override rule, stated absolutely.
 
@@ -733,11 +745,11 @@ def test_a_pipeline_agreeing_with_its_config_digests_as_the_config_alone() -> No
     config = PreprocessingConfig()
     plain = PreprocessingPipeline(config)
 
-    assert plain.digest() == config.digest(stopword_digest=plain.stopwords.digest)
+    assert plain.digest() == config.digest(stopword_digest=_bound_stopwords(plain))
 
     injected = PreprocessingPipeline(config, lemmatiser=make_lemmatiser(LemmatiserKind.NONE))
     assert injected.digest() == config.digest(
-        stopword_digest=injected.stopwords.digest, lemmatiser_override="none"
+        stopword_digest=_bound_stopwords(injected), lemmatiser_override="none"
     )
     assert injected.digest() != plain.digest()
 
@@ -935,7 +947,7 @@ def test_the_digest_of_a_config_only_pipeline_is_unmoved_by_binding_content() ->
     from_config = PreprocessingPipeline(config)
     injected_same = PreprocessingPipeline(config, lemmatiser=make_lemmatiser(config.lemmatiser))
 
-    expected = config.digest(stopword_digest=from_config.stopwords.digest)
+    expected = config.digest(stopword_digest=_bound_stopwords(from_config))
 
     assert from_config.digest() == expected, "no override key is added when none is needed"
     assert injected_same.digest() == expected, "and injecting the config's own backend is a no-op"
@@ -952,6 +964,124 @@ def test_injecting_a_different_kind_still_moves_the_digest_by_its_bare_name() ->
     injected = PreprocessingPipeline(config, lemmatiser=make_lemmatiser(LemmatiserKind.NONE))
 
     assert injected.digest() == config.digest(
-        stopword_digest=injected.stopwords.digest, lemmatiser_override="none"
+        stopword_digest=_bound_stopwords(injected), lemmatiser_override="none"
     )
     assert injected.digest() != PreprocessingPipeline(config).digest()
+
+
+# ---------------------------------------------------------------------------
+# The stopword identity is derived, not supplied
+# ---------------------------------------------------------------------------
+# `digest` was the only one, and it was whatever the caller passed. Nothing
+# derived it and nothing checked it, while `PreprocessingPipeline` published it
+# as the map's identity -- so two sets holding different words could carry one
+# identity and hash to one pipeline digest. The same hole `LookupLemmatiser` had
+# one field along, closed the same way.
+def test_two_word_sets_cannot_share_an_identity_by_sharing_a_supplied_digest() -> None:
+    """The defect, stated directly.
+
+    Both sets are handed the same `digest` string, which the constructor accepts
+    because provenance is legitimately caller-supplied -- `load_stopwords` sets
+    it from the asset's raw file bytes on purpose. What must not follow is that
+    the two become indistinguishable.
+    """
+    the_and_of = StopwordSet(["the", "of"], name="x", digest="a-supplied-string")
+    cat_and_dog = StopwordSet(["cat", "dog"], name="x", digest="a-supplied-string")
+
+    assert the_and_of.digest == cat_and_dog.digest, "the premise: provenance is shared"
+    assert the_and_of.content_digest != cat_and_dog.content_digest, (
+        "but the identity is derived from the words and must separate them"
+    )
+
+
+def test_the_content_digest_matches_what_from_iterable_derives() -> None:
+    """One canonical form, not two.
+
+    `from_iterable` digests the sorted words joined by newlines, and that is the
+    form the derived value has to reproduce -- otherwise a set built by the
+    factory and one built directly would disagree about their own identity while
+    holding the same words.
+    """
+    direct = StopwordSet(["of", "the"], name="x", digest="irrelevant")
+    factory = StopwordSet.from_iterable(["the", "of"])
+
+    assert direct.content_digest == factory.content_digest
+    assert factory.digest == factory.content_digest, (
+        "the factory derives its provenance the same way, so the two coincide there"
+    )
+
+
+def test_order_and_repetition_do_not_change_the_identity() -> None:
+    """A set is a set. The canonical form is sorted and deduplicated, so the
+    identity cannot depend on how the caller happened to spell the collection."""
+    a = StopwordSet(["the", "of", "the"], name="x", digest="d")
+    b = StopwordSet(["of", "the"], name="x", digest="d")
+
+    assert a.content_digest == b.content_digest
+
+
+def test_the_empty_set_agrees_with_the_factory_on_the_one_form_that_has_no_words() -> None:
+    r"""The degenerate end of the canonical form, where an off-by-one would hide.
+
+    The derived value joins the sorted words with newlines and appends one. With
+    no words that is the single byte ``b"\n"``, not the empty string -- so a
+    derivation spelled ``"\n".join(ws)`` without the trailing newline, or one
+    special-casing empty to ``b""``, would agree with ``from_iterable`` on every
+    non-empty set and disagree only here. Removing no words is a real
+    configuration, and it has to hash like one.
+    """
+    factory = StopwordSet.from_iterable([])
+    direct = StopwordSet([], name="x", digest="irrelevant")
+
+    assert factory.content_digest == direct.content_digest
+    assert direct.content_digest == hashlib.sha256(b"\n").hexdigest(), (
+        "pinned as a constant, so a change to the canonical form fails here rather "
+        "than silently agreeing with a matching change in the factory"
+    )
+    assert direct.content_digest != hashlib.sha256(b"").hexdigest(), (
+        "the trailing newline is part of the form, not an accident of joining"
+    )
+
+
+def test_an_empty_set_and_a_set_holding_one_empty_string_are_not_the_same_map() -> None:
+    r"""The pair the canonical form cannot separate, recorded rather than assumed.
+
+    ``[""]`` canonicalises to ``"" + "\n"``, which is the same byte string the
+    empty set produces, so the two collide. They are different maps -- one strips
+    nothing, the other holds a word. ``normalise`` never yields an empty token,
+    so no pipeline input reaches the collision, but the constructor is public and
+    the two are one character apart.
+
+    Asserted as equal on purpose: this pins the collision as known, so making the
+    form injective later fails here and is reviewed rather than absorbed.
+    """
+    empty = StopwordSet([], name="x", digest="d")
+    holds_empty_string = StopwordSet([""], name="x", digest="d")
+
+    assert "" in holds_empty_string, "the premise: the two sets genuinely differ"
+    assert "" not in empty
+    assert empty.content_digest == holds_empty_string.content_digest, (
+        "documented, not endorsed: the canonical form cannot tell them apart, and "
+        "no pipeline input produces an empty token to expose it"
+    )
+
+
+def test_the_pipeline_digest_separates_two_maps_that_remove_different_words() -> None:
+    """The consequence, and the reason the constructor mattered.
+
+    `PreprocessingPipeline.digest` is what a run manifest records, so two maps
+    that strip different words must not hash alike. They did, whenever the
+    stopword sets were handed the same provenance string.
+    """
+    config = PreprocessingConfig()
+    strips_articles = PreprocessingPipeline(
+        config, stopwords=StopwordSet(["the", "of"], name="x", digest="same")
+    )
+    strips_animals = PreprocessingPipeline(
+        config, stopwords=StopwordSet(["cat", "dog"], name="x", digest="same")
+    )
+
+    assert strips_articles.preprocess("the cat") != strips_animals.preprocess("the cat"), (
+        "the premise: these two maps genuinely differ"
+    )
+    assert strips_articles.digest() != strips_animals.digest()
