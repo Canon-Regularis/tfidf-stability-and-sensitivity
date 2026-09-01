@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -794,3 +795,57 @@ def test_the_exported_weight_is_exactly_tf_times_idf(tmp_path: Path) -> None:
         assert same_bits(entry["tf"] * entry["idf"], entry["weight"]), (
             "w = fl(tf * idf), bit for bit"
         )
+
+
+# ---------------------------------------------------------------------------
+# build-corpus refuses an unfit build before it writes anything
+# ---------------------------------------------------------------------------
+def test_an_unreproducible_build_leaves_no_artefact_behind(tmp_path: Path) -> None:
+    """The guard runs before `save_model`, not after it.
+
+    `require_reproducible` refuses a fast-math or arch-tuned build, because such
+    a build cannot produce publishable numbers. It used to run *after*
+    `save_model`, so it raised with the container and its readable sidecar
+    already on disk and `manifest.write` never reached. Measured with the old
+    ordering: `['m.json', 'm.tfsx']` survived the exception.
+
+    That is the worst of the three possible outcomes. A refusal that writes
+    nothing is safe and a completed write with a manifest is honest; what was
+    left instead was a complete-looking model, carrying a sidecar full of
+    digests, from a build the project declares unfit -- and no manifest to say
+    which.
+    """
+    out = tmp_path / "m.tfsx"
+
+    with (
+        patch.object(RunManifest, "is_reproducible_build", property(lambda self: False)),
+        pytest.raises(RuntimeError, match="not reproducible"),
+    ):
+        main(["build-corpus", str(CORPUS), "-o", str(out)])
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == [], (
+        "the refusal must leave the directory as it found it"
+    )
+
+
+def test_a_reproducible_build_writes_both_the_model_and_its_manifest(tmp_path: Path) -> None:
+    """The guard's other half: it must not refuse an ordinary build.
+
+    Contrastive with the test above, so a refusal that wrote nothing because it
+    refused *everything* could not pass for correct. The manifest is asserted
+    alongside the container because the ordering change moved when it is filled
+    in -- `manifest.model` is now assigned after `save_model` returns, and a
+    manifest written without it would record no container digest at all.
+    """
+    out = tmp_path / "m.tfsx"
+
+    assert main(["build-corpus", str(CORPUS), "-o", str(out)]) == 0
+
+    assert out.exists(), "the container"
+    manifest_path = out.with_suffix(".manifest.json")
+    assert manifest_path.exists(), "and the manifest beside it"
+
+    recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert recorded["model"]["container_sha256"] == hash_file(out, text=False), (
+        "the manifest's model block must describe the file that was actually written"
+    )

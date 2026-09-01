@@ -230,7 +230,6 @@ def cmd_build_corpus(args: argparse.Namespace) -> int:
         )
 
     out = Path(args.output)
-    provenance = save_model(model, out)
 
     manifest = RunManifest(
         run_kind="build_corpus",
@@ -241,10 +240,21 @@ def cmd_build_corpus(args: argparse.Namespace) -> int:
             "n_documents": len(ids),
         },
         preprocessing=pipeline.fingerprint(),
-        model=provenance,
         parameters={"reduction": str(model.reduction), "log_impl": str(model.idf.log_impl)},
     )
+    # Refuse BEFORE writing anything. `save_model` used to run first and this
+    # guard second, so on a fast-math or arch-tuned build the container and its
+    # readable sidecar were already on disk when `require_reproducible` raised
+    # and `manifest.write` was never reached. What that left behind is the worst
+    # of the three possible states: a complete-looking `.tfsx` with a sidecar
+    # full of digests, from a build this project declares unfit to produce
+    # publishable numbers, and no manifest to say so. `is_reproducible_build`
+    # reads only `environment["native"]`, so it needs nothing from `save_model`
+    # and can be asked first.
     manifest.require_reproducible()
+
+    provenance = save_model(model, out)
+    manifest.model = provenance
     manifest.write(out.with_suffix(".manifest.json"))
 
     # Digests only, never the output path: the path is the caller's choice and
