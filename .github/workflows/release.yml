@@ -56,6 +56,25 @@ jobs:
             requirements.txt
             requirements-dev.txt
       - run: python -m pip install --upgrade pip build twine
+      - name: The tag and the tree must state the same version
+        # `check_versions.py` has taken a `--tag` since it was written, and its
+        # own docstring says why: "`release.yml` triggers on `v*` and hands the
+        # tag to nothing that checks it, so `git tag v0.3.0` on a tree declaring
+        # 0.2.0 would build, test, gate and publish 0.2.0 under a 0.3.0
+        # release." Nothing then passed it. The only invocation anywhere was
+        # `ci.yml`, without `--tag` -- and `ci.yml` triggers on branches and
+        # pull requests, not on tags, so on a release no version check ran at
+        # all. The guard existed, worked, and was wired to nothing.
+        #
+        # Here rather than in `publish`, because `publish` needs this job and a
+        # tag naming the wrong version should stop the build before any artefact
+        # is made, not after three matrices have run.
+        #
+        # Guarded on the ref being a tag: `workflow_dispatch` runs this workflow
+        # from a branch, where `github.ref_name` is "main" and the comparison
+        # would be meaningless rather than informative.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/check_versions.py --tag "${{ github.ref_name }}"
       - run: python -m build --sdist
       - name: The distribution metadata must be valid before it is published
         # `twine check --strict` is what PyPI itself applies on upload, so
