@@ -69,7 +69,20 @@ class EditRecord:
 
     @property
     def changes_corpus_size(self) -> bool:
-        """Whether ``N`` changed, and hence whether *every* IDF moved."""
+        """Whether ``N`` changed.
+
+        Not "and hence every IDF moved", which this said and the arithmetic does
+        not support. Section 2.2 fixes ``idf(t) = log((1 + N) / (1 + df(t))) + 1``,
+        so a token appearing in every document has ``df == N``, the ratio is
+        exactly 1, and ``idf`` is exactly ``1.0`` whatever ``N`` is -- measured
+        at N = 5, 6, 100 and 101. An edit that changes ``N`` moves the IDF of
+        every term whose ``df`` did not move with it, which is most of them but
+        not all.
+
+        What the property is for is unaffected: section 4.4's certificate bounds
+        the movement of scores over a *fixed* document set, so an edit changing
+        ``N`` has no certificate at any ``k`` regardless of which IDFs moved.
+        """
         return self.n_before != self.n_after
 
     @property
