@@ -159,6 +159,27 @@ struct CsrView {
         if (indices.size() != values.size()) {
             return false;
         }
+        // Monotonicity, and it must come BEFORE the row loop below.
+        //
+        // `row(i)` computes `hi - lo` on `std::size_t`. A decreasing segment
+        // makes that wrap: at `hi == lo - 1` it wraps to exactly
+        // `std::dynamic_extent`, which `subspan` reads as "to the end", so the
+        // row silently spans the rest of the arrays and overlaps its successors.
+        // Larger jumps give a count past the end, which is undefined.
+        //
+        // The normative Python checks this explicitly -- `_check_csr` in
+        // persistence/save_load.py raises "indptr decreases at row {i}" -- and
+        // this mirror did not, so the two disagreed on the same input:
+        // `indptr = [0, 3, 2, 4]` over four non-zeros was rejected there and
+        // accepted here, since `front == 0` and `back == nnz` both hold and
+        // nothing looked between them. Checked here rather than in `row()`
+        // because canonical is what `row()` is allowed to assume; that is the
+        // contract the Python states and this restores.
+        for (std::size_t i = 0; i + 1 < indptr.size(); ++i) {
+            if (indptr[i + 1] < indptr[i]) {
+                return false;
+            }
+        }
         for (DocId i = 0; i < n_rows; ++i) {
             if (!row(i).is_canonical()) {
                 return false;

@@ -101,6 +101,40 @@ TEST_CASE("sparse: canonical-form detection") {
     CHECK_FALSE(SparseView{oob, v, 8}.is_canonical());
 }
 
+TEST_CASE("sparse: a decreasing indptr is not canonical") {
+    // The normative Python rejects this: `_check_csr` in
+    // persistence/save_load.py raises "indptr decreases at row {i}". This
+    // mirror did not, and the two disagreed on exactly these arrays.
+    //
+    // `front == 0` and `back == nnz` both hold, so the arms `is_canonical()`
+    // already had could not see it. `row(1)` then computes `hi - lo` as
+    // `2 - 3` on `std::size_t`, which wraps to `std::dynamic_extent`, and
+    // `subspan` reads that as "to the end" -- so row 1 silently spanned the
+    // rest of the arrays and overlapped row 2 instead of being refused.
+    const std::vector<Offset> backwards{0, 3, 2, 4};
+    const std::vector<TermId> indices{0, 1, 2, 3};
+    const std::vector<Real> values{1.0, 2.0, 3.0, 4.0};
+
+    const CsrView csr{backwards, indices, values, 3, 4};
+    CHECK(csr.indptr.front() == 0);              // the arms that did exist
+    CHECK(csr.indptr.back() == csr.nnz());       // both pass on this input
+    CHECK_FALSE(csr.is_canonical());
+}
+
+TEST_CASE("sparse: a non-decreasing indptr with an empty row is canonical") {
+    // The guard's other half. An empty row makes two adjacent offsets equal,
+    // which is ordinary -- a document with no in-vocabulary terms -- so a
+    // monotonicity check written as strictly increasing would reject the zero
+    // norm documents this project is largely about.
+    const std::vector<Offset> with_empty_row{0, 2, 2, 4};
+    const std::vector<TermId> indices{0, 1, 2, 3};
+    const std::vector<Real> values{1.0, 2.0, 3.0, 4.0};
+
+    const CsrView csr{with_empty_row, indices, values, 3, 4};
+    CHECK(csr.is_canonical());
+    CHECK(csr.row(1).empty());
+}
+
 TEST_CASE("sparse: transpose is a faithful inverted index") {
     const Corpus c = random_corpus(40, 25, 8, 99);
     const CsrView csr = c.view();
