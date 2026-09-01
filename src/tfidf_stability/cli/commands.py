@@ -21,7 +21,7 @@ from tfidf_stability.preprocessing.lemmatise import LemmatiserKind
 from tfidf_stability.preprocessing.normalise import NormalisationConfig
 from tfidf_stability.preprocessing.pipeline import PreprocessingConfig, PreprocessingPipeline
 from tfidf_stability.preprocessing.tokenise import TokenisationConfig
-from tfidf_stability.utils.hashing import hash_file, short
+from tfidf_stability.utils.hashing import hash_bytes, hash_file, short
 from tfidf_stability.utils.io import canonical_json, read_jsonl, write_json
 from tfidf_stability.utils.logging import EventKind, get_logger, log_event
 from tfidf_stability.utils.numerics import Reduction
@@ -305,11 +305,40 @@ def cmd_verify(args: argparse.Namespace) -> int:
     recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
     expected = recorded.get("model", {})
     failures = []
-    for key, actual in (
+
+    # `container_sha256` first, because it is the only recorded value covering
+    # the whole file. `TfidfModel.digest()` hashes the vocabulary, the IDF and
+    # every weight, and is honest that it stops there: `reduction`, `doc_ids`
+    # and `lengths` all round-trip through the container and none of them reach
+    # it. So comparing the two model digests alone answered a narrower question
+    # than the docstring above asks.
+    #
+    # Measured before this: flipping the reduction word from NAIVE to EXACT and
+    # the last document id from `d6` to `d9` left both digests unchanged, and
+    # `verify` printed "verified" and returned 0 -- while `inspect d6` on the
+    # same approved file returned 2, the two commands disagreeing about whether
+    # the document existed.
+    actual_container = hash_bytes(Path(args.model).read_bytes())
+    checks: tuple[tuple[str, str], ...] = (
+        ("container_sha256", actual_container),
         ("model_digest", model.digest()),
         ("vocabulary_digest", model.vocabulary.digest()),
-    ):
-        if key in expected and expected[key] != actual:
+    )
+
+    # A manifest that records none of them cannot be compared against, and
+    # saying "verified" on that basis is the same claim as saying it on a
+    # matching one. The loop read `if key in expected`, so a manifest missing
+    # every key passed silently; `save_model` writes all three, so a file
+    # missing them did not come from this project.
+    missing = [key for key, _ in checks if key not in expected]
+    if len(missing) == len(checks):
+        print(f"the manifest beside {args.model} records no digest to compare against")
+        return 2
+
+    for key, actual in checks:
+        if key not in expected:
+            failures.append(f"  {key}: absent from the manifest, so nothing was compared")
+        elif expected[key] != actual:
             failures.append(f"  {key}: manifest {expected[key][:16]}... != actual {actual[:16]}...")
 
     if failures:

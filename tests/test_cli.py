@@ -8,6 +8,7 @@ flag, so a forgotten argument cannot yield an undocumented number.
 from __future__ import annotations
 
 import json
+import struct
 from pathlib import Path
 from unittest.mock import patch
 
@@ -849,3 +850,108 @@ def test_a_reproducible_build_writes_both_the_model_and_its_manifest(tmp_path: P
     assert recorded["model"]["container_sha256"] == hash_file(out, text=False), (
         "the manifest's model block must describe the file that was actually written"
     )
+
+
+# ---------------------------------------------------------------------------
+# verify compares the whole file, not just the two digests that cover part of it
+# ---------------------------------------------------------------------------
+# `TfidfModel.digest()` hashes the vocabulary, the IDF and every weight, and is
+# honest that it stops there: `reduction`, `doc_ids` and `lengths` all round-trip
+# through the container and none reach it. `container_sha256` is the only
+# recorded value covering the file, and `verify` did not read it.
+def _built(tmp_path: Path) -> Path:
+    out = tmp_path / "m.tfsx"
+    assert main(["build-corpus", str(CORPUS), "-o", str(out)]) == 0
+    return out
+
+
+def test_verify_accepts_a_file_it_has_not_touched(tmp_path: Path) -> None:
+    """The baseline. Every rejection below is vacuous if this fails."""
+    assert main(["verify", str(_built(tmp_path))]) == 0
+
+
+def test_verify_rejects_a_container_whose_reduction_and_ids_were_altered(
+    tmp_path: Path,
+) -> None:
+    """The two digests it used to compare cannot see either field.
+
+    Measured before this: moving the reduction word from NAIVE to EXACT and the
+    last document id from `d6` to `d9` left `model_digest` and
+    `vocabulary_digest` both unchanged, and `verify` printed "verified" and
+    returned 0 -- on a file where `inspect d6` returned 2, the two commands
+    disagreeing about whether the document existed.
+    """
+    out = _built(tmp_path)
+    data = bytearray(out.read_bytes())
+    struct.pack_into("<I", data, 32, 3)  # the reduction word; offset from the header layout
+    at = data.rfind(b"d6")
+    assert at != -1, "the premise: the fixture's last document id is d6"
+    data[at : at + 2] = b"d9"
+    out.write_bytes(bytes(data))
+
+    assert main(["verify", str(out)]) == 1
+
+
+def test_verify_refuses_a_manifest_that_records_nothing_to_compare(
+    tmp_path: Path,
+) -> None:
+    """Absent keys used to pass silently, which is the same claim as a match.
+
+    The comparison read `if key in expected`, so a manifest carrying none of the
+    three digests reported "verified". `save_model` writes all three, so a file
+    missing them did not come from this project and cannot be checked.
+    """
+    out = _built(tmp_path)
+    manifest_path = out.with_suffix(".manifest.json")
+    recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    recorded["model"] = {"path": out.name}
+    manifest_path.write_text(json.dumps(recorded), encoding="utf-8")
+
+    assert main(["verify", str(out)]) == 2
+
+
+def test_verify_fails_on_a_manifest_missing_only_some_of_its_digests(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Between "all present" and "none present" sits the case that hid the bug.
+
+    The comparison read `if key in expected`, so an absent key was skipped
+    rather than reported, and a manifest carrying one digest out of three
+    verified on the strength of that one. Dropping every key is caught by the
+    early return above; dropping some is caught here, and it is the shape a
+    hand-edited or partially-written manifest actually takes.
+    """
+    out = _built(tmp_path)
+    manifest_path = out.with_suffix(".manifest.json")
+    recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    kept = recorded["model"]["container_sha256"]
+    recorded["model"] = {"path": out.name, "container_sha256": kept}
+    manifest_path.write_text(json.dumps(recorded), encoding="utf-8")
+
+    assert main(["verify", str(out)]) == 1, "an uncomparable digest is not a pass"
+
+    printed = capsys.readouterr().out
+    assert "model_digest" in printed, "the report must name the digest it could not compare"
+    assert "absent" in printed, (
+        "and say that it was missing, rather than reporting a mismatch it never saw"
+    )
+
+
+def test_verify_reports_which_digest_disagreed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A mismatch has to say what moved, or the next step is bisecting by hand.
+
+    The container digest is the one that catches a field the model digest does
+    not cover, so it is the one a reader most needs named.
+    """
+    out = _built(tmp_path)
+    data = bytearray(out.read_bytes())
+    struct.pack_into("<I", data, 32, 3)
+    out.write_bytes(bytes(data))
+
+    assert main(["verify", str(out)]) == 1
+
+    printed = capsys.readouterr().out
+    assert "MISMATCH" in printed
+    assert "container_sha256" in printed, "the failing digest must be named"

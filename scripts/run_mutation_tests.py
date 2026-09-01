@@ -75,7 +75,30 @@ REPO = Path(__file__).resolve().parents[1]
 #: scripts/benchmark.py as a subprocess, so without it that file errors and
 #: the campaign exits before mutating anything -- which reads as a broken
 #: runner rather than a missing directory.
-_SANDBOX_CONTENTS = ("src", "tests", "configs", "cpp", "data", "scripts", "pyproject.toml")
+#: What a campaign needs to be able to run the suite against a mutated copy.
+#:
+#: `docs`, `CITATION.cff` and `README.md` are here because two test files read
+#: repository metadata rather than the package: `test_doc_references.py` checks
+#: cross-references in `docs/`, and `test_repository_gates.py` runs
+#: `check_versions.py`, which compares the version in `CITATION.cff`. Without
+#: `examples` joins them because `docs/index.md` links into it.
+#: Without them those two files fail in the sandbox, and a campaign scoped to include
+#: either dies at the baseline before mutating anything -- loudly, but it means
+#: whole test files could not be pointed at a module. Measured: 34 of 36 files
+#: ran here before, 36 of 36 after.
+_SANDBOX_CONTENTS = (
+    "src",
+    "tests",
+    "configs",
+    "cpp",
+    "data",
+    "docs",
+    "examples",
+    "scripts",
+    "pyproject.toml",
+    "CITATION.cff",
+    "README.md",
+)
 
 #: Comparison flips. The pairs that matter are the boundary ones: `<=` against
 #: `<` decides whether a score exactly `tau` away joins a clique, which is the
@@ -351,8 +374,23 @@ def _load_equivalents(module: Path) -> dict[_Key, str]:
         fields = statement.split()
         if len(fields) < 6 or fields[0] != wanted or fields[4] != "->" or not reason.strip():
             continue
-        claims[(int(fields[1]), fields[2], fields[3], fields[5])] = reason.strip()
+        # `src=<8 hex>` prefixes the reason: a fingerprint of the source line the
+        # entry was written about, checked by the allowlist test in
+        # `tests/test_mutation_gate.py` that asks whether an entry still
+        # describes the line it names. Stripped here so the campaign's output
+        # reads as it always did -- the stamp is bookkeeping for the guard,
+        # not part of the argument.
+        claims[(int(fields[1]), fields[2], fields[3], fields[5])] = _without_stamp(reason)
     return claims
+
+
+def _without_stamp(reason: str) -> str:
+    """Drop a leading `src=<hash>` marker from an allowlist reason."""
+    text = reason.strip()
+    head, _, rest = text.partition(" ")
+    if head.startswith("src=") and len(head) == len("src=") + 8:
+        return rest.strip()
+    return text
 
 
 def main() -> int:
