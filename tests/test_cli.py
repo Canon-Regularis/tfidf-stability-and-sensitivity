@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import struct
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -955,3 +956,100 @@ def test_verify_reports_which_digest_disagreed(
     printed = capsys.readouterr().out
     assert "MISMATCH" in printed
     assert "container_sha256" in printed, "the failing digest must be named"
+
+
+# ---------------------------------------------------------------------------
+# The floating-point environment is checked before a command produces numbers
+# ---------------------------------------------------------------------------
+# `fp_guard.hpp` documents three layers of protection and calls this one "layer
+# 3, run time". The first two describe the binary; only this one can see the
+# process, and the process is where the hazard lives -- MKL and some OpenBLAS
+# builds set flush-to-zero as numpy imports, which flushes exactly the subnormal
+# near-tie margins under study. It was reachable only from the test suite, so
+# every real run went unchecked while the docstrings said otherwise.
+def test_a_command_checks_the_float_environment_before_producing_numbers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The probe runs, and runs *before* the command, not merely at some point.
+
+    Order is the whole claim: repairing a flushing environment after the numbers
+    have been computed repairs nothing. So the substitute asserts from inside
+    itself that the command has not yet written its output -- a test that only
+    recorded "was called" would pass with the call moved after the dispatch.
+    """
+    from tfidf_stability import _native
+
+    out = tmp_path / "ordered.tfsx"
+    calls: list[str] = []
+
+    def _probe(**kwargs: object) -> int:
+        calls.append("checked")
+        assert not out.exists(), (
+            "the probe ran after the command had already written its output, so "
+            "any repair it made came too late for the numbers in that file"
+        )
+        return 0
+
+    monkeypatch.setattr(_native, "native_available", lambda: True)
+    monkeypatch.setattr(_native, "check_float_environment", _probe)
+
+    assert main(["build-corpus", str(CORPUS), "-o", str(out)]) == 0
+
+    assert calls == ["checked"], "probed exactly once per invocation"
+    assert out.is_file(), "the premise: the command really did write something"
+
+
+def test_the_reference_backend_is_not_turned_into_an_error_by_the_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The arm that matters for anyone without a compiler.
+
+    `check_float_environment` goes through `require_native`, which raises
+    `NativeBackendUnavailableError` when there is no extension. Calling it
+    unconditionally would turn the pure-Python reference backend -- a supported,
+    documented configuration -- into a crash on every CLI invocation. So the call
+    is guarded, and this is the guard: with no backend the command still runs and
+    the probe is not attempted at all.
+    """
+    from tfidf_stability import _native
+
+    attempted: list[str] = []
+    monkeypatch.setattr(_native, "native_available", lambda: False)
+    monkeypatch.setattr(
+        _native, "check_float_environment", lambda **kw: attempted.append("called") or 0
+    )
+
+    out = tmp_path / "reference.tfsx"
+
+    assert main(["build-corpus", str(CORPUS), "-o", str(out)]) == 0
+    assert out.is_file(), "the command completed on the reference backend"
+    assert attempted == [], (
+        "with no extension the probe must not be attempted; it would raise "
+        "NativeBackendUnavailableError and take the whole command down with it"
+    )
+
+
+def test_an_untrustworthy_environment_is_not_swallowed_by_the_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The warning reaches the caller rather than being absorbed en route.
+
+    A probe whose warning is discarded is the same as no probe. The substitute
+    raises the warning directly rather than relying on this machine's environment
+    actually being broken, which is not something a test can arrange.
+    """
+    from tfidf_stability import _native
+
+    def _flushing(**kwargs: object) -> int:
+        warnings.warn(
+            "the floating-point environment is not trustworthy", RuntimeWarning, stacklevel=2
+        )
+        return 0b101
+
+    monkeypatch.setattr(_native, "native_available", lambda: True)
+    monkeypatch.setattr(_native, "check_float_environment", _flushing)
+
+    out = tmp_path / "flushed.tfsx"
+
+    with pytest.warns(RuntimeWarning, match="not trustworthy"):
+        main(["build-corpus", str(CORPUS), "-o", str(out)])
