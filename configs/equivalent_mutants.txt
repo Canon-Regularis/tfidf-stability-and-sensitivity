@@ -218,4 +218,4 @@ src/tfidf_stability/datasets/synthetic.py  319  constant  1 -> 0  # src=41434a9a
 src/tfidf_stability/persistence/save_load.py  506  constant  True -> False  # src=97e31d7a df and cf are unpacked two lines apart with the same count=head.n_terms, and neither is rebound before the zip, so their lengths cannot differ; the bookkeeping still runs, it is the ValueError that is unreachable
 
 # --- _native/__init__.py ---------------------------------------------------
-src/tfidf_stability/_native/__init__.py  70  constant  True -> False  # src=9d3aa03f inside the ABI mismatch arm, which needs a stale build on disk and is marked `# pragma: no cover`; selection happens once at import and a process that has imported this module cannot replay it against a differently-versioned extension
+src/tfidf_stability/_native/__init__.py  75  constant  True -> False  # src=9d3aa03f inside the ABI mismatch arm, which needs a stale build on disk and is marked `# pragma: no cover`; selection happens once at import and a process that has imported this module cannot replay it against a differently-versioned extension
