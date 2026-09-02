@@ -1026,6 +1026,97 @@ def test_the_length_range_is_checked_before_the_document_budget() -> None:
         )
 
 
+class _BoundedRandom:
+    """A random source that refuses to be asked forever.
+
+    The functions below are rejection samplers: they draw until a draw is
+    acceptable. On a degenerate range no draw ever is, so the loop never ends,
+    and a test driving them with a real `Random` would hang rather than fail if
+    its guard were removed -- inheriting the exact defect it exists to catch.
+
+    This raises instead, on the first draw past a limit no sound call can reach:
+    a correct guard rejects before drawing at all, and a correct sample succeeds
+    within a handful of draws. Local by house convention.
+    """
+
+    def __init__(self, limit: int = 64) -> None:
+        self.calls = 0
+        self.limit = limit
+
+    def getrandbits(self, k: int) -> int:
+        self.calls += 1
+        if self.calls > self.limit:
+            raise AssertionError(
+                f"still drawing after {self.limit} attempts: the sampler accepted a "
+                f"range it cannot satisfy, which against a real source is a hang"
+            )
+        return 0
+
+
+@pytest.mark.parametrize(("low", "high"), [(5, 3), (5, 4), (0, -1), (-3, -9)])
+def test_a_range_with_no_integer_in_it_is_refused_by_the_sampler_itself(
+    low: int, high: int
+) -> None:
+    """The guard above protects `generate`; this protects `_uniform_int`.
+
+    The three tests above all go through `generate`, which validates the one spec
+    field that reaches the sampler. That leaves the sampler itself able to hang,
+    and it is only safe today because every call site happens to pass a range
+    derived from a count it has already checked. An invariant held by the callers
+    is one the next caller can break.
+
+    Both degenerate shapes are covered because they hang for *different* reasons,
+    and a guard written for one can miss the other. At `span == 0`,
+    `(0).bit_length()` is 0, so `getrandbits(0)` returns 0 and `0 < 0` is false.
+    At `span < 0`, `(-1).bit_length()` is 1, so the draw is 0 or 1 and never
+    below -1. `(5, 4)` is the first; the rest are the second.
+
+    Driven by `_BoundedRandom` rather than a real `Random`, so that weakening the
+    guard fails this test instead of hanging the suite. A guard narrowed to
+    `span < 0` would still admit `(5, 4)`, and with a real source that is an
+    infinite loop -- a test asserting on non-termination has to bound the thing
+    it is testing, or it inherits the defect it is checking for.
+    """
+    source = _BoundedRandom()
+
+    with pytest.raises(ValueError, match=rf"the range \[{low}, {high}\] contains no integer"):
+        synthetic._uniform_int(source, low, high)
+
+    assert source.calls == 0, "the range is refused before any draw is asked for"
+
+
+def test_a_distribution_with_no_mass_is_refused_rather_than_sampled_forever() -> None:
+    """`_pick`'s own version of the same hang, which no spec guard reaches.
+
+    `_pick` rejection-samples below `cumulative[-1]`. At a total of zero the same
+    `bit_length()` of 0 applies: `getrandbits(0)` is 0, `0 < 0` is false, and the
+    loop never leaves. It is reachable whenever every Zipf weight rounds to zero,
+    which the spec cannot rule out because the weights are computed rather than
+    given.
+
+    Bounded for the same reason as the test above: without the guard this is an
+    infinite loop, and a test that hangs reports nothing.
+    """
+    source = _BoundedRandom()
+
+    with pytest.raises(ValueError, match="carries no mass"):
+        synthetic._pick(source, [0])
+
+    assert source.calls == 0, "refused before any draw is asked for"
+
+
+def test_an_empty_vocabulary_names_the_field_rather_than_indexing_off_the_end() -> None:
+    """`vocab_size=0` was the one spec field in this block without a guard.
+
+    It did fail, but as `IndexError: list index out of range` raised two calls
+    down in `_cumulative`, which is true and tells the caller nothing about which
+    field was wrong. Every sibling guard here names its field, and this one now
+    does too.
+    """
+    with pytest.raises(ValueError, match="vocab_size must be at least 1, got 0"):
+        synthetic.generate(_spec(n_docs=12, vocab_size=0))
+
+
 # ---------------------------------------------------------------------------
 # Parallel arrays: a short one is a loud failure, never a shortened corpus
 # ---------------------------------------------------------------------------

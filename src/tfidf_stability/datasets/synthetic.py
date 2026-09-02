@@ -156,6 +156,15 @@ def _pick(rng: random.Random, cumulative: list[int]) -> int:
     implementation is not promised stable across CPython versions.
     """
     total = cumulative[-1]
+    # A distribution with no mass cannot be sampled, and the loop below cannot
+    # say so: `(0).bit_length()` is 0, `getrandbits(0)` returns 0, and `0 < 0` is
+    # false, so it spins forever. Reached whenever every weight rounds to zero.
+    # Raising here turns the one failure a test cannot catch into one it can.
+    if total <= 0:
+        raise ValueError(
+            f"the cumulative distribution carries no mass (total {total}); "
+            f"every weight is zero, so no index can be drawn"
+        )
     # Rejection-sample to a uniform integer in [0, total), so the result does
     # not depend on how a float division rounds.
     bits = total.bit_length()
@@ -175,8 +184,29 @@ def _pick(rng: random.Random, cumulative: list[int]) -> int:
 
 
 def _uniform_int(rng: random.Random, low: int, high: int) -> int:
-    """Uniform integer in ``[low, high]``, inclusive, without ``randrange``."""
+    """Uniform integer in ``[low, high]``, inclusive, without ``randrange``.
+
+    Raises:
+        ValueError: If the range is empty or inverted.
+    """
     span = high - low + 1
+    # An empty or inverted range has no integer to return, and the loop below
+    # cannot report that -- it hangs. At `span == 0`, `(0).bit_length()` is 0, so
+    # `getrandbits(0)` returns 0 and `0 < 0` is false; at `span == -1`,
+    # `(-1).bit_length()` is 1, so the draw is 0 or 1 and never below -1. Neither
+    # ever exits, and a hang is the single failure mode a test cannot assert on,
+    # because the assertion is never reached.
+    #
+    # `generate` already checks the one spec field that reaches here (len_min
+    # against len_max, below), and every other call site passes a range derived
+    # from a count it has just validated. So this guard is not for today's
+    # callers; it is so that the next one fails loudly instead of silently never
+    # returning.
+    if span <= 0:
+        raise ValueError(
+            f"the range [{low}, {high}] contains no integer, so nothing can be "
+            f"drawn from it uniformly"
+        )
     bits = span.bit_length()
     while True:
         draw = rng.getrandbits(bits)
@@ -214,6 +244,13 @@ def generate(spec: SyntheticSpec | None = None) -> SyntheticCorpus:
             f"len_max={spec.len_max} is below len_min={spec.len_min}; "
             f"document lengths are drawn from the inclusive range between them"
         )
+    # Checked here so the failure names the field. An empty vocabulary reached
+    # `_cumulative([])`, which indexed `[-1]` of an empty list and surfaced as a
+    # bare `IndexError: list index out of range` from two calls down -- true, but
+    # it does not say which spec field was wrong, and it is the only guard in
+    # this block that was missing.
+    if spec.vocab_size < 1:
+        raise ValueError(f"vocab_size must be at least 1, got {spec.vocab_size}")
     rng = random.Random(spec.seed)
 
     vocabulary = [f"w{i:05d}" for i in range(spec.vocab_size)]

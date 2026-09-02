@@ -85,6 +85,8 @@ src/tfidf_stability/utils/numerics.py  322  compare  Gt -> GtE  # src=aa0e3e69 s
 src/tfidf_stability/utils/numerics.py  338  binop  Add -> Sub  # src=a6a003b6 the constant-folding probe answers the same on a conforming interpreter
 src/tfidf_stability/utils/numerics.py  339  binop  Add -> Sub  # src=199a247b the reassociation probe, likewise
 
+src/tfidf_stability/utils/numerics.py  311  boolop  And -> Or  # src=b8983b47 the fourth probe of the family documented at 322, 338 and 339: all three conjuncts are true on any machine a test can run on, so `and` and `or` return the same boolean and only a directed rounding mode could separate them
+
 # --- utils/io.py -----------------------------------------------------------
 src/tfidf_stability/utils/io.py  114  constant  True -> False  # src=d976dced the temp file always exists in the except arm, so missing_ok never fires
 
@@ -205,9 +207,15 @@ src/tfidf_stability/cli/commands.py  408  constant  True -> False  # src=1a07235
 
 # --- datasets/synthetic.py -------------------------------------------------
 src/tfidf_stability/datasets/synthetic.py  136  constant  1 -> 0  # src=a05543f2 the quotient reaches zero only above a vocabulary of 2**40 terms
-src/tfidf_stability/datasets/synthetic.py  167  constant  1 -> 0  # src=4a381170 the binary search converges either way; verified over every draw of three weight shapes for n = 1..11
-src/tfidf_stability/datasets/synthetic.py  250  binop  Sub -> Add  # src=0afce30f the one extra index reachable is itself a copy of a base document, so no structural property changes
-src/tfidf_stability/datasets/synthetic.py  250  constant  1 -> 0  # src=0afce30f likewise
-src/tfidf_stability/datasets/synthetic.py  254  binop  Sub -> Add  # src=5f0c004a the rank is clamped by min(vocab_size - 1, ...), which is never strictly binding
-src/tfidf_stability/datasets/synthetic.py  254  constant  1 -> 0  # src=5f0c004a likewise
-src/tfidf_stability/datasets/synthetic.py  282  constant  1 -> 0  # src=41434a9a the clamp bites only above 64 interactions per user, against a default of 12
+src/tfidf_stability/datasets/synthetic.py  176  constant  1 -> 0  # src=4a381170 the binary search converges either way; verified over every draw of three weight shapes for n = 1..11
+src/tfidf_stability/datasets/synthetic.py  287  binop  Sub -> Add  # src=0afce30f the one extra index reachable is itself a copy of a base document, so no structural property changes
+src/tfidf_stability/datasets/synthetic.py  287  constant  1 -> 0  # src=0afce30f likewise
+src/tfidf_stability/datasets/synthetic.py  291  binop  Sub -> Add  # src=5f0c004a the rank is clamped by min(vocab_size - 1, ...), which is never strictly binding
+src/tfidf_stability/datasets/synthetic.py  291  constant  1 -> 0  # src=5f0c004a likewise
+src/tfidf_stability/datasets/synthetic.py  319  constant  1 -> 0  # src=41434a9a the clamp bites only above 64 interactions per user, against a default of 12
+
+# --- persistence/save_load.py ----------------------------------------------
+src/tfidf_stability/persistence/save_load.py  506  constant  True -> False  # src=97e31d7a df and cf are unpacked two lines apart with the same count=head.n_terms, and neither is rebound before the zip, so their lengths cannot differ; the bookkeeping still runs, it is the ValueError that is unreachable
+
+# --- _native/__init__.py ---------------------------------------------------
+src/tfidf_stability/_native/__init__.py  70  constant  True -> False  # src=9d3aa03f inside the ABI mismatch arm, which needs a stale build on disk and is marked `# pragma: no cover`; selection happens once at import and a process that has imported this module cannot replay it against a differently-versioned extension
