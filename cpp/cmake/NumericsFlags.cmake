@@ -32,8 +32,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
     # with it, (-0.0) + 0.0 compiles to -0.0 (bits 8000000000000000); with
     # -fsigned-zeros it gives +0.0, as IEEE 754 requires. Every score here is
     # compared on its raw bit pattern and ranking/margins.py argues that -0.0
-    # cannot occur. fp_guard.hpp cannot catch the relaxed form either, since
-    # -fno-signed-zeros alone does not define __FAST_MATH__.
+    # cannot occur.
+    #
+    # This comment used to add that fp_guard.hpp "cannot catch the relaxed form
+    # either, since -fno-signed-zeros alone does not define __FAST_MATH__". The
+    # premise is right and the conclusion was wrong: GCC and Clang define
+    # __NO_SIGNED_ZEROS__ for it, verified with `-dM -E`, and fp_guard.hpp now
+    # refuses such a build at compile time. The flag below is still the fix; the
+    # header is the second line of defence for a build that bypasses this file.
     -fsigned-zeros
     -fexcess-precision=standard       # rule 3
   )

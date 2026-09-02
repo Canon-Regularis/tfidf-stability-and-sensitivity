@@ -42,8 +42,28 @@ Define TFIDF_ALLOW_FAST_MATH only in the CI job that deliberately proves this gu
 #  error "tfidf: -ffinite-math-only is enabled; NaN/Inf handling would be undefined."
 #endif
 
+// -fno-signed-zeros licenses the compiler to treat -0.0 and +0.0 as
+// interchangeable. Every score here is compared on its raw bit pattern and
+// `ranking/margins.py` argues that -0.0 cannot occur, so a build permitted to
+// produce one is not a build whose numbers mean what the study claims.
+//
+// NumericsFlags.cmake says this form "cannot" be caught here because it does not
+// define __FAST_MATH__. That is true of __FAST_MATH__ and false of the
+// conclusion: GCC and Clang define __NO_SIGNED_ZEROS__ for it. Verified with
+// `-dM -E`: `-fno-signed-zeros` alone defines __NO_SIGNED_ZEROS__, and the strict
+// flag set defines neither.
+#if defined(__NO_SIGNED_ZEROS__) && !defined(TFIDF_ALLOW_FAST_MATH)
+#  error "tfidf: -fno-signed-zeros is enabled; +0.0 and -0.0 would be interchangeable."
+#endif
+
+// The advice here is /fp:strict, not /fp:precise plus /fp:contract-. MSVC has no
+// negative form of /fp:contract: it answers `command line warning D9002:
+// ignoring unknown option '/fp:contract-'` and goes on contracting. That exact
+// mistake was made in this project's own flag list and survived because D9002 is
+// a warning, so the build succeeded. See cpp/cmake/NumericsFlags.cmake. Telling
+// the next person to use a flag that is silently ignored would reproduce it.
 #if defined(_M_FP_FAST) && !defined(TFIDF_ALLOW_FAST_MATH)
-#  error "tfidf: MSVC /fp:fast is enabled. Use /fp:precise /fp:contract-."
+#  error "tfidf: MSVC /fp:fast is enabled. Use /fp:strict."
 #endif
 
 namespace tfidf::fp {
@@ -131,11 +151,28 @@ struct SubnormalSurvival {
     f |= kConstantFolding;
 #endif
 
-    // Reassociation would preserve the tiny addend instead of losing it.
-    {
-        volatile double a = 1.0, b = 1e-17;
-        if ((a + b) - a != 0.0) f |= kReassociation;
-    }
+    // Reassociation, asked of the compiler rather than probed for.
+    //
+    // This was `volatile double a = 1.0, b = 1e-17; if ((a + b) - a != 0.0)`,
+    // which cannot fire. `volatile` makes each read an observable access, so the
+    // compiler is forbidden from folding the two reads of `a` together -- and
+    // that fold is precisely the rewrite the probe was trying to catch. The
+    // guard blocked the thing it was looking for.
+    //
+    // Measured with GCC 13.2 under `-fassociative-math -fno-signed-zeros
+    // -fno-trapping-math`: the same expression without `volatile` compiles to a
+    // bare `return b` (one `movapd`, one `ret`), proving reassociation is
+    // active, while `selftest()` on that build still returned 0. The bit could
+    // never be set -- the same defect `kConstantFolding` had before it was
+    // replaced by FLT_EVAL_METHOD, and for the same underlying reason: a
+    // property the flag makes unobservable has to be read off the compiler.
+    //
+    // GCC and Clang define __ASSOCIATIVE_MATH__ whenever -fassociative-math is
+    // in effect, including via -ffast-math. Verified with `-dM -E`: defined
+    // under that flag set, absent under the strict one.
+#if defined(__ASSOCIATIVE_MATH__)
+    f |= kReassociation;
+#endif
 
     // FMA contraction: with x = y = 1 + 2^-27 and z = -1,
     //   unfused  x*y + z  ==  2^-26                (the product is rounded first)
@@ -187,7 +224,7 @@ inline bool restore_subnormals() noexcept {
 /// Human-readable rendering of a selftest() result, for error messages.
 [[nodiscard]] inline const char* describe(std::uint32_t f) noexcept {
     if (f == kOk)                 return "ok";
-    if (f & kFmaContraction)      return "FMA contraction is active (need -ffp-contract=off / /fp:contract-)";
+    if (f & kFmaContraction)      return "FMA contraction is active (need -ffp-contract=off, or /fp:strict on MSVC)";
     if (f & kFlushToZero)         return "flush-to-zero is set (a BLAS may have set MXCSR.FTZ)";
     if (f & kDenormalsAreZero)    return "denormals-are-zero is set (a BLAS may have set MXCSR.DAZ)";
     if (f & kReassociation)       return "the compiler is reassociating floating-point sums";
