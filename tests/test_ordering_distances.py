@@ -396,6 +396,31 @@ def test_an_infinite_penalty_makes_the_singleton_maximum_undefined() -> None:
     assert fks_max(2, math.inf) == math.inf, "at k >= 2 the term is finite times inf"
 
 
+@pytest.mark.parametrize("penalty", [math.inf, -math.inf, math.nan])
+def test_no_pairs_means_the_penalty_cannot_matter_however_absurd(penalty: float) -> None:
+    """The two tests above meet here, and the crossing was never tested.
+
+    `test_a_non_positive_list_length_has_no_maximum` fixes `k = 0` at the pinned
+    finite penalty; `test_an_infinite_penalty_makes_the_singleton_maximum_undefined`
+    fixes a non-finite penalty at `k = 1`. Neither reaches `k = 0` with a
+    non-finite penalty, and that pairing is the only place the guard does any
+    work: the short circuit returns 0.0 before touching the penalty, while
+    falling through computes `0.0 + p * 0.0 * -1.0`, which is bit-identically
+    0.0 for every finite p and NaN for exactly these three.
+
+    Mutation testing found it. `if k < 1` -> `if k < 0` survived the whole suite,
+    since with a finite penalty the fall-through and the short circuit agree to
+    the bit. Verified exhaustively over k in {-1, 0, 1, 2} x penalty in
+    {0.5, 0.0, inf, nan, -inf}: these three inputs are the only ones that
+    separate the two.
+
+    The docstring's claim is that only `k = 0` has no pairs. If there are no
+    pairs the penalty cannot matter, and this is the only input able to check
+    that -- `penalty` is not validated, so the values are reachable.
+    """
+    assert fks_max(0, penalty) == 0.0
+
+
 @pytest.mark.parametrize(("k", "expected"), [(2, 5.0), (3, 12.0), (50, 3725.0)])
 def test_the_closed_form_is_k_times_three_k_minus_one_over_two(k: int, expected: float) -> None:
     """At the pinned penalty of one half. G2 notes `k <= 50` gives at most 1225

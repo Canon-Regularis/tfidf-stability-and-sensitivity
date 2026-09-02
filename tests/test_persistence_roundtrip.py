@@ -656,6 +656,54 @@ def test_a_document_frequency_outside_one_to_n_is_refused() -> None:
             model_from_bytes(_poke(payload, df_at, impossible))
 
 
+def test_the_document_frequency_at_its_upper_bound_is_accepted() -> None:
+    r"""The other edge of `1 <= df[t] <= N`, which nothing exercised.
+
+    The test above pokes only values *outside* the bound, so a guard narrowed to
+    `df[t] < N` rejects a term appearing in every document while every one of
+    those pokes still raises. Mutation testing found exactly that: the mutant
+    `1 <= d <= head.n_docs` -> `1 <= d < head.n_docs` survived the whole suite,
+    not merely this file.
+
+    Stated as its own test rather than folded into the one above, because it is
+    the opposite claim: that the loader *accepts* the boundary. A rejection test
+    and an acceptance test can both pass while the bound sits one off.
+    """
+    model = _three_token_model()
+    payload = model_bytes(model)
+    _, df_at, _ = _int_offsets(model)
+
+    restored = model_from_bytes(_poke(payload, df_at, model.n_documents))
+
+    assert restored.vocabulary.df[0] == model.n_documents, (
+        "a term recorded in every document is legitimate and must round-trip"
+    )
+
+
+def test_a_fitted_corpus_whose_term_is_in_every_document_round_trips() -> None:
+    """The same boundary reached by fitting rather than by editing bytes.
+
+    The poke above shows the loader accepts `df == N`; this shows `df == N` is a
+    value the vectoriser actually emits, so the guard is exercised by an ordinary
+    corpus and not only by a hand-built container. A term in every document is
+    not exotic -- it is any common word that survives stopword removal, and its
+    IDF is exactly zero, which is why the weight it carries is not what proves
+    the round trip. The recorded count is.
+    """
+    model = TfidfVectoriser().fit([["aa", "bb"], ["aa", "cc"], ["aa", "dd"]], ["d0", "d1", "d2"])
+    universal = model.vocabulary.tokens.index("aa")
+
+    assert model.n_documents == 3, "the premise: three documents"
+    assert model.vocabulary.df[universal] == 3, (
+        "the premise: aa is in every one of them, so df reaches its upper bound"
+    )
+
+    restored = model_from_bytes(model_bytes(model))
+
+    assert restored.vocabulary.df == model.vocabulary.df
+    assert restored.vocabulary.tokens == model.vocabulary.tokens
+
+
 def test_a_collection_frequency_below_its_document_frequency_is_refused() -> None:
     """`cf[t] >= df[t]`: a term occurs at least once in each document holding it.
 

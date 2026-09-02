@@ -278,6 +278,41 @@ def test_a_failed_rename_removes_the_temporary_and_leaves_the_original(tmp_path:
     assert list(tmp_path.iterdir()) == [target], "the temporary file outlived the failure"
 
 
+def test_cleanup_does_not_mask_the_failure_that_caused_it(tmp_path: Path) -> None:
+    """`missing_ok=True` on the cleanup unlink, which the test above cannot reach.
+
+    There the temporary still exists when the rename fails, so the flag is inert
+    and `missing_ok=True -> False` survived the whole suite. It does work in one
+    situation only: the temporary is already gone -- swept by something else, or
+    removed by the same failure -- and then `missing_ok=False` raises
+    FileNotFoundError *while handling* the real error. The caller is then told
+    the temporary was missing, which is not what went wrong, and the actual
+    failure survives only as a `__context__` nobody reads.
+
+    Simulated by unlinking the temporary inside the patched `os.replace`, which
+    is the only point in the sequence that is handed its name. Patched at the OS
+    boundary for the same reason as the test above: so the test cannot pass by
+    agreeing with a mock of the code it is about.
+    """
+    target = tmp_path / "out.bin"
+
+    def vanishing_replace(src: object, dst: object) -> None:
+        os.unlink(str(src))
+        raise OSError("rename refused after the temporary went away")
+
+    real_replace = os.replace
+    os.replace = vanishing_replace  # type: ignore[assignment]
+    try:
+        # The assertion is the message. FileNotFoundError is itself an OSError,
+        # so a bare `pytest.raises(OSError)` passes under the mutant too.
+        with pytest.raises(OSError, match="rename refused after the temporary went away"):
+            atomic_write_bytes(target, b"payload")
+    finally:
+        os.replace = real_replace  # type: ignore[assignment]
+
+    assert not list(tmp_path.glob("*.tmp")), "and nothing is left behind either way"
+
+
 def test_text_is_written_with_lf_endings_on_every_platform(tmp_path: Path) -> None:
     target = atomic_write_text(tmp_path / "out.txt", "a\nb\n")
     assert target.read_bytes() == b"a\nb\n", "a CRLF here would move every text digest"

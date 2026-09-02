@@ -115,6 +115,78 @@ def test_availability_and_its_reason_are_complementary(
     assert _native.unavailable_reason() == "no build here"
 
 
+def test_an_extension_built_for_this_interpreter_must_actually_have_loaded() -> None:
+    """A backend that fails to load turns every differential test into a skip.
+
+    Each native suite is guarded by `skipif(not native_available())` and pytest
+    exits 0 when all of them skip, so an extension that is present but unloadable
+    makes the differential tests vanish while the run still reports green. That
+    is not hypothetical. `ci.yml`'s install step records it happening for a long
+    time -- "every native test skipped on its skipif guard, and the job reported
+    success" -- and answers it with a workflow step that imports the backend and
+    fails if it cannot.
+
+    That guard lives in YAML, so it protects CI and not this suite. Mutation
+    testing showed the difference: inverting the ABI comparison at
+    `_native/__init__.py:69` leaves `_MODULE` unset on a machine whose extension
+    is fine, and the whole suite still passed, because every test that would have
+    exercised the backend skipped instead.
+
+    So the same claim is asserted where the suite can see it: if a compiled
+    extension carrying *this* interpreter's ABI tag sits beside the package, then
+    selection must have succeeded. A wrong comparison or a load failure is then a
+    loud failure rather than a quiet skip.
+
+    Matched on `importlib.machinery.EXTENSION_SUFFIXES` rather than on
+    `_tfidf_native*`, because a working tree can hold builds for several Pythons
+    at once and only the one tagged for this interpreter is loadable here --
+    globbing the wildcard would fail the test on a checkout whose only build is
+    for a different version, which is a legitimate state.
+    """
+    import importlib.machinery
+    from pathlib import Path
+
+    beside_the_package = Path(_native.__file__).parent
+    built = [
+        candidate
+        for suffix in importlib.machinery.EXTENSION_SUFFIXES
+        for candidate in beside_the_package.glob(f"_tfidf_native{suffix}")
+    ]
+    if not built:
+        pytest.skip("no extension built for this interpreter; there is nothing to assert")
+
+    assert native_available(), (
+        f"{built[0].name} is present and is tagged for this interpreter, so the "
+        f"native backend must have been selected. It was not, and the reason "
+        f"given is: {unavailable_reason()}"
+    )
+
+
+def test_a_backend_that_loaded_records_no_abi_mismatch() -> None:
+    """`_ABI_MISMATCH` is initialised False and set True only on the mismatch arm.
+
+    That arm is unreachable in-process, so every test exercising what the flag
+    *causes* substitutes it directly -- which leaves the initialiser itself
+    untested, and `_ABI_MISMATCH: bool = False -> True` survived the whole suite.
+
+    A wrongly-initialised flag is not inert. Nothing resets it on the success
+    path, so `require_native()` would raise `AbiVersionMismatchError` at a caller
+    whose build is fine, and the advice that distinguishes the two errors --
+    rebuild against the current contract, versus build at all -- would be wrong
+    in the one place it is read.
+
+    The same shape as the `_REASON` defect already fixed here: a backend
+    reporting itself available must not still carry the leftovers of a failure
+    that did not happen.
+    """
+    if not native_available():
+        pytest.skip(unavailable_reason() or "no native backend")
+
+    assert _native._ABI_MISMATCH is False, (
+        "the extension loaded, so nothing may still be claiming an ABI mismatch"
+    )
+
+
 # ---------------------------------------------------------------------------
 # The floating-point self-test
 # ---------------------------------------------------------------------------
@@ -237,6 +309,85 @@ def test_the_self_test_can_be_asked_not_to_repair(
         _native.check_float_environment(restore=False)
 
     assert calls == ["selftest"], "observed once, and nothing was repaired"
+
+
+def test_the_default_is_to_repair_rather_than_merely_observe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two tests above pass `restore` explicitly, so neither pins the default.
+
+    Both arms are covered -- `restore=True` repairs, `restore=False` observes --
+    but each names the argument, so the signature's own default is never the
+    thing under test. Mutation testing found the hole: `restore: bool = True` ->
+    `= False` survived the whole suite, because no call site in `tests/` omits
+    the argument.
+
+    The default is the interesting half. Repairing is what makes an unattended
+    run safe when a BLAS flips the flags at import, and a caller who never heard
+    of this function gets whatever the default says.
+    """
+    calls: list[str] = []
+
+    class _Stub:
+        def fp_selftest(self) -> int:
+            calls.append("selftest")
+            return 0 if "restore" in calls else 0b101
+
+        def fp_restore_subnormals(self) -> None:
+            calls.append("restore")
+
+        def fp_describe(self, flags: int) -> str:  # pragma: no cover - repair succeeds
+            return f"flags={flags:#b}"
+
+    monkeypatch.setattr(_native, "require_native", _Stub)
+
+    assert _native.check_float_environment() == 0, "called with no arguments at all"
+    assert calls == ["selftest", "restore", "selftest"], (
+        "the default must repair and re-read; observing without repairing would "
+        "leave a flushing environment in place for the rest of the run"
+    )
+
+
+def test_the_warning_is_attributed_to_the_caller_not_to_this_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`stacklevel=2`, asserted rather than assumed.
+
+    `pytest.warns` checks the category and the message and says nothing about
+    where the warning is reported from, so `stacklevel=2` -> `1` survived the
+    whole suite. It matters: at `stacklevel=1` every such warning is blamed on
+    `_native/__init__.py`, which is the same location for every caller, and the
+    one thing a reader needs -- which code was running under a flushing
+    environment -- is exactly what is lost.
+
+    Recorded through `catch_warnings` rather than `pytest.warns` because the
+    filename is the assertion, and `simplefilter` is needed to stop the
+    project-wide `filterwarnings = ["error"]` turning the warning into a raise
+    before it can be inspected.
+    """
+    import warnings
+
+    class _Stub:
+        def fp_selftest(self) -> int:
+            return 0b11
+
+        def fp_restore_subnormals(self) -> None:
+            return None
+
+        def fp_describe(self, flags: int) -> str:
+            return "subnormals are flushed"
+
+    monkeypatch.setattr(_native, "require_native", _Stub)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _native.check_float_environment(restore=False)
+
+    assert len(caught) == 1, "the premise: exactly one warning to attribute"
+    assert caught[0].filename == __file__, (
+        f"the warning must point at the code that asked, not at the module that "
+        f"raised it; it named {caught[0].filename}"
+    )
 
 
 # ---------------------------------------------------------------------------
