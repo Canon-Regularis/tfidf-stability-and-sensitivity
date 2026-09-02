@@ -26,6 +26,11 @@ htmlcov/
 
 # --- CMake / native build ----------------------------------------------------
 build/
+# Every workflow builds into its own directory beside build/: build-tests,
+# build-assert, build-bench, build-fastmath, build-asan, build-tsan. Only
+# `build/` was ignored, so running any command from ci.yml or sanitizers.yml
+# as documented left an untracked tree in `git status`.
+build-*/
 _skbuild/
 CMakeUserPresets.json
 compile_commands.json
