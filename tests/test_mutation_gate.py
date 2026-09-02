@@ -149,14 +149,35 @@ def test_a_claim_that_matches_no_survivor_fails_the_campaign() -> None:
     assert runner._verdict(module, []) == 1
 
 
-def test_a_module_with_no_claims_still_fails_on_any_survivor() -> None:
+def test_a_module_with_no_claims_still_fails_on_any_survivor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Absence of an allowlist entry must never read as permission. A module
-    nobody has documented behaves exactly as the tool did before this file."""
-    runner = _runner()
-    module = Path("src/tfidf_stability/persistence/save_load.py")
+    nobody has documented behaves exactly as the tool did before this file.
 
-    assert runner._load_equivalents(module) == {}, "the premise: nothing documented here"
-    assert runner._verdict(module, [_mutant(runner, 1, "constant", "1", "0")]) == 1
+    The premise is built rather than borrowed. This named
+    `persistence/save_load.py` and asserted the real allowlist held nothing for
+    it, which quietly coupled an unrelated test to that file's documentation
+    status: recording a legitimate equivalent mutant there -- as a campaign now
+    has -- broke this test for a reason with no bearing on what it checks. Worse,
+    the failure would read as "the gate is broken" rather than "this test's
+    premise expired".
+
+    So the loader is pointed at an allowlist that is empty by construction. The
+    module named is one that *does* carry real entries, which makes the emptiness
+    demonstrably come from the substituted file rather than from the module.
+    """
+    runner = _runner()
+    module = Path("src/tfidf_stability/ranking/sort_keys.py")
+
+    assert runner._load_equivalents(module), "the premise: this module is documented"
+
+    empty = tmp_path / "equivalent_mutants.txt"
+    empty.write_text("# an allowlist making no claim about anything\n", encoding="utf-8")
+    monkeypatch.setattr(runner, "_EQUIVALENTS", empty)
+
+    assert runner._load_equivalents(module) == {}, "and now, by construction, it is not"
+    assert runner._verdict(module, [_mutant(runner, 155, "compare", "LtE", "Lt")]) == 1
     assert runner._verdict(module, []) == 0
 
 
