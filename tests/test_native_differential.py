@@ -393,3 +393,54 @@ def test_exact_agrees_with_fsum_on_signed_zero(values: list[float]) -> None:
         f"{struct.pack('<d', reference).hex()}"
     )
     assert same_bits(reference, math.fsum(values)), "the reference is math.fsum"
+
+
+@pytest.mark.parametrize(
+    ("values", "reference_behaviour"),
+    [
+        ((1e200, 1e200), "inf"),
+        ((1e154, 1e154), "OverflowError"),
+    ],
+)
+def test_exact_diverges_from_fsum_once_a_partial_overflows(
+    values: tuple[float, float], reference_behaviour: str
+) -> None:
+    """The one place the two implementations are known NOT to agree.
+
+    `reduction.hpp` says so in its own words: CPython's `math_fsum` tracks
+    infinities and intermediate overflow separately and raises, while the C++
+    transcription has no such machinery and yields NaN. The other three policies
+    agree with the reference on these inputs; the gap is specific to `Exact`.
+
+    Pinned rather than fixed. Adding the tracking would put exception machinery
+    in a `noexcept` accumulator on the hot path to serve an input the pipeline
+    cannot produce -- a TF-IDF weight is at most `ln(1 + N)`, so squaring one
+    overflows only for a corpus of about e^(1e154) documents.
+
+    Recorded as a test because the header's reachability argument used to be
+    wrong in a way nothing would have caught: it argued that no infinity *enters*
+    a reduction, which is true and irrelevant, because `l2_norm` squares before
+    it sums and so *creates* one from finite arguments. Both cases below pass
+    finite values. If either side is ever changed to agree with the other, this
+    fails and the change is deliberate.
+    """
+    arr = np.array(values, dtype=np.float64)
+    exact = _policy(Reduction.EXACT)
+
+    native = nat.l2_norm(np.array([0, 1], dtype=np.int32), arr, 2, exact)
+    assert math.isnan(native), "the C++ Exact accumulator yields NaN once a partial overflows"
+
+    vector = SparseVector(indices=(0, 1), values=values, dim=2)
+    if reference_behaviour == "inf":
+        assert l2_norm(vector, Reduction.EXACT) == math.inf, (
+            "the reference reports the overflow as an infinity"
+        )
+    else:
+        with pytest.raises(OverflowError, match="intermediate overflow"):
+            l2_norm(vector, Reduction.EXACT)
+
+    for policy in (Reduction.NAIVE, Reduction.NEUMAIER, Reduction.PAIRWISE):
+        got = nat.l2_norm(np.array([0, 1], dtype=np.int32), arr, 2, _policy(policy))
+        assert same_bits(got, l2_norm(vector, policy)), (
+            f"{policy} must still agree bit for bit; the divergence is Exact's alone"
+        )
