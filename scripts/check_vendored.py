@@ -24,6 +24,42 @@ REPO = Path(__file__).resolve().parents[1]
 _EXEMPT = {"MANIFEST.sha256", "__init__.py", "__pycache__"}
 
 
+def _unlisted(manifest: Path, manifests: list[Path], listed: set[str]) -> list[str]:
+    """Files under a manifest's directory that the manifest does not name.
+
+    An unlisted file is invisible to the digest comparison, so it ships
+    unverified. Compared on the path relative to the manifest rather than on the
+    bare name, because that is the form the manifest uses:
+    ``cpp/third_party/MANIFEST.sha256`` lists ``doctest/doctest.h``.
+
+    Walked recursively. This was ``iterdir()`` with ``path.is_dir(): continue``,
+    which never descended -- and every file ``cpp/third_party`` vendors lives one
+    level down, in ``doctest/`` and ``nanobench/``. So for the tree
+    ``THIRD_PARTY_NOTICES.md`` makes its provenance claims about, the direction
+    this check exists to cover was inert. Measured on the previous version:
+    adding ``cpp/third_party/doctest/doctest_fwd.h`` printed "verified 8 vendored
+    files across 4 manifests" and exited 0, and so did adding an entire new
+    vendored library.
+    """
+    problems: list[str] = []
+    for path in sorted(manifest.parent.rglob("*")):
+        if path.is_dir():
+            continue
+        relative_parts = path.relative_to(manifest.parent).parts
+        if any(part in _EXEMPT for part in relative_parts):
+            continue
+        # A nested manifest owns its own subtree, so a file there is reported
+        # once, against the manifest that ought to list it.
+        if any(other != manifest and other.parent in path.parents for other in manifests):
+            continue
+        if path.relative_to(manifest.parent).as_posix() not in listed:
+            problems.append(
+                f"{path.relative_to(REPO)}: present in a vendored directory but "
+                f"absent from {manifest.name} -- add it or remove it"
+            )
+    return problems
+
+
 def check() -> list[str]:
     """Return a list of problems; empty means everything verified."""
     problems: list[str] = []
@@ -58,16 +94,7 @@ def check() -> list[str]:
                 )
             checked += 1
 
-        # An unlisted file is invisible to the digest comparison, so it ships
-        # unverified.
-        for path in manifest.parent.iterdir():
-            if path.name in _EXEMPT or path.is_dir():
-                continue
-            if path.name not in listed:
-                problems.append(
-                    f"{path.relative_to(REPO)}: present in a vendored directory but "
-                    f"absent from {manifest.name} -- add it or remove it"
-                )
+        problems.extend(_unlisted(manifest, manifests, listed))
 
     if not problems:
         print(f"verified {checked} vendored files across {len(manifests)} manifests")

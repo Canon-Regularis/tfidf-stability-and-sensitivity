@@ -2,8 +2,15 @@
 
 Material from other projects that is redistributed as part of this repository.
 Each entry records the upstream version and the digests under which it was
-vendored, so the provenance of every byte is checkable. Digests are verified at
-build time (`cpp/cmake/VendorCheck.cmake`) and in CI.
+vendored, so the provenance of every byte is checkable. Digests are verified by
+`scripts/check_vendored.py`, which runs as a pre-commit hook
+(`.pre-commit-config.yaml`) and as a CI step (`.github/workflows/ci.yml`).
+
+This previously said the digests were verified "at build time
+(`cpp/cmake/VendorCheck.cmake`)". There is no such file, and no CMake code in
+this repository computes a SHA-256 of anything: a corrupted vendored header
+built cleanly and hashed nothing. The verification described above is real and
+is what the claim now names.
 
 Nothing here is a runtime dependency of the pure-Python `reference` backend
 beyond the vendored Snowball stemmer; that backend is otherwise standard-library

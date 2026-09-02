@@ -19,7 +19,9 @@ now, not merely that a fixture is.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -94,6 +96,76 @@ def test_every_file_the_gate_reads_is_one_that_exists() -> None:
         assert (REPO / relative).exists(), f"{relative} is named by the gate but is not there"
 
 
+def test_every_file_that_states_a_version_is_one_the_gate_reads() -> None:
+    r"""The converse of the test above, which alone could never notice an omission.
+
+    That one iterates `gate._SOURCES` and asserts each path exists, so the list
+    under test supplies its own expectation: it catches a source that was renamed
+    away and cannot catch a source that was never added. It did not: the gate's
+    docstring said "Four files name it" and "every place this project states its
+    version" while `_SOURCES` held three. `CMakeLists.txt`'s `VERSION` was the
+    missing one, and it is not decorative -- it becomes `PROJECT_VERSION`, then
+    `kVersion`, then the native module's `__version__` and
+    `build_info()["version"]`, which is hashed into every RunManifest. Setting it
+    to 9.9.9 left the gate reporting "agrees across 3 places" and exiting 0.
+
+    So this searches the repository for the shape of a version declaration and
+    requires the gate to already know about each file it finds. The expectation
+    comes from the tree, not from the list.
+    """
+    gate = _script("check_versions")
+    known = set(gate._SOURCES)
+
+    # Files that state THIS project's version, by the forms it actually uses.
+    candidates: dict[str, re.Pattern[str]] = {
+        "pyproject.toml": re.compile(r'^version\s*=\s*"[0-9]'),
+        "CITATION.cff": re.compile(r"^version:\s*[\"']?[0-9]"),
+        "CMakeLists.txt": re.compile(r"^VERSION\s+[0-9]"),
+        "src/tfidf_stability/__init__.py": re.compile(r'^__version__\s*[:=].*"[0-9]'),
+    }
+
+    stating: set[str] = set()
+    for relative, pattern in candidates.items():
+        path = REPO / relative
+        if not path.exists():
+            continue
+        if any(
+            pattern.match(line.strip()) for line in path.read_text(encoding="utf-8").splitlines()
+        ):
+            stating.add(relative)
+
+    assert stating, "the premise: at least one file states a version"
+    missing = stating - known
+    assert not missing, (
+        f"these files state a version the gate does not read: {sorted(missing)}. "
+        f"A version stated in a file nobody compares is how CITATION.cff came to "
+        f"disagree in the first place."
+    )
+
+
+def test_the_version_gate_reads_every_place_its_docstring_claims() -> None:
+    """The count in the prose and the length of the table must agree.
+
+    The docstring said "Four files name it" beside a table of three for long
+    enough that a real omission hid behind it. Cheap to state, and it fails the
+    moment the two drift again in either direction.
+    """
+    gate = _script("check_versions")
+    doc = gate.__doc__ or ""
+
+    words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+    claimed = next((n for word, n in words.items() if f"{word} files name it" in doc.lower()), None)
+
+    assert claimed is not None, (
+        "the docstring no longer states how many files name the version; it did, "
+        "and the number is what made the omission visible"
+    )
+    assert claimed == len(gate._SOURCES), (
+        f"the docstring claims {claimed} files name the version but the gate "
+        f"reads {len(gate._SOURCES)}: {sorted(gate._SOURCES)}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # check_layout.py
 # ---------------------------------------------------------------------------
@@ -132,3 +204,121 @@ def test_the_exemption_is_what_makes_the_baseline_pass(
     monkeypatch.setattr(gate, "_CPP_ONLY", {"core"})
 
     assert gate.main() == 0
+
+
+# ---------------------------------------------------------------------------
+# check_vendored.py
+# ---------------------------------------------------------------------------
+# This gate had no owning test, while the header of this file said the gates
+# CI runs over the repository itself are covered here. Its digest comparison was
+# sound; its unlisted-file scan was not, and nothing would have noticed.
+def _vendored_tree(root: Path, files: dict[str, str]) -> Path:
+    """A directory with a MANIFEST.sha256 naming `files`, digests computed.
+
+    Local by house convention, and synthetic rather than pointed at the real
+    `cpp/third_party`, so a test can add and corrupt files without touching a
+    vendored byte.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for relative, content in sorted(files.items()):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content.encode("utf-8"))
+        lines.append(f"{hashlib.sha256(content.encode('utf-8')).hexdigest()}  {relative}")
+    (root / "MANIFEST.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return root
+
+
+def _vendored_gate(monkeypatch: pytest.MonkeyPatch, repo: Path) -> ModuleType:
+    gate = _script("check_vendored")
+    monkeypatch.setattr(gate, "REPO", repo)
+    return gate
+
+
+def test_the_vendored_gate_passes_on_this_repository() -> None:
+    """The baseline. Every rejection below is vacuous if this fails."""
+    assert _script("check_vendored").main() == 0
+
+
+def test_a_changed_vendored_byte_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The digest comparison, which is the half that always worked."""
+    _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
+    gate = _vendored_gate(monkeypatch, tmp_path)
+
+    assert gate.check() == [], "the premise: the tree verifies before it is touched"
+
+    (tmp_path / "vendor" / "lib" / "header.h").write_text("// edited\n", encoding="utf-8")
+
+    problems = gate.check()
+    assert problems, "a changed byte must be reported"
+    assert "digest changed" in problems[0]
+
+
+def test_a_file_added_inside_a_vendored_subdirectory_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The half that did not work, and the reason this test file exists.
+
+    The scan was `iterdir()` with `path.is_dir(): continue`, so it never
+    descended -- and every file `cpp/third_party` vendors sits one level down, in
+    `doctest/` and `nanobench/`. For that tree the check was inert. Measured
+    before the fix: adding `cpp/third_party/doctest/doctest_fwd.h` printed
+    "verified 8 vendored files across 4 manifests" and exited 0.
+
+    An unlisted file has no recorded digest, so nothing compares it to anything;
+    it ships with the provenance claim of the directory it sits in and none of
+    its own.
+    """
+    _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
+    gate = _vendored_gate(monkeypatch, tmp_path)
+
+    (tmp_path / "vendor" / "lib" / "extra.h").write_text("// unlisted\n", encoding="utf-8")
+
+    problems = gate.check()
+    assert problems, "a file added inside a vendored subdirectory must be reported"
+    assert "absent from MANIFEST.sha256" in problems[0]
+
+
+def test_an_entire_unlisted_vendored_library_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same hole at the scale that matters: not one stray header but a whole
+    new dependency, dropped in beside the ones whose provenance is recorded."""
+    _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
+    gate = _vendored_gate(monkeypatch, tmp_path)
+
+    (tmp_path / "vendor" / "catch2").mkdir()
+    (tmp_path / "vendor" / "catch2" / "catch.hpp").write_text("// vendored\n", encoding="utf-8")
+
+    assert gate.check(), "an unlisted vendored library must be reported"
+
+
+def test_a_listed_file_that_is_missing_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other direction: the manifest names something that is not there."""
+    _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
+    gate = _vendored_gate(monkeypatch, tmp_path)
+
+    (tmp_path / "vendor" / "lib" / "header.h").unlink()
+
+    problems = gate.check()
+    assert problems
+    assert "listed but missing" in problems[0]
+
+
+def test_a_tree_with_no_manifest_at_all_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gate that finds nothing to check must say so rather than pass.
+
+    Without this, deleting every MANIFEST.sha256 would make the gate green: it
+    would verify zero files across zero manifests and report success.
+    """
+    gate = _vendored_gate(monkeypatch, tmp_path)
+
+    problems = gate.check()
+    assert problems == ["no MANIFEST.sha256 found anywhere -- vendoring is unverified"]
