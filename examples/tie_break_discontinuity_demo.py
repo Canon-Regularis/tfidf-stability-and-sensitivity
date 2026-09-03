@@ -167,11 +167,27 @@ def demonstrate_tie_break_discontinuity() -> dict[str, Ranking]:
         )
 
     _rule("The tie is exact, not close")
-    tied = [(d, s) for d, s in zip(doc_ids, scores, strict=True) if s == 0.5]
-    print(f"  {len(tied)} documents share the single bit pattern {_hex_bits(0.5)}:")
-    print(f"    {', '.join(d for d, _ in tied)}")
-    same = all(same_bits(s, tied[0][1]) for _, s in tied)
-    print(f"  same_bits across all {len(tied)} of them: {same}")
+    # Grouped by bit pattern rather than filtered by `== 0.5`, so the tie is
+    # measured instead of assumed.
+    #
+    # This read `tied = [... if s == 0.5]` followed by `all(same_bits(s,
+    # tied[0][1]) for _, s in tied)`, printed as "same_bits across all 3 of
+    # them: True". That comparison could not be anything but True: the filter
+    # selects exactly the values whose bit pattern is 0.5's, and then asks
+    # whether their bit patterns are 0.5's. It read as independent
+    # verification of the section's claim -- "The tie is exact, not close" --
+    # and was a restatement of the filter.
+    by_pattern: dict[str, list[str]] = {}
+    for doc, score in zip(doc_ids, scores, strict=True):
+        by_pattern.setdefault(_hex_bits(score), []).append(doc)
+    pattern, tied_ids = max(by_pattern.items(), key=lambda item: len(item[1]))
+
+    print(f"  {len(tied_ids)} documents share the single bit pattern {pattern}:")
+    print(f"    {', '.join(tied_ids)}")
+    print(
+        f"  distinct bit patterns among all {len(scores)} scores: {len(by_pattern)}"
+        f"  (a near-tie rather than a tie would show as {len(scores)})"
+    )
 
     sorted_scores = rankings["pi"].sorted_scores
     print(f"  adjacent gaps, best first: {list(adjacent_gaps(sorted_scores))}")
