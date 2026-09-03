@@ -184,8 +184,18 @@ def test_measure_runs_a_warm_up_and_every_requested_batch() -> None:
 
     assert timing.repeats == 3
     assert timing.seconds > 0.0
-    # One warm-up, an unknown number of calibration batches, then the timed ones.
-    assert calls > 1 + 3 * timing.inner
+
+    # The exact count, so the warm-up is visible in it. Calibration times
+    # batches of 1, 2, 4, ... inner, which is 2 * inner - 1 calls; the timed
+    # phase adds repeats * inner; the warm-up adds the one that makes the total
+    # odd. Asserting an inequality instead leaves the warm-up unobserved: without
+    # it the count falls by one, and `> 1 + 3 * inner` still holds.
+    calibration = 2 * timing.inner - 1
+    timed = timing.repeats * timing.inner
+    assert calls == 1 + calibration + timed, (
+        f"{calls} calls for inner={timing.inner}, repeats={timing.repeats}; "
+        f"expected one warm-up plus {calibration} calibration and {timed} timed"
+    )
 
 
 def test_measure_rejects_a_meaningless_repeat_count() -> None:

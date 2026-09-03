@@ -384,9 +384,17 @@ def test_the_repr_names_the_parts_a_reader_needs_to_tell_two_pipelines_apart() -
 
 
 def test_the_stopword_set_repr_names_its_asset_and_size() -> None:
-    pipeline = PreprocessingPipeline(PreprocessingConfig())
-    text = repr(pipeline.stopwords)
+    """The two fields the name promises, not just the class and the digest.
+
+    A repr carrying only the digest identifies the set to a machine and tells a
+    reader nothing about which asset was loaded or how large it is.
+    """
+    stopwords = PreprocessingPipeline(PreprocessingConfig()).stopwords
+    text = repr(stopwords)
+
     assert "StopwordSet(" in text
+    assert f"name={stopwords.name!r}" in text, f"the asset name is missing from {text!r}"
+    assert f"n={len(stopwords)}" in text, f"the word count is missing from {text!r}"
     assert "digest=" in text
 
 
@@ -827,6 +835,38 @@ def test_the_asset_header_does_not_become_part_of_the_stopword_set() -> None:
     assert all(word for word in loaded), "and no blank line became an empty stopword"
     assert len(loaded) == sum(
         1 for line in lines if line.strip() and not line.strip().startswith("#")
+    )
+
+
+def test_a_padded_line_is_stripped_before_it_becomes_a_stopword(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`s = line.strip()`, exercised on an asset that has padding.
+
+    The frozen list carries no padded line, so loading it cannot distinguish
+    stripping from not stripping. A word stored with surrounding whitespace
+    never equals a token, so that stopword would silently stop being removed
+    while every digest and count stayed plausible.
+    """
+    from tfidf_stability.preprocessing import stopwords as module
+
+    asset = tmp_path / "padded.txt"
+    asset.write_text("# header\n  alpha  \n\tbeta\t\ngamma\n\n", encoding="utf-8", newline="")
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    (tmp_path / "MANIFEST.sha256").write_text(
+        f"{digest}  padded.txt\n", encoding="utf-8", newline=""
+    )
+
+    monkeypatch.setattr(module, "_ASSET_DIR", tmp_path)
+    monkeypatch.setattr(module, "_MANIFEST", tmp_path / "MANIFEST.sha256")
+    module.load_stopwords.cache_clear()
+    try:
+        loaded = module.load_stopwords("padded.txt")
+    finally:
+        module.load_stopwords.cache_clear()
+
+    assert sorted(loaded) == ["alpha", "beta", "gamma"], (
+        "the words must be stored stripped, and the comment and blank lines dropped"
     )
 
 

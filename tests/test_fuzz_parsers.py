@@ -162,7 +162,7 @@ def test_trailing_bytes_are_rejected(valid_container) -> None:
         # the parser accepts, which is right where acceptance is legitimate and
         # wrong here, because rejection is the claim. Relaxing
         # `len(data) != expected` to `len(data) < expected` left it green.
-        with pytest.raises(TfidfStabilityError):
+        with pytest.raises(TfidfStabilityError, match="but the header describes exactly"):
             model_from_bytes(valid_container + suffix)
 
 
@@ -213,7 +213,10 @@ def test_an_unknown_flag_bit_is_rejected(valid_container) -> None:
     mutated = bytearray(valid_container)
     mutated[offset : offset + struct.calcsize(code)] = struct.pack(code, 0xFFFF_FFFF)
 
-    with pytest.raises(TfidfStabilityError):
+    # Matched on the message, so a container rejected for some other reason --
+    # which is how this test passed while writing to the wrong field -- is not
+    # mistaken for the flag mask firing.
+    with pytest.raises(TfidfStabilityError, match="unknown flag bits set"):
         model_from_bytes(bytes(mutated))
 
 

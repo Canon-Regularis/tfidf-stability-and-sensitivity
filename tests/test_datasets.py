@@ -1304,17 +1304,40 @@ def test_a_twin_token_too_frequent_for_the_vocabulary_falls_back_to_its_head() -
 
 
 def test_the_twin_token_rank_is_clamped_at_the_rare_end_too() -> None:
-    """The `min(vocab_size - 1, ...)` half of the same expression. A df of 1
-    asks for a term appearing in one document, which is rank `vocab_size - 1`
-    exactly -- so the clamp is on the boundary rather than beyond it, and an
-    off-by-one would index past the vocabulary."""
+    """The rank chosen for each target df, pinned per pair.
+
+    The extra token is `vocabulary[min(V - 1, max(0, V // target_df - 1))]`.
+    Asserting only that the token is somewhere in the vocabulary holds for any
+    index, including a wrong one, so the whole expression goes unchecked.
+
+    On a 30-word vocabulary the default df grid gives ranks 29, 14, 6, 2 and
+    then 0 four times: once `target_df` exceeds `V`, `V // target_df` is 0 and
+    the `max(0, ...)` clamp is what keeps the index off `vocabulary[-1]`, which
+    is the head of the Zipf distribution and the opposite of the rare token the
+    pair is meant to carry.
+
+    The `min(V - 1, ...)` clamp never binds: `V // target_df - 1 <= V - 1` for
+    every `target_df >= 1`, with equality at 1.
+    """
     spec = synthetic.SyntheticSpec(
         n_docs=40, vocab_size=30, n_users=0, n_exact_duplicates=2, n_twin_pairs=8
     )
     corpus = synthetic.generate(spec)
     by_doc = corpus.features_by_doc()
 
-    assert {by_doc[b][-1] for _, b, _ in corpus.twins} <= {f"w{i:05d}" for i in range(30)}
+    extras = [by_doc[b][-1] for _, b, _ in corpus.twins]
+
+    assert extras == [
+        "w00029",  # target_df 1   -> rank 29, the rarest token
+        "w00014",  # target_df 2   -> rank 14
+        "w00006",  # target_df 4   -> rank 6
+        "w00002",  # target_df 8   -> rank 2
+        "w00000",  # target_df 16  -> rank 0
+        "w00000",  # target_df 32  -> 30 // 32 - 1 is -1, clamped to 0
+        "w00000",  # target_df 64  -> likewise
+        "w00000",  # target_df 128 -> likewise
+    ]
+    assert all(e in {f"w{i:05d}" for i in range(30)} for e in extras), "and every one is in range"
 
 
 def test_find_near_ties_skips_exact_ties_unless_asked_for_them() -> None:
