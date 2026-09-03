@@ -202,6 +202,46 @@ def test_score_dispatches_to_both_kernels(
     assert str(ScoringAlgorithm.TAAT) == "taat"
 
 
+def test_score_runs_the_kernel_it_was_asked_for(
+    monkeypatch: pytest.MonkeyPatch,
+    model: TfidfModel,
+    index: InvertedIndex,
+    corpus: list[list[str]],
+) -> None:
+    """Which kernel ran, rather than whether the two agree.
+
+    The kernels are required to be bit-identical, so comparing their output
+    cannot show which one executed: a dispatch that always chose TAAT satisfies
+    that comparison. The call is recorded instead, and both real kernels still
+    run so the returned scores stay meaningful.
+    """
+    from tfidf_stability.similarity import scoring as scoring_module
+
+    called: list[str] = []
+    real_taat = scoring_module.taat_scores
+    real_daat = scoring_module.daat_scores
+
+    def record_taat(*args: object, **kwargs: object) -> list[float]:
+        called.append("taat")
+        return real_taat(*args, **kwargs)  # type: ignore[arg-type]
+
+    def record_daat(*args: object, **kwargs: object) -> list[float]:
+        called.append("daat")
+        return real_daat(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(scoring_module, "taat_scores", record_taat)
+    monkeypatch.setattr(scoring_module, "daat_scores", record_daat)
+
+    q = queries(model, corpus, 1, seed=7)[0]
+
+    scoring_module.score(q, model.matrix, index, model.norms, algorithm=ScoringAlgorithm.TAAT)
+    assert called == ["taat"], "TAAT was requested"
+
+    called.clear()
+    scoring_module.score(q, model.matrix, index, model.norms, algorithm=ScoringAlgorithm.DAAT)
+    assert called == ["daat"], "DAAT was requested and must not fall through to TAAT"
+
+
 def test_precomputed_query_norm_changes_nothing(
     model: TfidfModel, index: InvertedIndex, corpus: list[list[str]]
 ) -> None:
@@ -393,6 +433,10 @@ def test_a_canonical_index_passes_every_arm() -> None:
         ("colptr does not start at zero", [1, 2, 3], [0, 2, 1], [1.0, 2.0, 3.0]),
         ("colptr does not end at nnz", [0, 2, 9], [0, 2, 1], [1.0, 2.0, 3.0]),
         ("a posting has no weight", [0, 2, 3], [0, 2, 1], [1.0, 2.0]),
+        # colptr[-1] == len(values) holds here, so this is the only case the
+        # rowidx/values length clause decides. The case above is settled by the
+        # colptr clause first, which short-circuits before rowidx is looked at.
+        ("a weight has no document", [0, 2, 3], [0, 2], [1.0, 2.0, 3.0]),
     ],
 )
 def test_a_malformed_index_is_rejected_before_its_postings_are_read(

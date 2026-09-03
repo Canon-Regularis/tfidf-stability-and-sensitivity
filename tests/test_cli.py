@@ -389,11 +389,32 @@ def test_every_documented_unicode_form_is_accepted(form: str) -> None:
     assert _fit({"preprocessing": {"unicode_form": form}})
 
 
-def test_two_unicode_forms_can_produce_different_digests() -> None:
-    """The premise of validating the field at all: if the choice never mattered
-    the guard would be protecting nothing."""
-    assert _fit({"preprocessing": {"unicode_form": "NFC"}}) is not None
-    assert _fit({"preprocessing": {"unicode_form": "NFKC"}}) is not None
+def test_two_unicode_forms_produce_different_digests() -> None:
+    """The premise of validating the field: the choice has to be able to matter.
+
+    The mini corpus is ASCII, where NFC and NFKC agree, so this fits a corpus
+    carrying a compatibility character instead. U+FB01, the fi ligature, is
+    folded to "fi" by NFKC and left alone by NFC, so the two forms yield
+    different vocabularies and different digests.
+    """
+    from tfidf_stability.cli.commands import pipeline_from_config, vectoriser_from_config
+
+    records = [
+        {"doc_id": "d0", "text": "ﬁle sharing"},
+        {"doc_id": "d1", "text": "file transfer"},
+    ]
+
+    def digest_under(form: str) -> str:
+        config: dict[str, object] = {"preprocessing": {"unicode_form": form}}
+        pipeline = pipeline_from_config(config)
+        features = [pipeline.preprocess(r["text"]) for r in records]
+        model = vectoriser_from_config(config).fit(features, [r["doc_id"] for r in records])
+        return model.digest()
+
+    assert digest_under("NFC") != digest_under("NFKC"), (
+        "if the two forms agreed on every corpus, validating unicode_form would "
+        "be guarding a field that cannot change a result"
+    )
 
 
 # ---------------------------------------------------------------------------

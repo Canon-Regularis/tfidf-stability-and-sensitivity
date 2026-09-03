@@ -224,10 +224,21 @@ def test_top_k_disagreement_is_about_the_set_not_the_order() -> None:
 
 
 def test_jaccard_distance() -> None:
+    """The last case pins the expression, not just the quantity.
+
+    `1 - |A n B| / |A u B|` and `(|A u B| - |A n B|) / |A u B|` are algebraically
+    equal and one ulp apart in binary64: the first gives 0.6666666666666667, the
+    second 2/3 = 0.6666666666666666. The native core has to reproduce these bits,
+    so the form the reference uses is part of the contract, and `approx` would
+    accept either.
+    """
     assert jaccard_distance([1, 2], [1, 2]) == 0.0
     assert jaccard_distance([1, 2], [3, 4]) == 1.0
     assert jaccard_distance([], []) == 0.0
-    assert jaccard_distance([1, 2], [2, 3]) == pytest.approx(2 / 3)
+    assert same_bits(jaccard_distance([1, 2], [2, 3]), 1.0 - 1 / 3)
+    assert jaccard_distance([1, 2], [2, 3]) != 2 / 3, (
+        "the rearranged form is a different double; pinning 2/3 would admit it"
+    )
 
 
 # ---------------------------------------------------------------------------

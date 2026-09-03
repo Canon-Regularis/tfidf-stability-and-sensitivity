@@ -126,10 +126,37 @@ def test_configure_is_idempotent() -> None:
 
 
 def test_configure_does_not_touch_the_root_logger() -> None:
+    """The handler list, the level and the filters, not the handlers alone.
+
+    Configuring the package must leave the application's own logging as it was.
+    A handler list comparison misses the other two: `basicConfig()` or a
+    `setLevel` on the root logger changes what every unrelated library emits
+    while the handler list stays identical.
+    """
     root = logging.getLogger()
-    before = list(root.handlers)
-    configure(stream=io.StringIO())
-    assert root.handlers == before
+    restore_to = root.level
+
+    # Pinned to a known level first. Comparing against whatever the level
+    # happens to be makes the test order-dependent: an earlier `configure()` in
+    # this file would already have moved it, and the comparison then sees no
+    # change from a second move.
+    root.setLevel(logging.WARNING)
+    try:
+        before_handlers = list(root.handlers)
+        before_filters = list(root.filters)
+        before_propagate = root.propagate
+
+        configure(stream=io.StringIO())
+
+        assert root.handlers == before_handlers, "no handler added to or removed from the root"
+        assert root.level == logging.WARNING, (
+            f"the root logger's level moved to {logging.getLevelName(root.level)}, "
+            f"which changes what every other library in the process emits"
+        )
+        assert root.filters == before_filters
+        assert root.propagate is before_propagate
+    finally:
+        root.setLevel(restore_to)
 
 
 def test_reset_leaves_a_handler_the_application_added() -> None:

@@ -369,10 +369,34 @@ def test_a_policy_that_compared_nothing_reports_zero_rather_than_dividing() -> N
 
 
 def test_a_noise_floor_block_carries_the_hex_form_of_every_float() -> None:
-    """Decimal rendering loses the last bit, and the last bit is the subject."""
+    """Decimal rendering loses the last bit, and the last bit is the subject.
+
+    Every `*_hex` field is paired with its decimal sibling by name, rather than
+    naming one of them, so a field added later is covered and a field reporting
+    the wrong quantity is caught. The block carries `eta_hex`, `tau_floor_hex`
+    and a `max_abs_hex` per policy.
+    """
     block = _floor(1e-16).as_dict()
     assert json.loads(canonical_json(block, indent=None)) == block
-    assert float.fromhex(block["eta_hex"]) == block["eta"]
+
+    def check(mapping: dict[str, object], where: str) -> int:
+        checked = 0
+        for key, value in mapping.items():
+            if key.endswith("_hex"):
+                decimal = key.removesuffix("_hex")
+                assert decimal in mapping, f"{where}{key} has no {decimal} beside it"
+                assert float.fromhex(str(value)) == mapping[decimal], (
+                    f"{where}{key} is {value}, which is not the hex form of "
+                    f"{decimal}={mapping[decimal]}"
+                )
+                checked += 1
+            elif isinstance(value, list):
+                for i, item in enumerate(value):
+                    if isinstance(item, dict):
+                        checked += check(item, f"{where}{key}[{i}].")
+        return checked
+
+    assert check(block, "") >= 3, "eta_hex, tau_floor_hex and at least one max_abs_hex"
 
 
 def test_a_tau_band_block_round_trips_and_pins_its_endpoints_in_hex() -> None:

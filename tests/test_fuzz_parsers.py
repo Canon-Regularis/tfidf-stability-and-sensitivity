@@ -157,8 +157,13 @@ def test_trailing_bytes_are_rejected(valid_container) -> None:
     byte strings that the reproducibility snapshot depends on: two files would
     decode to one model.
     """
-    _assert_typed(model_from_bytes, valid_container + b"\x00")
-    _assert_typed(model_from_bytes, valid_container + b"trailing garbage")
+    for suffix in (b"\x00", b"trailing garbage"):
+        # `pytest.raises`, not `_assert_typed`: that helper returns silently when
+        # the parser accepts, which is right where acceptance is legitimate and
+        # wrong here, because rejection is the claim. Relaxing
+        # `len(data) != expected` to `len(data) < expected` left it green.
+        with pytest.raises(TfidfStabilityError):
+            model_from_bytes(valid_container + suffix)
 
 
 @pytest.mark.property
@@ -197,10 +202,19 @@ def test_a_bad_magic_is_rejected(valid_container) -> None:
 
 
 def test_an_unknown_flag_bit_is_rejected(valid_container) -> None:
-    """Ignoring an unknown bit would let two files decode to one model."""
+    """Ignoring an unknown bit would let two files decode to one model.
+
+    The offset comes from `_header_field`, which is what that helper is for.
+    Written as `24:28` this wrote the upper half of `nnz` (20:28), so the
+    container was rejected for an absurd non-zero count and the flag mask never
+    ran: deleting the mask guard left the file green.
+    """
+    offset, code = _header_field("flags")
     mutated = bytearray(valid_container)
-    mutated[24:28] = struct.pack("<I", 0xFFFF_FFFF)
-    _assert_typed(model_from_bytes, bytes(mutated))
+    mutated[offset : offset + struct.calcsize(code)] = struct.pack(code, 0xFFFF_FFFF)
+
+    with pytest.raises(TfidfStabilityError):
+        model_from_bytes(bytes(mutated))
 
 
 def test_the_empty_input_is_rejected() -> None:

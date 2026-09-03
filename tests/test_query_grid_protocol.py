@@ -117,6 +117,12 @@ def test_the_restricted_table_holds_exactly_the_candidates_and_no_others() -> No
 
     for query in grid.queries:
         assert isinstance(query.table, AttributeTable)
+        # Identity, not cardinality. A table built from the wrong documents has
+        # the right length, so counts alone cannot see it.
+        assert query.table.doc_ids == query.candidate_ids, (
+            f"{query.query_id}: the table holds {query.table.doc_ids} but the "
+            f"candidates are {query.candidate_ids}"
+        )
         assert query.table.n_documents == len(query.scores), (
             "the attribute table and the score vector describe different sets"
         )

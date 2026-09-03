@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import re
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -100,40 +101,51 @@ def test_every_file_that_states_a_version_is_one_the_gate_reads() -> None:
     r"""The converse of the test above: a source the gate never learned about.
 
     That one iterates `gate._SOURCES` and asserts each path exists, so the list
-    under test supplies its own expectation: it catches a source that was renamed
-    away and cannot catch one that was never added. Here the expectation comes
-    from the tree instead, by searching for the shape of a version declaration.
-    `CMakeLists.txt` states one, and its `VERSION` becomes `PROJECT_VERSION`,
-    then `kVersion`, then the native module's `__version__` and
-    `build_info()["version"]`, which is hashed into every RunManifest.
+    under test supplies its own expectation: it catches a source renamed away and
+    cannot catch one that was never added.
+
+    The expectation here is the tree. Every tracked text file is searched for a
+    line declaring this project's own version, identified by a `version`,
+    `__version__` or `VERSION` key whose value is the version the gate reports.
+    Matching on the value keeps dependency pins out: `requirements.txt` names
+    versions, but not this one under that key.
     """
     gate = _script("check_versions")
     known = set(gate._SOURCES)
 
-    # Files that state THIS project's version, by the forms it actually uses.
-    candidates: dict[str, re.Pattern[str]] = {
-        "pyproject.toml": re.compile(r'^version\s*=\s*"[0-9]'),
-        "CITATION.cff": re.compile(r"^version:\s*[\"']?[0-9]"),
-        "CMakeLists.txt": re.compile(r"^VERSION\s+[0-9]"),
-        "src/tfidf_stability/__init__.py": re.compile(r'^__version__\s*[:=].*"[0-9]'),
-    }
+    version = gate._stated("pyproject.toml", gate._SOURCES["pyproject.toml"][0])
+    assert version, "the premise: the gate can read a version to search for"
+
+    declaration = re.compile(
+        r"""^\s*(?:__)?version(?:__)?\s*[:=]\s*["']?"""
+        + re.escape(version)
+        + r"""|^\s*VERSION\s+"""
+        + re.escape(version),
+        re.IGNORECASE,
+    )
+
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+    ).stdout.split()
 
     stating: set[str] = set()
-    for relative, pattern in candidates.items():
-        path = REPO / relative
-        if not path.exists():
+    for relative in tracked:
+        if "_snowball" in relative or relative.startswith(("reports/", "docs/")):
             continue
-        if any(
-            pattern.match(line.strip()) for line in path.read_text(encoding="utf-8").splitlines()
-        ):
+        path = REPO / relative
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if any(declaration.match(line) for line in text.splitlines()):
             stating.add(relative)
 
-    assert stating, "the premise: at least one file states a version"
+    assert stating, f"the premise: some tracked file declares version {version}"
     missing = stating - known
     assert not missing, (
-        f"these files state a version the gate does not read: {sorted(missing)}. "
-        f"A version stated in a file nobody compares is how CITATION.cff came to "
-        f"disagree in the first place."
+        f"these files declare version {version} but the gate does not read them: "
+        f"{sorted(missing)}. A version stated where nothing compares it is how "
+        f"CITATION.cff came to disagree."
     )
 
 

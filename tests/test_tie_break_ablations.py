@@ -152,6 +152,30 @@ def test_disagreement_rate_returns_its_denominator() -> None:
     assert 0.0 <= rate <= 1.0
 
 
+def test_the_disagreement_rate_is_the_share_of_queries_that_differed() -> None:
+    """The numerator, pinned to an exact value rather than to a range.
+
+    The tests around this one fix the denominator, the empty case and the
+    all-agree case, so a `disagreement_rate` returning a constant 0.0 satisfies
+    every one of them. Section 7.3 publishes this number, so the fraction itself
+    has to be pinned.
+
+    Query "a" is a four-way exact tie, where pi and pi_alt order by different
+    attributes and the top-2 sets differ; query "b" has distinct scores, where
+    every operator agrees. One of two, so 0.5.
+    """
+    table = table_of([3, 2, 1, 0])
+    results = ablate_queries(
+        [("a", [0.5, 0.5, 0.5, 0.5]), ("b", [0.9, 0.8, 0.7, 0.6])], table, ks=(2,)
+    )
+
+    assert disagreement_rate(results, "pi", "pi_alt", 2) == (0.5, 2)
+    assert disagreement_rate(results, "pi", "pi_score", 2) == (0.0, 2), (
+        "the same denominator with a different numerator, so the pair above is "
+        "not passing on the denominator alone"
+    )
+
+
 def test_disagreement_rate_is_zero_with_a_denominator_when_nothing_disagrees() -> None:
     table = table_of([3, 2, 1, 0])
     results = ablate_queries([("a", [0.9, 0.8, 0.7, 0.6])], table, ks=(2,))
