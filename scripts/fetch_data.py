@@ -42,12 +42,29 @@ DEFAULT_DEST = REPO / "data" / "raw" / "ml-latest-small.zip"
 _CHUNK = 1 << 16
 
 
-def _download(url: str, dest: Path) -> str:
-    """Stream to a temporary file, then rename. Returns the digest.
+def _download(url: str, dest: Path, expected: str | None) -> tuple[str, bool]:
+    """Stream to a temporary file, verify, then rename. Returns (digest, placed).
 
     An interrupted transfer must not leave a truncated file at the destination,
     where it would fail the digest check confusingly instead of simply being
     absent.
+
+    The verification happens here, before the rename, and that ordering is the
+    point. This used to move the download into place and let the caller compare
+    afterwards, which destroyed the very file the mismatch message tells the user
+    to go and find:
+
+        `--force` over a correct pinned archive, after GroupLens has replaced
+        ml-latest-small.zip in place -- which this script's own message says is
+        the likely cause of a mismatch -- overwrote the pinned copy with the new
+        one and only then reported the mismatch. The advice that follows,
+        "either obtain that archive, or re-run the experiments", was addressed to
+        someone whose only copy had just been deleted, and upstream no longer
+        serves it.
+
+    On a mismatch the download is kept beside the destination with a `.rejected`
+    suffix rather than discarded, so it can be inspected, and `dest` is left
+    exactly as it was.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_suffix(dest.suffix + ".partial")
@@ -66,8 +83,15 @@ def _download(url: str, dest: Path) -> str:
                 print(f"\r  {seen / 1e6:.1f} / {total / 1e6:.1f} MB", end="", flush=True)
     print()
 
+    actual = digest.hexdigest()
+    if expected is not None and actual != expected:
+        rejected = dest.with_suffix(dest.suffix + ".rejected")
+        shutil.move(str(partial), str(rejected))
+        print(f"  kept the rejected download at {rejected}")
+        return actual, False
+
     shutil.move(str(partial), str(dest))
-    return digest.hexdigest()
+    return actual, True
 
 
 def main() -> int:
@@ -89,12 +113,17 @@ def main() -> int:
         print(hashlib.sha256(dest.read_bytes()).hexdigest())
         return 0
 
+    # Read before the download, because it decides whether the download is
+    # allowed to replace what is already at `dest`.
+    pinned = movielens.MOVIELENS_SHA256
+
     if dest.exists() and not args.force:
         print(f"{dest} already exists (use --force to re-download)")
         digest = hashlib.sha256(dest.read_bytes()).hexdigest()
     else:
+        had_archive = dest.exists()
         try:
-            digest = _download(args.url, dest)
+            digest, placed = _download(args.url, dest, pinned)
         except OSError as exc:
             print(f"download failed: {exc}", file=sys.stderr)
             print(
@@ -105,9 +134,26 @@ def main() -> int:
             )
             return 1
 
+        if not placed:
+            print(f"sha256  {digest}")
+            print(
+                f"\nDIGEST MISMATCH\n  expected {pinned}\n  actual   {digest}\n\n"
+                "GroupLens updates ml-latest-small in place, so upstream has most likely\n"
+                "changed. The download was NOT moved into place.\n"
+                + (
+                    f"{dest} is untouched and still holds the archive it held before.\n"
+                    if had_archive
+                    else f"Nothing was written to {dest}.\n"
+                )
+                + "Published numbers were computed against the pinned archive, so either\n"
+                "keep that archive, or re-run the experiments and update the pin in the\n"
+                "same commit.",
+                file=sys.stderr,
+            )
+            return 1
+
     print(f"sha256  {digest}")
 
-    pinned = movielens.MOVIELENS_SHA256
     if pinned is None:
         print(
             "\nNo digest is pinned yet. To pin this archive, set in\n"

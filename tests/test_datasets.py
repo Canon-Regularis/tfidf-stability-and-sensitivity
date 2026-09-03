@@ -16,12 +16,16 @@ The archive reproduces the quirks of ``ml-latest-small`` the parser copes with:
 from __future__ import annotations
 
 import bisect
+import hashlib
+import importlib.util
 import io
 import json
 import random as random_module
+import sys
 import zipfile
 from itertools import pairwise
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -34,6 +38,8 @@ from tfidf_stability.utils.hashing import hash_bytes, hash_text
 from tfidf_stability.utils.io import canonical_json
 from tfidf_stability.utils.validation import DataIntegrityError
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
+
+REPO = Path(__file__).resolve().parents[1]
 
 # ---------------------------------------------------------------------------
 # A fake ml-latest-small
@@ -1344,3 +1350,122 @@ def test_find_near_ties_skips_exact_ties_unless_asked_for_them() -> None:
 
     asked_for = synthetic.find_near_ties(scores, limit=10, strictly_positive=False)
     assert sum(p.is_exact for p in asked_for) == 2, "the pairs the default dropped"
+
+
+# ---------------------------------------------------------------------------
+# scripts/fetch_data.py: a bad download must not destroy a good archive
+# ---------------------------------------------------------------------------
+# The archive is not re-obtainable. GroupLens replaces ml-latest-small.zip in
+# place -- this repository says so in three separate messages -- so a contributor
+# holding the pinned copy holds the only copy the published numbers were computed
+# against. The script used to move the download into place and compare
+# afterwards, so `--force` after an upstream change overwrote that copy and then
+# advised the reader to "obtain that archive".
+def _fetch_script() -> ModuleType:
+    """scripts/fetch_data.py as a module. Local by house convention."""
+    path = REPO / "scripts" / "fetch_data.py"
+    spec = importlib.util.spec_from_file_location("fetch_data_under_test", path)
+    assert spec is not None, "the script must be loadable as a module"
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class _Response:
+    """The slice of urlopen's result that `_download` uses."""
+
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+        self.headers = {"Content-Length": str(len(payload))}
+
+    def read(self, size: int) -> bytes:
+        chunk, self._payload = self._payload[:size], self._payload[size:]
+        return chunk
+
+    def __enter__(self) -> _Response:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+def _serve(monkeypatch: pytest.MonkeyPatch, fetch: ModuleType, payload: bytes) -> None:
+    monkeypatch.setattr(
+        fetch.urllib.request, "urlopen", lambda request: _Response(payload), raising=True
+    )
+
+
+def test_a_download_that_fails_the_pin_leaves_the_existing_archive_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The data-loss case, and the reason the verification moved before the rename.
+
+    The bytes at `dest` before the call are the pinned archive; the bytes served
+    are what upstream now returns. The pinned copy must survive.
+    """
+    fetch = _fetch_script()
+    dest = tmp_path / "ml-latest-small.zip"
+    dest.write_bytes(b"the pinned archive, not obtainable again")
+    _serve(monkeypatch, fetch, b"what upstream serves today")
+
+    digest, placed = fetch._download("https://example.invalid/ml.zip", dest, "0" * 64)
+
+    assert placed is False, "a download that fails the pin must not be moved into place"
+    assert dest.read_bytes() == b"the pinned archive, not obtainable again", (
+        "the archive the published numbers were computed against must survive a bad download"
+    )
+    assert digest == hashlib.sha256(b"what upstream serves today").hexdigest()
+
+
+def test_the_rejected_download_is_kept_rather_than_discarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Kept so the mismatch can be investigated -- was upstream reissued, or is
+    this a proxy serving an error page? Deleting it answers neither."""
+    fetch = _fetch_script()
+    dest = tmp_path / "ml-latest-small.zip"
+    dest.write_bytes(b"pinned")
+    _serve(monkeypatch, fetch, b"different")
+
+    fetch._download("https://example.invalid/ml.zip", dest, "0" * 64)
+
+    rejected = tmp_path / "ml-latest-small.zip.rejected"
+    assert rejected.read_bytes() == b"different"
+    assert not (tmp_path / "ml-latest-small.zip.partial").exists(), "no partial is left behind"
+
+
+def test_a_download_matching_the_pin_is_placed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contrastive with the two above, so neither passes by refusing everything."""
+    fetch = _fetch_script()
+    dest = tmp_path / "ml-latest-small.zip"
+    payload = b"the archive upstream still serves"
+    _serve(monkeypatch, fetch, payload)
+
+    digest, placed = fetch._download(
+        "https://example.invalid/ml.zip", dest, hashlib.sha256(payload).hexdigest()
+    )
+
+    assert placed is True
+    assert dest.read_bytes() == payload
+    assert digest == hashlib.sha256(payload).hexdigest()
+
+
+def test_an_unpinned_download_is_placed_so_the_first_fetch_can_pin_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`MOVIELENS_SHA256 = None` is the documented first-download case: there is
+    nothing to verify against yet, and the script prints the digest to pin. That
+    path must still deliver a file."""
+    fetch = _fetch_script()
+    dest = tmp_path / "ml-latest-small.zip"
+    _serve(monkeypatch, fetch, b"first ever download")
+
+    digest, placed = fetch._download("https://example.invalid/ml.zip", dest, None)
+
+    assert placed is True
+    assert dest.read_bytes() == b"first ever download"
+    assert digest == hashlib.sha256(b"first ever download").hexdigest()
