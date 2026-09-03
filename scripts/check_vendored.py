@@ -32,14 +32,8 @@ def _unlisted(manifest: Path, manifests: list[Path], listed: set[str]) -> list[s
     bare name, because that is the form the manifest uses:
     ``cpp/third_party/MANIFEST.sha256`` lists ``doctest/doctest.h``.
 
-    Walked recursively. This was ``iterdir()`` with ``path.is_dir(): continue``,
-    which never descended -- and every file ``cpp/third_party`` vendors lives one
-    level down, in ``doctest/`` and ``nanobench/``. So for the tree
-    ``THIRD_PARTY_NOTICES.md`` makes its provenance claims about, the direction
-    this check exists to cover was inert. Measured on the previous version:
-    adding ``cpp/third_party/doctest/doctest_fwd.h`` printed "verified 8 vendored
-    files across 4 manifests" and exited 0, and so did adding an entire new
-    vendored library.
+    Walked recursively, because every file ``cpp/third_party`` vendors lives one
+    level down, in ``doctest/`` and ``nanobench/``.
     """
     problems: list[str] = []
     for path in sorted(manifest.parent.rglob("*")):

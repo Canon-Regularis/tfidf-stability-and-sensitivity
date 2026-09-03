@@ -21,10 +21,8 @@ from tfidf_stability.utils.logging import EventKind, get_logger, log_event
 __all__ = [
     "REQUIRED_ABI",
     "build_info",
-    # Public because the CLI calls it and because anything embedding this package
-    # needs the same protection: it was absent here while the module docstring
-    # described it as the process-level guard, which is part of why nothing
-    # called it.
+    # Public because the CLI calls it, and because anything embedding this
+    # package needs the same process-level guard.
     "check_float_environment",
     "log_backend_selection",
     "native_available",

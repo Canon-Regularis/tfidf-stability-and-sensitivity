@@ -657,17 +657,11 @@ def test_a_document_frequency_outside_one_to_n_is_refused() -> None:
 
 
 def test_the_document_frequency_at_its_upper_bound_is_accepted() -> None:
-    r"""The other edge of `1 <= df[t] <= N`, which nothing exercised.
+    r"""The upper edge of `1 <= df[t] <= N`.
 
-    The test above pokes only values *outside* the bound, so a guard narrowed to
-    `df[t] < N` rejects a term appearing in every document while every one of
-    those pokes still raises. Mutation testing found exactly that: the mutant
-    `1 <= d <= head.n_docs` -> `1 <= d < head.n_docs` survived the whole suite,
-    not merely this file.
-
-    Stated as its own test rather than folded into the one above, because it is
-    the opposite claim: that the loader *accepts* the boundary. A rejection test
-    and an acceptance test can both pass while the bound sits one off.
+    The rejection test above pokes only values outside the bound, so a guard
+    narrowed to `df[t] < N` still passes it. A term occurring in every document
+    is ordinary, so the accepting side needs its own case.
     """
     model = _three_token_model()
     payload = model_bytes(model)
@@ -684,11 +678,9 @@ def test_a_fitted_corpus_whose_term_is_in_every_document_round_trips() -> None:
     """The same boundary reached by fitting rather than by editing bytes.
 
     The poke above shows the loader accepts `df == N`; this shows `df == N` is a
-    value the vectoriser actually emits, so the guard is exercised by an ordinary
-    corpus and not only by a hand-built container. A term in every document is
-    not exotic -- it is any common word that survives stopword removal, and its
-    IDF is exactly zero, which is why the weight it carries is not what proves
-    the round trip. The recorded count is.
+    value the vectoriser emits for an ordinary corpus, from any common word that
+    survives stopword removal. Its IDF is exactly zero, so the round trip is
+    checked on the recorded counts rather than on the weight the term carries.
     """
     model = TfidfVectoriser().fit([["aa", "bb"], ["aa", "cc"], ["aa", "dd"]], ["d0", "d1", "d2"])
     universal = model.vocabulary.tokens.index("aa")

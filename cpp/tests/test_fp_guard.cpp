@@ -33,19 +33,10 @@ TEST_CASE("fp: FMA contraction is off") {
 }
 
 TEST_CASE("fp: no reassociation of sums") {
-    // Asserted against the compiler's own report, not against arithmetic.
-    //
-    // This read `volatile double a = 1.0, b = 1e-17; CHECK((a + b) - a == 0.0);`
-    // and could not fail. `volatile` makes each read an observable access, so
-    // the compiler may not fold the two reads of `a` -- which is the very
-    // rewrite the check was written to detect. Measured with GCC 13.2 under
-    // `-fassociative-math -fno-signed-zeros -fno-trapping-math`: the same
-    // expression without `volatile` compiles to a bare `return b`, so
-    // reassociation was demonstrably active, and this test still passed.
-    //
-    // `selftest()` now reads __ASSOCIATIVE_MATH__ directly, which does fire on
-    // that build (bitmask 2). Asserting the bit rather than re-deriving the
-    // arithmetic keeps the one check that can actually distinguish the two.
+    // Asserted against the compiler's own report, not against arithmetic. An
+    // arithmetic probe needs `volatile`, which makes each read an observable
+    // access and forbids the very fold it is written to detect. `selftest()`
+    // reads __ASSOCIATIVE_MATH__ instead, and this asserts that bit.
     const std::uint32_t f = tfidf::fp::selftest();
     INFO("selftest bitmask = " << f << " -> " << tfidf::fp::describe(f));
     CHECK((f & tfidf::fp::kReassociation) == 0u);

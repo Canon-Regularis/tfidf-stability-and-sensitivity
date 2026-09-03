@@ -714,9 +714,9 @@ def _bound_stopwords(pipeline: PreprocessingPipeline) -> str:
     """The stopword component of the pipeline identity, as `digest()` binds it.
 
     Two digests joined: `digest` is provenance (the asset's raw file bytes) and
-    `content_digest` is identity (derived from the words). Reconstructed here
-    rather than restated as a literal, so a change to how they are joined fails
-    the pipeline's own tests rather than silently agreeing with a stale copy.
+    `content_digest` is identity, derived from the words. Reconstructed rather
+    than restated as a literal, so a change to how they are joined fails the
+    pipeline's own tests instead of agreeing with a stale copy here.
     """
     return f"{pipeline.stopwords.digest}:{pipeline.stopwords.content_digest}"
 
@@ -972,18 +972,17 @@ def test_injecting_a_different_kind_still_moves_the_digest_by_its_bare_name() ->
 # ---------------------------------------------------------------------------
 # The stopword identity is derived, not supplied
 # ---------------------------------------------------------------------------
-# `digest` was the only one, and it was whatever the caller passed. Nothing
-# derived it and nothing checked it, while `PreprocessingPipeline` published it
-# as the map's identity -- so two sets holding different words could carry one
-# identity and hash to one pipeline digest. The same hole `LookupLemmatiser` had
-# one field along, closed the same way.
+# `StopwordSet.digest` is provenance and is caller-supplied; `content_digest` is
+# identity and is derived from the words. `PreprocessingPipeline` binds both, so
+# two sets holding different words cannot reach one pipeline digest by carrying
+# one provenance string. `LookupLemmatiser` binds its table the same way.
 def test_two_word_sets_cannot_share_an_identity_by_sharing_a_supplied_digest() -> None:
-    """The defect, stated directly.
+    """Sharing a provenance string does not make two word sets one set.
 
-    Both sets are handed the same `digest` string, which the constructor accepts
-    because provenance is legitimately caller-supplied -- `load_stopwords` sets
-    it from the asset's raw file bytes on purpose. What must not follow is that
-    the two become indistinguishable.
+    The constructor accepts a caller-supplied `digest` because provenance is
+    legitimately supplied: `load_stopwords` sets it from the asset's raw file
+    bytes. `content_digest` is derived from the words, so it separates the two
+    regardless.
     """
     the_and_of = StopwordSet(["the", "of"], name="x", digest="a-supplied-string")
     cat_and_dog = StopwordSet(["cat", "dog"], name="x", digest="a-supplied-string")
@@ -997,10 +996,9 @@ def test_two_word_sets_cannot_share_an_identity_by_sharing_a_supplied_digest() -
 def test_the_content_digest_matches_what_from_iterable_derives() -> None:
     """One canonical form, not two.
 
-    `from_iterable` digests the sorted words joined by newlines, and that is the
-    form the derived value has to reproduce -- otherwise a set built by the
-    factory and one built directly would disagree about their own identity while
-    holding the same words.
+    `from_iterable` digests the sorted words joined by newlines, and the derived
+    value reproduces that form. Otherwise a set built by the factory and one
+    built directly would hold the same words under two identities.
     """
     direct = StopwordSet(["of", "the"], name="x", digest="irrelevant")
     factory = StopwordSet.from_iterable(["the", "of"])
@@ -1013,7 +1011,7 @@ def test_the_content_digest_matches_what_from_iterable_derives() -> None:
 
 def test_order_and_repetition_do_not_change_the_identity() -> None:
     """A set is a set. The canonical form is sorted and deduplicated, so the
-    identity cannot depend on how the caller happened to spell the collection."""
+    identity cannot depend on how the caller spelled the collection."""
     a = StopwordSet(["the", "of", "the"], name="x", digest="d")
     b = StopwordSet(["of", "the"], name="x", digest="d")
 
@@ -1021,14 +1019,13 @@ def test_order_and_repetition_do_not_change_the_identity() -> None:
 
 
 def test_the_empty_set_agrees_with_the_factory_on_the_one_form_that_has_no_words() -> None:
-    r"""The degenerate end of the canonical form, where an off-by-one would hide.
+    r"""The degenerate end of the canonical form: a set holding no words.
 
-    The derived value joins the sorted words with newlines and appends one. With
-    no words that is the single byte ``b"\n"``, not the empty string -- so a
-    derivation spelled ``"\n".join(ws)`` without the trailing newline, or one
-    special-casing empty to ``b""``, would agree with ``from_iterable`` on every
-    non-empty set and disagree only here. Removing no words is a real
-    configuration, and it has to hash like one.
+    The derived value joins the sorted words with newlines and appends one, so
+    an empty set hashes the single byte ``b"\n"``, not the empty string. A
+    derivation without the trailing newline, or one special-casing empty to
+    ``b""``, agrees with ``from_iterable`` everywhere except here. Removing no
+    words is a real configuration and has to hash like one.
     """
     factory = StopwordSet.from_iterable([])
     direct = StopwordSet([], name="x", digest="irrelevant")
@@ -1044,16 +1041,13 @@ def test_the_empty_set_agrees_with_the_factory_on_the_one_form_that_has_no_words
 
 
 def test_an_empty_set_and_a_set_holding_one_empty_string_are_not_the_same_map() -> None:
-    r"""The pair the canonical form cannot separate, recorded rather than assumed.
+    r"""The one pair the canonical form cannot separate.
 
-    ``[""]`` canonicalises to ``"" + "\n"``, which is the same byte string the
-    empty set produces, so the two collide. They are different maps -- one strips
-    nothing, the other holds a word. ``normalise`` never yields an empty token,
-    so no pipeline input reaches the collision, but the constructor is public and
-    the two are one character apart.
-
-    Asserted as equal on purpose: this pins the collision as known, so making the
-    form injective later fails here and is reviewed rather than absorbed.
+    ``[""]`` canonicalises to ``"" + "\n"``, the same byte string the empty set
+    produces, so the two collide although they are different maps. ``normalise``
+    never yields an empty token, so no pipeline input reaches the collision.
+    Asserted as equal on purpose: making the form injective fails here and is
+    reviewed rather than absorbed.
     """
     empty = StopwordSet([], name="x", digest="d")
     holds_empty_string = StopwordSet([""], name="x", digest="d")
@@ -1067,11 +1061,11 @@ def test_an_empty_set_and_a_set_holding_one_empty_string_are_not_the_same_map() 
 
 
 def test_the_pipeline_digest_separates_two_maps_that_remove_different_words() -> None:
-    """The consequence, and the reason the constructor mattered.
+    """Two pipelines stripping different words hash differently.
 
-    `PreprocessingPipeline.digest` is what a run manifest records, so two maps
-    that strip different words must not hash alike. They did, whenever the
-    stopword sets were handed the same provenance string.
+    `PreprocessingPipeline.digest` is what a run manifest records, so it has to
+    separate the two maps even where their stopword sets carry the same
+    caller-supplied provenance string.
     """
     config = PreprocessingConfig()
     strips_articles = PreprocessingPipeline(

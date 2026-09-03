@@ -117,25 +117,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 1
 
-    # Layer 3 of the floating-point guard, which nothing called.
+    # Layer 3 of the floating-point guard in `cpp/include/tfidf/core/fp_guard.hpp`.
+    # The compile-time `#error` and the manifest's resolved flag string describe
+    # the binary; only this probe sees the process, where MKL and some OpenBLAS
+    # builds set flush-to-zero and denormals-are-zero process-wide as numpy
+    # imports, flushing the subnormal near-tie margins this project measures.
     #
-    # `cpp/include/tfidf/core/fp_guard.hpp` describes three layers: a compile-time
-    # `#error` on fast-math, the resolved flag string baked into the manifest, and
-    # this runtime probe. The first two describe the *binary*; only this one can
-    # see the *process*, and that is where the live hazard is. MKL and some
-    # OpenBLAS builds set flush-to-zero and denormals-are-zero process-wide as
-    # numpy imports, which flushes exactly the subnormal near-tie margins this
-    # project exists to measure. `check_float_environment` repairs that, and warns
-    # when it cannot.
-    #
-    # It was reachable only from the test suite, so every real run went unchecked
-    # while three layers of documentation said otherwise.
-    #
-    # After the dispatch guard, so `--version` and `--help` do not pay for it, and
-    # before the command runs, so the repair happens before any number is
-    # produced. Guarded on availability because it goes through `require_native`,
-    # which raises when there is no extension -- the reference backend is a
-    # supported configuration, not an error.
+    # After the dispatch guard, so `--version` and `--help` do not pay for it,
+    # and before the command runs, so the repair precedes any number produced.
+    # Guarded on availability because it goes through `require_native`, which
+    # raises when there is no extension; the reference backend is supported.
     from tfidf_stability._native import check_float_environment, native_available
 
     if native_available():

@@ -216,13 +216,10 @@ class PreprocessingPipeline:
         else:
             override = identity
         # Both stopword digests, joined the way `lemmatiser_identity` joins the
-        # backend name to its content hash. `digest` is provenance -- the asset's
+        # backend name to its content hash. `digest` is provenance: the asset's
         # raw file bytes, so an edit in place is detectable even when the parsed
-        # set is unchanged -- and `content_digest` is identity, derived from the
-        # words and impossible to hand in. Binding provenance alone let a
-        # hand-built `StopwordSet` carry any digest string it liked and publish
-        # it as this map's identity, so two sets holding different words hashed
-        # to one pipeline digest. Neither subsumes the other, so both go in.
+        # set is unchanged. `content_digest` is identity, derived from the words
+        # and impossible to hand in. Neither subsumes the other, so both go in.
         stopwords = f"{self._stopwords.digest}:{self._stopwords.content_digest}"
         return self.config.digest(stopword_digest=stopwords, lemmatiser_override=override)
 

@@ -155,17 +155,10 @@ def test_a_module_with_no_claims_still_fails_on_any_survivor(
     """Absence of an allowlist entry must never read as permission. A module
     nobody has documented behaves exactly as the tool did before this file.
 
-    The premise is built rather than borrowed. This named
-    `persistence/save_load.py` and asserted the real allowlist held nothing for
-    it, which quietly coupled an unrelated test to that file's documentation
-    status: recording a legitimate equivalent mutant there -- as a campaign now
-    has -- broke this test for a reason with no bearing on what it checks. Worse,
-    the failure would read as "the gate is broken" rather than "this test's
-    premise expired".
-
-    So the loader is pointed at an allowlist that is empty by construction. The
-    module named is one that *does* carry real entries, which makes the emptiness
-    demonstrably come from the substituted file rather than from the module.
+    The empty allowlist is substituted rather than borrowed, so the premise does
+    not depend on which modules the real file happens to document. The module
+    named carries real entries, which places the emptiness in the substituted
+    file rather than in the module.
     """
     runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
@@ -452,9 +445,9 @@ def test_the_allowlist_names_only_modules_that_are_still_in_the_package() -> Non
 def _stamped_entries() -> list[tuple[str, int, str, str]]:
     """Every allowlist entry as `(path, line, stamp, reason)`.
 
-    Local by house convention, and separate from `_sites_by_key` above because
-    this asks a different question: not whether the mutation exists, but whether
-    the line it sits on is still the line the entry was written about.
+    Local by house convention. Separate from `_sites_by_key` above, which asks
+    whether the mutation exists rather than whether the line it sits on is still
+    the line the entry was written about.
     """
     entries: list[tuple[str, int, str, str]] = []
     for raw in ALLOWLIST.read_text(encoding="utf-8").splitlines():
@@ -480,17 +473,10 @@ def test_every_allowlist_entry_still_describes_the_line_it_names() -> None:
     """The half `..._still_names_a_mutation_that_exists` does not cover.
 
     That test asks whether a site with the entry's `(line, kind, before, after)`
-    exists. It does not ask whether that site is the one the entry was written
-    about, and the difference is not academic: when a round of edits shifted
-    lines, a repair tool mapped three of five entries onto the *nearest*
-    same-signature site -- the wrong expression each time, since the edits had
-    inserted closer ones -- and reported "0 need a human". The test passed on all
-    three. They were caught by reading each entry's recorded reason by hand.
-
-    A fingerprint of the source line closes it. `src=<8 hex>` prefixes each
-    reason; a renumbering onto a different expression no longer matches, and the
-    failure prints the line now sitting there so the fix is visible rather than
-    inferred.
+    exists, not whether it is the site the entry was written about: a renumber
+    onto the nearest same-signature line satisfies it. `src=<8 hex>` prefixes
+    each reason with a fingerprint of the source line, and the failure prints
+    the line now sitting there.
     """
     entries = _stamped_entries()
     assert entries, "the premise: the allowlist is not empty"
@@ -528,11 +514,11 @@ def test_every_allowlist_entry_still_describes_the_line_it_names() -> None:
 
 
 def test_a_stamp_pointing_at_a_different_expression_is_rejected() -> None:
-    """The guard's own discrimination, shown rather than assumed.
+    """A well-formed stamp taken from another line does not verify.
 
-    Two real entries from the same file, with their stamps exchanged: both still
-    name a site that exists and both have a well-formed stamp, so only the
-    fingerprint separates them. If this passes, the check above is decorative.
+    Two real entries from the same file with their stamps exchanged: both name a
+    site that exists and both stamps are well formed, so only the fingerprint
+    separates them.
     """
     entries = [e for e in _stamped_entries() if e[0].endswith("numerics.py")]
     assert len(entries) >= 2, "the premise: numerics.py carries several entries"

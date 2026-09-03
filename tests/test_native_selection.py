@@ -116,32 +116,16 @@ def test_availability_and_its_reason_are_complementary(
 
 
 def test_an_extension_built_for_this_interpreter_must_actually_have_loaded() -> None:
-    """A backend that fails to load turns every differential test into a skip.
+    """An extension carrying this interpreter's ABI tag must have been selected.
 
-    Each native suite is guarded by `skipif(not native_available())` and pytest
+    Every native suite is guarded by `skipif(not native_available())` and pytest
     exits 0 when all of them skip, so an extension that is present but unloadable
-    makes the differential tests vanish while the run still reports green. That
-    is not hypothetical. `ci.yml`'s install step records it happening for a long
-    time -- "every native test skipped on its skipif guard, and the job reported
-    success" -- and answers it with a workflow step that imports the backend and
-    fails if it cannot.
-
-    That guard lives in YAML, so it protects CI and not this suite. Mutation
-    testing showed the difference: inverting the ABI comparison at
-    `_native/__init__.py:69` leaves `_MODULE` unset on a machine whose extension
-    is fine, and the whole suite still passed, because every test that would have
-    exercised the backend skipped instead.
-
-    So the same claim is asserted where the suite can see it: if a compiled
-    extension carrying *this* interpreter's ABI tag sits beside the package, then
-    selection must have succeeded. A wrong comparison or a load failure is then a
-    loud failure rather than a quiet skip.
+    makes the differential tests vanish while the run still reports green.
+    `ci.yml` imports the backend at install time; this holds inside the suite.
 
     Matched on `importlib.machinery.EXTENSION_SUFFIXES` rather than on
     `_tfidf_native*`, because a working tree can hold builds for several Pythons
-    at once and only the one tagged for this interpreter is loadable here --
-    globbing the wildcard would fail the test on a checkout whose only build is
-    for a different version, which is a legitimate state.
+    at once and only the one tagged for this interpreter is loadable here.
     """
     import importlib.machinery
     from pathlib import Path
@@ -165,19 +149,12 @@ def test_an_extension_built_for_this_interpreter_must_actually_have_loaded() -> 
 def test_a_backend_that_loaded_records_no_abi_mismatch() -> None:
     """`_ABI_MISMATCH` is initialised False and set True only on the mismatch arm.
 
-    That arm is unreachable in-process, so every test exercising what the flag
-    *causes* substitutes it directly -- which leaves the initialiser itself
-    untested, and `_ABI_MISMATCH: bool = False -> True` survived the whole suite.
-
-    A wrongly-initialised flag is not inert. Nothing resets it on the success
-    path, so `require_native()` would raise `AbiVersionMismatchError` at a caller
-    whose build is fine, and the advice that distinguishes the two errors --
-    rebuild against the current contract, versus build at all -- would be wrong
-    in the one place it is read.
-
-    The same shape as the `_REASON` defect already fixed here: a backend
-    reporting itself available must not still carry the leftovers of a failure
-    that did not happen.
+    That arm is unreachable in-process, so tests of what the flag *causes*
+    substitute it directly and leave the initialiser itself unexercised. Nothing
+    resets the flag on the success path, so a True initialiser would make
+    `require_native()` raise `AbiVersionMismatchError` at a caller whose build is
+    fine, sending them to rebuild against the current contract rather than to
+    build at all.
     """
     if not native_available():
         pytest.skip(unavailable_reason() or "no native backend")
@@ -314,17 +291,13 @@ def test_the_self_test_can_be_asked_not_to_repair(
 def test_the_default_is_to_repair_rather_than_merely_observe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The two tests above pass `restore` explicitly, so neither pins the default.
+    """The default of `restore`, which the two tests above name explicitly.
 
-    Both arms are covered -- `restore=True` repairs, `restore=False` observes --
-    but each names the argument, so the signature's own default is never the
-    thing under test. Mutation testing found the hole: `restore: bool = True` ->
-    `= False` survived the whole suite, because no call site in `tests/` omits
-    the argument.
-
-    The default is the interesting half. Repairing is what makes an unattended
-    run safe when a BLAS flips the flags at import, and a caller who never heard
-    of this function gets whatever the default says.
+    Both arms are covered there -- `restore=True` repairs, `restore=False`
+    observes -- but each passes the argument, so the signature's own default is
+    never the thing under test. Repairing is what keeps an unattended run safe
+    when a BLAS flips the flags at import, and a caller who omits the argument
+    gets whatever the default says.
     """
     calls: list[str] = []
 
@@ -353,15 +326,12 @@ def test_the_warning_is_attributed_to_the_caller_not_to_this_module(
 ) -> None:
     """`stacklevel=2`, asserted rather than assumed.
 
-    `pytest.warns` checks the category and the message and says nothing about
-    where the warning is reported from, so `stacklevel=2` -> `1` survived the
-    whole suite. It matters: at `stacklevel=1` every such warning is blamed on
-    `_native/__init__.py`, which is the same location for every caller, and the
-    one thing a reader needs -- which code was running under a flushing
-    environment -- is exactly what is lost.
+    At `stacklevel=1` every such warning is reported from `_native/__init__.py`,
+    the same location for every caller, and which code was running under a
+    flushing environment is the one thing a reader needs.
 
-    Recorded through `catch_warnings` rather than `pytest.warns` because the
-    filename is the assertion, and `simplefilter` is needed to stop the
+    Recorded through `catch_warnings` rather than `pytest.warns`, which checks
+    the category and the message but not the filename. `simplefilter` stops the
     project-wide `filterwarnings = ["error"]` turning the warning into a raise
     before it can be inspected.
     """

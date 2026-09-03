@@ -39,16 +39,16 @@ binary64 and the demonstration has no floating-point content of its own: scores
 **Average case: nothing happens until well past it.** Under *random*
 perturbation the adversarial configuration is a measure-zero corner of the
 perturbation cube. Measured (`analysis/stability_profile.py::transition_curve`,
-k=10, 35 of 40 §7.1 leave-one-out queries × 40 trials; the other five were
+k=10, 33 of 40 §7.1 leave-one-out queries × 40 trials; the other seven were
 excluded for `m_k = 0`):
 
 | ε / (m_k/2) | flip rate |
 | --- | --- |
 | 0.25 to 1.01 | **0.00%** |
-| 1.10 | 0.50% |
-| 2.00 | 22.50% |
-| 5.00 | 62.86% |
-| 20.00 | 92.71% |
+| 1.10 | 0.15% |
+| 2.00 | 22.35% |
+| 5.00 | 60.61% |
+| 20.00 | 91.82% |
 
 A paper reporting only the second would understate the risk; only the first would
 suggest rankings are far more fragile than they are.
@@ -60,13 +60,13 @@ wrong summary: it would reward a certificate that always said "no".
 
 | outcome | top-k unchanged | top-k changed |
 | --- | --- | --- |
-| **certified stable** | 82 | **0** |
-| not certified | 408 | 310 |
+| **certified stable** | 81 | **0** |
+| not certified | 296 | 283 |
 
 - **Sound**: `certified_changed` must be zero. Any other value falsifies §4.4;
   it is a bug or a broken proof, never a statistic. `scripts/run_stability_profile.py`
   **exits non-zero** if it is non-zero, and CI runs it on every push.
-- **Conservative**: 56.8% of *uncertified* cases were unchanged anyway. Reporting
+- **Conservative**: 51.1% of *uncertified* cases were unchanged anyway. Reporting
   this is what stops "not certified" being read as "will break".
 
 One subtlety decides whether this is a theorem check or a flaky annoyance: the

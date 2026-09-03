@@ -36,14 +36,9 @@ _SOURCES: dict[str, tuple[str, str]] = {
         "what the package reports at runtime",
     ),
     "CITATION.cff": (r"^version:\s*[\"']?([^\"'\s]+)", "what a citation of this work names"),
-    # The fourth. This file's own docstring said "Four files name it" and
-    # "every place this project states its version" while this table held
-    # three, and the omitted one is not decorative: CMakeLists.txt's
-    # `VERSION` becomes `PROJECT_VERSION`, then `kVersion` in
-    # build_config.hpp, then the native module's `__version__` and
-    # `build_info()["version"]`, which is hashed into every RunManifest. A
-    # disagreement there mislabels which code produced a published number,
-    # which is the exact failure the gate exists to prevent.
+    # The fourth. CMakeLists.txt's `VERSION` becomes `PROJECT_VERSION`, then
+    # `kVersion` in build_config.hpp, then the native module's `__version__`
+    # and `build_info()["version"]`, which is hashed into every RunManifest.
     #
     # Anchored on the stripped line, so `cmake_minimum_required(VERSION 3.20)`
     # cannot match: that line begins with the command name, not with VERSION.

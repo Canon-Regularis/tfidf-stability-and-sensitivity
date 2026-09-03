@@ -97,21 +97,15 @@ def test_every_file_the_gate_reads_is_one_that_exists() -> None:
 
 
 def test_every_file_that_states_a_version_is_one_the_gate_reads() -> None:
-    r"""The converse of the test above, which alone could never notice an omission.
+    r"""The converse of the test above: a source the gate never learned about.
 
     That one iterates `gate._SOURCES` and asserts each path exists, so the list
     under test supplies its own expectation: it catches a source that was renamed
-    away and cannot catch a source that was never added. It did not: the gate's
-    docstring said "Four files name it" and "every place this project states its
-    version" while `_SOURCES` held three. `CMakeLists.txt`'s `VERSION` was the
-    missing one, and it is not decorative -- it becomes `PROJECT_VERSION`, then
-    `kVersion`, then the native module's `__version__` and
-    `build_info()["version"]`, which is hashed into every RunManifest. Setting it
-    to 9.9.9 left the gate reporting "agrees across 3 places" and exiting 0.
-
-    So this searches the repository for the shape of a version declaration and
-    requires the gate to already know about each file it finds. The expectation
-    comes from the tree, not from the list.
+    away and cannot catch one that was never added. Here the expectation comes
+    from the tree instead, by searching for the shape of a version declaration.
+    `CMakeLists.txt` states one, and its `VERSION` becomes `PROJECT_VERSION`,
+    then `kVersion`, then the native module's `__version__` and
+    `build_info()["version"]`, which is hashed into every RunManifest.
     """
     gate = _script("check_versions")
     known = set(gate._SOURCES)
@@ -144,11 +138,10 @@ def test_every_file_that_states_a_version_is_one_the_gate_reads() -> None:
 
 
 def test_the_version_gate_reads_every_place_its_docstring_claims() -> None:
-    """The count in the prose and the length of the table must agree.
+    """The count in the gate's docstring and the length of `_SOURCES` agree.
 
-    The docstring said "Four files name it" beside a table of three for long
-    enough that a real omission hid behind it. Cheap to state, and it fails the
-    moment the two drift again in either direction.
+    A table shorter than the count its own prose advertises hides a missing
+    source, so the two are compared in both directions.
     """
     gate = _script("check_versions")
     doc = gate.__doc__ or ""
@@ -209,9 +202,8 @@ def test_the_exemption_is_what_makes_the_baseline_pass(
 # ---------------------------------------------------------------------------
 # check_vendored.py
 # ---------------------------------------------------------------------------
-# This gate had no owning test, while the header of this file said the gates
-# CI runs over the repository itself are covered here. Its digest comparison was
-# sound; its unlisted-file scan was not, and nothing would have noticed.
+# The gate has two halves: a digest comparison against each MANIFEST.sha256, and
+# a scan for files no manifest lists. Both are exercised below.
 def _vendored_tree(root: Path, files: dict[str, str]) -> Path:
     """A directory with a MANIFEST.sha256 naming `files`, digests computed.
 
@@ -244,7 +236,7 @@ def test_the_vendored_gate_passes_on_this_repository() -> None:
 def test_a_changed_vendored_byte_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The digest comparison, which is the half that always worked."""
+    """The digest comparison: a listed file whose bytes no longer match."""
     _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
     gate = _vendored_gate(monkeypatch, tmp_path)
 
@@ -260,17 +252,13 @@ def test_a_changed_vendored_byte_is_reported(
 def test_a_file_added_inside_a_vendored_subdirectory_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The half that did not work, and the reason this test file exists.
+    """The unlisted-file scan, which must descend below the manifest's own level.
 
-    The scan was `iterdir()` with `path.is_dir(): continue`, so it never
-    descended -- and every file `cpp/third_party` vendors sits one level down, in
-    `doctest/` and `nanobench/`. For that tree the check was inert. Measured
-    before the fix: adding `cpp/third_party/doctest/doctest_fwd.h` printed
-    "verified 8 vendored files across 4 manifests" and exited 0.
-
-    An unlisted file has no recorded digest, so nothing compares it to anything;
-    it ships with the provenance claim of the directory it sits in and none of
-    its own.
+    Every file `cpp/third_party` vendors sits one level down, in `doctest/` and
+    `nanobench/`, so a scan skipping directories is inert on the real tree. An
+    unlisted file has no recorded digest, so nothing compares it to anything: it
+    ships with the provenance claim of the directory it sits in and none of its
+    own.
     """
     _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
     gate = _vendored_gate(monkeypatch, tmp_path)
@@ -285,8 +273,11 @@ def test_a_file_added_inside_a_vendored_subdirectory_is_reported(
 def test_an_entire_unlisted_vendored_library_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The same hole at the scale that matters: not one stray header but a whole
-    new dependency, dropped in beside the ones whose provenance is recorded."""
+    """The same scan at directory scale: a whole unlisted dependency.
+
+    The test above adds one file inside a directory the manifest already covers;
+    this one adds a directory no manifest names at all.
+    """
     _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
     gate = _vendored_gate(monkeypatch, tmp_path)
 
@@ -315,8 +306,8 @@ def test_a_tree_with_no_manifest_at_all_is_refused(
 ) -> None:
     """A gate that finds nothing to check must say so rather than pass.
 
-    Without this, deleting every MANIFEST.sha256 would make the gate green: it
-    would verify zero files across zero manifests and report success.
+    Deleting every MANIFEST.sha256 would otherwise leave the gate green: zero
+    files verified across zero manifests, reported as success.
     """
     gate = _vendored_gate(monkeypatch, tmp_path)
 

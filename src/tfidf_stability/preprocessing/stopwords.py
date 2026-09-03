@@ -78,22 +78,16 @@ class StopwordSet:
     ``digest`` goes into the run manifest, so a result traces back to the word
     list that produced it.
 
-    Two digests, because they answer different questions and neither subsumes the
-    other. ``digest`` is *provenance*: `load_stopwords` sets it from the asset's
-    raw file bytes on purpose, so editing the file in place is detectable even if
+    Two digests, because they answer different questions and neither subsumes
+    the other. ``digest`` is *provenance*: `load_stopwords` sets it from the
+    asset's raw file bytes, so editing the file in place is detectable even if
     the parsed set is unchanged. ``content_digest`` is *identity*: derived here
     from the words themselves, so it cannot be handed in and cannot be wrong.
 
-    Only ``digest`` existed, and it was an arbitrary string the caller supplied.
-    Nothing derived it, nothing checked it, and `PreprocessingPipeline` published
-    it as the map's identity -- so two sets holding different words could carry
-    one identity and hash to one pipeline digest. The factories below all derive
-    it correctly, which is why this was latent rather than live, but the
-    constructor is public and took whatever it was given.
-
-    This is the same hole `LookupLemmatiser` had one field along, and it is
-    closed the same way: the class computes the identity rather than trusting a
-    caller to.
+    `PreprocessingPipeline` publishes the identity, so without a derived digest
+    two sets holding different words could carry one caller-supplied ``digest``
+    and hash alike. `LookupLemmatiser` derives its identity for the same reason,
+    one field along.
     """
 
     __slots__ = ("_words", "content_digest", "digest", "name")

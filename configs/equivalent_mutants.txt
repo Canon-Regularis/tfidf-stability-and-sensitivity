@@ -203,19 +203,19 @@ src/tfidf_stability/cli/main.py  104  constant  False -> True  # src=d898869c ar
 src/tfidf_stability/cli/main.py  110  constant  False -> True  # src=cef12337 likewise for version
 
 # --- cli/commands.py -------------------------------------------------------
-src/tfidf_stability/cli/commands.py  408  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
+src/tfidf_stability/cli/commands.py  398  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
 
 # --- datasets/synthetic.py -------------------------------------------------
 src/tfidf_stability/datasets/synthetic.py  136  constant  1 -> 0  # src=a05543f2 the quotient reaches zero only above a vocabulary of 2**40 terms
 src/tfidf_stability/datasets/synthetic.py  176  constant  1 -> 0  # src=4a381170 the binary search converges either way; verified over every draw of three weight shapes for n = 1..11
-src/tfidf_stability/datasets/synthetic.py  287  binop  Sub -> Add  # src=0afce30f the one extra index reachable is itself a copy of a base document, so no structural property changes
-src/tfidf_stability/datasets/synthetic.py  287  constant  1 -> 0  # src=0afce30f likewise
-src/tfidf_stability/datasets/synthetic.py  291  binop  Sub -> Add  # src=5f0c004a the rank is clamped by min(vocab_size - 1, ...), which is never strictly binding
-src/tfidf_stability/datasets/synthetic.py  291  constant  1 -> 0  # src=5f0c004a likewise
-src/tfidf_stability/datasets/synthetic.py  319  constant  1 -> 0  # src=41434a9a the clamp bites only above 64 interactions per user, against a default of 12
+src/tfidf_stability/datasets/synthetic.py  281  binop  Sub -> Add  # src=0afce30f the one extra index reachable is itself a copy of a base document, so no structural property changes
+src/tfidf_stability/datasets/synthetic.py  281  constant  1 -> 0  # src=0afce30f likewise
+src/tfidf_stability/datasets/synthetic.py  285  binop  Sub -> Add  # src=5f0c004a the rank is clamped by min(vocab_size - 1, ...), which is never strictly binding
+src/tfidf_stability/datasets/synthetic.py  285  constant  1 -> 0  # src=5f0c004a likewise
+src/tfidf_stability/datasets/synthetic.py  313  constant  1 -> 0  # src=41434a9a the clamp bites only above 64 interactions per user, against a default of 12
 
 # --- persistence/save_load.py ----------------------------------------------
 src/tfidf_stability/persistence/save_load.py  506  constant  True -> False  # src=97e31d7a df and cf are unpacked two lines apart with the same count=head.n_terms, and neither is rebound before the zip, so their lengths cannot differ; the bookkeeping still runs, it is the ValueError that is unreachable
 
 # --- _native/__init__.py ---------------------------------------------------
-src/tfidf_stability/_native/__init__.py  75  constant  True -> False  # src=9d3aa03f inside the ABI mismatch arm, which needs a stale build on disk and is marked `# pragma: no cover`; selection happens once at import and a process that has imported this module cannot replay it against a differently-versioned extension
+src/tfidf_stability/_native/__init__.py  73  constant  True -> False  # src=9d3aa03f inside the ABI mismatch arm, which needs a stale build on disk and is marked `# pragma: no cover`; selection happens once at import and a process that has imported this module cannot replay it against a differently-versioned extension

@@ -163,6 +163,8 @@ jobs:
     name: the release must be reproducible
     timeout-minutes: 20
     runs-on: ubuntu-latest
+    # The gate inspects a wheel, so the wheels must exist first.
+    needs: [wheels]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
@@ -173,14 +175,53 @@ jobs:
             requirements.txt
             requirements-dev.txt
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          pattern: wheels-ubuntu-latest
+          path: wheelhouse
+          merge-multiple: true
+      - name: Install the wheel this release would ship
+        # The gate below reads build flags off a compiled extension, so one must
+        # be installed. Importing from `src/` finds no extension.
+        run: |
+          set -euo pipefail
+          wheel=$(ls wheelhouse/*cp312*manylinux*x86_64*.whl 2>/dev/null | head -1)
+          if [ -z "$wheel" ]; then
+            echo "::error::no cp312 manylinux x86_64 wheel was produced; nothing to gate"
+            ls -R wheelhouse || true
+            exit 1
+          fi
+          echo "installing $wheel"
+          python -m pip install "$wheel"
       - name: A release build must not be fast-math or arch-tuned
         # The manifest refuses to stamp such a run as reproducible, so shipping
         # one would ship a binary that cannot produce publishable numbers.
+        #
+        # `is_reproducible_build` is True whenever no native backend is loaded
+        # (manifest.py), so the backend's presence is asserted first and the
+        # flags are read off the extension.
+        #
+        # Run outside the checkout so the installed wheel is what is imported.
         run: |
+          cd "$RUNNER_TEMP"
           python - <<'PY'
-          import sys
-          sys.path.insert(0, "src")
+          from tfidf_stability._native import build_info, native_available, unavailable_reason
+
+          if not native_available():
+              raise SystemExit(
+                  f"installed wheel has no native backend: {unavailable_reason()}"
+              )
+
+          info = build_info()
+          print("build_info:", info)
+          for key in ("fast_math", "arch_tune"):
+              if info[key]:
+                  raise SystemExit(f"release wheel was built with {key}={info[key]}")
+          if not info["reproducible"]:
+              raise SystemExit(f"wheel does not report a reproducible build: {info}")
+
           from tfidf_stability.persistence.manifest import RunManifest
+
           m = RunManifest("release-check")
           m.require_reproducible()
           print("build is reproducible:", m.is_reproducible_build)

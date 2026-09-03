@@ -856,10 +856,10 @@ def test_a_reproducible_build_writes_both_the_model_and_its_manifest(tmp_path: P
 # ---------------------------------------------------------------------------
 # verify compares the whole file, not just the two digests that cover part of it
 # ---------------------------------------------------------------------------
-# `TfidfModel.digest()` hashes the vocabulary, the IDF and every weight, and is
-# honest that it stops there: `reduction`, `doc_ids` and `lengths` all round-trip
-# through the container and none reach it. `container_sha256` is the only
-# recorded value covering the file, and `verify` did not read it.
+# `TfidfModel.digest()` hashes the vocabulary, the IDF and every weight, and
+# stops there: `reduction`, `doc_ids` and `lengths` round-trip through the
+# container without reaching it. `container_sha256` is the only recorded value
+# covering the whole file, so `verify` compares that one too.
 def _built(tmp_path: Path) -> Path:
     out = tmp_path / "m.tfsx"
     assert main(["build-corpus", str(CORPUS), "-o", str(out)]) == 0
@@ -874,13 +874,11 @@ def test_verify_accepts_a_file_it_has_not_touched(tmp_path: Path) -> None:
 def test_verify_rejects_a_container_whose_reduction_and_ids_were_altered(
     tmp_path: Path,
 ) -> None:
-    """The two digests it used to compare cannot see either field.
+    """Two fields that `model_digest` and `vocabulary_digest` cannot see.
 
-    Measured before this: moving the reduction word from NAIVE to EXACT and the
-    last document id from `d6` to `d9` left `model_digest` and
-    `vocabulary_digest` both unchanged, and `verify` printed "verified" and
-    returned 0 -- on a file where `inspect d6` returned 2, the two commands
-    disagreeing about whether the document existed.
+    Moving the reduction word from NAIVE to EXACT and the last document id from
+    `d6` to `d9` leaves both of those digests unchanged, so `container_sha256`
+    is the only one that rejects the file.
     """
     out = _built(tmp_path)
     data = bytearray(out.read_bytes())
@@ -896,11 +894,10 @@ def test_verify_rejects_a_container_whose_reduction_and_ids_were_altered(
 def test_verify_refuses_a_manifest_that_records_nothing_to_compare(
     tmp_path: Path,
 ) -> None:
-    """Absent keys used to pass silently, which is the same claim as a match.
+    """A manifest recording no digests is uncheckable, not verified.
 
-    The comparison read `if key in expected`, so a manifest carrying none of the
-    three digests reported "verified". `save_model` writes all three, so a file
-    missing them did not come from this project and cannot be checked.
+    `save_model` writes all three, so a manifest carrying none of them did not
+    come from this project. Exit code 2 separates that from a mismatch.
     """
     out = _built(tmp_path)
     manifest_path = out.with_suffix(".manifest.json")
@@ -914,13 +911,12 @@ def test_verify_refuses_a_manifest_that_records_nothing_to_compare(
 def test_verify_fails_on_a_manifest_missing_only_some_of_its_digests(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Between "all present" and "none present" sits the case that hid the bug.
+    """The partial manifest, between "all present" and "none present".
 
-    The comparison read `if key in expected`, so an absent key was skipped
-    rather than reported, and a manifest carrying one digest out of three
-    verified on the strength of that one. Dropping every key is caught by the
-    early return above; dropping some is caught here, and it is the shape a
-    hand-edited or partially-written manifest actually takes.
+    A manifest carrying one digest of three must not verify on the strength of
+    that one: an absent digest is reported as absent rather than skipped.
+    Dropping every key returns 2 above; dropping some returns 1 here, and it is
+    the shape a hand-edited or partially-written manifest takes.
     """
     out = _built(tmp_path)
     manifest_path = out.with_suffix(".manifest.json")
@@ -961,21 +957,19 @@ def test_verify_reports_which_digest_disagreed(
 # ---------------------------------------------------------------------------
 # The floating-point environment is checked before a command produces numbers
 # ---------------------------------------------------------------------------
-# `fp_guard.hpp` documents three layers of protection and calls this one "layer
-# 3, run time". The first two describe the binary; only this one can see the
-# process, and the process is where the hazard lives -- MKL and some OpenBLAS
-# builds set flush-to-zero as numpy imports, which flushes exactly the subnormal
-# near-tie margins under study. It was reachable only from the test suite, so
-# every real run went unchecked while the docstrings said otherwise.
+# `fp_guard.hpp` calls this "layer 3, run time": the first two layers describe
+# the binary, and only this one sees the process. MKL and some OpenBLAS builds
+# set flush-to-zero as numpy imports, which flushes exactly the subnormal
+# near-tie margins under study, so every command probes before it computes.
 def test_a_command_checks_the_float_environment_before_producing_numbers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The probe runs, and runs *before* the command, not merely at some point.
+    """The probe runs before the command, not merely at some point in it.
 
-    Order is the whole claim: repairing a flushing environment after the numbers
-    have been computed repairs nothing. So the substitute asserts from inside
-    itself that the command has not yet written its output -- a test that only
-    recorded "was called" would pass with the call moved after the dispatch.
+    Repairing a flushing environment after the numbers are computed repairs
+    nothing, so the substitute asserts from inside itself that the command has
+    not yet written its output. Recording only that it was called would pass
+    with the probe moved after the dispatch.
     """
     from tfidf_stability import _native
 
@@ -1002,14 +996,12 @@ def test_a_command_checks_the_float_environment_before_producing_numbers(
 def test_the_reference_backend_is_not_turned_into_an_error_by_the_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The arm that matters for anyone without a compiler.
+    """The probe is skipped outright when no extension is present.
 
     `check_float_environment` goes through `require_native`, which raises
-    `NativeBackendUnavailableError` when there is no extension. Calling it
-    unconditionally would turn the pure-Python reference backend -- a supported,
-    documented configuration -- into a crash on every CLI invocation. So the call
-    is guarded, and this is the guard: with no backend the command still runs and
-    the probe is not attempted at all.
+    `NativeBackendUnavailableError` without an extension. Calling it
+    unconditionally would turn the pure-Python reference backend, a supported
+    configuration, into a crash on every CLI invocation.
     """
     from tfidf_stability import _native
 
@@ -1032,11 +1024,11 @@ def test_the_reference_backend_is_not_turned_into_an_error_by_the_check(
 def test_an_untrustworthy_environment_is_not_swallowed_by_the_cli(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The warning reaches the caller rather than being absorbed en route.
+    """The probe's warning reaches the caller rather than being absorbed.
 
-    A probe whose warning is discarded is the same as no probe. The substitute
-    raises the warning directly rather than relying on this machine's environment
-    actually being broken, which is not something a test can arrange.
+    A warning discarded on the way out is the same as no probe. The substitute
+    raises it directly, since a genuinely flushing environment is not something
+    a test can arrange.
     """
     from tfidf_stability import _native
 

@@ -58,8 +58,8 @@ one), top-k **set** disagreement:
 
 | pair | k=1 | k=5 | k=10 | k=20 | k=50 |
 | --- | --- | --- | --- | --- | --- |
-| π vs π_alt | **10.0%** | 0.0% | 0.0% | 7.5% | 2.5% |
-| π vs π_score | **50.0%** | 0.0% | 10.0% | 0.0% | 2.5% |
+| π vs π_alt | **2.5%** | 0.0% | 5.0% | 7.5% | 2.5% |
+| π vs π_score | **42.5%** | 0.0% | 10.0% | 0.0% | 2.5% |
 
 **Disagreement is concentrated at k=1.** The top document frequently sits in an
 exact-tie block, so which document is returned first is decided entirely by the
@@ -71,8 +71,8 @@ k = 1:
 
 | band | disagreement | n |
 | --- | --- | --- |
-| `exact_tie` | **100.0%** | 20 |
-| `(100·τ, ∞)` | **0.0%** | 20 |
+| `exact_tie` | **100.0%** | 17 |
+| `(100·τ, ∞)` | **0.0%** | 23 |
 
 Every query with an exact tie at rank 1 disagreed; no query without one did.
 Since the operators provably consume bit-identical scores, ties are the sole
@@ -137,7 +137,7 @@ measures the tie-break rather than numerical error. ([G22](spec_addenda.md#g22))
 
 `datasets.synthetic.find_near_ties` performs the search. On `synthetic_tiny` the
 tightest gap it finds is **exactly 0**, a twin pair tying at rank 1, and the
-closest strictly-positive gap is 1.2e−5.
+closest strictly-positive gap is 7.96e−6.
 
 ## Reproducing
 

@@ -43,28 +43,19 @@ _CHUNK = 1 << 16
 
 
 def _download(url: str, dest: Path, expected: str | None) -> tuple[str, bool]:
-    """Stream to a temporary file, verify, then rename. Returns (digest, placed).
+    """Stream to a temporary file, verify, then rename.
+
+    Returns the digest and whether the download was placed at ``dest``.
 
     An interrupted transfer must not leave a truncated file at the destination,
     where it would fail the digest check confusingly instead of simply being
     absent.
 
-    The verification happens here, before the rename, and that ordering is the
-    point. This used to move the download into place and let the caller compare
-    afterwards, which destroyed the very file the mismatch message tells the user
-    to go and find:
-
-        `--force` over a correct pinned archive, after GroupLens has replaced
-        ml-latest-small.zip in place -- which this script's own message says is
-        the likely cause of a mismatch -- overwrote the pinned copy with the new
-        one and only then reported the mismatch. The advice that follows,
-        "either obtain that archive, or re-run the experiments", was addressed to
-        someone whose only copy had just been deleted, and upstream no longer
-        serves it.
-
-    On a mismatch the download is kept beside the destination with a `.rejected`
-    suffix rather than discarded, so it can be inspected, and `dest` is left
-    exactly as it was.
+    Verification happens before the rename, so a mismatched download never
+    replaces the pinned archive already at ``dest`` -- the archive the mismatch
+    message asks the reader to keep. The rejected download is left beside the
+    destination with a `.rejected` suffix rather than discarded, so it can be
+    inspected.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_suffix(dest.suffix + ".partial")

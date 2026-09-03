@@ -279,20 +279,14 @@ def test_a_failed_rename_removes_the_temporary_and_leaves_the_original(tmp_path:
 
 
 def test_cleanup_does_not_mask_the_failure_that_caused_it(tmp_path: Path) -> None:
-    """`missing_ok=True` on the cleanup unlink, which the test above cannot reach.
+    """`missing_ok=True` on the cleanup unlink.
 
-    There the temporary still exists when the rename fails, so the flag is inert
-    and `missing_ok=True -> False` survived the whole suite. It does work in one
-    situation only: the temporary is already gone -- swept by something else, or
-    removed by the same failure -- and then `missing_ok=False` raises
-    FileNotFoundError *while handling* the real error. The caller is then told
-    the temporary was missing, which is not what went wrong, and the actual
-    failure survives only as a `__context__` nobody reads.
-
-    Simulated by unlinking the temporary inside the patched `os.replace`, which
-    is the only point in the sequence that is handed its name. Patched at the OS
-    boundary for the same reason as the test above: so the test cannot pass by
-    agreeing with a mock of the code it is about.
+    The test above leaves the temporary in place when the rename fails, so the
+    flag is inert there. It matters only when the temporary has already gone:
+    `missing_ok=False` would then raise FileNotFoundError while handling the
+    real error, reporting the missing temporary rather than the rename failure.
+    The temporary is removed inside the patched `os.replace`, the only point in
+    the sequence handed its name.
     """
     target = tmp_path / "out.bin"
 
@@ -303,8 +297,8 @@ def test_cleanup_does_not_mask_the_failure_that_caused_it(tmp_path: Path) -> Non
     real_replace = os.replace
     os.replace = vanishing_replace  # type: ignore[assignment]
     try:
-        # The assertion is the message. FileNotFoundError is itself an OSError,
-        # so a bare `pytest.raises(OSError)` passes under the mutant too.
+        # FileNotFoundError is itself an OSError, so the message rather than the
+        # type is what separates the real error from a masked one.
         with pytest.raises(OSError, match="rename refused after the temporary went away"):
             atomic_write_bytes(target, b"payload")
     finally:

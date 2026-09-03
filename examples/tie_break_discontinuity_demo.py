@@ -167,16 +167,9 @@ def demonstrate_tie_break_discontinuity() -> dict[str, Ranking]:
         )
 
     _rule("The tie is exact, not close")
-    # Grouped by bit pattern rather than filtered by `== 0.5`, so the tie is
-    # measured instead of assumed.
-    #
-    # This read `tied = [... if s == 0.5]` followed by `all(same_bits(s,
-    # tied[0][1]) for _, s in tied)`, printed as "same_bits across all 3 of
-    # them: True". That comparison could not be anything but True: the filter
-    # selects exactly the values whose bit pattern is 0.5's, and then asks
-    # whether their bit patterns are 0.5's. It read as independent
-    # verification of the section's claim -- "The tie is exact, not close" --
-    # and was a restatement of the filter.
+    # Grouped by bit pattern rather than filtered on `== 0.5`, so the tie is
+    # measured rather than assumed: filtering by the value and then asking
+    # whether the survivors share a bit pattern can only report True.
     by_pattern: dict[str, list[str]] = {}
     for doc, score in zip(doc_ids, scores, strict=True):
         by_pattern.setdefault(_hex_bits(score), []).append(doc)

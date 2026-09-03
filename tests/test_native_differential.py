@@ -405,24 +405,19 @@ def test_exact_agrees_with_fsum_on_signed_zero(values: list[float]) -> None:
 def test_exact_diverges_from_fsum_once_a_partial_overflows(
     values: tuple[float, float], reference_behaviour: str
 ) -> None:
-    """The one place the two implementations are known NOT to agree.
+    """The one place the two implementations do not agree.
 
-    `reduction.hpp` says so in its own words: CPython's `math_fsum` tracks
-    infinities and intermediate overflow separately and raises, while the C++
-    transcription has no such machinery and yields NaN. The other three policies
-    agree with the reference on these inputs; the gap is specific to `Exact`.
+    `reduction.hpp` records it: CPython's `math_fsum` tracks infinities and
+    intermediate overflow separately and raises, while the C++ transcription has
+    no such machinery and yields NaN. The gap is `Exact`'s alone; the other
+    three policies agree with the reference on these inputs.
 
-    Pinned rather than fixed. Adding the tracking would put exception machinery
-    in a `noexcept` accumulator on the hot path to serve an input the pipeline
-    cannot produce -- a TF-IDF weight is at most `ln(1 + N)`, so squaring one
-    overflows only for a corpus of about e^(1e154) documents.
-
-    Recorded as a test because the header's reachability argument used to be
-    wrong in a way nothing would have caught: it argued that no infinity *enters*
-    a reduction, which is true and irrelevant, because `l2_norm` squares before
-    it sums and so *creates* one from finite arguments. Both cases below pass
-    finite values. If either side is ever changed to agree with the other, this
-    fails and the change is deliberate.
+    Pinned rather than fixed. The tracking would put exception machinery in a
+    `noexcept` accumulator on the hot path to serve an input the pipeline cannot
+    produce: a TF-IDF weight is at most `ln(1 + N)`, so squaring one overflows
+    only for a corpus of about e^(1e154) documents. Both cases below pass finite
+    values, since `l2_norm` squares before it sums and so creates the infinity
+    itself.
     """
     arr = np.array(values, dtype=np.float64)
     exact = _policy(Reduction.EXACT)

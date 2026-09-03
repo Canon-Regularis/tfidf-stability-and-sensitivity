@@ -43,25 +43,17 @@ Define TFIDF_ALLOW_FAST_MATH only in the CI job that deliberately proves this gu
 #endif
 
 // -fno-signed-zeros licenses the compiler to treat -0.0 and +0.0 as
-// interchangeable. Every score here is compared on its raw bit pattern and
-// `ranking/margins.py` argues that -0.0 cannot occur, so a build permitted to
-// produce one is not a build whose numbers mean what the study claims.
-//
-// NumericsFlags.cmake says this form "cannot" be caught here because it does not
-// define __FAST_MATH__. That is true of __FAST_MATH__ and false of the
-// conclusion: GCC and Clang define __NO_SIGNED_ZEROS__ for it. Verified with
-// `-dM -E`: `-fno-signed-zeros` alone defines __NO_SIGNED_ZEROS__, and the strict
-// flag set defines neither.
+// interchangeable. Every score here is compared on its raw bit pattern, and
+// `ranking/margins.py` argues that -0.0 cannot occur. The flag does not define
+// __FAST_MATH__; GCC and Clang define __NO_SIGNED_ZEROS__ for it instead.
 #if defined(__NO_SIGNED_ZEROS__) && !defined(TFIDF_ALLOW_FAST_MATH)
 #  error "tfidf: -fno-signed-zeros is enabled; +0.0 and -0.0 would be interchangeable."
 #endif
 
-// The advice here is /fp:strict, not /fp:precise plus /fp:contract-. MSVC has no
-// negative form of /fp:contract: it answers `command line warning D9002:
-// ignoring unknown option '/fp:contract-'` and goes on contracting. That exact
-// mistake was made in this project's own flag list and survived because D9002 is
-// a warning, so the build succeeded. See cpp/cmake/NumericsFlags.cmake. Telling
-// the next person to use a flag that is silently ignored would reproduce it.
+// MSVC has no negative form of /fp:contract: `/fp:contract-` draws `command
+// line warning D9002: ignoring unknown option` and contraction continues. The
+// message therefore names /fp:strict, the documented way to forbid it. See
+// cpp/cmake/NumericsFlags.cmake.
 #if defined(_M_FP_FAST) && !defined(TFIDF_ALLOW_FAST_MATH)
 #  error "tfidf: MSVC /fp:fast is enabled. Use /fp:strict."
 #endif
@@ -151,25 +143,10 @@ struct SubnormalSurvival {
     f |= kConstantFolding;
 #endif
 
-    // Reassociation, asked of the compiler rather than probed for.
-    //
-    // This was `volatile double a = 1.0, b = 1e-17; if ((a + b) - a != 0.0)`,
-    // which cannot fire. `volatile` makes each read an observable access, so the
-    // compiler is forbidden from folding the two reads of `a` together -- and
-    // that fold is precisely the rewrite the probe was trying to catch. The
-    // guard blocked the thing it was looking for.
-    //
-    // Measured with GCC 13.2 under `-fassociative-math -fno-signed-zeros
-    // -fno-trapping-math`: the same expression without `volatile` compiles to a
-    // bare `return b` (one `movapd`, one `ret`), proving reassociation is
-    // active, while `selftest()` on that build still returned 0. The bit could
-    // never be set -- the same defect `kConstantFolding` had before it was
-    // replaced by FLT_EVAL_METHOD, and for the same underlying reason: a
-    // property the flag makes unobservable has to be read off the compiler.
-    //
-    // GCC and Clang define __ASSOCIATIVE_MATH__ whenever -fassociative-math is
-    // in effect, including via -ffast-math. Verified with `-dM -E`: defined
-    // under that flag set, absent under the strict one.
+    // Reassociation is read off the compiler, not probed for: an arithmetic
+    // probe needs `volatile`, which makes each read an observable access and
+    // forbids the very fold it looks for. GCC and Clang define
+    // __ASSOCIATIVE_MATH__ whenever -fassociative-math is in effect.
 #if defined(__ASSOCIATIVE_MATH__)
     f |= kReassociation;
 #endif

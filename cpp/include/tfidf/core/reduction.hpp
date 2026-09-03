@@ -153,19 +153,12 @@ struct Pairwise {
 /// inf. The other three policies agree with the reference on those inputs, so
 /// the gap is specific to `Exact`.
 ///
-/// Unreachable from the published pipeline, but not for the reason first given
-/// here, which was "a weight is a non-negative tf times `idf >= 0`, so no
-/// infinity enters a reduction". That covers what is *handed* to a reduction and
-/// misses what one can *create*: `l2_norm` squares before it sums, so a finite
-/// input can become an infinite addend. Measured:
-///
-///     l2_norm([1e200, 1e200], Exact)  ->  nan   (reference: inf)
-///     l2_norm([1e154, 1e154], Exact)  ->  nan   (reference: OverflowError)
-///
-/// with finite arguments in both cases. What actually makes it unreachable is
-/// magnitude: a TF-IDF weight is at most `ln(1 + N)`, so squaring it overflows
-/// only for a corpus of about e^(1e154) documents. Reachable in one step through
-/// the `reduce_sum` and `l2_norm` bindings, which take arbitrary values.
+/// Unreachable from the published pipeline. `l2_norm` squares before it sums,
+/// so finite inputs can create an infinite addend: over `[1e200, 1e200]` it
+/// gives nan where the reference gives inf. A TF-IDF weight is at most
+/// `ln(1 + N)`, so squaring one overflows only for a corpus of about e^(1e154)
+/// documents. Reachable through the `reduce_sum` and `l2_norm` bindings, which
+/// take arbitrary values.
 struct Exact {
     std::vector<Real> partials;
 

@@ -308,16 +308,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
     # `container_sha256` first, because it is the only recorded value covering
     # the whole file. `TfidfModel.digest()` hashes the vocabulary, the IDF and
-    # every weight, and is honest that it stops there: `reduction`, `doc_ids`
-    # and `lengths` all round-trip through the container and none of them reach
-    # it. So comparing the two model digests alone answered a narrower question
-    # than the docstring above asks.
-    #
-    # Measured before this: flipping the reduction word from NAIVE to EXACT and
-    # the last document id from `d6` to `d9` left both digests unchanged, and
-    # `verify` printed "verified" and returned 0 -- while `inspect d6` on the
-    # same approved file returned 2, the two commands disagreeing about whether
-    # the document existed.
+    # every weight, but `reduction`, `doc_ids` and `lengths` round-trip through
+    # the container without reaching it.
     actual_container = hash_bytes(Path(args.model).read_bytes())
     checks: tuple[tuple[str, str], ...] = (
         ("container_sha256", actual_container),
@@ -325,11 +317,9 @@ def cmd_verify(args: argparse.Namespace) -> int:
         ("vocabulary_digest", model.vocabulary.digest()),
     )
 
-    # A manifest that records none of them cannot be compared against, and
-    # saying "verified" on that basis is the same claim as saying it on a
-    # matching one. The loop read `if key in expected`, so a manifest missing
-    # every key passed silently; `save_model` writes all three, so a file
-    # missing them did not come from this project.
+    # A manifest recording none of the three cannot be compared against, so
+    # reporting "verified" would be an empty claim. `save_model` writes all
+    # three, so a file missing them did not come from this project.
     missing = [key for key, _ in checks if key not in expected]
     if len(missing) == len(checks):
         print(f"the manifest beside {args.model} records no digest to compare against")

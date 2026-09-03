@@ -1035,14 +1035,10 @@ def test_the_length_range_is_checked_before_the_document_budget() -> None:
 class _BoundedRandom:
     """A random source that refuses to be asked forever.
 
-    The functions below are rejection samplers: they draw until a draw is
-    acceptable. On a degenerate range no draw ever is, so the loop never ends,
-    and a test driving them with a real `Random` would hang rather than fail if
-    its guard were removed -- inheriting the exact defect it exists to catch.
-
-    This raises instead, on the first draw past a limit no sound call can reach:
-    a correct guard rejects before drawing at all, and a correct sample succeeds
-    within a handful of draws. Local by house convention.
+    The samplers below reject-and-redraw, so a degenerate range never terminates
+    and a real `Random` would hang the suite rather than fail it. A sound call
+    rejects before drawing at all, or succeeds within a handful of draws, so a
+    draw past the limit is a fault. Local by house convention.
     """
 
     def __init__(self, limit: int = 64) -> None:
@@ -1065,23 +1061,20 @@ def test_a_range_with_no_integer_in_it_is_refused_by_the_sampler_itself(
 ) -> None:
     """The guard above protects `generate`; this protects `_uniform_int`.
 
-    The three tests above all go through `generate`, which validates the one spec
-    field that reaches the sampler. That leaves the sampler itself able to hang,
-    and it is only safe today because every call site happens to pass a range
-    derived from a count it has already checked. An invariant held by the callers
-    is one the next caller can break.
+    The tests above reach the sampler only through `generate`, which validates
+    the one spec field feeding it. The sampler itself is safe only because every
+    call site passes a range derived from an already-checked count, and that is
+    an invariant a new caller can break.
 
-    Both degenerate shapes are covered because they hang for *different* reasons,
-    and a guard written for one can miss the other. At `span == 0`,
-    `(0).bit_length()` is 0, so `getrandbits(0)` returns 0 and `0 < 0` is false.
-    At `span < 0`, `(-1).bit_length()` is 1, so the draw is 0 or 1 and never
-    below -1. `(5, 4)` is the first; the rest are the second.
+    Both degenerate shapes are covered, because they fail to terminate for
+    different reasons and a guard written for one can miss the other. At
+    `span == 0`, `(0).bit_length()` is 0, so `getrandbits(0)` returns 0 and
+    `0 < 0` is false. At `span < 0`, `(-1).bit_length()` is 1, so the draw is 0
+    or 1 and never below -1. `(5, 4)` is the first shape; the rest are the
+    second.
 
-    Driven by `_BoundedRandom` rather than a real `Random`, so that weakening the
-    guard fails this test instead of hanging the suite. A guard narrowed to
-    `span < 0` would still admit `(5, 4)`, and with a real source that is an
-    infinite loop -- a test asserting on non-termination has to bound the thing
-    it is testing, or it inherits the defect it is checking for.
+    Driven by `_BoundedRandom` so that a weakened guard fails here rather than
+    hanging the suite.
     """
     source = _BoundedRandom()
 
@@ -1098,10 +1091,7 @@ def test_a_distribution_with_no_mass_is_refused_rather_than_sampled_forever() ->
     `bit_length()` of 0 applies: `getrandbits(0)` is 0, `0 < 0` is false, and the
     loop never leaves. It is reachable whenever every Zipf weight rounds to zero,
     which the spec cannot rule out because the weights are computed rather than
-    given.
-
-    Bounded for the same reason as the test above: without the guard this is an
-    infinite loop, and a test that hangs reports nothing.
+    given. Bounded for the same reason as the test above.
     """
     source = _BoundedRandom()
 
@@ -1112,12 +1102,11 @@ def test_a_distribution_with_no_mass_is_refused_rather_than_sampled_forever() ->
 
 
 def test_an_empty_vocabulary_names_the_field_rather_than_indexing_off_the_end() -> None:
-    """`vocab_size=0` was the one spec field in this block without a guard.
+    """`vocab_size=0` is refused by name rather than by an `IndexError`.
 
-    It did fail, but as `IndexError: list index out of range` raised two calls
-    down in `_cumulative`, which is true and tells the caller nothing about which
-    field was wrong. Every sibling guard here names its field, and this one now
-    does too.
+    Unguarded it fails two calls down in `_cumulative`, as `IndexError: list
+    index out of range`, which does not say which spec field was wrong. Every
+    sibling guard here names its field.
     """
     with pytest.raises(ValueError, match="vocab_size must be at least 1, got 0"):
         synthetic.generate(_spec(n_docs=12, vocab_size=0))
@@ -1355,12 +1344,10 @@ def test_find_near_ties_skips_exact_ties_unless_asked_for_them() -> None:
 # ---------------------------------------------------------------------------
 # scripts/fetch_data.py: a bad download must not destroy a good archive
 # ---------------------------------------------------------------------------
-# The archive is not re-obtainable. GroupLens replaces ml-latest-small.zip in
-# place -- this repository says so in three separate messages -- so a contributor
-# holding the pinned copy holds the only copy the published numbers were computed
-# against. The script used to move the download into place and compare
-# afterwards, so `--force` after an upstream change overwrote that copy and then
-# advised the reader to "obtain that archive".
+# The archive is not re-obtainable: GroupLens replaces ml-latest-small.zip in
+# place, so a contributor holding the pinned copy holds the only copy the
+# published numbers were computed against. `_download` therefore verifies the
+# digest before the rename, and `--force` cannot overwrite on a mismatch.
 def _fetch_script() -> ModuleType:
     """scripts/fetch_data.py as a module. Local by house convention."""
     path = REPO / "scripts" / "fetch_data.py"
@@ -1400,7 +1387,7 @@ def _serve(monkeypatch: pytest.MonkeyPatch, fetch: ModuleType, payload: bytes) -
 def test_a_download_that_fails_the_pin_leaves_the_existing_archive_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The data-loss case, and the reason the verification moved before the rename.
+    """The data-loss case: the digest is verified before the rename.
 
     The bytes at `dest` before the call are the pinned archive; the bytes served
     are what upstream now returns. The pinned copy must survive.
@@ -1422,8 +1409,11 @@ def test_a_download_that_fails_the_pin_leaves_the_existing_archive_untouched(
 def test_the_rejected_download_is_kept_rather_than_discarded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Kept so the mismatch can be investigated -- was upstream reissued, or is
-    this a proxy serving an error page? Deleting it answers neither."""
+    """The rejected bytes are kept rather than deleted.
+
+    An upstream reissue and a proxy serving an error page are told apart by
+    their content, so the mismatching download is preserved for inspection.
+    """
     fetch = _fetch_script()
     dest = tmp_path / "ml-latest-small.zip"
     dest.write_bytes(b"pinned")
@@ -1457,9 +1447,11 @@ def test_a_download_matching_the_pin_is_placed(
 def test_an_unpinned_download_is_placed_so_the_first_fetch_can_pin_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`MOVIELENS_SHA256 = None` is the documented first-download case: there is
-    nothing to verify against yet, and the script prints the digest to pin. That
-    path must still deliver a file."""
+    """`MOVIELENS_SHA256 = None` is the documented first-download case.
+
+    There is nothing to verify against yet and the script prints the digest to
+    pin, so that path must still deliver a file.
+    """
     fetch = _fetch_script()
     dest = tmp_path / "ml-latest-small.zip"
     _serve(monkeypatch, fetch, b"first ever download")
