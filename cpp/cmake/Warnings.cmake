@@ -2,12 +2,15 @@
 # Warnings.cmake: a noisy warning set, on purpose.
 #
 # Several of these are chosen specifically for a numerics codebase:
-#   -Wfloat-equal        forces every intentional `==` on doubles to be justified
-#                        (doubles are compared exactly here; bit-exactness is
-#                        the contract, so each site is silenced locally, which
-#                        makes the intent reviewable rather than accidental)
 #   -Wdouble-promotion   catches a float sneaking into a double computation
 #   -Wconversion         catches silent int/float narrowing in index arithmetic
+#   -Wsign-conversion    catches a negative index reaching an unsigned span
+#
+# -Wfloat-equal is deliberately NOT in the set. Bit-exactness is the contract,
+# so exact `==` on doubles is the normal case here rather than the suspicious
+# one: it fires on every comparison in the core and on every `CHECK(x == y)` in
+# the tests. Suppressing it at each site would leave a pragma with no argument
+# behind it, which is worse than not enabling it.
 # =============================================================================
 add_library(tfidf_warnings INTERFACE)
 add_library(tfidf::warnings ALIAS tfidf_warnings)
