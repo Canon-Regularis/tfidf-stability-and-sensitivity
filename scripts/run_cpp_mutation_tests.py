@@ -320,6 +320,10 @@ def campaign(
 
     tried = counts["killed"] + counts["survived"]
     return {
+        # A truncated run has not seen every candidate, so a claim it did not
+        # reach is unmatched rather than stale. Reporting those would fail a
+        # smoke run for entries that are perfectly good.
+        "partial": bool(limit),
         "file": relative,
         "counts": counts,
         "score": round(100 * counts["killed"] / tried, 1) if tried else None,
@@ -338,6 +342,21 @@ def campaign(
         ],
         "seconds": round(time.monotonic() - started, 1),
     }
+
+
+def suggested_entry(relative: str, survivor: dict[str, object]) -> str:
+    """The allowlist line a reader should paste, if the survivor is equivalent.
+
+    Built here rather than inlined into the message so a test can paste it back
+    through :func:`load_equivalents`. The first version of this diagnostic
+    omitted the column, and an entry without one is ignored, so following the
+    hint produced a claim that did nothing and the next run failed identically.
+    """
+    return (
+        f"{relative}  {survivor['line']}:{survivor['column']}  "
+        f"{survivor['before']} -> {survivor['after']}  "
+        f"# src={survivor['stamp']} <why nothing can observe it>"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -369,18 +388,23 @@ def main(argv: list[str] | None = None) -> int:
     failed = False
     for survivor in record["unclaimed"]:
         print(
-            f"UNCLAIMED SURVIVOR {record['file']}:{survivor['line']}  "
+            f"UNCLAIMED SURVIVOR {record['file']}:{survivor['line']}:{survivor['column']}  "
             f"{survivor['before']} -> {survivor['after']}  {survivor['source']}\n"
             f"  Kill it with a test, or argue it in {EQUIVALENTS.name} as:\n"
-            f"  {record['file']}  {survivor['line']}  {survivor['before']} -> "
-            f"{survivor['after']}  # src={survivor['stamp']} <why nothing can observe it>",
+            f"  {suggested_entry(str(record['file']), survivor)}",
             file=sys.stderr,
         )
         failed = True
     # An entry that matched no survivor is the other failure mode: the mutant is
     # killed now, or the line moved, and either way the claim needs re-reading
-    # rather than leaving to rot.
-    for entry in record["stale"]:
+    # rather than leaving to rot. Only meaningful over a complete run.
+    if record["partial"]:
+        print(
+            f"--limit was set, so {len(record['stale'])} unmatched claims are not "
+            f"reported: a truncated run cannot tell stale from unreached.",
+            file=sys.stderr,
+        )
+    for entry in [] if record["partial"] else record["stale"]:
         print(
             f"STALE CLAIM {record['file']}:{entry['line']}:{entry['column']}  "
             f"{entry['before']} -> {entry['after']} matched no survivor",

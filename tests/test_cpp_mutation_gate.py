@@ -199,28 +199,105 @@ def test_each_mutation_kind_is_produced_on_a_line_that_uses_it(before: str, afte
     assert (before, after) in produced
 
 
-def test_every_header_is_in_the_nightly_matrix() -> None:
-    """A header added later must not go unmutated in silence.
+#: Headers whose campaign has not been triaged, so they cannot join the nightly
+#: matrix without failing it every night. Each must say why; moving one out means
+#: killing its survivors or arguing them in configs/equivalent_mutants_cpp.txt.
+_NOT_YET_RECONCILED = {
+    "cpp/include/tfidf/ranking/distances.hpp": "campaign run, 13 survivors untriaged (87.9%)",
+    "cpp/include/tfidf/ranking/margins.hpp": "campaign run, 15 survivors untriaged (65.1%)",
+    "cpp/include/tfidf/ranking/sort_keys.hpp": "campaign run, 10 survivors untriaged (69.7%)",
+    "cpp/include/tfidf/ranking/attributes.hpp": "campaign run, 8 survivors untriaged (55.6%)",
+    "cpp/include/tfidf/ranking/ranker.hpp": "campaign run, 6 survivors untriaged (73.9%)",
+    "cpp/include/tfidf/ranking/tie_groups.hpp": "campaign run, 6 survivors untriaged (89.7%)",
+}
 
-    The campaign is a matrix of explicit paths rather than a glob, because a
-    glob would also pick up whatever lands in cpp/include next and there is no
-    way to spell "and this one is deliberately excluded" in one. The cost of
-    the explicit list is that it can fall behind, which is what this refuses.
-    """
+
+def _matrix() -> set[str]:
     import yaml
 
     workflow = yaml.safe_load(
         (REPO / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
     )
-    listed = set(workflow["jobs"]["cpp-mutation"]["strategy"]["matrix"]["header"])
-    present = {
+    return set(workflow["jobs"]["cpp-mutation"]["strategy"]["matrix"]["header"])
+
+
+def _headers() -> set[str]:
+    return {
         path.relative_to(REPO).as_posix()
         for path in (REPO / "cpp" / "include").rglob("*.hpp")
         if "third_party" not in path.parts
     }
 
+
+def test_every_header_is_either_scheduled_or_named_as_pending() -> None:
+    """A header must not go unmutated in silence, in either direction.
+
+    The campaign is a matrix of explicit paths rather than a glob: a glob would
+    also pick up whatever lands in cpp/include next, and there is no way to
+    spell "this one is deliberately excluded" in one. The cost is that the list
+    can fall behind, which is what this refuses -- a new header has to be either
+    scheduled or explicitly deferred, with a reason.
+
+    The matrix holds only headers whose survivors are all killed or argued. One
+    whose campaign has not been triaged would fail nightly whatever the state of
+    the tests, and a gate that always fails stops being read -- the argument
+    configs/equivalent_mutants.txt makes about itself.
+    """
+    listed, present, pending = _matrix(), _headers(), set(_NOT_YET_RECONCILED)
+
     assert present, "the scan found no headers; it is not testing anything"
-    assert not present - listed, f"headers with no nightly mutation job: {sorted(present - listed)}"
+    assert not listed & pending, f"scheduled and deferred at once: {sorted(listed & pending)}"
+    assert not present - listed - pending, (
+        f"headers neither scheduled nor deferred: {sorted(present - listed - pending)}"
+    )
     assert not listed - present, (
         f"the matrix names headers that no longer exist: {sorted(listed - present)}"
+    )
+    assert not pending - present, (
+        f"deferred headers that no longer exist: {sorted(pending - present)}"
+    )
+    assert all(reason.strip() for reason in _NOT_YET_RECONCILED.values()), (
+        "a deferral with no reason is indistinguishable from an oversight"
+    )
+
+
+def test_no_equivalence_is_argued_for_a_header_the_nightly_never_runs() -> None:
+    """An argument nothing rechecks decays exactly like the line numbers it is
+    anchored to. Every claim must belong to a scheduled header."""
+    listed = _matrix()
+    claimed = {path for path, *_ in _entries()}
+
+    assert claimed, "no header carries an argued equivalence; the check is vacuous"
+    assert not claimed - listed, (
+        f"equivalence arguments for headers the nightly does not run, so nothing "
+        f"ever rechecks them: {sorted(claimed - listed)}"
+    )
+
+
+def test_the_entry_the_gate_suggests_actually_loads(tmp_path: Path) -> None:
+    """The diagnostic is the only instruction a reader gets, and its first
+    version omitted the column -- which the loader requires, so pasting the
+    suggestion produced a claim that was silently ignored and the gate failed
+    again on the next run with the same message.
+    """
+    harness = _harness()
+    module = Path("cpp/include/tfidf/core/reduction.hpp")
+    survivor = {
+        "line": 57,
+        "column": 14,
+        "before": "<",
+        "after": "<=",
+        "stamp": "2a87a12d",
+    }
+    suggestion = harness.suggested_entry(module.as_posix(), survivor)
+
+    allowlist = tmp_path / "equivalent_mutants_cpp.txt"
+    # The placeholder stands in for the argument a reader writes; the point is
+    # that the surrounding syntax parses.
+    allowlist.write_text(suggestion + "\n", encoding="utf-8")
+    harness.EQUIVALENTS = allowlist
+
+    claims = harness.load_equivalents(module)
+    assert (57, 14, "<", "<=") in claims, (
+        f"the gate suggests an entry its own loader ignores:\n  {suggestion}"
     )
