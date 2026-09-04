@@ -202,6 +202,32 @@ def test_score_dispatches_to_both_kernels(
     assert str(ScoringAlgorithm.TAAT) == "taat"
 
 
+def test_anything_that_is_not_the_daat_member_runs_taat(
+    model: TfidfModel, index: InvertedIndex, corpus: list[list[str]]
+) -> None:
+    """The dispatch tests `is ScoringAlgorithm.DAAT` and falls through, so a
+    value that is not that member -- the bare string "daat" included, since a
+    str enum's value is equal to it but is not it -- runs TAAT rather than
+    raising.
+
+    Pinned rather than repaired. The two traversals are required to agree to the
+    last bit, so a wrong branch costs time and never an answer, and the C++
+    mirror falls through the same way; raising on one side alone would create
+    the divergence the differential suite exists to rule out.
+    """
+    q = queries(model, corpus, 1, seed=11)[0]
+    taat = score(q, model.matrix, index, model.norms, algorithm=ScoringAlgorithm.TAAT)
+
+    for not_the_member in ("daat", "DAAT", ScoringAlgorithm.DAAT.value, None):
+        got = score(q, model.matrix, index, model.norms, algorithm=not_the_member)  # type: ignore[arg-type]
+        assert all(same_bits(a, b) for a, b in zip(taat, got, strict=True)), not_the_member
+
+    # And the member itself does take the other branch, so the check above is
+    # about the fallthrough rather than about the two kernels agreeing anyway.
+    assert ScoringAlgorithm.DAAT.value == "daat"
+    assert ScoringAlgorithm.DAAT is not ScoringAlgorithm.DAAT.value
+
+
 def test_score_runs_the_kernel_it_was_asked_for(
     monkeypatch: pytest.MonkeyPatch,
     model: TfidfModel,

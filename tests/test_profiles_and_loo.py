@@ -575,6 +575,30 @@ def test_one_interaction_is_enough_for_a_profile_query_by_default() -> None:
     assert {q.query_id for q in strict} == {"thick"}
 
 
+def test_a_nan_threshold_keeps_everything_exactly_as_no_threshold_does() -> None:
+    """`weight < min_weight` is false for every weight when the threshold is
+    NaN, so a NaN filters nothing.
+
+    Four guards in this package spell the same shape `not (x >= 0)` precisely so
+    a NaN is refused rather than ignored. This one does not, and should not: it
+    has no non-negative domain, a negative threshold is a legal way to keep
+    everything, and no caller constructs a NaN. Written down because the
+    difference from those four is deliberate and otherwise looks like an
+    oversight.
+    """
+    interactions = [
+        Interaction(user_id="u", doc_id="m1", weight=5.0),
+        Interaction(user_id="u", doc_id="m2", weight=1.0),
+    ]
+    everything = group_interactions(interactions)
+    assert group_interactions(interactions, min_weight=float("nan")) == everything
+    assert group_interactions(interactions, min_weight=-1.0) == everything
+
+    # Contrast: a real threshold does filter, so the equality above is not
+    # simply the filter never running.
+    assert group_interactions(interactions, min_weight=4.0) == {"u": ("m1",)}
+
+
 def test_an_interaction_exactly_at_the_threshold_counts_as_one() -> None:
     """G10 decision 5 sets the threshold as `rating >= 4.0`, so the filter drops
     what is strictly below it. At exactly 4.0 the interaction is kept.

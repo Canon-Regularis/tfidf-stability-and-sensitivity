@@ -210,9 +210,17 @@ def tie_cliques(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, .
 def chain_inflation_ratio(sorted_scores: Sequence[float], tau: float) -> float:
     """``rho(tau) = |largest chain| / |largest clique|``.
 
-    Always ``>= 1``: a clique is an interval whose adjacent gaps are all
-    ``<= tau``, so it lies inside some chain. Large values mean the reported
-    tie groups are held together by chaining rather than by indistinguishability.
+    ``>= 1`` for the non-increasing input the parameter name requires: a clique
+    is then an interval whose adjacent gaps are all ``<= tau``, so it lies
+    inside some chain. Large values mean the reported tie groups are held
+    together by chaining rather than by indistinguishability.
+
+    The bound rests on that order and is not checked. On unsorted scores both
+    sides are computed over intervals that no longer correspond, and rho falls
+    below 1 -- ``[0.07, 0.01, 0.84, 0.26, 0.23, 1.0]`` at ``tau=0.2`` gives 0.5.
+    Nothing here can tell that from a legitimate result, so the ordering is the
+    caller's to establish; every in-package caller takes it from
+    :func:`~tfidf_stability.ranking.ranker.sorted_scores_desc`.
     """
     chains = tie_chains(sorted_scores, tau)
     cliques = tie_cliques(sorted_scores, tau)

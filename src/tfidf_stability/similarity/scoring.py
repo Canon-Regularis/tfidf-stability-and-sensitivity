@@ -364,7 +364,16 @@ def score(
     query_norm: float | None = None,
     scratch: ScoringScratch | None = None,
 ) -> list[float]:
-    """Score by the requested traversal. Mirrors ``tfidf::score``."""
+    """Score by the requested traversal. Mirrors ``tfidf::score``.
+
+    The dispatch tests for DAAT and falls through to TAAT, so anything that is
+    not ``ScoringAlgorithm.DAAT`` -- including the bare string ``"daat"``, which
+    is not the enum member and fails ``is`` -- runs TAAT. That is deliberate
+    rather than overlooked: the two traversals are required to agree to the last
+    bit, and the C++ mirror does the same, so a wrong branch costs time and
+    never an answer. Raising here would make the two implementations disagree
+    about an input neither is asked for.
+    """
     if algorithm is ScoringAlgorithm.DAAT:
         return daat_scores(query, corpus, doc_norms, policy, query_norm=query_norm)
     return taat_scores(query, index, doc_norms, policy, query_norm=query_norm, scratch=scratch)

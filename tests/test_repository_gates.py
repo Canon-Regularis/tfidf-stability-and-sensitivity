@@ -384,3 +384,81 @@ def test_a_dependency_named_in_both_requirement_files_agrees() -> None:
         if requirements[name] != declared[name]
     ]
     assert not disagreements, "; ".join(disagreements)
+
+
+# ---------------------------------------------------------------------------
+# check_cpp_format.py
+# ---------------------------------------------------------------------------
+def _format_gate(monkeypatch: pytest.MonkeyPatch, repo: Path) -> ModuleType:
+    gate = _script("check_cpp_format")
+    monkeypatch.setattr(gate, "REPO", repo)
+    return gate
+
+
+def _cpp_tree(root: Path, files: dict[str, str], column_limit: int = 100) -> None:
+    (root / ".clang-format").write_text(
+        f"Language: Cpp\nColumnLimit: {column_limit}\nUseTab: Never\n", encoding="utf-8"
+    )
+    for name, body in files.items():
+        path = root / "cpp" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+
+def test_the_cpp_format_gate_passes_on_this_repository() -> None:
+    """The baseline. Every rejection below is vacuous if this fails."""
+    assert _script("check_cpp_format").main() == 0
+
+
+def test_a_line_wider_than_the_limit_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The drift that went unnoticed: five lines past a limit nothing applied."""
+    _cpp_tree(tmp_path, {"a.hpp": "int x = 0;  //" + "-" * 100 + "\n"})
+    problems = _format_gate(monkeypatch, tmp_path).problems(tmp_path)
+    assert len(problems) == 1
+    assert "columns, limit is 100" in problems[0]
+
+
+def test_the_limit_comes_from_the_style_file_rather_than_this_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Otherwise editing `.clang-format` leaves the two disagreeing, which is the
+    same class of defect as the style file nothing read."""
+    body = "int x = 0;  //" + "-" * 60 + "\n"
+    _cpp_tree(tmp_path, {"a.hpp": body}, column_limit=200)
+    gate = _format_gate(monkeypatch, tmp_path)
+    assert gate.problems(tmp_path) == []
+
+    _cpp_tree(tmp_path, {"a.hpp": body}, column_limit=40)
+    assert gate.problems(tmp_path) != []
+
+
+def test_a_style_file_without_a_column_limit_is_refused_rather_than_defaulted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gate that silently substitutes its own default enforces something the
+    repository never asked for, and reports success for it."""
+    (tmp_path / ".clang-format").write_text("Language: Cpp\nUseTab: Never\n", encoding="utf-8")
+    (tmp_path / "cpp").mkdir()
+    gate = _format_gate(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit, match="no ColumnLimit"):
+        gate.problems(tmp_path)
+
+
+def test_tabs_and_trailing_space_are_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _cpp_tree(tmp_path, {"a.hpp": "int x;\t\nint y;   \n"})
+    problems = _format_gate(monkeypatch, tmp_path).problems(tmp_path)
+    assert any("tab character" in p for p in problems)
+    assert any("trailing whitespace" in p for p in problems)
+
+
+def test_vendored_code_is_not_ours_to_format(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """check_vendored.py asserts it matches upstream byte for byte, so
+    reformatting it would break that instead of fixing anything."""
+    _cpp_tree(tmp_path, {"third_party/doctest.h": "int x = 0;  //" + "-" * 100 + "\n"})
+    assert _format_gate(monkeypatch, tmp_path).problems(tmp_path) == []

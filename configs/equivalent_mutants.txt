@@ -60,8 +60,8 @@ src/tfidf_stability/ranking/attributes.py  452  constant  0 -> 1  # src=ce4e4d1b
 src/tfidf_stability/ranking/ranker.py  181  compare  Lt -> LtE  # src=59e83664 sort keys terminate in the unique doc id, so no two compare equal and the tie branch is unreachable
 
 # --- ranking/tie_groups.py -------------------------------------------------
-src/tfidf_stability/ranking/tie_groups.py  219  boolop  Or -> And  # src=28312cda chains and cliques are always both empty or both non-empty, both being covers of the same input; asserted by test_chains_and_cliques_are_empty_together and checked over 31248 (scores, tau) combinations
-src/tfidf_stability/ranking/tie_groups.py  310  boolop  Or -> And  # src=5f0336ee the same pair on the cached property
+src/tfidf_stability/ranking/tie_groups.py  227  boolop  Or -> And  # src=28312cda chains and cliques are always both empty or both non-empty, both being covers of the same input; asserted by test_chains_and_cliques_are_empty_together and checked over 31248 (scores, tau) combinations
+src/tfidf_stability/ranking/tie_groups.py  318  boolop  Or -> And  # src=5f0336ee the same pair on the cached property
 
 # --- ranking/margins.py ----------------------------------------------------
 src/tfidf_stability/ranking/margins.py  147  constant  2 -> 1  # src=8f629c39 marked `# pragma: no cover - defensive`; n < 2 is refused before this point
@@ -157,7 +157,7 @@ src/tfidf_stability/preprocessing/ngrams.py  77  constant  1 -> 0  # src=3822bf7
 src/tfidf_stability/profiles/query_modes.py  205  constant  2 -> 1  # src=69347c47 the clamp sits behind `if min_interactions >= 2`, which makes it dead
 
 # --- profiles/user_profile.py ----------------------------------------------
-src/tfidf_stability/profiles/user_profile.py  257  constant  True -> False  # src=2181b96d strict zip behind SparseVector.__post_init__
+src/tfidf_stability/profiles/user_profile.py  264  constant  True -> False  # src=2181b96d strict zip behind SparseVector.__post_init__
 
 # --- analysis/stratify.py --------------------------------------------------
 src/tfidf_stability/analysis/stratify.py  95  compare  Lt -> LtE  # src=a8d4f837 the bands are contiguous, so a value equal to a lower bound already matched the band before it
@@ -167,7 +167,7 @@ src/tfidf_stability/analysis/summarise.py  72  compare  LtE -> Lt  # src=440ee8e
 src/tfidf_stability/analysis/summarise.py  74  compare  GtE -> Gt  # src=81dabb68 at p = 100 the general path computes rank n, the same element the shortcut returns
 
 # --- analysis/query_grid.py ------------------------------------------------
-src/tfidf_stability/analysis/query_grid.py  183  compare  Gt -> GtE  # src=ae54178c truncating a set to exactly its own length is a no-op
+src/tfidf_stability/analysis/query_grid.py  192  compare  Gt -> GtE  # src=ae54178c truncating a set to exactly its own length is a no-op
 
 # --- analysis/noise_floor.py -----------------------------------------------
 src/tfidf_stability/analysis/noise_floor.py  126  constant  0.0 -> 1.0  # src=b6ab684f the default fires only if _INSTRUMENTS is empty, which it never is
@@ -203,7 +203,7 @@ src/tfidf_stability/cli/main.py  104  constant  False -> True  # src=d898869c ar
 src/tfidf_stability/cli/main.py  110  constant  False -> True  # src=cef12337 likewise for version
 
 # --- cli/commands.py -------------------------------------------------------
-src/tfidf_stability/cli/commands.py  398  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
+src/tfidf_stability/cli/commands.py  424  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
 
 # --- datasets/synthetic.py -------------------------------------------------
 src/tfidf_stability/datasets/synthetic.py  136  constant  1 -> 0  # src=a05543f2 the quotient reaches zero only above a vocabulary of 2**40 terms

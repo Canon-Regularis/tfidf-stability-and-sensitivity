@@ -102,7 +102,14 @@ def group_interactions(
 
     Args:
         interactions: All interactions.
-        min_weight: Keep only interactions at or above this weight. For
+        min_weight: Keep only interactions at or above this weight. A NaN
+            threshold keeps everything, because the comparison below is
+            false for every weight; that is the same no-op as ``None``
+            rather than an error, and no caller constructs one. Spelled
+            ``weight < min_weight`` rather than the negated form used for
+            the tau thresholds, because there is no non-negative domain
+            here: a negative threshold is a legal way to keep everything.
+            For
             MovieLens this is the ``rating >= 4.0`` threshold deciding what
             "interacted" means, a choice section 7.1 leaves open and that
             materially changes the profile.

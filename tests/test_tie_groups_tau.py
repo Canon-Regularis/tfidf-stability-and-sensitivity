@@ -826,3 +826,22 @@ def test_every_score_lands_in_a_chain_and_in_a_clique() -> None:
                 assert bool(chains) == bool(cliques)
 
     assert checked == 430, "the sweep shrank without anyone noticing"
+
+
+def test_the_inflation_ratio_falls_below_one_on_unsorted_scores() -> None:
+    """`chain_inflation_ratio` documented itself as "always >= 1" without
+    qualification, and the bound holds only for the non-increasing order the
+    parameter name asks for.
+
+    The order is a silent precondition: nothing checks it, and on unsorted input
+    chains and cliques are computed over intervals that no longer correspond, so
+    rho drops below its own floor. Pinned rather than guarded -- the check is
+    O(n) on a function called once per tau per query, and every in-package
+    caller takes its input from `sorted_scores_desc`.
+    """
+    unsorted = [0.07, 0.01, 0.84, 0.26, 0.23, 1.0]
+    assert chain_inflation_ratio(unsorted, 0.2) == 0.5
+
+    # Sorted, the same multiset honours the bound, so the failure is the order
+    # rather than the values.
+    assert chain_inflation_ratio(sorted(unsorted, reverse=True), 0.2) >= 1.0
