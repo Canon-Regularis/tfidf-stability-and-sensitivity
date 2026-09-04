@@ -385,17 +385,34 @@ def test_a_limit_of_zero_produces_an_empty_grid_rather_than_every_fold() -> None
     assert len(build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=0)) == 0
 
 
-def test_a_negative_limit_silently_drops_the_last_fold() -> None:
-    """`folds[:-1]` is a legal slice, so `-1` trims one query instead of raising
-    or meaning unlimited.
+def test_a_negative_limit_is_refused_rather_than_counted_from_the_end() -> None:
+    """`folds[:-1]` is a legal slice, so `-1` used to trim one query rather than
+    raise or mean unlimited, and the reduced count was then reported as the
+    protocol's own.
 
-    The fifth site in this package where a negative index is accepted where the
-    positive side is checked, after `short`, `Ranking.top_k`, `compare_top_k`
-    and `CsrMatrix.row`. Only `build_vocabulary`'s `max_features` guards it.
+    One of five sites in this package where a negative index was accepted where
+    the positive side is checked, after `short`, `Ranking.top_k`,
+    `compare_top_k` and `CsrMatrix.row`. This is the one a driver can reach:
+    both experiment drivers pass `--queries` straight through as `limit`, and
+    argparse takes `type=int` with no lower bound.
     """
     interactions, features, doc_ids = _grid_inputs()
-    trimmed = build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=-1)
-    assert len(trimmed) == 2
+    with pytest.raises(ValueError, match="limit must be non-negative"):
+        build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=-1)
+
+    # The boundary either side of it, so the guard is placed at zero rather
+    # than merely somewhere below the full grid.
+    assert len(build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=0)) == 0
+    assert len(build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=2)) == 2
+
+
+def test_a_nan_limit_is_refused_by_the_same_guard() -> None:
+    """Spelled `not limit >= 0` rather than `limit < 0` precisely so this holds:
+    a NaN compares false against both bounds and would otherwise reach the
+    slice, where it raises TypeError from inside the library instead."""
+    interactions, features, doc_ids = _grid_inputs()
+    with pytest.raises(ValueError, match="limit must be non-negative"):
+        build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=float("nan"))
 
 
 def test_the_limited_prefix_is_the_same_folds_every_time() -> None:

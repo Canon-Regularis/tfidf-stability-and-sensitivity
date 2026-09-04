@@ -149,7 +149,10 @@ def build_query_grid(
             fast. Capping is always reported.
 
     Raises:
-        ValueError: If ``mode`` is item-as-query.
+        ValueError: If ``mode`` is item-as-query, or ``limit`` is negative.
+            A negative cap reached the slice below, where Python counts from
+            the end: ``limit=-1`` silently dropped the last query of the grid
+            and reported the reduced count as if it were the whole protocol.
     """
     # Loaders hand back plain triples; group_interactions wants the typed record.
     # Its `weight` feeds eligibility only, since section 7.1 specifies an
@@ -179,6 +182,12 @@ def build_query_grid(
             f"{mode} is implemented but section 7.1 excludes it from the reported "
             f"experiments; use USER_PROFILE or LEAVE_ONE_OUT"
         )
+
+    if limit is not None and not limit >= 0:
+        # Spelled as the negation of the non-negative test, like the other
+        # thresholds here, so a NaN arriving through the API is refused rather
+        # than compared false against both bounds and let through.
+        raise ValueError(f"limit must be non-negative or None, got {limit}")
 
     if limit is not None and len(query_set.queries) > limit:
         # A deterministic prefix rather than a sample: the grid must not move
