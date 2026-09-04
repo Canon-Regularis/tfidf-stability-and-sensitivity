@@ -5,8 +5,9 @@
 # writes its own manifest, and the manifests differ only in the varied field.
 
 tie_break_priority:            # G15: section 4.5 does not say which reordering
-  description: All six orderings of the attribute priority. The default pi_alt
-    is the reversal; this sweep shows how much that choice matters.
+  description: The five orderings other than pi_priority itself, which every run
+    already uses as its baseline. The default pi_alt is the reversal; this sweep
+    shows how much that choice matters.
   vary: ranking.pi_alt_priority
   values:
     - [engagement, rating, popularity]

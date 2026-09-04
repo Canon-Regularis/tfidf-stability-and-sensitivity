@@ -75,6 +75,80 @@ def test_every_ablation_names_the_field_it_varies() -> None:
         assert "description" in entry, f"{name} is undocumented"
 
 
+#: `vary` paths that name a key `configs/default.yaml` deliberately does not
+#: carry, with the reason it is absent.
+_VARIES_AN_ABSENT_KEY = {
+    "evaluation.tau": (
+        "section 7.1 derives tau from the measured noise floor, so default.yaml "
+        "pins tau_provisional and refuses to pin tau; this sweep is what supplies it"
+    ),
+}
+
+
+def test_every_ablation_varies_a_field_that_exists_and_offers_values_that_are_legal() -> None:
+    """The shape test above accepts any three keys, whatever they say.
+
+    An ablation is a claim that varying one pinned decision changes a published
+    number. If ``vary`` names a key the config does not have, the run writes a
+    manifest recording a field nothing read, which is the failure the section
+    below this one exists to prevent -- one level up, in the grid rather than in
+    the reader. If ``values`` holds something the field cannot take, the run
+    fails at the far end of an experiment instead of here.
+    """
+    import itertools
+
+    import yaml
+
+    from tfidf_stability.profiles.user_profile import ProfileAggregation
+    from tfidf_stability.utils.numerics import Reduction
+
+    config = load_config()
+    ablations = yaml.safe_load((REPO / "configs" / "ablations.yaml").read_text(encoding="utf-8"))
+
+    #: field -> the values it accepts, where the field is closed.
+    closed = {
+        "profiles.aggregation": {m.value for m in ProfileAggregation},
+        "numerics.reduction": {m.value for m in Reduction},
+    }
+
+    absent = []
+    for name, entry in ablations.items():
+        section, _, key = entry["vary"].partition(".")
+        if entry["vary"] in _VARIES_AN_ABSENT_KEY:
+            assert key not in config.get(section, {}), (
+                f"{entry['vary']} is exempted as absent but the config now pins it; "
+                f"delete the exemption rather than the assertion"
+            )
+            absent.append(entry["vary"])
+            continue
+        assert section in config, f"{name} varies {entry['vary']}, and there is no {section}"
+        assert key in config[section], f"{name} varies {entry['vary']}, which no section pins"
+
+        allowed = closed.get(entry["vary"])
+        if allowed is not None:
+            illegal = [v for v in entry["values"] if v not in allowed]
+            assert not illegal, f"{name} offers {illegal}, and {entry['vary']} takes {allowed}"
+
+    assert sorted(absent) == sorted(_VARIES_AN_ABSENT_KEY), (
+        "an exemption that no ablation uses is a stale argument"
+    )
+
+    # The two places the tau sweep is written must be the same sweep. They are
+    # separate files, and a run that took its grid from one and its manifest
+    # from the other would report a sweep it did not perform.
+    assert ablations["tau_sweep"]["values"] == config["evaluation"]["tau_sweep"]
+
+    # `tie_break_priority` claimed six orderings and listed five. The five are
+    # right -- the sixth is `pi_priority`, the baseline every run already uses --
+    # so the count is pinned here rather than left to a description.
+    priority = config["ranking"]["pi_priority"]
+    expected = [list(p) for p in itertools.permutations(priority) if list(p) != priority]
+    listed = [list(v) for v in ablations["tie_break_priority"]["values"]]
+    assert sorted(listed) == sorted(expected), (
+        "tie_break_priority must offer every ordering except the baseline"
+    )
+
+
 # ---------------------------------------------------------------------------
 # A recorded key must be an applied key
 # ---------------------------------------------------------------------------
@@ -353,6 +427,103 @@ def test_experiment_drivers_do_not_contradict_the_pinned_config() -> None:
     assert compared, "the scan matched no shared keys; it is not testing anything"
     assert not disagreements, "driver defaults contradict configs/default.yaml: " + "; ".join(
         disagreements
+    )
+
+
+#: Keyword defaults in ``src/`` that shadow a pinned key and are allowed to
+#: differ, each with the reason. An entry without a reason is not an exemption.
+_SHADOWED_BY_DESIGN = {
+    ("tfidf_stability.preprocessing.pipeline", "PreprocessingPipeline.__init__", "lemmatiser"): (
+        "same name, different thing: this parameter is a ready-made Lemmatiser "
+        "injected in place of the configured one, not the name of a backend. "
+        "None means 'build it from the config', and the config field that does "
+        "carry the pinned name, PreprocessingConfig.lemmatiser, defaults to "
+        "LemmatiserKind.PORTER2 and is compared below like any other"
+    ),
+    ("tfidf_stability.profiles.query_modes", "user_profile_queries", "min_interactions"): (
+        "a profile query needs one interaction where a leave-one-out fold needs "
+        "two, which test_one_interaction_is_enough_for_a_profile_query_by_default "
+        "pins; the pinned 5 is the protocol threshold build_query_grid applies"
+    ),
+}
+
+
+def test_src_defaults_do_not_contradict_the_pinned_config() -> None:
+    """The same guard as the drivers get, applied to the library itself.
+
+    Three of the six sections in ``configs/default.yaml`` -- ``ranking``,
+    ``evaluation`` and ``profiles`` -- are read by no module in ``src``. Their
+    values are hashed into the run manifest all the same, so a default that
+    drifts from the pinned value produces numbers the digest attributes to a
+    configuration that did not produce them. The driver-side scan above cannot
+    see it, because the disagreement is in a function signature rather than an
+    ``add_argument`` call.
+
+    Defaults are read from the live signature rather than the source text, so an
+    enum member and a module constant compare by the value they actually carry.
+    """
+    import enum
+    import importlib
+    import inspect
+    import pkgutil
+
+    import tfidf_stability
+
+    config = load_config()
+    pinned = {
+        key: value
+        for _, body in config.items()
+        if isinstance(body, dict)
+        for key, value in body.items()
+    }
+
+    def resolved(value: object) -> object:
+        if isinstance(value, enum.Enum):
+            return value.value
+        if isinstance(value, (list, tuple)):
+            return [resolved(v) for v in value]
+        return value
+
+    disagreements = []
+    compared = []
+    exempted = []
+    for info in pkgutil.walk_packages(tfidf_stability.__path__, "tfidf_stability."):
+        if "_snowball" in info.name:
+            continue
+        module = importlib.import_module(info.name)
+        for owner, obj in vars(module).items():
+            functions = [(owner, obj)] if inspect.isfunction(obj) else []
+            if inspect.isclass(obj) and obj.__module__ == info.name:
+                functions = [
+                    (f"{owner}.{n}", f) for n, f in vars(obj).items() if inspect.isfunction(f)
+                ]
+            for name, function in functions:
+                if function.__module__ != info.name:
+                    continue
+                for parameter in inspect.signature(function).parameters.values():
+                    if parameter.default is inspect.Parameter.empty:
+                        continue
+                    if parameter.name not in pinned:
+                        continue
+                    key = (info.name, name, parameter.name)
+                    if key in _SHADOWED_BY_DESIGN:
+                        exempted.append(key)
+                        continue
+                    compared.append(f"{info.name}:{name}:{parameter.name}")
+                    if resolved(parameter.default) != resolved(pinned[parameter.name]):
+                        disagreements.append(
+                            f"{info.name}.{name}({parameter.name}="
+                            f"{parameter.default!r}) vs pinned {pinned[parameter.name]!r}"
+                        )
+
+    assert compared, "the scan matched no shared keys; it is not testing anything"
+    assert not disagreements, "src defaults contradict configs/default.yaml: " + "; ".join(
+        disagreements
+    )
+    # An exemption for a signature that no longer exists is a stale argument, and
+    # a reader would take it as still describing the code.
+    assert sorted(set(exempted)) == sorted(_SHADOWED_BY_DESIGN), (
+        "every entry in _SHADOWED_BY_DESIGN must name a default that is still there"
     )
 
 
