@@ -368,3 +368,61 @@ TEST_CASE("compare_top_k: k beyond the lists, and k = 0") {
     CHECK(empty.jaccard == 0.0);
     CHECK(std::isnan(empty.kendall_intersection));
 }
+
+TEST_CASE("fks: the union is walked in first-appearance order, not sorted") {
+    // Every penalty this suite uses elsewhere is dyadic -- kFksPenalty is 0.5,
+    // and the sweeps use 0, 0.25, 0.5, 1 -- so every partial sum is exact and
+    // any enumeration order reproduces the same double. The ordering contract
+    // with the reference is therefore invisible to those cases: sorting the
+    // union, or iterating the `seen` set instead of the `uni` vector, would
+    // change nothing they can see.
+    //
+    // A penalty of 1/3 is not dyadic, so the order of the additions decides the
+    // last bit. These two lists are disjoint, which puts every pair into case 3
+    // or case 4 and makes the addend sequence depend on nothing but the union
+    // order. The value is `math.fsum`-free: it is what the normative Python
+    // returns, which is the whole point of pinning it.
+    const std::vector<DocId> a{5, 3, 1};
+    const std::vector<DocId> b{4, 2, 0};
+
+    CHECK(same_bits(kendall_fks(a, b, 1.0 / 3.0, false), 11.000000000000002));
+
+    // The same input at a dyadic penalty, to show why the case above is needed:
+    // here the sum is exact and no ordering can be distinguished.
+    CHECK(kendall_fks(a, b, 0.5, false) == 12.0);
+}
+
+TEST_CASE("compare_top_k: a negative k is an empty prefix here, unlike in Python") {
+    // Latent rather than live, and pinned so it stays that way. `prefix` takes
+    // `std::max(k, 0)`, so a negative k compares nothing and every field
+    // reports "no evidence" while `k` carries the negative value through.
+    //
+    // The normative Python slices `a[:k]`, which counts from the END: it
+    // compares [1, 2] against [3, 2] and reports sets_differ, an intersection
+    // of one and a jaccard of 2/3. The two disagree, and the only thing between
+    // them is the binding, which refuses k < 0 before the header is reached
+    // (cpp/bindings/module.cpp, "k must be non-negative"). Relaxing that throw,
+    // or adding a second C++ caller, makes the disagreement live -- so the
+    // header's own behaviour is stated here rather than left to be discovered.
+    const std::vector<DocId> a{1, 2, 3};
+    const std::vector<DocId> b{3, 2, 1};
+    const std::vector<DocId> empty{};
+
+    const auto c = compare_top_k(a, b, -1);
+    CHECK(c.k == -1);  // carried through unclamped, so a caller can see what it asked for
+    CHECK_FALSE(c.sets_differ);
+    CHECK(c.intersection_size == 0);
+    CHECK(c.swapped == 0);
+    CHECK(std::isnan(c.kendall_intersection));
+    // Stated as "identical to an empty prefix" rather than as constants, which
+    // is the actual contract and does not go stale if the empty case is defined
+    // differently later.
+    CHECK(same_bits(c.fks, kendall_fks(empty, empty)));
+    CHECK(same_bits(c.jaccard, jaccard_distance(empty, empty)));
+
+    // And the comparison the clamp threw away really was informative, so the
+    // divergence is a difference in answers rather than in presentation.
+    const auto two = compare_top_k(a, b, 2);
+    CHECK(two.sets_differ);
+    CHECK(two.intersection_size == 1);
+}

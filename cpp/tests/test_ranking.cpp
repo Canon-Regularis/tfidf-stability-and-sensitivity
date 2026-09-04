@@ -39,6 +39,21 @@ RankTable make_table(const std::vector<std::int32_t>& attr) {
     return t;
 }
 
+/// A table with several attributes, `attrs[a][d]` being document `d`'s rank
+/// under attribute `a`. `make_table` covers the one-attribute case; priority
+/// order cannot be tested with one attribute.
+RankTable make_wide_table(const std::vector<std::vector<std::int32_t>>& attrs) {
+    RankTable t;
+    t.n_docs = static_cast<std::int32_t>(attrs.front().size());
+    t.n_attrs = static_cast<std::int32_t>(attrs.size());
+    for (const auto& row : attrs) {
+        t.ranks.insert(t.ranks.end(), row.begin(), row.end());
+    }
+    t.id_ranks.resize(attrs.front().size());
+    std::iota(t.id_ranks.begin(), t.id_ranks.end(), 0);
+    return t;
+}
+
 std::vector<DocId> rank_with(const std::vector<Real>& scores,
                              const RankTable& table,
                              const std::vector<std::int32_t>& priority,
@@ -200,6 +215,50 @@ TEST_CASE("ranker: an empty priority falls through to the identifier") {
     const std::vector<Real> scores{0.5, 0.5, 0.5};
     const auto order = rank_with(scores, t, {}, Selection::FullSort);
     CHECK(order == std::vector<DocId>{0, 1, 2});
+}
+
+TEST_CASE("ranker: a score tie is broken by the attribute, not by the identifier") {
+    // The case the suite did not have. Every other ranking test either gives
+    // the documents distinct scores, so the attribute is never consulted, or
+    // passes an empty priority, so there is no attribute to consult. Deleting
+    // the whole rank-copying loop from `build_keys` -- leaving every attribute
+    // rank at the zero `fill` puts there, so every tie fell through to the
+    // identifier -- left all 98 cases in this suite passing.
+    //
+    // Section 4.5 is about exactly this ordering, so nothing else in the
+    // repository has more reason to be pinned.
+    const RankTable t = make_table({9, 0});  // doc 1 has the better attribute
+    const std::vector<Real> tied{0.5, 0.5};
+
+    CHECK(rank_with(tied, t, {0}, Selection::FullSort) == std::vector<DocId>{1, 0});
+    // Contrast with the same scores and no priority, which is the order the
+    // identifier alone gives: the two must differ, or the check above would
+    // hold whether or not the attribute was read.
+    CHECK(rank_with(tied, t, {}, Selection::FullSort) == std::vector<DocId>{0, 1});
+}
+
+TEST_CASE("ranker: the priority decides which attribute is consulted first") {
+    // G15 makes the reordering of the priority an ablation, so which attribute
+    // leads has to be a property of `priority` rather than of the table's row
+    // order. The two attributes here disagree, so whichever leads wins.
+    const RankTable t = make_wide_table({{1, 0}, {0, 1}});
+    const std::vector<Real> tied{0.5, 0.5};
+
+    CHECK(rank_with(tied, t, {0, 1}, Selection::FullSort) == std::vector<DocId>{1, 0});
+    CHECK(rank_with(tied, t, {1, 0}, Selection::FullSort) == std::vector<DocId>{0, 1});
+}
+
+TEST_CASE("ranker: a later attribute decides only when every earlier one ties") {
+    // The lexicographic step. Documents 0 and 1 tie on the leading attribute
+    // and separate on the second; document 2 loses on the leading one, so the
+    // second never gets to rescue it.
+    const RankTable t = make_wide_table({{0, 0, 7}, {5, 1, 0}});
+    const std::vector<Real> tied{0.5, 0.5, 0.5};
+
+    CHECK(rank_with(tied, t, {0, 1}, Selection::FullSort) == std::vector<DocId>{1, 0, 2});
+    // And with only the leading attribute in the priority, the pair that ties
+    // on it falls through to the identifier instead of to attribute 1.
+    CHECK(rank_with(tied, t, {0}, Selection::FullSort) == std::vector<DocId>{0, 1, 2});
 }
 
 TEST_CASE("ranker: sorted_scores_desc is non-increasing and a permutation") {

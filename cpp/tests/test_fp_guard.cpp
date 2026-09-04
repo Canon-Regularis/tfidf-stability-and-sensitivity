@@ -7,10 +7,14 @@
 
 #include <doctest.h>
 
+#include <algorithm>
+#include <bit>
 #include <cfenv>
 #include <cmath>
 #include <limits>
 #include <string>
+#include <utility>
+#include <vector>
 
 TEST_CASE("fp: the build is numerically trustworthy") {
     const std::uint32_t f = tfidf::fp::selftest();
@@ -151,3 +155,88 @@ TEST_CASE("build: provenance is populated") {
 TEST_CASE("build: reproducibility flag reflects the actual knobs") {
     CHECK(tfidf::build::kReproducible == (!tfidf::build::kArchTune && !tfidf::build::kFastMath));
 }
+
+TEST_CASE("fp: every failure flag is its own single bit") {
+    // The flags are shift expressions, and nothing checked the shift amounts.
+    // Changing any one of them makes two flags equal: `kConstantFolding` at
+    // `1u << 1` collides with `kReassociation`, and `selftest()` then reports a
+    // failure under the wrong name while `f & kConstantFolding` becomes true
+    // for a build that only reassociates. Three such mutations survived the
+    // suite.
+    const std::pair<const char*, std::uint32_t> flags[] = {
+        {"kConstantFolding", tfidf::fp::kConstantFolding},
+        {"kReassociation", tfidf::fp::kReassociation},
+        {"kFmaContraction", tfidf::fp::kFmaContraction},
+        {"kRoundingMode", tfidf::fp::kRoundingMode},
+        {"kFlushToZero", tfidf::fp::kFlushToZero},
+        {"kDenormalsAreZero", tfidf::fp::kDenormalsAreZero},
+    };
+
+    CHECK(tfidf::fp::kOk == 0u);
+
+    std::uint32_t seen = 0u;
+    for (const auto& [name, bit] : flags) {
+        INFO("flag " << name);
+        CHECK(bit != 0u);
+        // A single bit, so a mask test names exactly one failure.
+        CHECK((bit & (bit - 1u)) == 0u);
+        // And one no other flag has already claimed.
+        CHECK((seen & bit) == 0u);
+        seen |= bit;
+    }
+    // Six flags, so six bits: the loop above would also pass if two names
+    // referred to the same constant and the check ran over five distinct bits.
+    CHECK(std::popcount(seen) == 6);
+}
+
+TEST_CASE("fp: describe names the failure it was handed") {
+    // `describe` is what an operator reads when a build is refused, and it was
+    // untested. Its first arm is `f == kOk`; inverted, every broken environment
+    // is described as "ok" and the only failure path in the shipped binary
+    // reports success.
+    CHECK(std::string(tfidf::fp::describe(tfidf::fp::kOk)) == "ok");
+
+    const std::uint32_t flags[] = {
+        tfidf::fp::kConstantFolding, tfidf::fp::kReassociation,
+        tfidf::fp::kFmaContraction,  tfidf::fp::kRoundingMode,
+        tfidf::fp::kFlushToZero,     tfidf::fp::kDenormalsAreZero,
+    };
+    std::vector<std::string> messages;
+    for (const std::uint32_t f : flags) {
+        const std::string message = tfidf::fp::describe(f);
+        CHECK(message != "ok");
+        CHECK_FALSE(message.empty());
+        messages.push_back(message);
+    }
+    // Distinct, or two failures would be indistinguishable in the one place
+    // they are reported.
+    std::sort(messages.begin(), messages.end());
+    CHECK(std::adjacent_find(messages.begin(), messages.end()) == messages.end());
+
+    // An unknown bit still says something rather than falling off the end.
+    CHECK(std::string(tfidf::fp::describe(1u << 31)) != "ok");
+}
+
+#if TFIDF_HAS_MXCSR
+TEST_CASE("fp: restore_subnormals reports whether it actually changed anything") {
+    // The return value is the caller's record that a third-party library had
+    // set FTZ/DAZ. Reported the wrong way round, a clean run logs a correction
+    // that never happened and a corrected run stays silent.
+    const unsigned int original = _mm_getcsr();
+    const unsigned int clean = original & ~0x8040u;
+
+    _mm_setcsr(clean);
+    CHECK_FALSE(tfidf::fp::restore_subnormals());  // nothing to do
+    CHECK((_mm_getcsr() & 0x8040u) == 0u);
+
+    _mm_setcsr(clean | 0x8040u);
+    CHECK(tfidf::fp::restore_subnormals());  // and it says so when there was
+    CHECK((_mm_getcsr() & 0x8040u) == 0u);   // having actually cleared them
+
+    // A second call has nothing left to change.
+    CHECK_FALSE(tfidf::fp::restore_subnormals());
+
+    _mm_setcsr(original);
+    CHECK((_mm_getcsr() & 0x8040u) == (original & 0x8040u));
+}
+#endif
