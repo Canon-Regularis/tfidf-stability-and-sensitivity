@@ -165,6 +165,10 @@ ignore = [
 "tests/test_preprocessing_determinism.py" = ["RUF001", "PLE2515"]
 # Structural validators read best as a sequence of guard clauses.
 "src/tfidf_stability/vectorisation/sparse.py" = ["PLR0911"]
+# A hand-written C++ lexer. The scanner is one state machine over a cursor,
+# and every branch is a mutually exclusive thing that cursor can be sitting
+# on; splitting it into helpers would hide that rather than reveal it.
+"scripts/run_cpp_mutation_tests.py" = ["PLR0912", "PLR0915"]
 
 [tool.mypy]
 python_version = "3.11"

@@ -188,7 +188,9 @@ class NativeIndex {
 
     [[nodiscard]] std::int32_t n_documents() const noexcept { return n_rows_; }
     [[nodiscard]] std::int32_t n_features() const noexcept { return n_cols_; }
-    [[nodiscard]] std::int64_t nnz() const noexcept { return static_cast<std::int64_t>(values_.size()); }
+    [[nodiscard]] std::int64_t nnz() const noexcept {
+        return static_cast<std::int64_t>(values_.size());
+    }
     [[nodiscard]] std::int32_t reduction() const noexcept {
         return static_cast<std::int32_t>(reduction_);
     }
@@ -263,8 +265,9 @@ class NativeRanker {
         if (n_attrs < 0 || (n_attrs > 0 && ranks.shape(0) % static_cast<std::size_t>(n_attrs))) {
             throw std::invalid_argument("the rank matrix is not n_attrs * n_docs");
         }
-        if (n_attrs > 0 &&
-            ranks.shape(0) != static_cast<std::size_t>(n_attrs) * static_cast<std::size_t>(n_docs)) {
+        const auto expected_ranks =
+            static_cast<std::size_t>(n_attrs) * static_cast<std::size_t>(n_docs);
+        if (n_attrs > 0 && ranks.shape(0) != expected_ranks) {
             throw std::invalid_argument("the rank matrix does not match n_docs");
         }
         if (priority.shape(0) > ranking::kMaxAttributes) {

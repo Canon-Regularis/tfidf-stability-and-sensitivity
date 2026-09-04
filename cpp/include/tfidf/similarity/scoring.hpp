@@ -128,7 +128,8 @@ void score_taat_with(const SparseView& query,
             }
         }
         for (const DocId d : scratch.touched) {
-            scratch.accumulator[static_cast<std::size_t>(d)] = accs[static_cast<std::size_t>(d)].value();
+            const auto i = static_cast<std::size_t>(d);
+            scratch.accumulator[i] = accs[i].value();
         }
     }
 

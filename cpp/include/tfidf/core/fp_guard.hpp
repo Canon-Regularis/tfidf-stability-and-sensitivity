@@ -200,13 +200,20 @@ inline bool restore_subnormals() noexcept {
 
 /// Human-readable rendering of a selftest() result, for error messages.
 [[nodiscard]] inline const char* describe(std::uint32_t f) noexcept {
-    if (f == kOk)                 return "ok";
-    if (f & kFmaContraction)      return "FMA contraction is active (need -ffp-contract=off, or /fp:strict on MSVC)";
-    if (f & kFlushToZero)         return "flush-to-zero is set (a BLAS may have set MXCSR.FTZ)";
-    if (f & kDenormalsAreZero)    return "denormals-are-zero is set (a BLAS may have set MXCSR.DAZ)";
-    if (f & kReassociation)       return "the compiler is reassociating floating-point sums";
-    if (f & kConstantFolding)     return "constants are folded at extended precision";
-    if (f & kRoundingMode)        return "the rounding mode is not round-to-nearest-even";
+    if (f == kOk)
+        return "ok";
+    if (f & kFmaContraction)
+        return "FMA contraction is active (need -ffp-contract=off, or /fp:strict on MSVC)";
+    if (f & kFlushToZero)
+        return "flush-to-zero is set (a BLAS may have set MXCSR.FTZ)";
+    if (f & kDenormalsAreZero)
+        return "denormals-are-zero is set (a BLAS may have set MXCSR.DAZ)";
+    if (f & kReassociation)
+        return "the compiler is reassociating floating-point sums";
+    if (f & kConstantFolding)
+        return "constants are folded at extended precision";
+    if (f & kRoundingMode)
+        return "the rounding mode is not round-to-nearest-even";
     return "unknown floating-point environment failure";
 }
 

@@ -101,6 +101,13 @@ jobs:
         run: python scripts/check_vendored.py
       - name: The C++ tree must mirror the Python packages
         run: python scripts/check_layout.py
+      - name: C++ must match the style file the repository ships
+        # `.clang-format` sat in the tree with nothing applying it, and five
+        # lines had drifted past its own ColumnLimit. clang-format itself is not
+        # run here because it is not on every contributor's machine and a check
+        # that skips when its tool is missing is no check; this enforces the
+        # subset that needs no tool, reading the limits from the file.
+        run: python scripts/check_cpp_format.py
       - name: No test may pass without asserting anything
         # The run-level guards elsewhere (ctest --no-tests=error, the executed-test
         # count in determinism.yml) answer "did anything run". This answers "could
