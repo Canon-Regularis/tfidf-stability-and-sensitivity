@@ -531,3 +531,34 @@ def test_a_stamp_pointing_at_a_different_expression_is_rejected() -> None:
     assert _fingerprint(body[second_line - 1]) != first_stamp.removeprefix("src="), (
         "swapping two entries' stamps must not still verify"
     )
+
+
+def test_an_entry_whose_only_reason_is_its_fingerprint_is_refused(tmp_path: Path) -> None:
+    """The emptiness test runs after the `src=` stamp is stripped, not before.
+
+    A reason may carry a `src=<8 hex>` prefix, which the loader removes because
+    it is bookkeeping for the drift guard rather than part of the argument.
+    Testing the raw text for emptiness accepted an entry whose whole reason was
+    that prefix, leaving an empty argument behind: a survivor silenced with no
+    stated reason, which is the suppression this file's header refuses.
+
+    The stamped-and-argued form must still load, or the fix would silence the
+    real allowlist instead.
+    """
+    runner = _runner()
+    allowlist = tmp_path / "equivalent_mutants.txt"
+    entry = "src/tfidf_stability/utils/numerics.py  112  compare  GtE -> Gt  #"
+    module = Path("src/tfidf_stability/utils/numerics.py")
+
+    allowlist.write_text(f"{entry} src=2a87a12d\n", encoding="utf-8")
+    runner._EQUIVALENTS = allowlist
+    assert runner._load_equivalents(module) == {}, "a stamp is not an argument"
+
+    allowlist.write_text(f"{entry}\n", encoding="utf-8")
+    assert runner._load_equivalents(module) == {}, "and neither is nothing at all"
+
+    allowlist.write_text(f"{entry} src=2a87a12d both branches agree\n", encoding="utf-8")
+    claims = runner._load_equivalents(module)
+    assert claims == {(112, "compare", "GtE", "Gt"): "both branches agree"}, (
+        "a stamped entry that does argue its case must still be honoured"
+    )

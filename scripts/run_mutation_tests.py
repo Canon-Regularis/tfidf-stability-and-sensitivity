@@ -95,6 +95,10 @@ _SANDBOX_CONTENTS = (
     "pyproject.toml",
     "CITATION.cff",
     "README.md",
+    # `check_versions.py` reads the project version from four files and
+    # `tests/test_repository_gates.py` runs it, so all four must be present or
+    # the sandbox baseline fails before a single mutant is applied.
+    "CMakeLists.txt",
 )
 
 #: Comparison flips. The pairs that matter are the boundary ones: `<=` against
@@ -369,13 +373,20 @@ def _load_equivalents(module: Path) -> dict[_Key, str]:
     for raw in _EQUIVALENTS.read_text(encoding="utf-8").splitlines():
         statement, _, reason = raw.partition("#")
         fields = statement.split()
-        if len(fields) < 6 or fields[0] != wanted or fields[4] != "->" or not reason.strip():
+        if len(fields) < 6 or fields[0] != wanted or fields[4] != "->":
             continue
         # A reason may be prefixed `src=<8 hex>`, a fingerprint of the source
         # line the entry was written about, checked by the allowlist test in
         # tests/test_mutation_gate.py. Stripped here: it is bookkeeping for that
         # guard, not part of the argument the campaign prints.
-        claims[(int(fields[1]), fields[2], fields[3], fields[5])] = _without_stamp(reason)
+        #
+        # Emptiness is tested after stripping it. Testing `reason` instead let an
+        # entry whose whole reason was its own fingerprint through, carrying an
+        # empty argument -- the suppression this file's header refuses.
+        argument = _without_stamp(reason)
+        if not argument:
+            continue
+        claims[(int(fields[1]), fields[2], fields[3], fields[5])] = argument
     return claims
 
 
