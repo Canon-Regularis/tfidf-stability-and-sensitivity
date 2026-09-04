@@ -79,6 +79,56 @@ jobs:
         run: |
           python scripts/run_mutation_tests.py "${{ matrix.module }}"             --tests ${{ matrix.tests }} --timeout 180
 
+  cpp-mutation:
+    name: C++ mutation testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      # One job per header, for the same reason the Python matrix has one per
+      # module: cost is (sites x suite time), and a survivor names where it came
+      # from without further digging. The C++ suite is a single ctest target, so
+      # there is no per-header test list to choose -- every mutant is judged by
+      # the whole native suite.
+      matrix:
+        header:
+          - cpp/include/tfidf/core/reduction.hpp
+          - cpp/include/tfidf/core/fp_guard.hpp
+          - cpp/include/tfidf/core/types.hpp
+          - cpp/include/tfidf/vectorisation/sparse.hpp
+          - cpp/include/tfidf/similarity/scoring.hpp
+          - cpp/include/tfidf/ranking/distances.hpp
+          - cpp/include/tfidf/ranking/sort_keys.hpp
+          - cpp/include/tfidf/ranking/ranker.hpp
+          - cpp/include/tfidf/ranking/tie_groups.hpp
+          - cpp/include/tfidf/ranking/margins.hpp
+          - cpp/include/tfidf/ranking/attributes.hpp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+        with:
+          python-version: "3.12"
+      - name: Configure and prove the baseline is green
+        # A tree whose tests already fail would score every mutant as killed, so
+        # the campaign would report a perfect score for a broken suite.
+        run: |
+          cmake -S . -B build-tests -G Ninja -DCMAKE_BUILD_TYPE=Release                 -DTFIDF_BUILD_NATIVE=OFF -DTFIDF_BUILD_TESTS=ON
+          cmake --build build-tests --target tfidf_tests
+          ctest --test-dir build-tests --no-tests=error --output-on-failure
+      - name: Break ${{ matrix.header }} and see whether the native suite notices
+        # Every survivor must be argued in configs/equivalent_mutants_cpp.txt,
+        # and an entry there that matches no survivor fails too -- otherwise the
+        # file accretes into a blanket suppression.
+        run: |
+          python scripts/run_cpp_mutation_tests.py "${{ matrix.header }}"                  --test-timeout 180 --json "mutants.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        if: always()
+        with:
+          name: cpp-mutants-${{ strategy.job-index }}
+          path: mutants.json
+        continue-on-error: true
+
   deep-property-search:
     name: hypothesis at 100k examples
     runs-on: ubuntu-latest

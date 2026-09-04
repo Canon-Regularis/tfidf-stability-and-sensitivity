@@ -1,0 +1,58 @@
+# C++ mutants that survive because no behaviour distinguishes them.
+#
+# The counterpart of equivalent_mutants.txt for the native core. Same purpose,
+# same two failure modes, one extra field: mutation of C++ is lexical, so a
+# claim is keyed by column as well as line. A line can carry two candidates that
+# read the same and are equivalent for different reasons -- in the fsum
+# correction one `<` compares the remainder against zero and the other compares
+# a partial -- and one argument does not cover both.
+#
+# Format, one claim per line:
+#
+#     <header path>  <line>:<column>  <before> -> <after>  # src=<8 hex> why
+#
+# The reason is required. An entry without one is a suppression, not a finding.
+# `src=` is a whitespace-normalised digest of the line the claim is about, so
+# reindenting does not invalidate an argument while changing the expression does.
+#
+# Two ways this file fails the build, both deliberate:
+#
+#   * a survivor that is not listed here -- a real gap, or a new equivalent that
+#     has not been justified yet;
+#   * an entry here that matched no survivor -- the mutant is killed now, or the
+#     line moved, and the claim must be re-read rather than left to rot.
+#
+# Three kinds of argument appear below, and they are not equally strong:
+#
+#   equivalent   the mutated expression computes the same answer by another
+#                route, or is unreachable. These are proofs.
+#   undefined    the mutation reads out of bounds -- `n >= 0` on a size_t, then
+#                indexing at SIZE_MAX. Not equivalent; simply not observable in
+#                a way any test could depend on. Listed as such rather than
+#                dressed up as equivalence.
+#   capacity     a `reserve` hint, which cannot change a result.
+#
+cpp/include/tfidf/core/reduction.hpp  57:14  < -> <=  # src=e1484609 magnitude is read only by the >= in Neumaier::add, where -0.0 and 0.0 compare equal; the function's own note already records that -0.0 is its only difference from std::abs
+cpp/include/tfidf/core/reduction.hpp  74:28  >= -> >  # src=64fa110b at equal magnitudes both branches compute the same compensation: with sum == x the subtraction is exact either way, and with sum == -x the total is zero and both recover the same remainder
+cpp/include/tfidf/core/reduction.hpp  103:26  0 -> 1  # src=d66c51c8 starting at level 1 leaves partials[0] at its value-initialised 0.0 and shifts every real partial up one slot; value() folds that 0.0 in last, and adding 0.0 is the identity for a finite total
+cpp/include/tfidf/core/reduction.hpp  134:23  > -> >=  # src=7410e9bd levels is size_t so levels >= 0 is always true, and counts[levels - 1] then indexes counts[SIZE_MAX]; undefined rather than equivalent, and no input makes it deterministically observable
+cpp/include/tfidf/core/reduction.hpp  137:23  2 -> 3  # src=26d66a27 the weight is only compared for equality, so what it must do is give equal-size subtrees equal counts rather than record the size; 3^k is injective in k exactly as 2^k is, so the merges land at the same points and the tree is identical
+cpp/include/tfidf/core/reduction.hpp  139:20  < -> <=  # src=c5eb3d72 writing partials[64] needs 64 completed levels, which is 2^64 blocks of 128 values
+cpp/include/tfidf/core/reduction.hpp  171:27  0 -> 1  # src=adca7709 resize(1) on the first add creates a leading 0.0 that every later add preserves, shifting the array and the index together so partials[n - 1] resolves to the same element; a 0.0 partial is inert in the descent and false in both arms of the sign test, and 600000 random expansions found no separating input
+cpp/include/tfidf/core/reduction.hpp  174:29  < -> <=  # src=7f6c11d4 the swap only matters when the magnitudes differ; at |x| == |y| the two-sum is exact in either order, giving the same hi and a remainder of zero
+cpp/include/tfidf/core/reduction.hpp  218:18  > -> >=  # src=24ccd7e3 n is size_t, so n >= 0 is always true and the next decrement wraps into partials[SIZE_MAX]; undefined rather than equivalent
+cpp/include/tfidf/core/reduction.hpp  228:15  > -> >=  # src=e41ae70b the same always-true size_t comparison, reading partials[SIZE_MAX] when the descent has consumed every partial
+cpp/include/tfidf/core/reduction.hpp  228:27  < -> <=  # src=e41ae70b the descent leaves lo non-zero wherever it breaks, and where it does not break n is zero and the first conjunct already fails, so lo is never compared against zero as an equal
+cpp/include/tfidf/core/reduction.hpp  228:52  < -> <=  # src=e41ae70b add pushes a partial only when it is non-zero, so no partial is ever exactly 0.0 and <= cannot differ from <
+cpp/include/tfidf/core/reduction.hpp  229:27  > -> >=  # src=9d5e6008 the mirror of the lo comparison on the line above: lo is non-zero wherever this is reached
+cpp/include/tfidf/core/reduction.hpp  229:52  > -> >=  # src=9d5e6008 the mirror of the partial comparison on the line above: no partial is ever exactly 0.0
+cpp/include/tfidf/similarity/scoring.hpp  54:58  / -> *  # src=44f2eb01 reserve is a capacity hint; touched grows to whatever it needs either way and no scored result can depend on it
+cpp/include/tfidf/vectorisation/sparse.hpp  81:13  + -> -  # src=bb1ac0d7 indices are strictly ascending, so dropping this increment still gives the same sum: the next iteration compares the index that did not move against its successor and advances it through the a < b branch instead
+cpp/include/tfidf/vectorisation/sparse.hpp  81:14  + -> -  # src=bb1ac0d7 the second token of the same increment, equivalent for the reason above
+cpp/include/tfidf/vectorisation/sparse.hpp  82:13  + -> -  # src=08b428dd the mirror of the increment above, on the other list
+cpp/include/tfidf/vectorisation/sparse.hpp  82:14  + -> -  # src=08b428dd the second token of the same increment, equivalent for the reason above
+cpp/include/tfidf/vectorisation/sparse.hpp  83:22  < -> <=  # src=4d0d6b34 the branch above has already taken a == b, so this comparison never sees two equal indices
+cpp/include/tfidf/vectorisation/sparse.hpp  184:30  0 -> 1  # src=47635e97 starting the monotonicity scan at row 1 is observable only when indptr decreases at the first pair, which needs indptr[1] < indptr[0] == 0 and hence a negative offset; row() then casts that to size_t, so the behaviour is undefined rather than merely wrong
+cpp/include/tfidf/vectorisation/sparse.hpp  241:26  0 -> 1  # src=42af1cef the skipped iteration adds colptr[0], which assign set to zero and the counting loop never writes because it writes t + 1; the prefix sum is unchanged
+cpp/include/tfidf/vectorisation/sparse.hpp  247:69  - -> +  # src=b583f8a4 cursor is only ever indexed below n_cols, so sizing it one entry longer changes nothing the transpose reads
+cpp/include/tfidf/vectorisation/sparse.hpp  247:71  1 -> 0  # src=b583f8a4 the same: end() - 0 sizes cursor one entry longer than needed and every read stays below n_cols
