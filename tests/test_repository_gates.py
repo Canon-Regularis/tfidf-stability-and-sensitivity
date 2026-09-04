@@ -124,9 +124,20 @@ def test_every_file_that_states_a_version_is_one_the_gate_reads() -> None:
         re.IGNORECASE,
     )
 
-    tracked = subprocess.run(
-        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
-    ).stdout.split()
+    # `git ls-files` where there is a checkout, a walk where there is not: the
+    # mutation sandbox is a copy of the tree, so git fails there with exit 128.
+    try:
+        tracked = subprocess.run(
+            ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout.split()
+    except (subprocess.CalledProcessError, OSError):
+        skip = {".git", "__pycache__", ".hypothesis", ".pytest_cache"}
+        tracked = [
+            path.relative_to(REPO).as_posix()
+            for path in REPO.rglob("*")
+            if path.is_file()
+            and not any(part in skip or part.startswith("build") for part in path.parts)
+        ]
 
     stating: set[str] = set()
     for relative in tracked:
@@ -325,3 +336,51 @@ def test_a_tree_with_no_manifest_at_all_is_refused(
 
     problems = gate.check()
     assert problems == ["no MANIFEST.sha256 found anywhere -- vendoring is unverified"]
+
+
+# ---------------------------------------------------------------------------
+# Dependency specifiers, stated twice
+# ---------------------------------------------------------------------------
+def test_a_dependency_named_in_both_requirement_files_agrees() -> None:
+    """`pyproject.toml`'s dev extra and `requirements-dev.txt` must not differ.
+
+    Every CI job installs `requirements-dev.txt`, which pins `ruff` and `mypy`
+    exactly and says why: a floor promises that every future release agrees with
+    this one, and ruff 0.16 stabilising PLR0917 failed the lint job on a commit
+    that changed no Python. The dev extra said `ruff>=0.6, mypy>=1.11`, so a
+    contributor installing `.[dev]` got whatever was current and a clean tree
+    reported findings CI had never seen.
+
+    Compares the specifier rather than the resolved version, so it needs no
+    network and fails on the disagreement itself.
+    """
+    import tomllib
+
+    def parse(lines: list[str]) -> dict[str, str]:
+        found: dict[str, str] = {}
+        for raw in lines:
+            line = raw.split("#", 1)[0].strip().strip(",").strip('"')
+            if not line or line.startswith("-"):
+                continue
+            match = re.match(r"^([A-Za-z0-9._-]+)\s*(\[[^\]]*\])?\s*(.*)$", line)
+            if match:
+                found[match.group(1).lower()] = match.group(3).replace(" ", "")
+        return found
+
+    requirements = parse((REPO / "requirements-dev.txt").read_text(encoding="utf-8").splitlines())
+    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    extras = pyproject["project"]["optional-dependencies"]
+    declared = parse([item for group in extras.values() for item in group])
+
+    shared = sorted(set(requirements) & set(declared))
+    # The linters are the reason this test exists; if either left one of the
+    # files, the comparison below quietly stopped covering it.
+    assert "ruff" in shared, "ruff is no longer named in both files"
+    assert "mypy" in shared, "mypy is no longer named in both files"
+    disagreements = [
+        f"{name}: requirements-dev.txt says {requirements[name]!r}, "
+        f"pyproject says {declared[name]!r}"
+        for name in shared
+        if requirements[name] != declared[name]
+    ]
+    assert not disagreements, "; ".join(disagreements)
