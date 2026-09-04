@@ -116,6 +116,16 @@ TEST_CASE("kendall tau: differing sets are refused, not approximated") {
     };
     CHECK_THROWS_AS(attempt({1, 2}, {1, 3}), std::invalid_argument);
     CHECK_THROWS_AS(attempt({1, 2}, {1}), std::invalid_argument);
+
+    // The guard is `a.size() != b.size() || sa != sb`, and neither case above
+    // separates the two arms: the first differs in membership at equal size,
+    // the second differs in both. Repeating an element differs in size alone,
+    // so only the size arm can refuse it -- and without that arm the function
+    // does not fail, it answers. `positions` keeps the last index of a repeat,
+    // so {1,2} against {1,2,2} maps to [0,2], counts no inversions, and divides
+    // by the pair count of a.size(): a confident 0.0 for two lists that are not
+    // orderings of the same thing.
+    CHECK_THROWS_AS(attempt({1, 2}, {1, 2, 2}), std::invalid_argument);
 }
 
 TEST_CASE("kendall tau: unlike FKS, this one really is a metric") {
