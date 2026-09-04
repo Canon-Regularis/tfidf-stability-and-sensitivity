@@ -69,11 +69,37 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
 
     The digest travels with the parsed content, so a manifest identifies the
     config down to its comments, which carry the spec_addenda citations.
+
+    Every way this fails raises :class:`ConfigError`. It already did so for a
+    section of the wrong type, but a missing file left ``FileNotFoundError``, a
+    malformed document left ``yaml.YAMLError`` and a scalar at the top level
+    left ``TypeError``, all of which reach the CLI, which installs no handler --
+    so the same user error was a diagnostic in one case and a traceback in
+    three.
+
+    Raises:
+        ConfigError: If the file cannot be read, is not valid YAML, or does not
+            hold a mapping at the top level.
     """
     import yaml
 
     target = Path(path) if path else _DEFAULT_CONFIG
-    parsed: dict[str, Any] = yaml.safe_load(target.read_text(encoding="utf-8"))
+    try:
+        text = target.read_text(encoding="utf-8")
+    except OSError as exc:
+        # OSError rather than FileNotFoundError: a directory, a permission
+        # failure and a missing file are the same mistake to the caller, and
+        # only one of them was being reported as one.
+        raise ConfigError(f"cannot read config {target}: {exc}") from exc
+    try:
+        document = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{target} is not valid YAML: {exc}") from exc
+    if not isinstance(document, dict):
+        raise ConfigError(
+            f"{target} must hold a mapping at the top level, got {type(document).__name__}"
+        )
+    parsed: dict[str, Any] = document
     parsed["_source"] = str(target.name)
     parsed["_digest"] = hash_file(target, text=True)
     return parsed

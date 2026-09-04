@@ -534,6 +534,43 @@ def test_src_defaults_do_not_contradict_the_pinned_config() -> None:
 # that is hashed and then ignored makes two different configurations produce the
 # same numbers under different digests. The section reader refuses rather than
 # skipping, and these are the arms that do the refusing.
+def test_every_way_of_failing_to_load_a_config_raises_the_same_type(tmp_path: Path) -> None:
+    """`load_config` raised ConfigError for a section of the wrong type and
+    leaked three other exceptions for the rest.
+
+    A missing file left FileNotFoundError, a malformed document left
+    yaml.YAMLError and a scalar at the top level left TypeError. `cli/main.py`
+    installs no handler, so the same class of user error -- a bad --config --
+    was a diagnostic in one case and a traceback in three.
+    """
+    missing = tmp_path / "absent.yaml"
+    with pytest.raises(ConfigError, match="cannot read config"):
+        load_config(missing)
+
+    # A directory, not a missing file: the same mistake to the caller, and it
+    # arrives as a different OSError, which is why the guard catches the base.
+    with pytest.raises(ConfigError, match="cannot read config"):
+        load_config(tmp_path)
+
+    unparseable = tmp_path / "broken.yaml"
+    unparseable.write_text("preprocessing: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="is not valid YAML"):
+        load_config(unparseable)
+
+    scalar = tmp_path / "scalar.yaml"
+    scalar.write_text("7\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="must hold a mapping at the top level"):
+        load_config(scalar)
+
+
+def test_a_wrapped_config_failure_still_carries_the_original(tmp_path: Path) -> None:
+    """`from exc`, so an out-of-tree caller that needs to tell a missing file
+    from a permission failure can still reach the distinction."""
+    with pytest.raises(ConfigError, match="cannot read config") as caught:
+        load_config(tmp_path / "absent.yaml")
+    assert isinstance(caught.value.__cause__, FileNotFoundError)
+
+
 def test_a_config_section_that_is_not_a_mapping_is_rejected(tmp_path: Path) -> None:
     config = tmp_path / "bad.yaml"
     config.write_text("preprocessing: [not, a, mapping]\n", encoding="utf-8")
