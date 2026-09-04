@@ -72,9 +72,15 @@ template <class Policy>
         const TermId b = v.indices[j];
         if (a == b) {
             acc.add(u.values[i] * v.values[j]);
+            // Both advance, though the sum does not need both to. Indices are
+            // strictly ascending, so dropping either increment still gives the
+            // same result: the next iteration compares the index that did not
+            // move against its successor, falls into the branch below, and
+            // advances it there. Disabling one is undetectable from outside,
+            // which is why no test asserts it.
             ++i;
             ++j;
-        } else if (a < b) {
+        } else if (a < b) {  // never reached for a == b, so `<=` would read the same
             ++i;
         } else {
             ++j;
@@ -229,6 +235,9 @@ struct Csc {
     for (const TermId t : csr.indices) {
         ++out.colptr[static_cast<std::size_t>(t) + 1];
     }
+    // From c = 0, although that first iteration adds colptr[0], which `assign`
+    // set to zero and the counting loop above never writes (it writes t + 1).
+    // Starting from c = 1 would produce the same colptr.
     for (std::size_t c = 0; c < ncols; ++c) {
         out.colptr[c + 1] += out.colptr[c];
     }

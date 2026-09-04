@@ -126,6 +126,11 @@ struct Pairwise {
   private:
     constexpr void push(Real v, std::size_t weight) noexcept {
         // Merge equal-weight partials, mirroring the recursive split.
+        //
+        // The weight is only ever compared for equality, so what it has to do is
+        // give equal-size subtrees equal counts -- not record the size. Tripling
+        // it below instead of doubling merges at exactly the same points and
+        // produces the same tree, so that constant is not observable.
         while (levels > 0 && counts[levels - 1] == weight) {
             --levels;
             v = partials[levels] + v;
