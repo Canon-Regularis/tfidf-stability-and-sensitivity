@@ -462,3 +462,38 @@ def test_vendored_code_is_not_ours_to_format(
     reformatting it would break that instead of fixing anything."""
     _cpp_tree(tmp_path, {"third_party/doctest.h": "int x = 0;  //" + "-" * 100 + "\n"})
     assert _format_gate(monkeypatch, tmp_path).problems(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# determinism.yml counts its own matrix
+# ---------------------------------------------------------------------------
+def test_the_digest_comparison_expects_one_result_per_matrix_leg() -> None:
+    """`compare` refuses to run unless every matrix leg uploaded a digest.
+
+    That count is written as a literal, `expected=18`, because the job cannot
+    see the matrices it is comparing. A literal that falls behind fails in one
+    of two ways: too high and the job fails every night, too low and the
+    project's flagship reproducibility claim is decided by whichever legs
+    happened to finish -- which is the failure the guard was added to prevent,
+    reintroduced by arithmetic.
+    """
+    import yaml
+
+    text = (REPO / ".github" / "workflows" / "determinism.yml").read_text(encoding="utf-8")
+    workflow = yaml.safe_load(text)
+
+    legs = 0
+    for name in ("reference", "native"):
+        matrix = workflow["jobs"][name]["strategy"]["matrix"]
+        product = 1
+        for key, values in matrix.items():
+            if key in {"include", "exclude"} or not isinstance(values, list):
+                continue
+            product *= len(values)
+        legs += product + len(matrix.get("include") or []) - len(matrix.get("exclude") or [])
+
+    stated = re.search(r"^\s*expected=(\d+)\s*$", text, re.M)
+    assert stated is not None, "the compare job no longer states how many digests it expects"
+    assert int(stated.group(1)) == legs, (
+        f"determinism.yml compares {stated.group(1)} digests but the matrices produce {legs} legs"
+    )

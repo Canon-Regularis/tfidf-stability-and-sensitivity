@@ -194,17 +194,28 @@ jobs:
         # Arch-tuned, therefore NOT reproducible: fine for timing, never for
         # results. The binary reports that itself.
         run: ./build-bench/cpp/bench/tfidf_bench
-      - name: Python-side benchmarks
+      - name: Native against the reference, with bit-identity proved first
+        # Was `pytest --benchmark-only`, which collected nothing: no test in this
+        # repository uses a pytest-benchmark fixture, so the step errored, `|| true`
+        # swallowed it, and the artifact it uploaded was zero bytes. The measuring
+        # is done by scripts/benchmark.py, which also refuses to print a ratio
+        # until it has checked the two backends agree to the last bit.
+        #
+        # Build isolation ON, as in ci.yml and determinism.yml:
+        # --no-build-isolation could not find the build backend on Windows.
         run: |
-          # Build isolation ON, as in ci.yml and determinism.yml:
-          # --no-build-isolation could not find the build backend on Windows.
+          set -euo pipefail
           python -m pip install -e .
-          python -m pytest tests/ -q --benchmark-only --benchmark-json=bench.json || true
+          python scripts/benchmark.py --docs 4000 --queries 40 --repeats 9 --json bench.json
+          # A ratio is only evidence if the native backend was actually there.
+          # The harness degrades to reference-only rather than failing, which is
+          # right for a contributor without a compiler and wrong here: it would
+          # report a green benchmark job for a build that never happened.
+          python -c "import json; r=json.load(open('bench.json')); c=r['comparisons']; assert c, 'the report contains no measurements'; assert r['native'], 'degraded to reference-only: ' + str(r.get('native_reason')); bad=[x['name'] for x in c if not x['verified']]; assert not bad, 'ratios reported without bit-identity: ' + str(bad); print(len(c), 'comparisons, every one bit-identity verified')"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: benchmarks
           path: bench.json
-        continue-on-error: true
 
   vendored-drift:
     name: vendored code vs upstream
