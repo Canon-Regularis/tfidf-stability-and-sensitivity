@@ -61,7 +61,7 @@ src/tfidf_stability/ranking/ranker.py  181  compare  Lt -> LtE  # src=59e83664 s
 
 # --- ranking/tie_groups.py -------------------------------------------------
 src/tfidf_stability/ranking/tie_groups.py  227  boolop  Or -> And  # src=28312cda chains and cliques are always both empty or both non-empty, both being covers of the same input; asserted by test_chains_and_cliques_are_empty_together and checked over 31248 (scores, tau) combinations
-src/tfidf_stability/ranking/tie_groups.py  318  boolop  Or -> And  # src=5f0336ee the same pair on the cached property
+src/tfidf_stability/ranking/tie_groups.py  335  boolop  Or -> And  # src=5f0336ee the same pair on the cached property
 
 # --- ranking/margins.py ----------------------------------------------------
 src/tfidf_stability/ranking/margins.py  147  constant  2 -> 1  # src=8f629c39 marked `# pragma: no cover - defensive`; n < 2 is refused before this point

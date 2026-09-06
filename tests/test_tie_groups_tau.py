@@ -385,9 +385,41 @@ def test_report_carries_both_the_ball_and_the_partition_statistics() -> None:
         "largest_chain",
         "n_cliques",
         "largest_clique",
+        "largest_ball",
         "rho",
     }
     assert report["rho"] == 3.0
+
+    # The ball was the one object missing, and this assertion was the reason it
+    # went unnoticed: the key set above is exhaustive, so it pinned the absence
+    # of the statistic the test is named for. Neither neighbour stands in for
+    # it -- a clique is complete-linkage, a chain single-linkage, and the ball
+    # lies strictly between them on this ladder.
+    assert report["largest_clique"] == 2
+    assert report["largest_ball"] == 3
+    assert report["largest_chain"] == 6
+
+
+def test_the_ball_width_is_bracketed_by_the_clique_and_the_chain() -> None:
+    """`largest_clique <= largest_ball <= largest_chain`, for every corpus.
+
+    The relation is what makes the three worth reporting together: a clique
+    requires every pair within tau, a ball only every member within tau of one
+    centre, and a chain only a path of steps within tau. Each is a weaker
+    requirement than the last, so each group can only grow.
+    """
+    for scores, tau in (
+        ([1.0 - i * 2**-20 for i in range(6)], 2**-20),
+        ([1.0, 1.0, 1.0], 0.0),
+        ([1.0, 0.5, 0.25], 0.0),
+        ([3.0, 2.0, 1.0], 10.0),
+        ([1.0], 0.5),
+    ):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            report = TieGroupIndex.build(scores, tau).report()
+        assert report["largest_clique"] <= report["largest_ball"], (scores, tau)
+        assert report["largest_ball"] <= report["largest_chain"], (scores, tau)
 
 
 def test_chain_of_returns_the_unique_containing_chain() -> None:
