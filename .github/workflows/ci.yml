@@ -101,6 +101,13 @@ jobs:
         run: python scripts/check_vendored.py
       - name: The C++ tree must mirror the Python packages
         run: python scripts/check_layout.py
+      - name: Nothing may call a stdlib API newer than requires-python
+        # mypy above runs over src/ only. This defect was in tests/ and
+        # scripts/: `Path.read_text(newline=...)` exists from 3.13, the floor is
+        # 3.11, and it failed five jobs at once while passing every local check
+        # on a newer interpreter. Asks mypy one question at the floor rather
+        # than pointing strict mypy at those trees, which is separate work.
+        run: python scripts/check_python_floor.py
       - name: C++ must match the style file the repository ships
         # `.clang-format` sat in the tree with nothing applying it, and five
         # lines had drifted past its own ColumnLimit. clang-format itself is not

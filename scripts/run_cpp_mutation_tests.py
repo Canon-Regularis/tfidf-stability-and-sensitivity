@@ -253,7 +253,8 @@ def campaign(
     relative: str, build: str, target: str, limit: int | None, test_timeout: int
 ) -> dict[str, object]:
     path = REPO / relative
-    original = path.read_text(encoding="utf-8", newline="")
+    with path.open(encoding="utf-8", newline="") as handle:
+        original = handle.read()
     lines = original.split("\n")
 
     line_of: dict[int, int] = {}

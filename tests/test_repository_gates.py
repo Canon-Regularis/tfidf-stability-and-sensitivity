@@ -497,3 +497,75 @@ def test_the_digest_comparison_expects_one_result_per_matrix_leg() -> None:
     assert int(stated.group(1)) == legs, (
         f"determinism.yml compares {stated.group(1)} digests but the matrices produce {legs} legs"
     )
+
+
+# ---------------------------------------------------------------------------
+# check_python_floor.py
+# ---------------------------------------------------------------------------
+@pytest.mark.slow
+def test_the_python_floor_gate_passes_on_this_repository() -> None:
+    """The baseline over the whole tree, which is a mypy run and costs a minute.
+
+    Marked slow because the lint job runs `check_python_floor.py` itself on
+    every push, so this is the second reader of the same fact rather than the
+    only one. The rejection paths below stay in the fast tier: they run mypy
+    over a single generated file and are what would go quiet if the gate broke.
+    """
+    gate = _script("check_python_floor")
+    assert gate.findings(REPO, gate.floor(REPO)) == []
+
+
+def test_the_floor_is_read_from_pyproject_rather_than_repeated() -> None:
+    """A version repeated in the checker drifts from the one in the metadata,
+    and then the check is enforcing something the project never claimed."""
+    gate = _script("check_python_floor")
+    assert gate.floor(REPO) == "3.11"
+
+    import re
+
+    stated = re.search(
+        r'requires-python\s*=\s*"[^0-9]*(\d+\.\d+)',
+        (REPO / "pyproject.toml").read_text(encoding="utf-8"),
+    )
+    assert stated is not None
+    assert gate.floor(REPO) == stated.group(1)
+
+
+def test_a_project_with_no_stated_floor_is_refused_rather_than_assumed(
+    tmp_path: Path,
+) -> None:
+    """Defaulting to some version would enforce a floor the project never set."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    gate = _script("check_python_floor")
+    with pytest.raises(SystemExit, match="states no requires-python floor"):
+        gate.floor(tmp_path)
+
+
+def test_a_call_the_floor_cannot_make_is_reported(tmp_path: Path) -> None:
+    """The gate's whole purpose, on the exact defect that prompted it.
+
+    `Path.read_text` grew its `newline` parameter in 3.13. At a floor of 3.11
+    the call is impossible, and mypy says so; at 3.13 the same file is fine, so
+    the check is reading the version rather than banning the argument.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nrequires-python = ">=3.11"\n', encoding="utf-8"
+    )
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "probe.py").write_text(
+        "from pathlib import Path\n\n\n"
+        "def read(p: Path) -> str:\n"
+        '    return p.read_text(encoding="utf-8", newline="")\n',
+        encoding="utf-8",
+    )
+
+    gate = _script("check_python_floor")
+    at_floor = gate.findings(tmp_path, "3.11")
+    assert at_floor, "the call is impossible at 3.11 and was not reported"
+    assert "newline" in at_floor[0]
+
+    assert gate.findings(tmp_path, "3.13") == [], (
+        "the same call is legal from 3.13, so the gate is banning the argument "
+        "rather than checking the version"
+    )

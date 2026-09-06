@@ -98,7 +98,8 @@ def test_every_claim_names_a_column_holding_the_token_it_claims() -> None:
     """
     harness = _harness()
     for path, line, column, before, after, _, _ in _entries():
-        text = (REPO / path).read_text(encoding="utf-8", newline="")
+        with (REPO / path).open(encoding="utf-8", newline="") as handle:
+            text = handle.read()
         body = text.splitlines()
         actual = body[line - 1][column - 1 : column - 1 + len(before)]
         assert actual == before, (
