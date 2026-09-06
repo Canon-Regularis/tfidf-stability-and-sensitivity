@@ -12,11 +12,13 @@
 
 #include <doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <numeric>
 #include <random>
 #include <set>
+#include <utility>
 #include <vector>
 
 using namespace tfidf;
@@ -449,5 +451,201 @@ TEST_CASE("attributes: ratio_less is a strict order") {
                 CHECK_FALSE(ratio_less(b[0], b[1], a[0], a[1]));  // asymmetric
             }
         }
+    }
+}
+
+TEST_CASE("margins: an exact tie is a defined margin of zero, not any defined margin") {
+    // `is_exact_tie` is `defined && value == 0.0`. The two cases already tested
+    // agree with `defined || value == 0.0`: a zero margin is defined, and an
+    // undefined one carries NaN, which equals nothing. What separates them is a
+    // margin that is defined and NOT zero, which nothing asserted -- so the
+    // conjunction could be a disjunction and every top-k boundary would report
+    // itself as an exact tie, sending membership to the tie-break.
+    const std::vector<Real> s{1.0, 0.75, 0.5, 0.5, 0.25};
+
+    const Margin gap = boundary_margin(s, 1);
+    REQUIRE(gap.defined);
+    REQUIRE(gap.value == 0.25);
+    CHECK_FALSE(gap.is_exact_tie());
+
+    // And the two directions that already held, kept together with it so the
+    // three cases read as the truth table they are.
+    const Margin tie = boundary_margin(s, 3);
+    CHECK(tie.defined);
+    CHECK(tie.value == 0.0);
+    CHECK(tie.is_exact_tie());
+
+    const Margin undefined = boundary_margin(s, 5);
+    CHECK_FALSE(undefined.defined);
+    CHECK_FALSE(undefined.is_exact_tie());
+}
+
+TEST_CASE("margins: two scores have one gap, which is the boundary of the guard") {
+    // `adjacent_gaps` returns early below two scores. The existing cases use
+    // three, one and none, and every one of them agrees with a guard placed at
+    // three instead of two: the interesting size is exactly two, the smallest
+    // input that has a gap at all.
+    CHECK(adjacent_gaps(std::vector<Real>{1.0, 0.75}) == std::vector<Real>{0.25});
+    CHECK(adjacent_gaps(std::vector<Real>{1.0}).empty());
+
+    // Length is N-1 for every N, which is the property the reserve() above the
+    // loop encodes and the loop bound has to agree with.
+    for (std::size_t n = 2; n <= 6; ++n) {
+        std::vector<Real> scores;
+        for (std::size_t i = 0; i < n; ++i) {
+            scores.push_back(1.0 - 0.1 * static_cast<Real>(i));
+        }
+        CHECK(adjacent_gaps(scores).size() == n - 1);
+    }
+}
+
+TEST_CASE("margins: k = 0 is undefined rather than a read below the first score") {
+    // `k <= 0` returns undefined. Relaxed to `k < 0`, k = 0 passes the guard,
+    // `k_effective` is 0, the `k_effective >= n` arm is false for any non-empty
+    // input, and the subtraction then indexes `sorted_scores[-1]`. The margin
+    // comes back marked defined either way, so the flag is what a test can see.
+    const std::vector<Real> s{1.0, 0.75, 0.5};
+
+    const Margin zero = boundary_margin(s, 0);
+    CHECK_FALSE(zero.defined);
+    CHECK(std::isnan(zero.value));
+    CHECK(zero.k == 0);
+
+    const Margin negative = boundary_margin(s, -1);
+    CHECK_FALSE(negative.defined);
+    CHECK(std::isnan(negative.value));
+
+    const Margin zero_top = min_adjacent_margin_top(s, 0);
+    CHECK_FALSE(zero_top.defined);
+    CHECK(std::isnan(zero_top.value));
+}
+
+TEST_CASE("margins: the minimum runs over the gaps inside the top-k and no further") {
+    // The loop stops at `j + 1 < k_effective`, so it reads the gaps between
+    // ranks 1..k and never the boundary gap at k -> k+1. That is the whole
+    // distinction between this and `boundary_margin`.
+    //
+    // The existing case cannot see it: with {1, .75, .5, .5, .25} at k = 4 the
+    // extra gap the relaxed bound would include is 0.25, and the minimum is
+    // already 0.0, so including it changes nothing. Here the gap just outside
+    // the top-k is the smallest in the list, so reading one too far returns it.
+    const std::vector<Real> s{1.0, 0.75, 0.5, 0.4999};
+
+    const Margin top = min_adjacent_margin_top(s, 3);
+    CHECK(top.defined);
+    CHECK(top.value == 0.25);  // min(1.0-0.75, 0.75-0.5); NOT 0.5-0.4999
+
+    // The gap the loop must not reach is genuinely smaller, so the case
+    // discriminates rather than happening to agree.
+    const Margin boundary = boundary_margin(s, 3);
+    CHECK(boundary.defined);
+    CHECK(boundary.value < top.value);
+}
+
+TEST_CASE("margins: two scores are enough for a minimum over the top") {
+    // The guard is three clauses, and `n < 2` is DEAD in the original: reaching
+    // it needs k_effective = min(k, n) >= 2, which forces n >= 2. The Python
+    // mirror marks its copy "pragma: no cover - defensive" for that reason.
+    // Relaxing it to `n <= 2` resurrects it into a live guard that refuses the
+    // smallest corpus with a gap at all, and no case in this file passes a
+    // two-element span to this function -- the defined cases use five elements
+    // and the undefined case uses three.
+    const std::vector<Real> two{1.0, 0.75};
+
+    const Margin m = min_adjacent_margin_top(two, 2);
+    CHECK(m.defined);
+    CHECK(m.value == 0.25);
+
+    // The normative Python returns the same, so a mutant that refuses this
+    // input diverges from the reference on a two-document corpus.
+    CHECK(boundary_margin(two, 1).value == 0.25);
+}
+
+TEST_CASE("margins: a computed minimum is marked defined") {
+    // `m.defined = true` at the end of `min_adjacent_margin_top` had no
+    // assertion behind it: every existing case reads `.value`, which is set on
+    // the same path, and the only `.defined` assertions are the FALSE ones on
+    // the undefined branches. Flipped to false, every certificate built from
+    // this margin would silently become undefined.
+    const std::vector<Real> s{1.0, 0.75, 0.5};
+
+    const Margin m = min_adjacent_margin_top(s, 2);
+    CHECK(m.defined);
+    CHECK(m.value == 0.25);
+    CHECK_FALSE(m.is_exact_tie());
+
+    const Margin b = boundary_margin(s, 1);
+    CHECK(b.defined);
+}
+
+TEST_CASE("ranker: select_top writes the first slot, not only the rest") {
+    // `select_top` copies the chosen keys with `for (i = 0; i < m; ++i)`. The
+    // existing prefix test does compare out[0], but its caller sizes `out` with
+    // `std::vector<DocId> out(m)`, which zero-initialises it -- and for that
+    // test's seed the top document IS document 0, so a loop starting at 1 left
+    // the right answer in place and the case passed. Fifty documents over four
+    // distinct scores tie heavily at the top, and ties fall to the identifier,
+    // which favours the lowest id.
+    //
+    // Here document 0 has the worst score, so nothing can leave a correct out[0]
+    // behind by accident.
+    const std::vector<Real> scores{0.1, 0.9, 0.5};
+    const RankTable t = make_table({0, 0, 0});
+    const std::vector<std::int32_t> priority{0};
+
+    for (const auto how : {Selection::PartialSort, Selection::NthElement,
+                           Selection::FullSort}) {
+        std::vector<SortKey> keys(scores.size());
+        build_keys(scores, t, priority, keys);
+        std::vector<DocId> out(2, -1);  // a sentinel, not the zero doc id
+        select_top(keys, 2, out, how);
+        CHECK(out[0] == 1);  // the best score, and not document 0
+        CHECK(out[1] == 2);
+    }
+}
+
+TEST_CASE("ranker: partition_is_valid can actually say no") {
+    // Its false branch had no test. Every call site asserts the postcondition
+    // holds, so a body that returned true unconditionally satisfied all of
+    // them -- and the check is the only guarantee this project has about
+    // `nth_element`, whose remainder is explicitly implementation-defined.
+    const std::vector<Real> scores{0.9, 0.7, 0.5, 0.3, 0.1};
+    const RankTable t = make_table({0, 0, 0, 0, 0});
+    const std::vector<std::int32_t> priority{0};
+
+    std::vector<SortKey> keys(scores.size());
+    build_keys(scores, t, priority, keys);
+    std::sort(keys.begin(), keys.end(), key_less);
+    REQUIRE(partition_is_valid(keys, 2));
+
+    SUBCASE("a violation at the very first key") {
+        // The loop over the prefix starts at i = 0, and m = 1 is what isolates
+        // that: with a one-element prefix there is no other index to catch the
+        // violation, so a loop starting at 1 runs zero iterations and reports a
+        // broken partition as valid. At m = 2 the displaced key lands in the
+        // tail and index 1 fails against it too, which hides the off-by-one.
+        std::vector<SortKey> broken = keys;
+        std::swap(broken[0], broken[1]);
+        CHECK_FALSE(partition_is_valid(broken, 1));
+
+        std::vector<SortKey> far = keys;
+        std::swap(far[0], far[4]);
+        CHECK_FALSE(partition_is_valid(far, 1));
+        CHECK_FALSE(partition_is_valid(far, 2));
+    }
+
+    SUBCASE("a violation at a later key") {
+        std::vector<SortKey> broken = keys;
+        std::swap(broken[1], broken[4]);
+        CHECK_FALSE(partition_is_valid(broken, 2));
+    }
+
+    SUBCASE("m at or past the end is vacuously valid") {
+        // The early return: with no remainder there is nothing to compare
+        // against, so any arrangement satisfies the postcondition.
+        std::vector<SortKey> shuffled = keys;
+        std::swap(shuffled[0], shuffled[4]);
+        CHECK(partition_is_valid(shuffled, shuffled.size()));
+        CHECK(partition_is_valid(shuffled, shuffled.size() + 3));
     }
 }

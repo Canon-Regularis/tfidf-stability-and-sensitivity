@@ -562,3 +562,82 @@ def test_an_entry_whose_only_reason_is_its_fingerprint_is_refused(tmp_path: Path
     assert claims == {(112, "compare", "GtE", "Gt"): "both branches agree"}, (
         "a stamped entry that does argue its case must still be honoured"
     )
+
+
+# ---------------------------------------------------------------------------
+# An argument nothing rechecks
+# ---------------------------------------------------------------------------
+#: Modules whose equivalence arguments the nightly matrix does not re-run. Each
+#: entry is a promise to schedule that module, not a licence to leave it out:
+#: the allowlist's own header says a claim that stops matching a survivor "must
+#: be re-checked rather than left to rot", and that check only runs for modules
+#: the matrix names. Scheduling one needs its scoped test list measured, because
+#: too narrow a list reports survivors the whole suite would kill.
+_NOT_YET_SCHEDULED = {
+    "src/tfidf_stability/ranking/attributes.py",
+    "src/tfidf_stability/analysis/stability_profile.py",
+    "src/tfidf_stability/analysis/noise_floor.py",
+    "src/tfidf_stability/utils/numerics.py",
+    "src/tfidf_stability/datasets/synthetic.py",
+    "src/tfidf_stability/vectorisation/sparse.py",
+    "src/tfidf_stability/vectorisation/vocabulary.py",
+    "src/tfidf_stability/perturbation/vector_perturb.py",
+    "src/tfidf_stability/ranking/distances.py",
+    "src/tfidf_stability/similarity/scoring.py",
+    "src/tfidf_stability/perturbation/idf_perturb.py",
+    "src/tfidf_stability/vectorisation/tfidf.py",
+    "src/tfidf_stability/similarity/geometry.py",
+    "src/tfidf_stability/benchmarks/tfidf_perf.py",
+    "src/tfidf_stability/similarity/cosine.py",
+    "src/tfidf_stability/perturbation/experiments.py",
+    "src/tfidf_stability/analysis/summarise.py",
+    "src/tfidf_stability/cli/main.py",
+    "src/tfidf_stability/ranking/ranker.py",
+    "src/tfidf_stability/utils/io.py",
+    "src/tfidf_stability/vectorisation/df_counts.py",
+    "src/tfidf_stability/preprocessing/tokenise.py",
+    "src/tfidf_stability/preprocessing/stopwords.py",
+    "src/tfidf_stability/preprocessing/ngrams.py",
+    "src/tfidf_stability/profiles/query_modes.py",
+    "src/tfidf_stability/profiles/user_profile.py",
+    "src/tfidf_stability/analysis/stratify.py",
+    "src/tfidf_stability/analysis/query_grid.py",
+    "src/tfidf_stability/cli/commands.py",
+    "src/tfidf_stability/persistence/save_load.py",
+    "src/tfidf_stability/_native/__init__.py",
+}
+
+
+def test_no_module_gains_an_unrecheckable_argument() -> None:
+    """An equivalence argument is only as good as the campaign that rechecks it.
+
+    The allowlist fails the build two ways: a survivor with no entry, and an
+    entry matching no survivor. The second is what stops the file becoming a
+    blanket suppression -- and it can only fire for a module the nightly matrix
+    actually runs. The matrix names three modules; the allowlist argues about
+    thirty-four, so most of the file is currently unfalsifiable.
+
+    This does not fix that. It stops it growing: a NEW module cannot acquire an
+    argument without either being scheduled or being added to the list above,
+    which is a visible admission rather than a silent one.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
+    )
+    scheduled = {e["module"] for e in workflow["jobs"]["mutation"]["strategy"]["matrix"]["include"]}
+    claimed = {path for path, *_ in _stamped_entries()}
+
+    assert claimed, "no module carries an argued equivalence; the check is vacuous"
+    unaccounted = claimed - scheduled - _NOT_YET_SCHEDULED
+    assert not unaccounted, (
+        "modules whose equivalence arguments nothing rechecks, and which are not "
+        f"listed as pending: {sorted(unaccounted)}"
+    )
+    stale = _NOT_YET_SCHEDULED & scheduled
+    assert not stale, (
+        f"listed as pending but now scheduled -- drop them from the list: {sorted(stale)}"
+    )
+    gone = {m for m in _NOT_YET_SCHEDULED if not (REPO / m).exists()}
+    assert not gone, f"pending modules that no longer exist: {sorted(gone)}"

@@ -426,3 +426,22 @@ TEST_CASE("compare_top_k: a negative k is an empty prefix here, unlike in Python
     CHECK(two.sets_differ);
     CHECK(two.intersection_size == 1);
 }
+
+TEST_CASE("fks: the normaliser is zero for every k below one, not just at zero") {
+    // `fks_max` guards with `k < 1`, and the guard is not observable at all:
+    // relaxing it to `k < 0` differs only at k == 0, where the fall-through
+    // computes 0*0 + p*0*(0-1) = 0.0 + (-0.0) = +0.0, the same double the guard
+    // returns, and every k below zero still takes the early return. That is an
+    // argued equivalence in configs/equivalent_mutants_cpp.txt rather than
+    // something a test can refuse. What is pinned here is the stated domain:
+    // the normaliser is zero wherever there is no pair to disagree about.
+    CHECK(fks_max(0) == 0.0);
+    CHECK(fks_max(-1) == 0.0);
+    CHECK(fks_max(-2) == 0.0);
+
+    // The values the relaxed guard would produce instead, named so the case
+    // reads as the discrimination it is: at kFksPenalty = 0.5, k = -1 gives
+    // 1 + 0.5*(-1)*(-2) = 2.0 and k = -2 gives 4 + 0.5*(-2)*(-3) = 7.0.
+    CHECK(fks_max(1) == 1.0);   // and k = 1 is NOT degenerate: one case-3 pair
+    CHECK(fks_max(2) == 5.0);   // 4 + 0.5*2*1
+}
