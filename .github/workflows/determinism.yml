@@ -114,19 +114,29 @@ jobs:
       # step above this one failed every native job on every OS.
       - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
       - name: Configure
+        timeout-minutes: 5
         run: >
           cmake -S . -B build-tests -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build }}
           -DTFIDF_BUILD_TESTS=ON
       - name: Build
+        timeout-minutes: 12
         run: cmake --build build-tests
+      # ctest carries its own 300s TIMEOUT property on cpp.unit, so this bounds
+      # the step around it rather than the test.
       - name: Native unit tests
+        timeout-minutes: 10
         run: ctest --test-dir build-tests --output-on-failure --no-tests=error
       # The native backend must not change any number. The digest here is
       # computed by the reference path, and the differential suite is what
       # proves the two agree, so a divergence shows up as a test failure with
       # a precise location rather than as an opaque hash mismatch.
       - name: Differential suite (reference vs native, bit-exact)
+        # The step that stalled a native ubuntu Release job for the full job
+        # budget with no diagnostic: a job-level limit cannot name the step, and
+        # a cancelled job keeps no log. Every long step here is bounded so a
+        # recurrence says where.
+        timeout-minutes: 12
         shell: bash
         run: |
           # Build isolation ON, as in ci.yml: `--no-build-isolation` could not

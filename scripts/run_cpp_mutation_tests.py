@@ -212,11 +212,18 @@ def build_and_test(build: str, target: str, test_timeout: int) -> str:
 
     A mutant can make the suite loop forever -- dropping the increment that ends
     a merge, or relaxing a bound the loop counts against -- and three campaigns
-    died on exactly that before this handled it. `ctest --timeout` makes ctest
-    kill the test itself and report failure, which is both the right verdict (a
-    suite that does not terminate has not passed) and the only way to avoid
-    leaving the test binary running, holding a lock on the file the next build
-    needs to relink.
+    died on exactly that before this handled it. Letting ctest kill the test is
+    both the right verdict -- a suite that does not terminate has not passed --
+    and the only way to avoid leaving the test binary running, holding a lock on
+    the file the next build needs to relink.
+
+    Which bound actually fires: cpp/tests/CMakeLists.txt sets a TIMEOUT property
+    of 300s on `cpp.unit`, and CMake documents `--timeout` as not applying to a
+    test that carries one. So the inner bound is that 300s whatever is passed
+    here, and `--test-timeout` only scales the outer backstop below, which is
+    kept above 300 on purpose: ctest kills the test cleanly, whereas Python
+    killing ctest can orphan the binary. The flag still matters for a tree that
+    does not set the property.
 
     A build that times out is `stillborn` instead: nothing was learned about the
     tests, and treating it as a kill would inflate the score with infrastructure.
@@ -252,7 +259,9 @@ def build_and_test(build: str, target: str, test_timeout: int) -> str:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=test_timeout * 4 + 120,
+            # Above the project's 300s ctest property on purpose, so ctest
+            # does the killing and no orphaned binary holds the exe lock.
+            timeout=max(test_timeout, 300) * 2,
             check=False,
         )
     except subprocess.TimeoutExpired:
@@ -382,8 +391,9 @@ def main(argv: list[str] | None = None) -> int:
         "--test-timeout",
         type=int,
         default=180,
-        help="seconds before ctest kills a test; a mutant that loops forever "
-        "is detected by this rather than by hanging the campaign",
+        help="per-test timeout passed to ctest. This project sets a TIMEOUT "
+        "property of 300s, which CMake does not let --timeout override, so "
+        "here it bounds only the outer backstop",
     )
     parser.add_argument("--json", type=Path, default=None, help="write the full record here")
     args = parser.parse_args(argv)
