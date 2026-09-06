@@ -130,12 +130,21 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 /// would be a wrong answer rather than a missing one.
 [[nodiscard]] inline Real kendall_tau_distance(std::span<const DocId> a,
                                                std::span<const DocId> b) {
-    const std::unordered_set<DocId> sa(a.begin(), a.end());
-    const std::unordered_set<DocId> sb(b.begin(), b.end());
+    // Sorted copies, not sets: a set is blind to multiplicity, so {1, 1, 2}
+    // and {1, 2, 1} against {1, 2, 2} passed both halves -- same size, same
+    // set -- and `positions` then kept only the last index of each repeat, so
+    // the inversion count ran over a mapping that had lost a document and
+    // returned 0.0 for two lists that are not orderings of the same multiset.
+    // The normative Python compares Counters for the same reason.
+    std::vector<DocId> sa(a.begin(), a.end());
+    std::vector<DocId> sb(b.begin(), b.end());
+    std::sort(sa.begin(), sa.end());
+    std::sort(sb.begin(), sb.end());
     if (a.size() != b.size() || sa != sb) {
         throw std::invalid_argument(
-            "kendall_tau_distance requires two orderings of the same set; for top-k "
-            "lists that may differ in membership use kendall_fks (spec_addenda G2)");
+            "kendall_tau_distance requires two orderings of the same set, with the "
+            "same multiplicities; for top-k lists that may differ in membership use "
+            "kendall_fks (spec_addenda G2)");
     }
     const std::size_t n = a.size();
     if (n < 2) {

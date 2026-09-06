@@ -27,6 +27,18 @@ Usage::
 
 The build directory must already be configured and its baseline must be green:
 a tree whose tests already fail would score every mutant as killed.
+
+What the score does NOT include: the verdict is `ctest`, which runs the native
+doctest suite alone. This project's strongest guarantee -- that the C++ agrees
+with the normative Python bit for bit -- lives in pytest, in
+``tests/test_native_*_differential.py``, and those need the extension rebuilt
+per mutant, which is minutes rather than seconds. So a survivor here means "the
+native suite cannot see it", not "nothing can": a mutation in a function the
+bindings export may still be caught differentially. A mutation in one they do
+NOT export has no other net at all, and three of the functions this campaign
+found holes in are in that class: ``is_exact_tie``, ``adjacent_gaps`` and
+``partition_is_valid`` appear nowhere in ``cpp/bindings/module.cpp``, so the
+native suite is their only coverage in either language.
 """
 
 from __future__ import annotations

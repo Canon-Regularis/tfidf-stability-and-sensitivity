@@ -304,24 +304,41 @@ def test_compare_top_k_invariants(a: list[int], b: list[int], k: int) -> None:
 # ---------------------------------------------------------------------------
 # kendall_tau_distance: the precondition the guard does not quite cover
 # ---------------------------------------------------------------------------
-def test_two_orderings_of_the_same_multiset_but_different_multiplicity_are_not_caught() -> None:
-    """A latent defect, pinned rather than repaired.
+def test_two_lists_of_the_same_set_but_different_multiplicity_are_refused() -> None:
+    """`set()` is blind to multiplicity, and the guard used to be written on it.
 
-    The guard compares lengths and `set()`s. `[1, 1, 2]` and `[1, 2, 2]` pass
-    both -- same length, same set -- and then the `position` dict keeps only the
-    last index of each repeated element, so the inversion count is computed
-    against a mapping that lost a document. The result is `0.0`: two orderings
-    reported as identical when they are not.
+    `[1, 1, 2]` and `[1, 2, 2]` pass both halves of the old guard -- same
+    length, same set -- and the `position` dict then keeps only the last index
+    of each repeated element, so the inversion count ran against a mapping that
+    had lost a document. It returned `0.0`: two lists reported as identical
+    orderings when one of them is not an ordering of that multiset at all.
 
-    Not reachable from this package, where both arguments come from a `Ranking`
-    whose order is a permutation and therefore duplicate-free. A `Counter`
-    comparison would close it; the guard as written documents "same set" and
-    delivers it, so the gap is in the precondition rather than in the code.
+    Unreachable from this package, where both arguments come from a `Ranking`
+    whose order is a permutation. Repaired rather than pinned because the wrong
+    answer was a confident number rather than an error, and because the C++
+    mirror compared `unordered_set`s and was blind in exactly the same way.
     """
     left, right = [1, 1, 2], [1, 2, 2]
-    assert len(left) == len(right), "the length half of the guard passes"
-    assert set(left) == set(right), "and so does the membership half"
-    assert kendall_tau_distance(left, right) == 0.0
+    assert len(left) == len(right), "the length half of the old guard passes"
+    assert set(left) == set(right), "and so did the membership half"
+    with pytest.raises(ValueError, match="same multiplicities"):
+        kendall_tau_distance(left, right)
+
+
+def test_a_repeat_is_still_accepted_when_both_sides_carry_it() -> None:
+    """The limit of the repair, stated rather than left to be discovered.
+
+    `Counter` equality asks for the same multiset, which `[1, 1, 2]` and
+    `[2, 1, 1]` satisfy. They are accepted and a number comes back, computed
+    through the same last-wins position map -- for a multiset there is no
+    canonical inversion count, so the number means less than it looks.
+
+    Nothing in the package can reach it: every caller passes a permutation.
+    Tightening the guard to reject any repeated element would close it, and is
+    a larger change to the contract than the defect required.
+    """
+    assert kendall_tau_distance([1, 1, 2], [2, 1, 1]) == pytest.approx(2 / 3)
+    assert kendall_tau_distance([1, 1, 2], [1, 1, 2]) == 0.0
 
 
 @pytest.mark.parametrize(

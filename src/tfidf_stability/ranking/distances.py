@@ -36,6 +36,7 @@ the effect under study.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import combinations
@@ -129,10 +130,17 @@ def kendall_tau_distance(a: Sequence[int], b: Sequence[int]) -> float:
         ValueError: If the two orderings do not rank the same set, which signals
             that :func:`kendall_fks` is the function wanted.
     """
-    if len(a) != len(b) or set(a) != set(b):
+    # Counter, not set: `set` is blind to multiplicity, so [1, 1, 2] and
+    # [1, 2, 2] passed both halves of the guard -- same length, same set -- and
+    # the position dict below then kept only the last index of each repeat,
+    # counting inversions against a mapping that had lost a document. The
+    # result was 0.0, two orderings reported as identical when one of them is
+    # not an ordering of that multiset at all.
+    if len(a) != len(b) or Counter(a) != Counter(b):
         raise ValueError(
-            "kendall_tau_distance requires two orderings of the same set; for top-k "
-            "lists that may differ in membership use kendall_fks (spec_addenda G2)"
+            "kendall_tau_distance requires two orderings of the same set, with the "
+            "same multiplicities; for top-k lists that may differ in membership use "
+            "kendall_fks (spec_addenda G2)"
         )
     n = len(a)
     if n < 2:

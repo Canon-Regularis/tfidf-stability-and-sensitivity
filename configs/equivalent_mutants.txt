@@ -68,10 +68,10 @@ src/tfidf_stability/ranking/margins.py  147  constant  2 -> 1  # src=8f629c39 ma
 src/tfidf_stability/ranking/margins.py  148  constant  False -> True  # src=c19c3ab9 the same unreachable defensive return
 
 # --- ranking/distances.py --------------------------------------------------
-src/tfidf_stability/ranking/distances.py  86  constant  0 -> 1  # src=df18baa6 a merge scratch buffer, every entry overwritten before it is read
-src/tfidf_stability/ranking/distances.py  163  compare  Lt -> LtE  # src=5560e194 a shortcut, not a correction: at k = 0 the closed form already evaluates to 0.0, and negative k returns early either way
-src/tfidf_stability/ranking/distances.py  221  compare  Lt -> LtE  # src=75c13ecb ranking positions are distinct by construction
-src/tfidf_stability/ranking/distances.py  229  compare  Lt -> LtE  # src=234423a3 likewise, within each of the two lists
+src/tfidf_stability/ranking/distances.py  87  constant  0 -> 1  # src=df18baa6 a merge scratch buffer, every entry overwritten before it is read
+src/tfidf_stability/ranking/distances.py  171  compare  Lt -> LtE  # src=5560e194 a shortcut, not a correction: at k = 0 the closed form already evaluates to 0.0, and negative k returns early either way
+src/tfidf_stability/ranking/distances.py  229  compare  Lt -> LtE  # src=75c13ecb ranking positions are distinct by construction
+src/tfidf_stability/ranking/distances.py  237  compare  Lt -> LtE  # src=234423a3 likewise, within each of the two lists
 
 # --- ranking/sort_keys.py --------------------------------------------------
 src/tfidf_stability/ranking/sort_keys.py  155  compare  LtE -> Lt  # src=7c4df57a the self-check runs an extra size or one fewer; keys are tuples and therefore transitive, so neither finds a violation

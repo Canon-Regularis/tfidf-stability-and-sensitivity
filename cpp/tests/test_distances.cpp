@@ -445,3 +445,24 @@ TEST_CASE("fks: the normaliser is zero for every k below one, not just at zero")
     CHECK(fks_max(1) == 1.0);   // and k = 1 is NOT degenerate: one case-3 pair
     CHECK(fks_max(2) == 5.0);   // 4 + 0.5*2*1
 }
+
+TEST_CASE("kendall tau: the same set with different multiplicities is refused") {
+    // The guard compared `unordered_set`s, which are blind to multiplicity, so
+    // {1, 1, 2} against {1, 2, 2} passed both halves -- same size, same set --
+    // and `positions` then kept only the last index of each repeat. The
+    // inversion count ran over a mapping that had lost a document and the
+    // function returned 0.0: two lists called identical orderings when one is
+    // not an ordering of that multiset at all.
+    //
+    // The normative Python compared `set()`s and was blind the same way, so the
+    // two agreed on the wrong answer and no differential test could see it.
+    const auto attempt = [](const std::vector<DocId>& a, const std::vector<DocId>& b) {
+        static_cast<void>(kendall_tau_distance(a, b));
+    };
+    CHECK_THROWS_AS(attempt({1, 1, 2}, {1, 2, 2}), std::invalid_argument);
+
+    // The same multiset is still accepted, which is the limit of the repair and
+    // is unreachable from a ranking: every caller passes a permutation.
+    CHECK(kendall_tau_distance(std::vector<DocId>{1, 1, 2},
+                               std::vector<DocId>{1, 1, 2}) == 0.0);
+}

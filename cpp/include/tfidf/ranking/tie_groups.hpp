@@ -130,8 +130,14 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
     return out;
 }
 
-/// `rho(tau) = |largest chain| / |largest clique|`. Always `>= 1`, because a
-/// clique's adjacent gaps are all `<= tau` and so it lies inside a chain.
+/// `rho(tau) = |largest chain| / |largest clique|`.
+///
+/// `>= 1` for the non-increasing input this layer requires, because a clique's
+/// adjacent gaps are then all `<= tau` and so it lies inside a chain. The bound
+/// rests on that order and is not checked: on unsorted scores both sides are
+/// computed over intervals that no longer correspond and the ratio falls below
+/// one. The normative Python says the same, and its docstring names
+/// `[0.07, 0.01, 0.84, 0.26, 0.23, 1.0]` at `tau = 0.2`, which gives 0.5.
 [[nodiscard]] inline Real chain_inflation_ratio(std::span<const Real> sorted_scores, Real tau) {
     const auto chains = tie_chains(sorted_scores, tau);
     const auto cliques = tie_cliques(sorted_scores, tau);

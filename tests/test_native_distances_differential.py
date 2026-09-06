@@ -120,6 +120,15 @@ def test_kendall_tau_refuses_differing_sets_on_both_sides() -> None:
     with pytest.raises(ValueError, match="same set"):
         nat.kendall_tau_distance(ids([1, 2]), ids([1, 3]))
 
+    # Same length and same set, different multiplicities. Both sides were blind
+    # to this -- Python compared `set`s, the core `unordered_set`s -- and both
+    # returned 0.0 rather than refusing. The sweep above cannot reach it: it
+    # builds every list with `rng.sample`, which is duplicate-free.
+    with pytest.raises(ValueError, match="same multiplicities"):
+        kendall_tau_distance([1, 1, 2], [1, 2, 2])
+    with pytest.raises(ValueError, match="same multiplicities"):
+        nat.kendall_tau_distance(ids([1, 1, 2]), ids([1, 2, 2]))
+
 
 # ---------------------------------------------------------------------------
 # FKS
