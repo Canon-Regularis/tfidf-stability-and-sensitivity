@@ -98,6 +98,33 @@ jobs:
             tests: >-
               tests/test_analysis_harness.py tests/test_doc_references.py
               tests/test_public_api_surface.py
+          # 51 sites, 46 killed, all 5 survivors already documented and nothing
+          # stale: this one needed no change at all, which is the outcome the
+          # other two had to be worked towards.
+          - module: src/tfidf_stability/perturbation/vector_perturb.py
+            tests: >-
+              tests/test_perturbation_bounds.py tests/test_perturbation_experiments.py
+              tests/test_public_api_surface.py
+          - module: src/tfidf_stability/perturbation/idf_perturb.py
+            tests: >-
+              tests/test_perturbation_bounds.py tests/test_perturbation_experiments.py
+              tests/test_public_api_surface.py
+          - module: src/tfidf_stability/similarity/geometry.py
+            tests: >-
+              tests/test_cosine_edge_cases.py tests/test_perturbation_bounds.py
+              tests/test_public_api_surface.py
+          - module: src/tfidf_stability/similarity/scoring.py
+            tests: tests/test_scoring_kernels.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/analysis/summarise.py
+            tests: tests/test_analysis_harness.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/ranking/distances.py
+            tests: >-
+              tests/test_ordering_distances.py tests/test_native_distances_differential.py
+              tests/test_tie_break_ablations.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/profiles/query_modes.py
+            tests: >-
+              tests/test_profiles_and_loo.py tests/test_query_grid_protocol.py
+              tests/test_public_api_surface.py
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
@@ -145,6 +172,7 @@ jobs:
           - cpp/include/tfidf/ranking/ranker.hpp
           - cpp/include/tfidf/ranking/sort_keys.hpp
           - cpp/include/tfidf/ranking/tie_groups.hpp
+          - cpp/include/tfidf/ranking/distances.hpp
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6

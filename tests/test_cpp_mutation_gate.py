@@ -203,13 +203,10 @@ def test_each_mutation_kind_is_produced_on_a_line_that_uses_it(before: str, afte
 #: Headers whose campaign has not been triaged, so they cannot join the nightly
 #: matrix without failing it every night. Each must say why; moving one out means
 #: killing its survivors or arguing them in configs/equivalent_mutants_cpp.txt.
-_NOT_YET_RECONCILED = {
-    "cpp/include/tfidf/ranking/distances.hpp": (
-        "kendall_tau_distance grew a multiset guard after this header's campaign "
-        "ran, so its candidate set is no longer the one that was measured and the "
-        "survivors have to be re-measured before they can be argued"
-    ),
-}
+#: Every header is scheduled. Kept as an empty set rather than deleted: a new
+#: header must be either scheduled or deferred with a reason, and the test
+#: below needs somewhere to say the second.
+_NOT_YET_RECONCILED: dict[str, str] = {}
 
 
 def _matrix() -> set[str]:

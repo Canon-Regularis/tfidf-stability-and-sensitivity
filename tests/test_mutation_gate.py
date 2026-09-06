@@ -579,16 +579,10 @@ _NOT_YET_SCHEDULED = {
     "src/tfidf_stability/datasets/synthetic.py",
     "src/tfidf_stability/vectorisation/sparse.py",
     "src/tfidf_stability/vectorisation/vocabulary.py",
-    "src/tfidf_stability/perturbation/vector_perturb.py",
-    "src/tfidf_stability/ranking/distances.py",
-    "src/tfidf_stability/similarity/scoring.py",
-    "src/tfidf_stability/perturbation/idf_perturb.py",
     "src/tfidf_stability/vectorisation/tfidf.py",
-    "src/tfidf_stability/similarity/geometry.py",
     "src/tfidf_stability/benchmarks/tfidf_perf.py",
     "src/tfidf_stability/similarity/cosine.py",
     "src/tfidf_stability/perturbation/experiments.py",
-    "src/tfidf_stability/analysis/summarise.py",
     "src/tfidf_stability/cli/main.py",
     "src/tfidf_stability/ranking/ranker.py",
     "src/tfidf_stability/utils/io.py",
@@ -596,7 +590,6 @@ _NOT_YET_SCHEDULED = {
     "src/tfidf_stability/preprocessing/tokenise.py",
     "src/tfidf_stability/preprocessing/stopwords.py",
     "src/tfidf_stability/preprocessing/ngrams.py",
-    "src/tfidf_stability/profiles/query_modes.py",
     "src/tfidf_stability/profiles/user_profile.py",
     "src/tfidf_stability/analysis/stratify.py",
     "src/tfidf_stability/analysis/query_grid.py",
@@ -639,3 +632,46 @@ def test_no_module_gains_an_unrecheckable_argument() -> None:
     )
     gone = {m for m in _NOT_YET_SCHEDULED if not (REPO / m).exists()}
     assert not gone, f"pending modules that no longer exist: {sorted(gone)}"
+
+
+def test_every_scheduled_module_and_its_tests_exist() -> None:
+    """A matrix entry names paths as bare strings, and nothing resolves them.
+
+    Both halves matter and both fail silently. A module path that no longer
+    exists makes the runner exit before it starts. A test path that no longer
+    exists is worse: pytest reports a collection error, the runner reads a
+    non-zero exit as "the tests noticed", and every mutant is scored killed --
+    a perfect mutation score for a module nothing tested. That mistake was made
+    while assembling this matrix, so it is not hypothetical.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
+    )
+    entries = workflow["jobs"]["mutation"]["strategy"]["matrix"]["include"]
+    assert entries, "no module is scheduled; the check is vacuous"
+
+    missing = []
+    for entry in entries:
+        if not (REPO / entry["module"]).is_file():
+            missing.append(f"module {entry['module']}")
+        for test in str(entry["tests"]).split():
+            if not (REPO / test).is_file():
+                missing.append(f"{entry['module']} names {test}")
+    assert not missing, "nightly mutation matrix points at paths that do not exist: " + "; ".join(
+        missing
+    )
+
+
+def test_no_scheduled_module_is_also_listed_as_pending() -> None:
+    """The two lists are maintained by hand and must not overlap: a module in
+    both reads as scheduled to the matrix and as deferred to a reader."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
+    )
+    scheduled = {e["module"] for e in workflow["jobs"]["mutation"]["strategy"]["matrix"]["include"]}
+    overlap = scheduled & _NOT_YET_SCHEDULED
+    assert not overlap, f"scheduled and deferred at once: {sorted(overlap)}"
