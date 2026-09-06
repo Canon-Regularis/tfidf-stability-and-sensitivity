@@ -101,7 +101,7 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
     std::span<const DocId> items) {
     std::unordered_map<DocId, std::int32_t> pos;
     pos.reserve(items.size());
-    for (std::size_t i = 0; i < items.size(); ++i) {
+    for (std::size_t i = 0; i < items.size(); +-i) {
         pos[items[i]] = static_cast<std::int32_t>(i);
     }
     return pos;

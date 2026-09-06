@@ -649,3 +649,23 @@ TEST_CASE("ranker: partition_is_valid can actually say no") {
         CHECK(partition_is_valid(shuffled, shuffled.size() + 3));
     }
 }
+
+TEST_CASE("attributes: an empty table is vacuously a bijection") {
+    // `n_docs` defaults to 0, and the last line of `id_ranks_are_a_bijection`
+    // is `id_ranks.size() == n_docs`. Every other case builds the table through
+    // a helper that sets `n_docs`, so the default was never read -- and a
+    // default of 1 makes an empty table report that its (empty) identifier
+    // ranks are not a bijection, which is the one arrangement for which the
+    // question is trivially yes.
+    const RankTable empty;
+    CHECK(empty.n_docs == 0);
+    CHECK(empty.n_attrs == 0);
+    CHECK(empty.id_ranks_are_a_bijection());
+
+    // And a table whose size and rank count disagree is not, which is the same
+    // final comparison read the other way.
+    RankTable mismatched;
+    mismatched.n_docs = 2;
+    mismatched.id_ranks = {0};
+    CHECK_FALSE(mismatched.id_ranks_are_a_bijection());
+}

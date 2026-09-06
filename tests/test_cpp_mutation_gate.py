@@ -204,12 +204,11 @@ def test_each_mutation_kind_is_produced_on_a_line_that_uses_it(before: str, afte
 #: matrix without failing it every night. Each must say why; moving one out means
 #: killing its survivors or arguing them in configs/equivalent_mutants_cpp.txt.
 _NOT_YET_RECONCILED = {
-    "cpp/include/tfidf/ranking/distances.hpp": "campaign run, 13 survivors untriaged (87.9%)",
-    "cpp/include/tfidf/ranking/margins.hpp": "campaign run, 15 survivors untriaged (65.1%)",
-    "cpp/include/tfidf/ranking/sort_keys.hpp": "campaign run, 10 survivors untriaged (69.7%)",
-    "cpp/include/tfidf/ranking/attributes.hpp": "campaign run, 8 survivors untriaged (55.6%)",
-    "cpp/include/tfidf/ranking/ranker.hpp": "campaign run, 6 survivors untriaged (73.9%)",
-    "cpp/include/tfidf/ranking/tie_groups.hpp": "campaign run, 6 survivors untriaged (89.7%)",
+    "cpp/include/tfidf/ranking/distances.hpp": (
+        "kendall_tau_distance grew a multiset guard after this header's campaign "
+        "ran, so its candidate set is no longer the one that was measured and the "
+        "survivors have to be re-measured before they can be argued"
+    ),
 }
 
 

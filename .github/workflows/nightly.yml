@@ -104,6 +104,11 @@ jobs:
           - cpp/include/tfidf/core/types.hpp
           - cpp/include/tfidf/vectorisation/sparse.hpp
           - cpp/include/tfidf/similarity/scoring.hpp
+          - cpp/include/tfidf/ranking/attributes.hpp
+          - cpp/include/tfidf/ranking/margins.hpp
+          - cpp/include/tfidf/ranking/ranker.hpp
+          - cpp/include/tfidf/ranking/sort_keys.hpp
+          - cpp/include/tfidf/ranking/tie_groups.hpp
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
