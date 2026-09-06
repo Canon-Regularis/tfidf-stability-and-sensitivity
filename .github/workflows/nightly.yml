@@ -46,6 +46,27 @@ jobs:
       # One job per module, each scoped to that module's own test file plus the
       # package surface suite. Mutation cost is (sites x suite time), so pointing
       # every module at the whole suite would turn a twenty-minute run into days.
+      #
+      # Why this list is three modules and not thirty-four, measured rather than
+      # assumed. Scoping a module to every test that can transitively reach it
+      # is the rigorous choice -- a mutant surviving that is a true survivor,
+      # with no risk of a false one from too narrow a scope -- but it does not
+      # fit: utils/numerics.py is reachable from 27 test files, a 210s run
+      # against 62 sites, which is 217 minutes; vectorisation/sparse.py is 20
+      # files and 182 minutes. Both exceed this job's budget several times over.
+      # Roughly 7 to 9 seconds of every run is interpreter startup and
+      # collection, so a narrow scope does not help as much as it looks.
+      #
+      # The second constraint is subtler and is why modules cannot simply be
+      # added here: widening a module's scope kills mutants its original,
+      # narrower campaign recorded as survivors, and configs/equivalent_mutants
+      # .txt then fails on the other side -- an entry that matches no survivor.
+      # Adding a module therefore means running its campaign and reconciling its
+      # entries first, not editing this list.
+      #
+      # tests/test_mutation_gate.py tracks the consequence: 104 of the 109
+      # allowlist entries belong to modules no job here re-runs, so most of that
+      # file is currently unfalsifiable. Its _NOT_YET_SCHEDULED set names them.
       # Splitting also means a survivor names the module it came from without any
       # further digging.
       #
@@ -62,6 +83,21 @@ jobs:
             tests: tests/test_margins_and_flip_radii.py tests/test_public_api_surface.py
           - module: src/tfidf_stability/ranking/sort_keys.py
             tests: tests/test_ranking_tie_breaks.py tests/test_public_api_surface.py
+          # Added after running its campaign and confirming the result rather
+          # than by editing this list: 63 sites, 54 killed, and all 9 survivors
+          # already matched by an entry in the allowlist, in 346s. That takes
+          # nine of the entries nothing re-ran and makes them falsifiable again.
+          - module: src/tfidf_stability/analysis/noise_floor.py
+            tests: tests/test_analysis_harness.py tests/test_public_api_surface.py
+          # Also run before being added, and it earned its place: 72 sites, 65
+          # killed, all 7 survivors documented -- and four entries that no
+          # longer matched anything, deleted in the same commit. Those four are
+          # what the rot looks like, and nothing had re-run this module to find
+          # them.
+          - module: src/tfidf_stability/analysis/stability_profile.py
+            tests: >-
+              tests/test_analysis_harness.py tests/test_doc_references.py
+              tests/test_public_api_surface.py
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7

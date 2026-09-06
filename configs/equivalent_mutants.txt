@@ -184,14 +184,10 @@ src/tfidf_stability/analysis/noise_floor.py  357  constant  0.0 -> 1.0  # src=d7
 src/tfidf_stability/analysis/stability_profile.py  207  compare  GtE -> Gt  # src=13ab22bd at k == n the margin is undefined, so both paths exclude the query
 src/tfidf_stability/analysis/stability_profile.py  223  binop  Add -> Sub  # src=bdcdc388 subtracting a symmetric uniform draw is distributionally identical
 src/tfidf_stability/analysis/stability_profile.py  269  compare  GtE -> Gt  # src=13ab22bd at k == n the certified radius is undefined, so both paths count it undefined
-src/tfidf_stability/analysis/stability_profile.py  287  binop  Mult -> Div  # src=a5c00ff5 both forms still populate the certified and uncertified rows
-src/tfidf_stability/analysis/stability_profile.py  287  constant  0.0 -> 1.0  # src=a5c00ff5 likewise
 src/tfidf_stability/analysis/stability_profile.py  288  binop  Add -> Sub  # src=bdcdc388 symmetric draw again
 src/tfidf_stability/analysis/stability_profile.py  293  constant  0.0 -> 1.0  # src=838b24b2 scores are non-empty past the k >= len guard
 src/tfidf_stability/analysis/stability_profile.py  293  constant  True -> False  # src=838b24b2 perturbed is built from scores one line earlier
 src/tfidf_stability/analysis/stability_profile.py  295  compare  Lt -> LtE  # src=e0fdbf71 separable only by a draw landing exactly on the radius
-src/tfidf_stability/analysis/stability_profile.py  302  constant  False -> True  # src=f2810538 see the cell-identity test; the totals still reconcile under this swap
-src/tfidf_stability/analysis/stability_profile.py  302  constant  True -> False  # src=f2810538 likewise
 
 # --- benchmarks/tfidf_perf.py ----------------------------------------------
 src/tfidf_stability/benchmarks/tfidf_perf.py  190  constant  True -> False  # src=e15604aa check_same_bits raises on a length mismatch two lines earlier, so strict never fires

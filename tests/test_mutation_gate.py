@@ -575,8 +575,6 @@ def test_an_entry_whose_only_reason_is_its_fingerprint_is_refused(tmp_path: Path
 #: too narrow a list reports survivors the whole suite would kill.
 _NOT_YET_SCHEDULED = {
     "src/tfidf_stability/ranking/attributes.py",
-    "src/tfidf_stability/analysis/stability_profile.py",
-    "src/tfidf_stability/analysis/noise_floor.py",
     "src/tfidf_stability/utils/numerics.py",
     "src/tfidf_stability/datasets/synthetic.py",
     "src/tfidf_stability/vectorisation/sparse.py",
