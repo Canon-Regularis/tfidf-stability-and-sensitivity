@@ -37,11 +37,21 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
     # fix; the header is the second line of defence for a build that bypasses
     # this file.
     -fsigned-zeros
-    -fexcess-precision=standard       # rule 3
   )
+  include(CheckCXXCompilerFlag)
+
+  # rule 3, probed rather than assumed: GCC implements it for C++ only from
+  # GCC 13 and earlier front ends reject it outright, failing the build.
+  # manylinux_2_28 ships GCC 12. Where it is unavailable the rule rests on the
+  # target evaluating each operation in its own type, which fp_guard.hpp reads
+  # off FLT_EVAL_METHOD and `fp_selftest` reports.
+  check_cxx_compiler_flag("-fexcess-precision=standard" TFIDF_HAS_EXCESS_PRECISION)
+  if(TFIDF_HAS_EXCESS_PRECISION)
+    target_compile_options(tfidf_numerics_strict INTERFACE -fexcess-precision=standard)
+  endif()
+
   # x87 carries 80-bit intermediates; SSE2 is exactly binary64. Irrelevant on
   # x86-64 (SSE2 is the default ABI) but decisive on 32-bit hosts.
-  include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag("-mfpmath=sse" TFIDF_HAS_MFPMATH_SSE)
   if(TFIDF_HAS_MFPMATH_SSE)
     target_compile_options(tfidf_numerics_strict INTERFACE -mfpmath=sse)
