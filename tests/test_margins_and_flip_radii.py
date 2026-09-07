@@ -673,26 +673,32 @@ def test_halving_a_margin_and_doubling_it_back_recovers_it_exactly(value: float)
     assert same_bits(2.0 * margin.flip_radius, value)
 
 
-def test_the_exactness_claim_fails_at_the_smallest_subnormal() -> None:
-    """The one margin where halving is not a shift.
+def test_the_exactness_claim_fails_for_every_odd_subnormal_margin() -> None:
+    """Where halving is not a shift.
 
-    `flip_radius` documents itself as exact: "division by a power of two only
-    shifts the exponent, so `2 * flip_radius` recovers `value` bit for bit".
-    At `5e-324` there is no exponent left to shift, so the halving rounds to
-    zero and the round trip returns `0.0` instead of the margin.
+    A subnormal has no exponent left to shift, so the halving rounds to nearest
+    even: every odd multiple of `5e-324` loses its low bit, and `5e-324` itself
+    halves to zero. Even multiples still round-trip, so the boundary is parity
+    in the subnormal range rather than the smallest subnormal alone.
 
-    Pinned rather than repaired. The consequence is real but bounded: a
-    certified radius of `0.0` is *conservative* -- it certifies nothing, where
-    the true radius is a fraction of the smallest subnormal -- so no ranking is
-    ever wrongly certified as stable. Reaching it needs two adjacent scores one
-    subnormal apart, far below the noise floor the tau band is derived from.
+    The consequence is bounded: a radius that rounds down is *conservative* --
+    it certifies less than the true radius, so no ranking is ever wrongly
+    certified as stable. Reaching it needs two adjacent scores a subnormal
+    apart, far below the noise floor the tau band is derived from.
     """
     smallest = 5e-324
-    margin = Margin("boundary", 1, 1, smallest, True)
 
+    margin = Margin("boundary", 1, 1, smallest, True)
     assert margin.flip_radius == 0.0
     assert 2.0 * margin.flip_radius != smallest
     assert not margin.is_exact_tie, "the margin itself is still non-zero"
+
+    def round_trips(multiple: int) -> bool:
+        value = multiple * smallest
+        return same_bits(2.0 * Margin("boundary", 1, 1, value, True).flip_radius, value)
+
+    assert [m for m in range(1, 40, 2) if round_trips(m)] == [], "odd multiples lose a bit"
+    assert [m for m in range(2, 40, 2) if not round_trips(m)] == [], "even multiples survive"
 
 
 def test_the_flip_radius_of_a_negative_zero_margin_keeps_its_sign() -> None:

@@ -660,21 +660,21 @@ def test_the_smallest_positive_value_is_one_ulp_from_zero() -> None:
     assert ulps_between(5e-324, 0.0) == -1.0
 
 
-def test_the_distance_between_the_extremes_overflows_to_negative_infinity() -> None:
-    """A latent defect, pinned rather than repaired.
-
-    Both arguments are finite, so the non-finite guard does not fire, and the
-    documented contract says `inf` is reserved for a non-finite input. But
-    `b - a` is `-1.8e308`, which overflows, and the result is `-inf` -- a
-    magnitude the caller cannot distinguish from "one of these was not a number".
-
-    Unreachable from this project's data, where the quantities compared are
-    similarities and margins in `[0, 1]`. Stated so the limit of the unit is
-    written down where someone reaching for it on other data will see it.
+def test_the_distance_between_the_extremes_stays_finite() -> None:
+    """Both arguments are finite, and the contract reserves `inf` for a
+    non-finite one. `b - a` is `-3.6e308` here and overflows, so the two values
+    are scaled before they are subtracted rather than after; `scale` is a power
+    of two, so that division is exact and the orders agree everywhere the
+    subtraction does not overflow.
     """
     got = ulps_between(sys.float_info.max, -sys.float_info.max)
-    assert got == -math.inf
+    assert math.isfinite(got), "both arguments are finite, so the distance is too"
     assert math.isfinite(sys.float_info.max), "both arguments really are finite"
+
+    # `max / ulp(max)` is `2**53 - 1`, and the extremes sit that far either side
+    # of zero, so the signed distance between them is twice it.
+    assert got == -(2.0**54 - 2.0)
+    assert ulps_between(-sys.float_info.max, sys.float_info.max) == 2.0**54 - 2.0
 
 
 # ---------------------------------------------------------------------------

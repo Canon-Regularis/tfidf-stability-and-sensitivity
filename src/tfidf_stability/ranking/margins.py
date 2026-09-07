@@ -68,8 +68,10 @@ class Margin:
     def flip_radius(self) -> float:
         """``eps_k^flip = m_k / 2`` (section 2.3.2).
 
-        Exact: division by a power of two only shifts the exponent, so
-        ``2 * flip_radius`` recovers ``value`` bit for bit.
+        Halving shifts the exponent, so ``2 * flip_radius`` recovers ``value``
+        bit for bit for every normal margin. Subnormals have no exponent left to
+        shift: an odd multiple of ``5e-324`` loses its low bit to round-half-to-
+        even, and ``5e-324`` itself halves to zero.
         """
         return self.value / 2.0
 

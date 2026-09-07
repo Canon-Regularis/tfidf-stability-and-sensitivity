@@ -113,7 +113,14 @@ class Ranking:
             )
 
     def top_k(self, k: int) -> tuple[int, ...]:
-        """The first ``k`` document indices."""
+        """The first ``k`` document indices.
+
+        Both bounds are checked: ``order[:k]`` is a legal slice for a negative
+        ``k`` and returns all but the last few, which is not a prefix of any
+        length a caller asked for.
+        """
+        if k < 0:
+            raise ValueError(f"top_k({k}) is not a prefix; k must be non-negative")
         if k > self.n_selected:
             raise ValueError(f"top_k({k}) but only {self.n_selected} documents were selected")
         return self.order[:k]

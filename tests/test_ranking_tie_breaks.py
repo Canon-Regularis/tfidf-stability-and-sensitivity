@@ -1248,20 +1248,21 @@ def test_asking_for_no_documents_at_all_returns_nothing() -> None:
     assert _ranked().top_k(0) == ()
 
 
-def test_a_negative_top_k_silently_drops_from_the_end() -> None:
-    """`order[:-1]` is a legal slice, so a `k` that arrived negative returns
-    almost the whole ranking rather than raising. The upper bound is checked and
-    the lower one is not.
-
-    Pinned as the asymmetry it is -- the same slicing trap as `short(digest, -1)`
-    in the hashing module, and reached the same way.
+def test_a_negative_top_k_is_refused_rather_than_dropping_from_the_end() -> None:
+    """`order[:-1]` is a legal slice, so an unchecked negative `k` returns
+    almost the whole ranking instead of a prefix. Both bounds are checked, so
+    the two ends of the range fail the same way rather than one silently.
     """
     ranking = _ranked(4)
-    assert len(ranking.top_k(-1)) == 3
-    assert ranking.top_k(-1) == ranking.order[:-1]
 
+    with pytest.raises(ValueError, match=r"top_k\(-1\) is not a prefix"):
+        ranking.top_k(-1)
     with pytest.raises(ValueError, match=r"top_k\(5\) but only 4 documents were selected"):
         ranking.top_k(5)
+
+    # The two ends that are legal: an empty prefix, and the whole ranking.
+    assert ranking.top_k(0) == ()
+    assert ranking.top_k(4) == ranking.order
 
 
 @pytest.mark.parametrize("j", [0, -1, 5, 99])

@@ -57,15 +57,15 @@ src/tfidf_stability/ranking/attributes.py  443  constant  0 -> 1  # src=f0761228
 src/tfidf_stability/ranking/attributes.py  452  constant  0 -> 1  # src=ce4e4d1b the missing-scalar placeholder, filtered out by has_value
 
 # --- ranking/ranker.py -----------------------------------------------------
-src/tfidf_stability/ranking/ranker.py  181  compare  Lt -> LtE  # src=59e83664 sort keys terminate in the unique doc id, so no two compare equal and the tie branch is unreachable
+src/tfidf_stability/ranking/ranker.py  188  compare  Lt -> LtE  # src=59e83664 sort keys terminate in the unique doc id, so no two compare equal and the tie branch is unreachable
 
 # --- ranking/tie_groups.py -------------------------------------------------
 src/tfidf_stability/ranking/tie_groups.py  227  boolop  Or -> And  # src=28312cda chains and cliques are always both empty or both non-empty, both being covers of the same input; asserted by test_chains_and_cliques_are_empty_together and checked over 31248 (scores, tau) combinations
 src/tfidf_stability/ranking/tie_groups.py  335  boolop  Or -> And  # src=5f0336ee the same pair on the cached property
 
 # --- ranking/margins.py ----------------------------------------------------
-src/tfidf_stability/ranking/margins.py  147  constant  2 -> 1  # src=8f629c39 marked `# pragma: no cover - defensive`; n < 2 is refused before this point
-src/tfidf_stability/ranking/margins.py  148  constant  False -> True  # src=c19c3ab9 the same unreachable defensive return
+src/tfidf_stability/ranking/margins.py  149  constant  2 -> 1  # src=8f629c39 marked `# pragma: no cover - defensive`; n < 2 is refused before this point
+src/tfidf_stability/ranking/margins.py  150  constant  False -> True  # src=c19c3ab9 the same unreachable defensive return
 
 # --- ranking/distances.py --------------------------------------------------
 src/tfidf_stability/ranking/distances.py  87  constant  0 -> 1  # src=df18baa6 a merge scratch buffer, every entry overwritten before it is read
@@ -79,12 +79,12 @@ src/tfidf_stability/ranking/sort_keys.py  155  compare  LtE -> Lt  # src=7c4df57
 src/tfidf_stability/utils/numerics.py  112  compare  GtE -> Gt  # src=2a87a12d at equal magnitude both Neumaier branches compute the same compensation; verified across sign combinations and at 1e300
 src/tfidf_stability/utils/numerics.py  273  constant  0.0 -> 1.0  # src=4ce04a9e marked `# pragma: no cover`; reachable only if ulp() returns zero
 src/tfidf_stability/utils/numerics.py  274  constant  0.0 -> 1.0  # src=8725d058 the same unreachable arm
-src/tfidf_stability/utils/numerics.py  322  binop  Div -> Mult  # src=aa0e3e69 the flush-to-zero probe: both forms report the same boolean on a machine that is not flushing, which is the only kind a test can run on
-src/tfidf_stability/utils/numerics.py  322  compare  Gt -> GtE  # src=aa0e3e69 same probe, same reason
-src/tfidf_stability/utils/numerics.py  338  binop  Add -> Sub  # src=a6a003b6 the constant-folding probe answers the same on a conforming interpreter
-src/tfidf_stability/utils/numerics.py  339  binop  Add -> Sub  # src=199a247b the reassociation probe, likewise
+src/tfidf_stability/utils/numerics.py  326  binop  Div -> Mult  # src=aa0e3e69 the flush-to-zero probe: both forms report the same boolean on a machine that is not flushing, which is the only kind a test can run on
+src/tfidf_stability/utils/numerics.py  326  compare  Gt -> GtE  # src=aa0e3e69 same probe, same reason
+src/tfidf_stability/utils/numerics.py  342  binop  Add -> Sub  # src=a6a003b6 the constant-folding probe answers the same on a conforming interpreter
+src/tfidf_stability/utils/numerics.py  343  binop  Add -> Sub  # src=199a247b the reassociation probe, likewise
 
-src/tfidf_stability/utils/numerics.py  311  boolop  And -> Or  # src=b8983b47 the fourth probe of the family documented at 322, 338 and 339: all three conjuncts are true on any machine a test can run on, so `and` and `or` return the same boolean and only a directed rounding mode could separate them
+src/tfidf_stability/utils/numerics.py  315  boolop  And -> Or  # src=b8983b47 the fourth probe of the family documented at 322, 338 and 339: all three conjuncts are true on any machine a test can run on, so `and` and `or` return the same boolean and only a directed rounding mode could separate them
 
 # --- utils/io.py -----------------------------------------------------------
 src/tfidf_stability/utils/io.py  114  constant  True -> False  # src=d976dced the temp file always exists in the except arm, so missing_ok never fires

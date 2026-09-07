@@ -272,7 +272,11 @@ def ulps_between(a: float, b: float) -> float:
     scale = ulp(max(abs(a), abs(b)))
     if scale == 0.0:  # pragma: no cover - both subnormal-zero
         return 0.0
-    return (b - a) / scale
+    # Scaled before the subtraction rather than after it: `b - a` overflows for
+    # arguments of opposite sign near the maximum, and `-inf` is the value the
+    # contract above reserves for a non-finite argument. `scale` is a power of
+    # two, so dividing first is exact and the two orders agree elsewhere.
+    return b / scale - a / scale
 
 
 # ---------------------------------------------------------------------------
