@@ -69,7 +69,6 @@ src/tfidf_stability/ranking/margins.py  148  constant  False -> True  # src=c19c
 
 # --- ranking/distances.py --------------------------------------------------
 src/tfidf_stability/ranking/distances.py  87  constant  0 -> 1  # src=df18baa6 a merge scratch buffer, every entry overwritten before it is read
-src/tfidf_stability/ranking/distances.py  171  compare  Lt -> LtE  # src=5560e194 a shortcut, not a correction: at k = 0 the closed form already evaluates to 0.0, and negative k returns early either way
 src/tfidf_stability/ranking/distances.py  229  compare  Lt -> LtE  # src=75c13ecb ranking positions are distinct by construction
 src/tfidf_stability/ranking/distances.py  237  compare  Lt -> LtE  # src=234423a3 likewise, within each of the two lists
 
