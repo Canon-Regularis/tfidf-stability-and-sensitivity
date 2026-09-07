@@ -195,19 +195,24 @@ def check_unique_ids(ids: Sequence[object]) -> None:
 def resolve_k(k: int, n: int, mode: StrictMode = StrictMode.STRICT) -> int:
     """Validate ``k`` against a corpus of ``n`` rankable documents.
 
-    Returns the effective ``k``. Strict mode raises on an over-large ``k``;
-    lenient mode clamps to ``n``, and the caller is then expected to record
-    ``k_effective``. See ``docs/spec_addenda.md#g3``.
+    Returns the effective ``k``. Only ``StrictMode.LENIENT`` clamps to ``n``,
+    with the caller then recording ``k_effective``; every other mode raises, so
+    an unrecognised one cannot clamp in silence. See ``docs/spec_addenda.md#g3``.
+
+    Tested against ``StrictMode.LENIENT`` rather than ``StrictMode.STRICT``
+    because ``StrictMode`` is a ``str`` enum: ``"strict"`` equals the strict
+    member without being it, so an identity test on the strict branch sends the
+    documented string spelling to the clamp.
     """
     if k <= 0:
         raise KOutOfRangeError(f"k must be positive, got {k}")
     if k <= n:
         return k
-    if mode is StrictMode.STRICT:
-        raise KOutOfRangeError(
-            f"k={k} exceeds the {n} rankable documents. Use StrictMode.LENIENT to clamp."
-        )
-    return n
+    if mode == StrictMode.LENIENT:
+        return n
+    raise KOutOfRangeError(
+        f"k={k} exceeds the {n} rankable documents. Use StrictMode.LENIENT to clamp."
+    )
 
 
 def _unreachable(msg: str) -> NoReturn:  # pragma: no cover - defensive

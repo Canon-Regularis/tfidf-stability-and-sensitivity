@@ -243,20 +243,25 @@ def test_a_boolean_k_is_the_integer_it_equals() -> None:
     assert resolve_k(True, 5, StrictMode.STRICT) == 1
 
 
-def test_a_mode_given_as_a_string_clamps_instead_of_refusing() -> None:
-    """A latent trap, pinned rather than fixed.
-
-    `StrictMode` is a `str` enum and the check is `mode is StrictMode.STRICT`, so
-    the string `"strict"` compares equal to the member and *is not* it -- an
-    over-large k then takes the lenient branch and clamps. No current caller can
-    reach this: every one passes the member. It would become live the moment a
-    config key were read straight through into `mode`.
+def test_only_an_explicit_lenient_mode_clamps_an_over_large_k() -> None:
+    """`StrictMode` is a `str` enum, so `"strict"` compares equal to the strict
+    member without being it. The clamp is therefore guarded on `LENIENT`: the
+    string spelling, and any value that is neither member, raise rather than
+    clamp, which is G3's "never a silent clamp".
     """
     assert StrictMode.STRICT == "strict", "the premise: equality holds"
-    assert resolve_k(9, 5, "strict") == 5  # type: ignore[arg-type]
+    assert StrictMode.STRICT is not "strict"  # noqa: F632 - the premise, stated
 
-    with pytest.raises(KOutOfRangeError, match="k=9 exceeds the 5 rankable documents"):
-        resolve_k(9, 5, StrictMode.STRICT)
+    refused = 0
+    for mode in (StrictMode.STRICT, "strict", "STRICT", "nonsense", None, 0):
+        with pytest.raises(KOutOfRangeError, match="k=9 exceeds the 5 rankable documents"):
+            resolve_k(9, 5, mode)  # type: ignore[arg-type]
+        refused += 1
+    assert refused == 6
+
+    # The one mode that clamps, by either spelling of it.
+    assert resolve_k(9, 5, StrictMode.LENIENT) == 5
+    assert resolve_k(9, 5, "lenient") == 5  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
