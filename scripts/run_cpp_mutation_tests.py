@@ -270,9 +270,28 @@ def build_and_test(build: str, target: str, test_timeout: int) -> str:
     return "killed" if tested.returncode != 0 else "survived"
 
 
+def verify_baseline(build: str, target: str, test_timeout: int) -> None:
+    """Refuse to score anything against a tree whose tests already fail.
+
+    A verdict here is "ctest returned non-zero", so a red baseline scores every
+    mutant as killed and the campaign reports a clean sweep. A campaign killed
+    outright does not run its restore, so the tree it was mutating is one way a
+    baseline goes red. `build_and_test` names verdicts from the mutant's side,
+    so an unmutated tree that passes is `survived`.
+    """
+    verdict = build_and_test(build, target, test_timeout)
+    if verdict != "survived":
+        raise SystemExit(
+            f"baseline is not green: unmutated, {build} reports '{verdict}', so every "
+            f"mutant would score as killed and the campaign would report a clean sweep.\n"
+            f"Check `git status` for a header left mutated by an interrupted campaign."
+        )
+
+
 def campaign(
     relative: str, build: str, target: str, limit: int | None, test_timeout: int
 ) -> dict[str, object]:
+    verify_baseline(build, target, test_timeout)
     path = REPO / relative
     with path.open(encoding="utf-8", newline="") as handle:
         original = handle.read()

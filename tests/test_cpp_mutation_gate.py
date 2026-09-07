@@ -200,6 +200,37 @@ def test_each_mutation_kind_is_produced_on_a_line_that_uses_it(before: str, afte
     assert (before, after) in produced
 
 
+@pytest.mark.parametrize("verdict", ["killed", "stillborn"])
+def test_a_red_baseline_stops_the_campaign_rather_than_being_scored(verdict: str) -> None:
+    """A verdict is "ctest returned non-zero", so a suite that fails before any
+    mutation scores every mutant as killed and the campaign reports a clean
+    sweep. Both ways a baseline can be red refuse to start one.
+    """
+    harness = _harness()
+    harness.build_and_test = lambda build, target, test_timeout: verdict
+
+    with pytest.raises(SystemExit, match="baseline is not green"):
+        harness.verify_baseline("build-tests", "tfidf_tests", 60)
+
+
+def test_a_green_baseline_starts_the_campaign_and_is_judged_unmutated() -> None:
+    """The contrast: `survived` is the unmutated tree passing its own tests, and
+    it is the only verdict that proceeds. The arguments reach `build_and_test`
+    as given, so the baseline is judged by the build the campaign then uses.
+    """
+    harness = _harness()
+    calls: list[tuple[str, str, int]] = []
+
+    def fake_build_and_test(build: str, target: str, test_timeout: int) -> str:
+        calls.append((build, target, test_timeout))
+        return "survived"
+
+    harness.build_and_test = fake_build_and_test
+    harness.verify_baseline("build-tests", "tfidf_tests", 60)
+
+    assert calls == [("build-tests", "tfidf_tests", 60)]
+
+
 #: Headers whose campaign has not been triaged, so they cannot join the nightly
 #: matrix without failing it every night. Each must say why; moving one out means
 #: killing its survivors or arguing them in configs/equivalent_mutants_cpp.txt.
