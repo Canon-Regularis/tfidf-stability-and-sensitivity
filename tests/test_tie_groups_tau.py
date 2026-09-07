@@ -782,11 +782,17 @@ def test_an_empty_corpus_has_no_largest_group_rather_than_a_group_of_one() -> No
     """`max(..., default=0)`. A default of 1 would report a single-document
     chain in a corpus with no documents, and `rho` would then be 1.0 -- a
     perfectly-behaved ratio computed from nothing.
+
+    All three statistics take the default, and each needs its own assertion:
+    `largest_ball` folds over centres rather than over a stored list, so its
+    `default=` is a separate one from the two above it.
     """
     empty = TieGroupIndex.build((), 1.0)
     assert empty.largest_chain == 0
     assert empty.largest_clique == 0
+    assert empty.largest_ball == 0
     assert math.isnan(empty.rho)
+    assert empty.report()["largest_ball"] == 0
 
 
 # ---------------------------------------------------------------------------
