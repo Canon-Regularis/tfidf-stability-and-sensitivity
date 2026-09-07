@@ -94,7 +94,12 @@ def _band_of(value: float, defined: bool, bands: Sequence[tuple[str, float, floa
     for label, lo, hi in bands:
         if lo < value <= hi:
             return label
-    return bands[-1][0]
+    # The bands tile (0, inf) and zero is taken above, so only a negative value
+    # reaches here, which a gap between non-increasing scores cannot be. It
+    # stays in the partition so the per-k totals keep reconciling, and it goes
+    # to `undefined` rather than the top band: a margin from a broken sort is
+    # not evidence of separation.
+    return UNDEFINED_BAND
 
 
 def stratify_by_margin(

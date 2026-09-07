@@ -398,15 +398,16 @@ def test_a_result_can_be_sliced_by_operator_pair_and_by_k() -> None:
     assert result.at_k(9999) == ()
 
 
-def test_a_margin_outside_every_band_falls_into_the_last_one_rather_than_vanishing() -> None:
+def test_a_margin_outside_every_band_is_undefined_rather_than_well_separated() -> None:
     """The bands cover (0, inf), so only a negative value can miss them all --
-    which a gap between sorted scores cannot be. The fallthrough is what keeps a
-    value that got there anyway inside the partition: dropping it would make the
-    per-k totals stop reconciling with the query count, which is the check that
-    would otherwise catch the upstream bug.
+    which a gap between sorted scores cannot be. It stays inside the partition,
+    since dropping it would make the per-k totals stop reconciling with the
+    query count, but it lands in `undefined` rather than the top band, which
+    would report a broken sort as the best-separated queries in the A2 table.
     """
     bands = margin_bands(1e-9)
-    assert _band_of(-1.0, True, bands) == bands[-1][0]
+    assert _band_of(-1.0, True, bands) == UNDEFINED_BAND
+    assert _band_of(-5e-324, True, bands) == UNDEFINED_BAND, "including the smallest negative"
     assert _band_of(math.inf, True, bands) == bands[-1][0], "the top band is unbounded above"
     assert _band_of(math.nan, True, bands) == UNDEFINED_BAND
     assert _band_of(0.5, False, bands) == UNDEFINED_BAND, "undefined wins over the value"
