@@ -317,7 +317,11 @@ struct TopKComparison {
     Real kendall_intersection = std::numeric_limits<Real>::quiet_NaN();
     std::int32_t intersection_size = 0;
     Real jaccard = 0.0;
-    /// Documents that entered or left the top-k, halved: how many swaps.
+    /// The larger of the two one-way differences: how many documents left the
+    /// top-k, or entered it, whichever is greater. On equal-length prefixes the
+    /// two are equal and this is the number of swaps. On prefixes of different
+    /// lengths they are not, and halving their sum would round a one-document
+    /// difference down to no swaps while `sets_differ` reported a difference.
     std::int32_t swapped = 0;
 };
 
@@ -347,7 +351,7 @@ struct TopKComparison {
     out.fks = kendall_fks(pa, pb);
     out.intersection_size = static_cast<std::int32_t>(shared.size());
     out.jaccard = jaccard_distance(pa, pb);
-    out.swapped = static_cast<std::int32_t>((sa.size() + sb.size() - 2 * shared.size()) / 2);
+    out.swapped = static_cast<std::int32_t>(std::max(sa.size(), sb.size()) - shared.size());
 
     if (shared.size() >= 2) {
         std::vector<DocId> ra;

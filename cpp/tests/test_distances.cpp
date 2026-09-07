@@ -303,6 +303,25 @@ TEST_CASE("compare_top_k: identical lists") {
     CHECK(c.k == 3);
 }
 
+TEST_CASE("compare_top_k: prefixes of different lengths report what differs") {
+    // Membership changes come in pairs only when the prefixes are the same
+    // length. Halving the symmetric difference assumes they always do, so an
+    // odd one truncated to zero swaps while sets_differ reported a difference.
+    // G19 makes unequal prefixes a protocol case, not an accident.
+    const TopKComparison one =
+        compare_top_k(std::vector<DocId>{1, 2, 3}, std::vector<DocId>{1, 2}, 3);
+    CHECK(one.sets_differ);
+    CHECK(one.swapped == 1);  // document 3 left the top-k
+    CHECK(one.intersection_size == 2);
+
+    // Disjoint and unequal: three left, two entered, and the larger is reported
+    // rather than the mean of the two rounded down.
+    const TopKComparison disjoint =
+        compare_top_k(std::vector<DocId>{1, 2, 3}, std::vector<DocId>{4, 5}, 3);
+    CHECK(disjoint.swapped == 3);
+    CHECK(disjoint.intersection_size == 0);
+}
+
 TEST_CASE("compare_top_k: the intersection Kendall is undefined below two shared") {
     // Why K_int is never reported alone: here it reads as "no reordering" while
     // the set indicator and the FKS distance both see the change.

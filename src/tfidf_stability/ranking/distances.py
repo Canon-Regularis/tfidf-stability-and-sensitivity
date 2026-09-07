@@ -295,7 +295,11 @@ class TopKComparison:
     #: uninterpretable without it.
     intersection_size: int
     jaccard: float
-    #: Documents that entered or left the top-k, halved: the number of swaps.
+    #: The larger of the two one-way differences: how many documents left the
+    #: top-k, or entered it, whichever is greater. On equal-length prefixes the
+    #: two are equal and this is the number of swaps. On prefixes of different
+    #: lengths they are not, and halving their sum would round a one-document
+    #: difference down to no swaps while ``sets_differ`` reported a difference.
     swapped: int
 
 
@@ -319,5 +323,5 @@ def compare_top_k(a: Sequence[int], b: Sequence[int], k: int) -> TopKComparison:
         kendall_intersection=k_int,
         intersection_size=len(shared),
         jaccard=jaccard_distance(prefix_a, prefix_b),
-        swapped=len(sa ^ sb) // 2,
+        swapped=max(len(sa), len(sb)) - len(shared),
     )

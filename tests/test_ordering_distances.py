@@ -516,23 +516,28 @@ def test_a_negative_prefix_length_silently_drops_from_the_end() -> None:
     assert result.intersection_size == 1, "it compared the first two of each"
 
 
-def test_an_odd_symmetric_difference_reports_no_swaps_at_all() -> None:
-    """A latent defect, pinned.
-
-    `swapped` is `len(sa ^ sb) // 2`, which assumes membership changes come in
-    pairs -- one document leaving as another arrives. When the two prefixes have
-    different lengths the symmetric difference is odd, and the floor division
-    reports zero swaps for a comparison that simultaneously reports the sets as
-    differing.
+def test_prefixes_of_different_lengths_report_the_documents_that_differ() -> None:
+    """Membership changes come in pairs only when the prefixes are the same
+    length. Halving the symmetric difference assumes they always do, so an odd
+    one floor-divided to zero swaps for a comparison that reported the sets as
+    differing in the same breath.
 
     Reachable whenever a fold's candidate set is smaller than `k`, which G19
-    says happens by protocol rather than by accident.
+    says happens by protocol rather than by accident. `swapped` is therefore the
+    larger one-way difference, which never reads as zero while `sets_differ`
+    is true.
     """
     result = compare_top_k([1, 2, 3], [1, 2], 3)
 
     assert result.sets_differ is True
-    assert result.swapped == 0, "one document differs, and half of one is none"
+    assert result.swapped == 1, "document 3 left the top-k"
     assert result.intersection_size == 2
+
+    # Disjoint prefixes of different lengths: three left and two entered, and
+    # the count reports the larger rather than rounding their mean down.
+    disjoint = compare_top_k([1, 2, 3], [4, 5], 3)
+    assert disjoint.swapped == 3
+    assert disjoint.intersection_size == 0
 
 
 def test_a_swap_of_one_document_for_another_counts_as_one() -> None:
