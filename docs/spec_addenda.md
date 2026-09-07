@@ -686,8 +686,13 @@ Three things follow, all of which affect §7.2 and §7.3 as written:
    boundary depends on how many documents are competing for it.
 2. **`k` can exceed the candidate count** for a heavy user on a small corpus,
    which is the `k > N` case of [G3](#g3) arriving through the *protocol* rather
-   than through a configuration error. It is handled leniently, with
-   `k_effective` recorded.
+   than through a configuration error. Two layers resolve it differently, and
+   the §7.2/7.3 statistics use the second. The ranking API applies [G3](#g3):
+   strict mode raises and lenient mode clamps to `N`, recording `k_effective`
+   (`utils/validation.py:resolve_k`, `ranking/ranker.py`). The experiment layer
+   never clamps; the query is excluded and counted, because a clamped `k`
+   measures a different quantity (`analysis/stability_profile.py`, in both
+   `transition_curve` and `certificate_audit`). See [G25](#g25).
 3. **A disagreement *rate* has a varying denominator.** §7.3's "fraction of
    queries for which the top-k set differs" is well defined, but the per-query
    populations it averages over are not the same size.
@@ -1156,8 +1161,8 @@ strongest form: the tie-break is the *only* factor in the disagreement.
 ### The candidate set moves, and margins must follow it
 
 Each query excludes its own profile items (G10 decision 3), so **N differs per
-query** (G19). Three consequences the implementation must honour, all in
-`analysis/query_grid.py`:
+query** (G19). Three consequences the implementation must honour, in
+`analysis/query_grid.py` and `analysis/stability_profile.py`:
 
 1. Margins are computed over the **candidate** scores only. Computing them over
    the full corpus would include documents the query was never allowed to
@@ -1166,7 +1171,10 @@ query** (G19). Three consequences the implementation must honour, all in
    rank over non-candidates. `transition_curve` and `certificate_audit` therefore
    accept per-query tables.
 3. `k` can exceed a query's candidate count. Those queries are excluded and
-   counted, never clamped, since a clamped `k` measures a different quantity.
+   counted, never clamped, since a clamped `k` measures a different quantity
+   (`analysis/stability_profile.py`). The lenient clamp of [G3](#g3) is the
+   ranking API's rule and is not reached from here; [G19](#g19)(2) states both
+   layers side by side.
 
 ### What this means for reproduction
 
