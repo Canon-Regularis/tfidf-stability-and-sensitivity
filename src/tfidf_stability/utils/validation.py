@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from enum import Enum
-from typing import Final, NoReturn
+from typing import Final
 
 __all__ = [
     "AbiVersionMismatchError",
@@ -213,7 +213,3 @@ def resolve_k(k: int, n: int, mode: StrictMode = StrictMode.STRICT) -> int:
     raise KOutOfRangeError(
         f"k={k} exceeds the {n} rankable documents. Use StrictMode.LENIENT to clamp."
     )
-
-
-def _unreachable(msg: str) -> NoReturn:  # pragma: no cover - defensive
-    raise AssertionError(f"unreachable: {msg}")
