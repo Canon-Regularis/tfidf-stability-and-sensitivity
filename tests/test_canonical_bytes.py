@@ -652,15 +652,21 @@ def test_hashing_an_iterator_consumes_it_once() -> None:
 # ---------------------------------------------------------------------------
 # short: a display helper with a slicing trap
 # ---------------------------------------------------------------------------
-def test_a_negative_length_drops_from_the_end_instead_of_truncating() -> None:
-    """`digest[:-1]` is a legal slice, so a length arriving as -1 returns almost
-    the whole digest rather than an empty string or an error. Pinned: the
-    function is documented as "never for identity comparison", and this is the
-    shape that most looks like a full digest while not being one.
+def test_a_negative_length_is_refused_rather_than_dropping_from_the_end() -> None:
+    """`digest[:-1]` is a legal slice, so a length arriving as -1 returned almost
+    the whole digest rather than a short prefix of it -- the shape that most
+    looks like a full digest while not being one, in a value that reaches log
+    lines and filenames.
+
+    The boundary either side, so the guard sits at zero rather than somewhere
+    below it: zero is a length, and an over-long one is the whole digest.
     """
     digest = "a" * 64
-    assert len(short(digest, -1)) == 63
+    with pytest.raises(ValueError, match="length must be non-negative"):
+        short(digest, -1)
+
     assert len(short(digest, 0)) == 0
+    assert len(short(digest, 1)) == 1
     assert short(digest, 999) == digest
 
 

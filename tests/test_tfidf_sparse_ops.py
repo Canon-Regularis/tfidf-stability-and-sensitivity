@@ -899,21 +899,27 @@ def test_a_row_of_the_wrong_dimension_is_refused_wherever_it_sits(position: int)
         CsrMatrix.from_rows(rows, n_cols=4)
 
 
-def test_a_negative_row_index_yields_an_empty_row_rather_than_raising() -> None:
-    """`indptr[-1]` is the final offset and `indptr[0]` is zero, so the slice
-    runs backwards and comes out empty. Silent, and the fourth instance of a
-    negative index being accepted where the positive side is checked.
+def test_a_negative_row_index_is_refused_rather_than_yielding_an_empty_row() -> None:
+    """`indptr[-1]` is the final offset and `indptr[0]` is zero, so the slice ran
+    backwards and came out empty. A row is a document's vector, so an empty one
+    scores zero against every query instead of reporting the mistake.
+
+    Both ends now say the same thing, which is the point: the positive side was
+    already checked, by `indptr[i + 1]` running off the tuple.
     """
     matrix = CsrMatrix.from_rows(
         [SparseVector.from_mapping({0: 1.0}, 4), SparseVector.from_mapping({1: 2.0}, 4)], n_cols=4
     )
-    assert matrix.row(-1).nnz == 0
+    with pytest.raises(IndexError, match="row -1 is outside a 2-row matrix"):
+        matrix.row(-1)
+
     assert matrix.row(0).nnz == 1
+    assert matrix.row(1).nnz == 1
 
 
 def test_a_row_index_past_the_end_is_an_index_error() -> None:
     matrix = CsrMatrix.from_rows([SparseVector.from_mapping({0: 1.0}, 4)], n_cols=4)
-    with pytest.raises(IndexError, match="tuple index out of range"):
+    with pytest.raises(IndexError, match="row 1 is outside a 1-row matrix"):
         matrix.row(1)
 
 

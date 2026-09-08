@@ -109,7 +109,15 @@ def short(digest: str, length: int = 12) -> str:
 
     Never for identity comparison: 12 hex characters is 48 bits, enough to
     eyeball and far too few to rely on.
+
+    Raises:
+        ValueError: If ``length`` is negative. ``digest[:-1]`` is a legal slice
+            that drops the last character, so a negative length returned a
+            digest one character short of the full one rather than a short
+            prefix of it, and log lines and filenames carried it.
     """
+    if length < 0:
+        raise ValueError(f"length must be non-negative, got {length}")
     return digest[:length]
 
 

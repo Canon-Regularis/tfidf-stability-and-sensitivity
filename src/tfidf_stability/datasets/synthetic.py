@@ -429,6 +429,13 @@ def find_near_ties(
         The closest pairs, tightest first. ``rank`` is 1-indexed, so the pair is
         ``(r_rank, r_{rank+1})`` and ``gap`` is ``m_rank``.
     """
+    if limit < 0:
+        # `pairs[:-1]` is a legal slice that drops the widest gap instead of
+        # returning nothing, so a negative limit silently changed which pairs
+        # section 7.4 selects as its case study. The same guard as
+        # `build_query_grid`, for the same reason.
+        raise ValueError(f"limit must be non-negative, got {limit}")
+
     pairs = [
         NearTie(i + 1, above, below, above - below)
         for i, (above, below) in enumerate(pairwise(sorted_scores))

@@ -1484,3 +1484,20 @@ def test_an_unpinned_download_is_placed_so_the_first_fetch_can_pin_it(
     assert placed is True
     assert dest.read_bytes() == b"first ever download"
     assert digest == hashlib.sha256(b"first ever download").hexdigest()
+
+
+def test_a_negative_near_tie_limit_is_refused_rather_than_dropping_the_widest_gap() -> None:
+    """`pairs[:-1]` is a legal slice, so a negative limit returned all but the
+    widest gap rather than nothing -- silently changing which pair section 7.4
+    selects as its constructed near-tie case study.
+
+    The boundary either side, so the guard sits at zero rather than below it.
+    """
+    scores = [1.0, 0.9, 0.5, 0.1]
+
+    with pytest.raises(ValueError, match="limit must be non-negative"):
+        synthetic.find_near_ties(scores, limit=-1)
+
+    assert synthetic.find_near_ties(scores, limit=0) == []
+    assert len(synthetic.find_near_ties(scores, limit=1)) == 1
+    assert len(synthetic.find_near_ties(scores, limit=99)) == 3

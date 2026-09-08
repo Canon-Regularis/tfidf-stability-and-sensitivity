@@ -176,7 +176,17 @@ class CsrMatrix:
         return len(self.values)
 
     def row(self, i: int) -> SparseVector:
-        """Row ``i`` as a :class:`SparseVector`."""
+        """Row ``i`` as a :class:`SparseVector`.
+
+        Raises:
+            IndexError: If ``i`` is outside ``[0, n_rows)``. A negative ``i``
+                indexed ``indptr`` from the end, giving ``lo = nnz`` and
+                ``hi = 0`` and so an empty row, where ``i >= n_rows`` already
+                raised. The row is a document's vector, so an empty one scores
+                zero against every query rather than reporting the mistake.
+        """
+        if not 0 <= i < self.n_rows:
+            raise IndexError(f"row {i} is outside a {self.n_rows}-row matrix")
         lo, hi = self.indptr[i], self.indptr[i + 1]
         return SparseVector(indices=self.indices[lo:hi], values=self.values[lo:hi], dim=self.n_cols)
 
