@@ -124,6 +124,15 @@ contribution. `p = 0` assumes the unseen pair agrees, biasing every measurement
 *downwards*, which is the wrong direction for a study of instability; `p = 1`
 biases upwards.
 
+**The admissible domain is `p ∈ [0, 1]`**, the two endpoints being exactly the
+biased readings above, and both implementations refuse anything else. The
+normalisation below depends on it: outside the range the ceiling `k² + p·k(k−1)`
+is no longer the maximum, and for `p` negative or NaN it is negative or
+undefined, so `K̄` leaves `[0, 1]` altogether. Left unchecked the failure was
+silent and in the worst direction — the ceiling failed a `> 0` test, the
+normalisation returned the `0.0` reserved for `k = 0`, and two disjoint lists
+reported perfect agreement.
+
 > **Correction.** An earlier draft of this entry claimed `p = ½` makes `K⁽ᵖ⁾` a
 > genuine metric. **That is false.** Measured against this repository's own
 > implementation (itself cross-checked against an independently written

@@ -69,8 +69,9 @@ src/tfidf_stability/ranking/margins.py  150  constant  False -> True  # src=c19c
 
 # --- ranking/distances.py --------------------------------------------------
 src/tfidf_stability/ranking/distances.py  87  constant  0 -> 1  # src=df18baa6 a merge scratch buffer, every entry overwritten before it is read
-src/tfidf_stability/ranking/distances.py  229  compare  Lt -> LtE  # src=75c13ecb ranking positions are distinct by construction
-src/tfidf_stability/ranking/distances.py  237  compare  Lt -> LtE  # src=234423a3 likewise, within each of the two lists
+src/tfidf_stability/ranking/distances.py  185  constant  1 -> 0  # src=5560e194 the mirror of distances.hpp:203. At k = 0 the fall-through computes 0.0 + p * 0.0 * -1.0, which is bit-identically +0.0 for every admissible penalty, so the short circuit and the closed form agree. Killed until _checked_penalty fixed the domain: a non-finite penalty made the fall-through NaN, and a test passed one
+src/tfidf_stability/ranking/distances.py  252  compare  Lt -> LtE  # src=75c13ecb ranking positions are distinct by construction
+src/tfidf_stability/ranking/distances.py  260  compare  Lt -> LtE  # src=234423a3 likewise, within each of the two lists
 
 # --- ranking/sort_keys.py --------------------------------------------------
 src/tfidf_stability/ranking/sort_keys.py  155  compare  LtE -> Lt  # src=7c4df57a the self-check runs an extra size or one fewer; keys are tuples and therefore transitive, so neither finds a violation
