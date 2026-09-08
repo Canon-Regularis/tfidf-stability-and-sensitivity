@@ -220,3 +220,41 @@ def test_compare_top_k_rejects_a_negative_k() -> None:
     """Python would slice from the end; the binding refuses rather than guess."""
     with pytest.raises(ValueError, match="non-negative"):
         nat.compare_top_k(ids([1, 2]), ids([2, 1]), -1)
+
+
+@pytest.mark.parametrize("penalty", [math.nan, math.inf, -math.inf, -1.0, -0.5, 1.5, 2.0])
+def test_both_backends_refuse_a_penalty_outside_the_domain(penalty: float) -> None:
+    """G2 fixes the case-4 penalty in [0, 1]. Neither backend validated it, and
+    the failure was silent in the worst direction: the normalising ceiling came
+    out NaN or negative, `ceiling > 0.0` was false, and the distance fell to the
+    branch meant for `k = 0` -- reporting two disjoint lists as identical.
+
+    Both refuse now, which is the point: guarding only the reference would have
+    made the backends disagree on which inputs are answerable.
+    """
+    a, b = [1, 2, 3], [4, 5, 6]
+
+    with pytest.raises(ValueError, match=r"penalty must lie in \[0, 1\]"):
+        nat.kendall_fks(ids(a), ids(b), penalty, True)
+    with pytest.raises(ValueError, match=r"penalty must lie in \[0, 1\]"):
+        kendall_fks(a, b, penalty)
+
+    with pytest.raises(ValueError, match=r"penalty must lie in \[0, 1\]"):
+        nat.fks_max(3, penalty)
+    with pytest.raises(ValueError, match=r"penalty must lie in \[0, 1\]"):
+        fks_max(3, penalty)
+
+
+@pytest.mark.parametrize("penalty", [0.0, 1.0])
+def test_the_domain_endpoints_stay_admissible_and_bit_exact(penalty: float) -> None:
+    """G2 names p = 0 and p = 1 as the two biased readings it argues against, so
+    they are meaningful settings rather than out-of-range ones. A guard that
+    excluded either would refuse the spec's own comparison points.
+    """
+    a, b = [1, 2, 3], [4, 5, 6]
+    for normalise in (True, False):
+        assert same_bits(
+            nat.kendall_fks(ids(a), ids(b), penalty, normalise),
+            kendall_fks(a, b, penalty, normalise=normalise),
+        )
+    assert same_bits(nat.fks_max(3, penalty), fks_max(3, penalty))

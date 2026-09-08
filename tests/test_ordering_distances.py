@@ -401,42 +401,63 @@ def test_a_non_positive_list_length_has_no_maximum(k: int) -> None:
     assert fks_max(k) == 0.0
 
 
-@pytest.mark.parametrize("penalty", [0.0, 0.5, 1.0, -1.0])
-def test_a_single_pair_of_disjoint_singletons_is_one_whatever_the_penalty(
+@pytest.mark.parametrize("penalty", [0.0, 0.25, 0.5, 1.0])
+def test_a_single_pair_of_disjoint_singletons_is_one_for_every_admissible_penalty(
     penalty: float,
 ) -> None:
     """`k = 1` is not degenerate: two disjoint singletons contribute exactly one
     case-3 pair, and case 3 is the one the penalty does not touch. So the
-    maximum is 1 for every penalty, including the absurd ones.
+    maximum is 1 across the whole domain, endpoints included.
     """
     assert fks_max(1, penalty) == 1.0
 
 
-def test_an_infinite_penalty_makes_the_singleton_maximum_undefined() -> None:
-    """The one penalty that breaks the rule above. At `k = 1` the case-4 term is
-    `p * 1 * 0`, and `inf * 0` is NaN rather than zero -- so the maximum comes
-    out undefined and every normalised distance against it would follow.
+@pytest.mark.parametrize("penalty", [math.nan, math.inf, -math.inf, -1.0, -0.5, 1.5, 2.0])
+def test_a_penalty_outside_the_domain_is_refused_by_both_entry_points(
+    penalty: float,
+) -> None:
+    """G2 fixes the case-4 penalty in `[0, 1]` and argues the choice on bias
+    grounds. Outside it the normalisation stops meaning anything, and the way it
+    failed was the worst available: `fks_max` is NaN for a NaN penalty and
+    negative for a sufficiently negative one, `ceiling > 0.0` is false in both
+    cases, and `kendall_fks` then took its `else 0.0` branch -- the branch that
+    exists for `k = 0`, where no pairs means no disagreement.
 
-    Pinned as the boundary of the "any penalty" claim. `FKS_PENALTY` is a pinned
-    constant and no caller computes one, so this is unreachable in practice.
+    So two disjoint lists, the furthest apart two top-k lists can be, came back
+    as being in perfect agreement.
     """
-    assert math.isnan(fks_max(1, math.inf))
-    assert fks_max(2, math.inf) == math.inf, "at k >= 2 the term is finite times inf"
+    with pytest.raises(ValueError, match=r"penalty must lie in \[0, 1\]"):
+        fks_max(3, penalty)
+    with pytest.raises(ValueError, match=r"penalty must lie in \[0, 1\]"):
+        kendall_fks([1, 2, 3], [4, 5, 6], penalty)
+    with pytest.raises(ValueError, match=r"penalty must lie in \[0, 1\]"):
+        kendall_fks([1, 2, 3], [4, 5, 6], penalty, normalise=False)
 
 
-@pytest.mark.parametrize("penalty", [math.inf, -math.inf, math.nan])
-def test_no_pairs_means_the_penalty_cannot_matter_however_absurd(penalty: float) -> None:
-    """`k = 0` with a non-finite penalty: no pairs, so no penalty term.
+def test_disjoint_lists_are_maximally_distant_at_every_admissible_penalty() -> None:
+    """The property the guard protects, asserted directly rather than through the
+    guard: disjoint lists are the maximum, so their normalised distance is 1.0
+    whatever the penalty. A returned 0.0 here is the defect's signature.
+    """
+    a, b = [1, 2, 3], [4, 5, 6]
+    for penalty in (0.0, 0.25, 0.5, 1.0):
+        assert kendall_fks(a, b, penalty) == 1.0, f"disjoint lists at p={penalty}"
+        assert kendall_fks(a, b, penalty, normalise=False) == fks_max(3, penalty)
 
-    `test_a_non_positive_list_length_has_no_maximum` fixes `k = 0` at the pinned
-    finite penalty; `test_an_infinite_penalty_makes_the_singleton_maximum_undefined`
-    fixes a non-finite penalty at `k = 1`. Their crossing is the only place the
-    `k < 1` guard does work: the short circuit returns 0.0 before touching the
-    penalty, while falling through computes `0.0 + p * 0.0 * -1.0`, which is
-    bit-identically 0.0 for every finite p and NaN for exactly these three.
-    `penalty` is not validated, so the values are reachable.
+
+@pytest.mark.parametrize("penalty", [0.0, 0.5, 1.0])
+def test_no_pairs_means_the_penalty_term_never_runs(penalty: float) -> None:
+    """`k = 0` short-circuits before the closed form.
+
+    The guard is not observable: at `k = 0` the fall-through computes
+    `0.0 + p * 0.0 * -1.0`, which is bit-identically `+0.0` for every admissible
+    penalty, so the two routes agree. It used to be observable only because a
+    non-finite penalty made the fall-through NaN, and those are now refused
+    before `k` is looked at -- which is why the mutation allowlist carries an
+    argued entry for this guard in both languages.
     """
     assert fks_max(0, penalty) == 0.0
+    assert same_bits(fks_max(0, penalty), 0.0), "positive zero, not negative"
 
 
 @pytest.mark.parametrize(("k", "expected"), [(2, 5.0), (3, 12.0), (50, 3725.0)])

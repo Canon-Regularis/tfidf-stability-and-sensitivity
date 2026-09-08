@@ -485,3 +485,45 @@ TEST_CASE("kendall tau: the same set with different multiplicities is refused") 
     CHECK(kendall_tau_distance(std::vector<DocId>{1, 1, 2},
                                std::vector<DocId>{1, 1, 2}) == 0.0);
 }
+
+TEST_CASE("fks: a penalty outside [0, 1] is refused by both entry points") {
+    // G2 fixes the case-4 penalty in [0, 1] and argues the choice on bias
+    // grounds. Outside it the normalisation stops meaning anything, and the way
+    // it failed was the worst available: fks_max is NaN for a NaN penalty and
+    // negative for a sufficiently negative one, the `ceiling > 0.0` test is
+    // false in both cases, and kendall_fks then took the branch that exists for
+    // k = 0 -- so two disjoint lists came back as being in perfect agreement.
+    //
+    // Void-returning, since both functions are [[nodiscard]] and doctest's macro
+    // does not itself discard the value.
+    const auto max_attempt = [](Real p) { (void)fks_max(3, p); };
+    const auto fks_attempt = [](Real p) {
+        (void)kendall_fks(std::vector<DocId>{1, 2, 3}, std::vector<DocId>{4, 5, 6}, p, true);
+    };
+
+    const Real nan = std::numeric_limits<Real>::quiet_NaN();
+    const Real inf = std::numeric_limits<Real>::infinity();
+    for (const Real bad : {nan, inf, -inf, -1.0, -0.5, 1.5, 2.0}) {
+        CHECK_THROWS_AS(max_attempt(bad), std::invalid_argument);
+        CHECK_THROWS_AS(fks_attempt(bad), std::invalid_argument);
+    }
+
+    // The endpoints stay admissible: G2 discusses p = 0 and p = 1 as the two
+    // biased readings, so a guard that excluded them would refuse the spec.
+    for (const Real good : {0.0, 0.25, kFksPenalty, 1.0}) {
+        CHECK(fks_max(1, good) == 1.0);
+        CHECK(kendall_fks(std::vector<DocId>{1, 2, 3}, std::vector<DocId>{4, 5, 6}, good, true) ==
+              1.0);
+    }
+}
+
+TEST_CASE("fks: k = 0 short-circuits before the penalty term runs") {
+    // The guard is not observable: at k = 0 the fall-through computes
+    // 0 + p * 0.0 * -1.0, which is bit-identically +0.0 for every admissible
+    // penalty. It was observable only while a non-finite penalty could make that
+    // NaN, and those are refused before k is looked at.
+    for (const Real p : {0.0, 0.25, kFksPenalty, 1.0}) {
+        CHECK(fks_max(0, p) == 0.0);
+        CHECK(std::signbit(fks_max(0, p)) == false);  // positive zero
+    }
+}
