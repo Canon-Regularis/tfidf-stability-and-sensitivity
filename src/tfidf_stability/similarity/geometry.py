@@ -124,13 +124,22 @@ def lipschitz_constant(
     report how tight it was.
 
     Raises:
-        ValueError: If any of the four vectors is zero, where the bound is
-            vacuous: cosine is defined there by convention rather than geometry.
+        ValueError: If any of the four vectors has a norm that is not strictly
+            positive, where the bound is vacuous: cosine is defined at zero by
+            convention rather than geometry, and a NaN norm gives ``C = NaN``.
     """
     nu, nv = l2_norm(u, policy), l2_norm(v, policy)
     nup, nvp = l2_norm(u_prime, policy), l2_norm(v_prime, policy)
-    if min(nu, nv, nup, nvp) <= 0.0:
-        raise ValueError("the Lipschitz bound requires four non-zero vectors")
+    # Each norm tested for positivity rather than `min(...) <= 0.0`, which lets a
+    # NaN through twice over: every comparison with NaN is false, and `min`
+    # itself returns whichever operand it saw first, so the guard's own value
+    # depends on argument order. `not (x > 0.0)` is the form used for the tau
+    # thresholds in ranking/tie_groups.py and analysis/stratify.py.
+    if not all(norm > 0.0 for norm in (nu, nv, nup, nvp)):
+        raise ValueError(
+            "the Lipschitz bound requires four non-zero vectors with a defined norm, "
+            f"got {(nu, nv, nup, nvp)}"
+        )
 
     from tfidf_stability.similarity.cosine import cosine
 

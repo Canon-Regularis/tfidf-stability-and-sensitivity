@@ -645,6 +645,24 @@ def test_a_zero_vector_in_any_of_the_four_positions_is_refused(position: int) ->
         lipschitz_constant(*vectors)
 
 
+@pytest.mark.parametrize("position", [0, 1, 2, 3])
+def test_a_nan_norm_in_any_of_the_four_positions_is_refused(position: int) -> None:
+    """The contrast with the zero case above: a NaN norm is not caught by
+    comparing the minimum against zero, in any position.
+
+    `min(...) <= 0.0` failed twice over. Every comparison with NaN is false, so
+    a NaN that reached the minimum passed the guard; and `min` keeps whichever
+    operand it saw first, so whether the NaN even became the minimum depended on
+    argument order. `C = 1 / NaN` is then NaN and the bound reports `holds` as
+    false for a reason that has nothing to do with the mathematics.
+    """
+    vectors = [sv({0: 1.0}), sv({0: 1.0}), sv({0: 2.0}), sv({0: 2.0})]
+    vectors[position] = sv({0: math.nan})
+
+    with pytest.raises(ValueError, match="requires four non-zero vectors"):
+        lipschitz_constant(*vectors)
+
+
 def test_the_zero_vector_guard_is_what_keeps_the_constant_finite() -> None:
     """`C = 1 / L`, so an infinite constant would need `L` below about
     `5.6e-309`. No such norm exists that is not zero: the sum of squares

@@ -94,7 +94,32 @@ def test_an_all_nan_sample_summarises_without_raising() -> None:
     d = summarise_values("m", [math.nan, math.nan])
     assert d.n == 0
     assert d.n_nan == 2
+    assert d.n_infinite == 0
     assert math.isnan(d.mean)
+
+
+def test_an_infinity_is_counted_not_averaged_and_is_not_a_nan() -> None:
+    """An infinite margin is defined -- `boundary_margin((inf, 1.0), 1)` returns
+    one -- so it reaches a summary without passing through the NaN filter.
+    Averaged in, `mean` and the upper percentiles become infinite, and
+    `canonical_json` writes those as `null`, which is indistinguishable in the
+    published record from a serialisation fault.
+
+    Counted apart from NaN because both serialise to `null`: the two counts are
+    the only thing that says which one the sample held.
+    """
+    d = summarise_values("m", [1.0, 2.0, math.inf, 3.0])
+    assert d.n == 3
+    assert d.n_nan == 0
+    assert d.n_infinite == 1
+    assert d.mean == 2.0
+    assert d.maximum == 3.0, "the largest measurement, not the infinity"
+
+    both = summarise_values("m", [1.0, math.nan, math.inf, -math.inf])
+    assert (both.n, both.n_nan, both.n_infinite) == (1, 1, 2)
+    assert both.minimum == 1.0
+    assert both.maximum == 1.0
+    assert both.as_dict()["n_infinite"] == 2
 
 
 # ---------------------------------------------------------------------------

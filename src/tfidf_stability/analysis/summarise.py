@@ -84,6 +84,10 @@ class Distribution:
     name: str
     n: int
     n_nan: int
+    #: Observations that were infinite. Counted apart from ``n_nan`` because
+    #: ``canonical_json`` writes both as ``null``, so the counts are what tells
+    #: a reader which one a record held.
+    n_infinite: int
     n_zero: int
     minimum: float
     maximum: float
@@ -105,6 +109,7 @@ class Distribution:
             "name": self.name,
             "n": self.n,
             "n_nan": self.n_nan,
+            "n_infinite": self.n_infinite,
             "n_zero": self.n_zero,
             "share_zero": self.share_zero,
             "min": self.minimum,
@@ -121,22 +126,28 @@ def summarise_values(
     *,
     percentiles: Sequence[int] = DEFAULT_PERCENTILES,
 ) -> Distribution:
-    """Summarise a sample, keeping NaN out of the statistics but not the record.
+    """Summarise a sample, keeping non-finite values out of the statistics but
+    not out of the record.
 
     NaN marks an undefined quantity here (``m_min^top`` at ``k = 1`` (G16), or a
-    margin on a degenerate query) and is never a measurement. Excluded from the
-    statistics and counted, so a summary over mostly undefined values is visibly
-    thin.
+    margin on a degenerate query) and is never a measurement. Neither is an
+    infinity: ``boundary_margin`` returns a *defined* infinite margin for an
+    infinite score, and one carried into the statistics makes ``mean`` and the
+    upper percentiles infinite, which ``canonical_json`` then writes as ``null``.
+    Both kinds are excluded and counted separately, so a summary over mostly
+    undefined values is visibly thin and a reader can tell which kind it held.
     """
     collected = list(values)
-    finite = sorted(v for v in collected if not math.isnan(v))
-    n_nan = len(collected) - len(finite)
+    finite = sorted(v for v in collected if math.isfinite(v))
+    n_nan = sum(1 for v in collected if math.isnan(v))
+    n_infinite = len(collected) - len(finite) - n_nan
 
     if not finite:
         return Distribution(
             name=name,
             n=0,
             n_nan=n_nan,
+            n_infinite=n_infinite,
             n_zero=0,
             minimum=math.nan,
             maximum=math.nan,
@@ -148,6 +159,7 @@ def summarise_values(
         name=name,
         n=len(finite),
         n_nan=n_nan,
+        n_infinite=n_infinite,
         n_zero=sum(1 for v in finite if v == 0.0),
         minimum=finite[0],
         maximum=finite[-1],
