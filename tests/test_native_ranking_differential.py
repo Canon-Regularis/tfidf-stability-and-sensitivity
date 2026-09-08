@@ -42,7 +42,7 @@ from tfidf_stability.ranking.tie_groups import (
     tie_cliques,
 )
 from tfidf_stability.utils.numerics import same_bits
-from tfidf_stability.utils.validation import KOutOfRangeError, StrictMode
+from tfidf_stability.utils.validation import EmptyCorpusError, KOutOfRangeError, StrictMode
 
 pytestmark = [
     pytest.mark.native,
@@ -247,6 +247,69 @@ def test_native_ranker_rejects_non_bijective_identifier_ranks() -> None:
         )
 
 
+def test_native_ranker_rejects_an_empty_corpus_as_the_reference_does() -> None:
+    """G17 makes ranking an empty corpus an error, and `rank`/`rank_top_k` raise
+    `EmptyCorpusError` for it. The native side sorted an empty table and returned
+    an empty permutation instead: nothing else in the constructor refuses it,
+    because `id_ranks_are_a_bijection` is vacuously true on an empty table.
+
+    `NativeIndex` admits an empty corpus on purpose -- scoring one is well
+    defined -- so this is a rule about ranking, not about the backend.
+    """
+    empty = np.array([], dtype=np.int32)
+    with pytest.raises(ValueError, match="cannot rank an empty corpus"):
+        nat.NativeRanker(empty, empty, empty, 0)
+
+    with pytest.raises(EmptyCorpusError, match="empty corpus"):
+        rank([], AttributeTable.from_records([], ()), SortKeySpec("pi", ()))
+
+
+@pytest.mark.parametrize("selection", [-1, 5, 999, -(2**31 - 1)])
+def test_a_selection_outside_the_enum_is_refused(selection: int) -> None:
+    """The same hole `checked_policy` closes for `Reduction`, with a weaker
+    consequence: the sort key is injective, so every strategy returns the
+    identical permutation and the `default:` arm still gave a correct answer.
+    What was lost is provenance -- a manifest and a benchmark table naming a
+    strategy that did not run.
+    """
+    rng = random.Random(3)
+    scores, table = tie_heavy(rng, 6)
+    ranker = native_ranker(table, ATTRS)
+    native = np.array(scores, dtype=np.float64)
+
+    with pytest.raises(ValueError, match="selection strategy out of range"):
+        ranker.rank(native, selection)
+    with pytest.raises(ValueError, match="selection strategy out of range"):
+        ranker.top_k(native, 2, selection)
+
+    # Every in-range strategy is accepted, so the guard bounds the enum rather
+    # than merely rejecting large numbers.
+    for name, value in nat.SELECTION.items():
+        assert len(ranker.rank(native, int(value))) == len(scores), name
+
+
+def test_the_tie_group_binding_guards_refuse_what_the_reference_refuses() -> None:
+    """`checked_tau` and the `j` range check are the binding's own guards and had
+    no test of their own. The reference raises `IndexError` for an out-of-range
+    centre and `ValueError` for a tau that is negative or NaN; a NaN tau is the
+    case that matters, because every comparison with it is false and the three
+    tie-group functions would otherwise give three different answers in silence.
+    """
+    scores = np.array([1.0, 0.75, 0.5], dtype=np.float64)
+
+    for bad_j in (-1, 3, 99):
+        with pytest.raises(IndexError, match="rank index out of range"):
+            nat.tie_ball_interval(scores, bad_j, 0.1)
+
+    for bad_tau in (-1.0, -0.0001, math.nan):
+        with pytest.raises(ValueError, match="tau must be non-negative"):
+            nat.tie_ball_interval(scores, 1, bad_tau)
+        with pytest.raises(ValueError, match="tau must be non-negative"):
+            nat.tie_chains(scores, bad_tau)
+
+    assert nat.tie_ball_interval(scores, 1, 0.0) == (1, 2), "tau = 0 is admissible"
+
+
 def test_native_ranker_rejects_a_mismatched_score_count() -> None:
     rng = random.Random(2)
     _, table = tie_heavy(rng, 6)
@@ -270,18 +333,20 @@ def test_native_ranker_rejects_an_unknown_attribute() -> None:
         )
 
 
-def test_the_two_backends_disagree_only_on_invalid_k_and_only_in_kind() -> None:
-    """Pin the one place the backends part company: ``k = 0``.
+@pytest.mark.parametrize("k", [0, -1, -5, -(2**31 - 1)])
+def test_both_backends_refuse_a_non_positive_k(k: int) -> None:
+    """The backends used to part company here, and no longer do.
 
-    For every valid k they agree bit-for-bit, per the tests above. At ``k = 0``
-    they differ in kind: the reference raises ``KOutOfRangeError`` (``resolve_k``
-    rejects non-positive k in strict and lenient modes alike, treating zero as a
-    nonsensical rank), while the native margin functions return an undefined
-    margin.
+    ``resolve_k`` rejects non-positive k in strict and lenient modes alike, so
+    the reference can never return a margin for one. The native functions
+    returned an undefined margin instead, and worse, one carrying
+    ``k_effective = k``: ``std::min(k, n)`` on a negative k gives that k back,
+    and the binding hands the field straight to Python, so a value the reference
+    cannot produce reached a results file. Both now refuse.
 
-    Nothing in the package passes k = 0, so the divergence is latent. Pinned
-    because if it widened, the reference would refuse while the native path
-    returned a NaN that serialises to ``null`` in a results file.
+    The exception types differ by language convention -- ``KOutOfRangeError``
+    against nanobind's ``ValueError`` -- which is why this asserts refusal on
+    each side rather than one shared type.
     """
     scores = np.array([1.0, 0.5, 0.25], dtype=np.float64)
 
@@ -289,13 +354,29 @@ def test_the_two_backends_disagree_only_on_invalid_k_and_only_in_kind() -> None:
         (nat.boundary_margin, boundary_margin),
         (nat.min_adjacent_margin_top, min_adjacent_margin_top),
     ):
-        value, defined, _ = native_fn(scores, 0)
-        assert math.isnan(value)
-        assert not defined
+        with pytest.raises(ValueError, match="k must be positive"):
+            native_fn(scores, k)
 
         for mode in (StrictMode.STRICT, StrictMode.LENIENT):
-            with pytest.raises(KOutOfRangeError, match="k must be positive, got 0"):
-                reference_fn([1.0, 0.5, 0.25], 0, mode=mode)
+            with pytest.raises(KOutOfRangeError, match="k must be positive"):
+                reference_fn([1.0, 0.5, 0.25], k, mode=mode)
+
+
+def test_the_effective_k_agrees_across_the_boundary_where_k_is_admissible() -> None:
+    """`k_effective` is the field the negative-k defect escaped through, and the
+    margin tests above compare it only for `k <= n`. Here it is compared across
+    the clamp, which is the boundary it is for.
+    """
+    scores = [1.0, 0.5, 0.25]
+    native = np.array(scores, dtype=np.float64)
+
+    for k in (1, 2, 3, 4, 99):
+        _, _, k_eff = nat.boundary_margin(native, k)
+        assert k_eff == boundary_margin(scores, k, mode=StrictMode.LENIENT).k_effective
+        assert k_eff == min(k, len(scores))
+
+        _, _, top_eff = nat.min_adjacent_margin_top(native, k)
+        assert top_eff == min_adjacent_margin_top(scores, k, mode=StrictMode.LENIENT).k_effective
 
 
 # ---------------------------------------------------------------------------

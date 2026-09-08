@@ -122,6 +122,54 @@ double checked_tau(double tau) {
     return tau;
 }
 
+/// Reject a selection strategy outside the enum.
+///
+/// The same hole `checked_policy` closes, with a weaker consequence: the sort
+/// key is injective, so every strategy returns the identical permutation and an
+/// out-of-range value still gets a correct answer from the `default:` arm. What
+/// it loses is provenance -- the run manifest and the benchmark table name a
+/// strategy that did not run.
+///
+/// Bounded against the enumerators, so adding a strategy cannot leave this stale.
+ranking::Selection checked_selection(std::int32_t selection) {
+    if (selection < static_cast<std::int32_t>(ranking::Selection::FullSort) ||
+        selection > static_cast<std::int32_t>(ranking::Selection::BoundedHeap)) {
+        throw std::invalid_argument("selection strategy out of range");
+    }
+    return static_cast<ranking::Selection>(selection);
+}
+
+/// Reject a scoring algorithm outside the enum.
+///
+/// `score` reads `algorithm == Daat` and falls to TAAT otherwise, so an
+/// out-of-range value silently ran TAAT while the manifest recorded what was
+/// asked for. The two agree bit for bit, so this is the same provenance
+/// argument as `checked_selection` rather than a numerical one.
+ScoringAlgorithm checked_algorithm(std::int32_t algorithm) {
+    if (algorithm < static_cast<std::int32_t>(ScoringAlgorithm::Taat) ||
+        algorithm > static_cast<std::int32_t>(ScoringAlgorithm::Daat)) {
+        throw std::invalid_argument("scoring algorithm out of range");
+    }
+    return static_cast<ScoringAlgorithm>(algorithm);
+}
+
+/// Reject a k the normative reference would refuse.
+///
+/// `resolve_k` raises `KOutOfRangeError` for k <= 0 in both strict and lenient
+/// mode, so a Margin from the reference can never carry a non-positive
+/// `k_effective`. The margin entry points return that field to Python, so
+/// without this the two backends disagree on what they report for the same
+/// argument. `compare_top_k` below refuses a negative k for the same reason.
+///
+/// Applied to every entry point that takes a k, not one of them: the note on
+/// `checked_tau` records a sweep that guarded one of four and left three.
+std::int32_t checked_k(std::int32_t k) {
+    if (k <= 0) {
+        throw std::invalid_argument("k must be positive");
+    }
+    return k;
+}
+
 /// Shape of this binding surface, checked against
 /// `tfidf_stability._native.REQUIRED_ABI` on import.
 ///
@@ -225,7 +273,7 @@ class NativeIndex {
         const double q_norm = l2_norm(query, reduction_);
         std::vector<double> out(static_cast<std::size_t>(n_rows_));
         tfidf::score(query, csr(), csc_, norms_, q_norm, out, scratch_, reduction_,
-                     static_cast<ScoringAlgorithm>(algorithm));
+                     checked_algorithm(algorithm));
         return to_numpy(std::move(out));
     }
 
@@ -262,6 +310,15 @@ class NativeRanker {
                  const I32Array& priority,
                  std::int32_t n_attrs) {
         const auto n_docs = static_cast<std::int32_t>(id_ranks.shape(0));
+        // G17 makes ranking an empty corpus an error, and `rank`/`rank_top_k`
+        // raise `EmptyCorpusError` for it. Without this the native side sorts an
+        // empty table and returns an empty permutation: `id_ranks_are_a_bijection`
+        // is vacuously true, so nothing else here refuses it. `NativeIndex`
+        // admits n_docs == 0 on purpose, since scoring an empty corpus is
+        // well defined; ranking one is not.
+        if (n_docs == 0) {
+            throw std::invalid_argument("cannot rank an empty corpus");
+        }
         if (n_attrs < 0 || (n_attrs > 0 && ranks.shape(0) % static_cast<std::size_t>(n_attrs))) {
             throw std::invalid_argument("the rank matrix is not n_attrs * n_docs");
         }
@@ -299,7 +356,7 @@ class NativeRanker {
     nb::ndarray<nb::numpy, std::int32_t> rank(const F64Array& scores, std::int32_t selection) {
         prepare(scores);
         std::vector<DocId> out(static_cast<std::size_t>(table_.n_docs));
-        ranking::rank_full(keys_, out, static_cast<ranking::Selection>(selection));
+        ranking::rank_full(keys_, out, checked_selection(selection));
         return to_numpy_i32(std::vector<std::int32_t>(out.begin(), out.end()));
     }
 
@@ -310,7 +367,7 @@ class NativeRanker {
         const auto take = std::min<std::size_t>(static_cast<std::size_t>(std::max(m, 0)),
                                                 keys_.size());
         std::vector<DocId> out(take);
-        ranking::select_top(keys_, take, out, static_cast<ranking::Selection>(selection));
+        ranking::select_top(keys_, take, out, checked_selection(selection));
         return to_numpy_i32(std::vector<std::int32_t>(out.begin(), out.end()));
     }
 
@@ -468,7 +525,7 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "boundary_margin",
         [](const F64Array& sorted_scores, std::int32_t k) {
-            const auto mg = ranking::boundary_margin(checked_scores(sorted_scores), k);
+            const auto mg = ranking::boundary_margin(checked_scores(sorted_scores), checked_k(k));
             return nb::make_tuple(mg.value, mg.defined, mg.k_effective);
         },
         nb::arg("sorted_scores"), nb::arg("k"),
@@ -477,7 +534,8 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "min_adjacent_margin_top",
         [](const F64Array& sorted_scores, std::int32_t k) {
-            const auto mg = ranking::min_adjacent_margin_top(checked_scores(sorted_scores), k);
+            const auto mg =
+                ranking::min_adjacent_margin_top(checked_scores(sorted_scores), checked_k(k));
             return nb::make_tuple(mg.value, mg.defined, mg.k_effective);
         },
         nb::arg("sorted_scores"), nb::arg("k"));
