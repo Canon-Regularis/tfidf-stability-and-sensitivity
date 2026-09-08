@@ -22,6 +22,16 @@
 
 namespace tfidf::ranking {
 
+/// Which sorting strategy produces the order.
+///
+/// Unlike `Reduction`, these values do NOT correspond to
+/// `tfidf_stability.ranking.ranker.Selection`, whose members past the first two
+/// name different algorithms. Only the names in the `SELECTION` dict cross the
+/// boundary; the integers are meaningful to this header alone.
+///
+/// The strategy never changes the answer -- the sort key is injective, so every
+/// one of them yields the same permutation. It is recorded because a run
+/// manifest and a benchmark table name the strategy that ran.
 enum class Selection : std::int32_t {
     FullSort = 0,
     StableSort = 1,

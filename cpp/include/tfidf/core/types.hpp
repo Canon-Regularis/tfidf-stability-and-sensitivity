@@ -30,8 +30,10 @@ using Score = double;
 
 /// How a sum of floating-point numbers is accumulated.
 ///
-/// Mirrors `tfidf_stability.utils.numerics.Reduction`, including the integer
-/// values, which cross the language boundary.
+/// Mirrors `tfidf_stability.utils.numerics.Reduction`. That enum carries string
+/// values; these integers are what crosses the language boundary, exposed as the
+/// `REDUCTION` dict and looked up by name, so the numbering here is part of the
+/// contract even though the two enums do not share it literally.
 enum class Reduction : std::int32_t {
     /// Plain left-to-right fold. The literal reading of the paper's formulas
     /// and the default for every published result.
