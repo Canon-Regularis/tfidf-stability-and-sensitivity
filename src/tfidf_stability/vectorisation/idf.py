@@ -66,7 +66,11 @@ def smoothed_idf_one(df: int, n_documents: int, impl: LogImpl = LogImpl.CORRECTL
     if df > n_documents:
         raise ValueError(f"df={df} exceeds the corpus size N={n_documents}")
 
-    if impl is LogImpl.PLATFORM:
+    # Coerced, not compared with `is`: LogImpl is a str enum, so "platform"
+    # equals the member without being it and would silently take the
+    # correctly-rounded path, reporting the G13 gap this setting exists to
+    # measure as exactly zero. LogImpl() refuses an unrecognised value outright.
+    if LogImpl(impl) is LogImpl.PLATFORM:
         return platform_log_ratio(1 + n_documents, 1 + df) + 1.0
     return correctly_rounded_log_ratio(1 + n_documents, 1 + df) + 1.0
 
@@ -78,6 +82,17 @@ class IdfVector:
     values: tuple[float, ...]
     n_documents: int
     log_impl: LogImpl
+
+    def __post_init__(self) -> None:
+        """Normalise ``log_impl`` to the member, refusing an unknown value.
+
+        ``LogImpl`` is a ``str`` enum, so ``"platform"`` equals the member
+        without being it. The container flag in ``persistence/save_load.py``
+        selects on ``is`` and would record ``PLATFORM`` for a model computed with
+        correctly-rounded logarithms, giving a round-tripped model a different
+        digest from the one saved.
+        """
+        object.__setattr__(self, "log_impl", LogImpl(self.log_impl))
 
     def __len__(self) -> int:
         return len(self.values)
@@ -146,5 +161,9 @@ def delta_idf(
     one ``log`` of a ratio of ratios, matching the expression as written. The
     ``+1`` in ``idf`` cancels in the difference, so it does not appear here.
     """
-    log = platform_log_ratio if impl is LogImpl.PLATFORM else correctly_rounded_log_ratio
+    log = (
+        platform_log_ratio
+        if LogImpl(impl) is LogImpl.PLATFORM  # coerced, as in smoothed_idf_one
+        else correctly_rounded_log_ratio
+    )
     return log(1 + n_after, 1 + df_after) - log(1 + n_before, 1 + df_before)

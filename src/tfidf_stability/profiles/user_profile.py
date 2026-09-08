@@ -88,6 +88,17 @@ class UserProfile:
     features: tuple[str, ...]
     aggregation: ProfileAggregation
 
+    def __post_init__(self) -> None:
+        """Normalise the aggregation to the member, refusing an unknown value.
+
+        ``ProfileAggregation`` is a ``str`` enum, so ``"vector_mean"`` equals the
+        member without being it. :func:`embed_profile` selects the divisor on
+        ``is``, so the string produced the sum instead of the mean. Cosine is
+        scale-invariant and no similarity moves, but ``profile_norm`` does, and
+        the section 4.2 bounds are stated in norms.
+        """
+        object.__setattr__(self, "aggregation", ProfileAggregation(self.aggregation))
+
     @property
     def n_items(self) -> int:
         return len(self.item_ids)

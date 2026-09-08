@@ -1644,3 +1644,55 @@ def test_a_truncated_ranking_leaves_the_degenerate_case_on_one_real_score() -> N
     assert rank_top_k(tail_only, table, PI, k=1).query_degenerate is False, (
         "the flag reads every score, not only the selected ones"
     )
+
+
+# ---------------------------------------------------------------------------
+# The spec's three enums are members, whatever spelling built them
+# ---------------------------------------------------------------------------
+def test_a_spec_built_from_strings_ranks_exactly_as_one_built_from_members() -> None:
+    """`Direction`, `AttributeDType` and `MissingPolicy` are all `str` enums, so
+    `"asc"` equals the member without being it, and every branch that reads them
+    selects on `is`. A string fell through to the default arm: descending order
+    for a spec that asked for ascending, and `missing_rank = n_distinct` for one
+    that asked for FIRST. Both change the rank encoding, and the ranks are what
+    the tie-break sorts on, so top-k membership moves.
+
+    Both attributes below discriminate: ascending and descending give different
+    rank vectors, as do the two missing placements.
+    """
+    records = [{"doc_id": "a", "p": 10}, {"doc_id": "b", "p": 30}, {"doc_id": "c", "p": 20}]
+
+    def ranks(direction: object) -> tuple[int, ...]:
+        spec = AttributeSpec("p", direction, AttributeDType.INT64)  # type: ignore[arg-type]
+        return AttributeTable.from_records(records, (spec,)).column("p").ranks
+
+    assert ranks(Direction.ASC) == (0, 2, 1)
+    assert ranks(Direction.DESC) == (2, 0, 1)
+    assert ranks("asc") == ranks(Direction.ASC), "the string must not fall through to DESC"
+    assert ranks("desc") == ranks(Direction.DESC)
+
+    absent = [{"doc_id": "a", "p": 10}, {"doc_id": "b"}, {"doc_id": "c", "p": 20}]
+
+    def placed(policy: object) -> tuple[int, ...]:
+        spec = AttributeSpec("p", Direction.DESC, AttributeDType.INT64, policy)  # type: ignore[arg-type]
+        return AttributeTable.from_records(absent, (spec,)).column("p").ranks
+
+    assert placed(MissingPolicy.FIRST) == (2, 0, 1)
+    assert placed(MissingPolicy.LAST) == (1, 2, 0)
+    assert placed("first") == placed(MissingPolicy.FIRST), "the string must not fall through"
+    assert placed("last") == placed(MissingPolicy.LAST)
+
+
+def test_a_spec_refuses_a_value_none_of_its_enums_name() -> None:
+    """A misspelled direction must not quietly rank the other way round."""
+    with pytest.raises(ValueError, match="is not a valid Direction"):
+        AttributeSpec("p", "ASC")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="is not a valid AttributeDType"):
+        AttributeSpec("p", Direction.DESC, "int32")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="is not a valid MissingPolicy"):
+        AttributeSpec("p", Direction.DESC, AttributeDType.INT64, "middle")  # type: ignore[arg-type]
+
+    kept = AttributeSpec("p", "asc", "bytes", "first")  # type: ignore[arg-type]
+    assert kept.direction is Direction.ASC
+    assert kept.dtype is AttributeDType.BYTES
+    assert kept.missing_policy is MissingPolicy.FIRST

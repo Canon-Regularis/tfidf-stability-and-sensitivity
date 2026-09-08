@@ -117,6 +117,20 @@ class AttributeSpec:
     dtype: AttributeDType = AttributeDType.INT64
     missing_policy: MissingPolicy = MissingPolicy.LAST
 
+    def __post_init__(self) -> None:
+        """Normalise the three enums to their members, refusing unknown values.
+
+        All three are ``str`` enums, so ``"ratio_i64"`` equals the member without
+        being it, and every branch that reads them selects on ``is``. A string
+        ``dtype`` fell through to the plain sort and a string ``missing_policy``
+        to ``missing_rank = n_distinct``, which changes the rank encoding and so
+        the tie-break that decides top-k membership. ``AttributeSpec`` is public
+        and constructed directly, so the coercion belongs here.
+        """
+        object.__setattr__(self, "direction", Direction(self.direction))
+        object.__setattr__(self, "dtype", AttributeDType(self.dtype))
+        object.__setattr__(self, "missing_policy", MissingPolicy(self.missing_policy))
+
 
 #: The tuple README section 2.3.1 names, minus the identifier, which the sort key
 #: appends implicitly and never permutes.

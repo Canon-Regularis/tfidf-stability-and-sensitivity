@@ -17,6 +17,7 @@ import pytest
 from tfidf_stability.utils.numerics import correctly_rounded_log_ratio, same_bits, ulps_between
 from tfidf_stability.utils.validation import EmptyVocabularyError, TfidfStabilityError
 from tfidf_stability.vectorisation.idf import (
+    IdfVector,
     LogImpl,
     delta_idf,
     idf_linf,
@@ -135,6 +136,50 @@ def test_platform_log_differs_from_correctly_rounded() -> None:
     # Measured at ~15% on the reference machine. The loose bound asserts
     # "materially different" rather than a machine-specific figure.
     assert differing > 0.05 * n, f"only {differing}/{n} entries differ"
+
+
+def test_the_string_spelling_of_a_log_impl_selects_the_same_logarithm() -> None:
+    """`LogImpl` is a `str` enum, so `"platform"` equals the member without
+    being it. Selected on `is`, the string took the correctly-rounded branch and
+    reported the G13 gap this setting exists to measure as exactly zero.
+
+    The contrast is the point: the two spellings must agree bit for bit, and
+    must both differ from the correctly-rounded value.
+    """
+    n = 9742
+    # The two logarithms agree on most df, so the case is chosen rather than
+    # assumed: a df they agree on would pass whichever branch the string took.
+    df = next(
+        d
+        for d in range(1, n + 1)
+        if not same_bits(
+            smoothed_idf_one(d, n, LogImpl.CORRECTLY_ROUNDED),
+            smoothed_idf_one(d, n, LogImpl.PLATFORM),
+        )
+    )
+    exact = smoothed_idf_one(df, n, LogImpl.CORRECTLY_ROUNDED)
+    member = smoothed_idf_one(df, n, LogImpl.PLATFORM)
+    assert not same_bits(member, exact), "the df chosen must be one that differs"
+
+    assert same_bits(smoothed_idf_one(df, n, "platform"), member)  # type: ignore[arg-type]
+    assert same_bits(smoothed_idf_one(df, n, "correctly_rounded"), exact)  # type: ignore[arg-type]
+
+    # delta_idf selects the same way, and so does the vector's recorded flag.
+    assert same_bits(
+        delta_idf(df, df + 1, n, n, "platform"),  # type: ignore[arg-type]
+        delta_idf(df, df + 1, n, n, LogImpl.PLATFORM),
+    )
+    assert smoothed_idf([df], n, "platform").log_impl is LogImpl.PLATFORM  # type: ignore[arg-type]
+
+
+def test_an_unrecognised_log_impl_is_refused_rather_than_defaulted() -> None:
+    """Coercion refuses what it cannot name, so a misspelling cannot quietly
+    select the default and be recorded as the one that was asked for."""
+    for bad in ("Platform", "exact", ""):
+        with pytest.raises(ValueError, match="is not a valid LogImpl"):
+            smoothed_idf_one(3, 10, bad)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="is not a valid LogImpl"):
+        IdfVector(values=(1.0,), n_documents=1, log_impl="platfrom")  # type: ignore[arg-type]
 
 
 def test_division_before_log_is_not_the_same_as_difference_of_logs() -> None:
@@ -408,6 +453,41 @@ def test_the_sklearn_compatible_policy_ignores_document_frequency_entirely() -> 
         VocabularyConfig(max_features=1, max_features_policy=MaxFeaturesPolicy.SKLEARN_COMPAT),
     )
     assert vocab.tokens == ("rare",)
+
+
+def test_the_string_spelling_of_a_policy_selects_the_same_vocabulary() -> None:
+    """`MaxFeaturesPolicy` is a `str` enum, so `"cf_desc"` equals the member
+    without being it. `build_vocabulary` selects the ranking order on `is`, so
+    the string fell through to DF_DESC and a different set of tokens survived
+    the cut -- the vocabulary, and every number computed from it, while the
+    config still recorded the policy that was asked for.
+
+    The corpus discriminates: `rare` wins on collection frequency and `common`
+    wins on document frequency, so the two policies cannot agree by accident.
+    """
+    corpus = [["rare", "rare", "rare"], ["common"], ["common"]]
+
+    def survivor(policy: object) -> tuple[str, ...]:
+        cfg = VocabularyConfig(max_features=1, max_features_policy=policy)  # type: ignore[arg-type]
+        return build_vocabulary(corpus, cfg).tokens
+
+    assert survivor(MaxFeaturesPolicy.CF_DESC) == ("rare",)
+    assert survivor(MaxFeaturesPolicy.DF_DESC) == ("common",)
+    assert survivor("cf_desc") == ("rare",), "the string must not fall through to df_desc"
+    assert survivor("df_desc") == ("common",)
+    assert survivor("sklearn_compat") == ("rare",)
+
+    assert VocabularyConfig(max_features_policy="cf_desc").max_features_policy is (  # type: ignore[arg-type]
+        MaxFeaturesPolicy.CF_DESC
+    )
+
+
+def test_an_unrecognised_max_features_policy_is_refused_rather_than_defaulted() -> None:
+    """A misspelling must not quietly select the default and then be recorded in
+    the manifest as the policy that was requested."""
+    for bad in ("cf-desc", "CF_DESC", "frequency", ""):
+        with pytest.raises(ValueError, match="is not a valid MaxFeaturesPolicy"):
+            VocabularyConfig(max_features_policy=bad)  # type: ignore[arg-type]
 
 
 def test_a_term_id_maps_back_to_the_token_it_was_assigned_to() -> None:

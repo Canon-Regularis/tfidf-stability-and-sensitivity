@@ -78,6 +78,17 @@ class VocabularyConfig:
     max_features: int | None = None
     max_features_policy: MaxFeaturesPolicy = MaxFeaturesPolicy.DF_DESC
 
+    def __post_init__(self) -> None:
+        """Normalise the policy to the member, refusing an unknown value.
+
+        ``MaxFeaturesPolicy`` is a ``str`` enum, so ``"cf_desc"`` equals the
+        member without being it. ``build_vocabulary`` selects the ranking order
+        on ``is``, so the string fell through to ``DF_DESC``: a different set of
+        tokens survives the cut, which changes the vocabulary and every number
+        computed from it, with the config still recording the policy asked for.
+        """
+        object.__setattr__(self, "max_features_policy", MaxFeaturesPolicy(self.max_features_policy))
+
 
 def _resolve_threshold(
     value: int | float, n_docs: int, *, name: str, bound: Literal["lower", "upper"] = "lower"
