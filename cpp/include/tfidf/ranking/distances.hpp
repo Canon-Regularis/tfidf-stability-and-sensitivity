@@ -175,10 +175,31 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 /// one each) or case 4 (2 * C(k, 2) pairs, `p` each), giving
 /// `k^2 + p * k * (k - 1)`.
 ///
+/// Reject a case-4 penalty outside `[0, 1]`.
+///
+/// `!(0.0 <= p && p <= 1.0)` rather than the positive form: every comparison
+/// with NaN is false, so the other spelling admits NaN through a guard whose
+/// message names a range. G2 fixes the domain, and the normalised `K-bar` lies
+/// in `[0, 1]` only because of it.
+///
+/// Left unchecked, a NaN or sufficiently negative penalty made the normalising
+/// ceiling NaN or negative, `ceiling > 0.0` false, and the distance 0.0: two
+/// disjoint lists, the furthest apart they can be, reported as identical.
+inline void checked_penalty(Real penalty) {
+    if (!(penalty >= 0.0 && penalty <= 1.0)) {
+        throw std::invalid_argument("the case-4 penalty must lie in [0, 1]");
+    }
+}
+
 /// `k = 1` is not degenerate: two disjoint singletons still contribute one
 /// case-3 pair, so the maximum is 1. An early guard of the form `if k < 2:
 /// return 0` normalised two entirely disjoint lists to distance zero.
-[[nodiscard]] inline Real fks_max(std::int32_t k, Real penalty = kFksPenalty) noexcept {
+///
+/// `noexcept` is deliberately absent: the penalty is validated here, and the
+/// normative Python raises for the same domain. Leaving this permissive while
+/// the reference refused would be a divergence rather than a saving.
+[[nodiscard]] inline Real fks_max(std::int32_t k, Real penalty = kFksPenalty) {
+    checked_penalty(penalty);
     if (k < 1) {
         return 0.0;  // k = 0 is the only case with no pairs at all
     }
@@ -206,6 +227,7 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
                                       std::span<const DocId> b,
                                       Real penalty = kFksPenalty,
                                       bool normalise = true) {
+    checked_penalty(penalty);
     // First-appearance order, a then b. The enumeration order below is part of
     // the contract with the reference.
     std::vector<DocId> uni;

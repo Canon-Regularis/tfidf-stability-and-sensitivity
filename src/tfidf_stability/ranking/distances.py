@@ -153,6 +153,19 @@ def kendall_tau_distance(a: Sequence[int], b: Sequence[int]) -> float:
 # ---------------------------------------------------------------------------
 # Fagin-Kumar-Sivakumar generalised Kendall distance
 # ---------------------------------------------------------------------------
+def _checked_penalty(penalty: float) -> float:
+    """Reject a case-4 penalty outside ``[0, 1]``.
+
+    ``not (0.0 <= p <= 1.0)`` rather than the positive form: every comparison
+    with NaN is false, so writing the test the other way admits NaN through a
+    guard whose message names a range. G2 fixes the domain, and the normalised
+    ``K-bar`` lies in ``[0, 1]`` only because of it.
+    """
+    if not 0.0 <= penalty <= 1.0:
+        raise ValueError(f"the case-4 penalty must lie in [0, 1], got {penalty!r}")
+    return penalty
+
+
 def fks_max(k: int, penalty: float = FKS_PENALTY) -> float:
     """The maximum value of ``K^(p)`` over two top-k lists, attained when disjoint.
 
@@ -168,6 +181,7 @@ def fks_max(k: int, penalty: float = FKS_PENALTY) -> float:
     ``k = 1`` is not degenerate: two disjoint singleton lists still contribute
     one case-3 pair, and the formula gives 1. Only ``k = 0`` has no pairs.
     """
+    _checked_penalty(penalty)
     if k < 1:
         return 0.0
     return float(k * k) + penalty * float(k) * float(k - 1)
@@ -207,12 +221,21 @@ def kendall_fks(
 
     Args:
         a, b: Two top-k lists, best first. May rank different sets.
-        penalty: The case-4 penalty ``p``.
+        penalty: The case-4 penalty ``p``, in ``[0, 1]`` (G2).
         normalise: Divide by :func:`fks_max` to land in ``[0, 1]``.
 
     Returns:
         The distance. ``0.0`` when both lists are empty or identical.
+
+    Raises:
+        ValueError: If ``penalty`` lies outside ``[0, 1]``. Checked before the
+            enumeration, and not left to the division below: ``fks_max`` is NaN
+            for a NaN penalty and negative for a sufficiently negative one, and
+            ``ceiling > 0.0`` is false in both cases, so the normalisation
+            returned 0.0 -- reporting two disjoint lists, the furthest apart they
+            can be, as being in perfect agreement.
     """
+    _checked_penalty(penalty)
     union = list(dict.fromkeys([*a, *b]))
     pos_a = {item: i for i, item in enumerate(a)}
     pos_b = {item: i for i, item in enumerate(b)}
