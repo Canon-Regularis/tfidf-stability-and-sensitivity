@@ -59,8 +59,14 @@ struct Margin {
     const auto n = static_cast<std::int32_t>(sorted_scores.size());
     Margin m;
     m.k = k;
+    // k_effective is assigned only past this guard. `resolve_k` raises for
+    // k <= 0 in both modes, so the reference can never produce a negative
+    // k_effective, and the binding hands this field straight to Python.
+    if (k <= 0) {
+        return m;  // undefined, and k_effective keeps its default 0
+    }
     m.k_effective = std::min(k, n);
-    if (k <= 0 || m.k_effective >= n) {
+    if (m.k_effective >= n) {
         return m;  // undefined: r_{k+1} does not exist
     }
     const auto i = static_cast<std::size_t>(m.k_effective);
@@ -78,8 +84,11 @@ struct Margin {
     const auto n = static_cast<std::int32_t>(sorted_scores.size());
     Margin m;
     m.k = k;
+    if (k <= 0) {
+        return m;  // as in boundary_margin: no negative k_effective escapes
+    }
     m.k_effective = std::min(k, n);
-    if (k <= 0 || m.k_effective < 2 || n < 2) {
+    if (m.k_effective < 2 || n < 2) {
         return m;
     }
     Real best = std::numeric_limits<Real>::infinity();
