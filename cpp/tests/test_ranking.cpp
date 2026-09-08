@@ -18,6 +18,7 @@
 #include <numeric>
 #include <random>
 #include <set>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -520,6 +521,33 @@ TEST_CASE("margins: k = 0 is undefined rather than a read below the first score"
     CHECK(std::isnan(zero_top.value));
 }
 
+TEST_CASE("margins: a refused k reports no effective k rather than a negative one") {
+    // `k_effective` is assigned past the `k <= 0` guard, so it keeps its default
+    // 0. `std::min(k, n)` on a negative k gives that k back, and the binding
+    // returns this field to Python, where `resolve_k` raises for k <= 0 and no
+    // Margin can carry a non-positive `k_effective`.
+    //
+    // The `defined` flag cannot see this: it is false either way. Only the field
+    // itself distinguishes them, which is why the case below reads it.
+    const std::vector<Real> s{1.0, 0.75, 0.5};
+
+    for (const std::int32_t k : {-1, -5, -1073741824, 0}) {
+        CHECK(boundary_margin(s, k).k_effective == 0);
+        CHECK(min_adjacent_margin_top(s, k).k_effective == 0);
+        CHECK(boundary_margin(s, k).k == k);  // the requested k is still reported
+    }
+
+    // A k the guard admits still resolves normally, so the move did not disturb
+    // the clamp itself. k = 1 is the case that separates the guard from the
+    // `k_effective < 2` test below it: the margin is undefined either way, so
+    // only this field distinguishes a guard placed at 0 from one placed at 1.
+    CHECK(min_adjacent_margin_top(s, 1).k_effective == 1);
+    CHECK_FALSE(min_adjacent_margin_top(s, 1).defined);
+    CHECK(boundary_margin(s, 2).k_effective == 2);
+    CHECK(boundary_margin(s, 99).k_effective == 3);
+    CHECK(min_adjacent_margin_top(s, 99).k_effective == 3);
+}
+
 TEST_CASE("margins: the minimum runs over the gaps inside the top-k and no further") {
     // The loop stops at `j + 1 < k_effective`, so it reads the gaps between
     // ranks 1..k and never the boundary gap at k -> k+1. That is the whole
@@ -668,4 +696,55 @@ TEST_CASE("attributes: an empty table is vacuously a bijection") {
     mismatched.n_docs = 2;
     mismatched.id_ranks = {0};
     CHECK_FALSE(mismatched.id_ranks_are_a_bijection());
+}
+
+TEST_CASE("sort_keys: a priority longer than the key can carry is reported") {
+    // `build_keys` is noexcept and stops at kMaxAttributes, so a longer priority
+    // is truncated in silence and the key sorts on a prefix of the operator that
+    // was asked for. The reference tuple has no such bound, so the two order ties
+    // differently. A predicate is the only form this condition can take in a
+    // noexcept function; the binding raises on the same input.
+    const std::vector<std::int32_t> three{0, 1, 2};
+    const std::vector<std::int32_t> four{0, 1, 2, 3};
+    const std::vector<std::int32_t> five{0, 1, 2, 3, 0};
+
+    CHECK(priority_fits(three));
+    CHECK(priority_fits(four));  // the boundary is inclusive
+    CHECK_FALSE(priority_fits(five));
+    CHECK(priority_fits(std::vector<std::int32_t>{}));
+}
+
+TEST_CASE("tie_groups: an out-of-range centre is refused rather than read") {
+    // `sorted_scores[j]` on an out-of-range j is undefined, not merely wrong.
+    // The normative Python raises IndexError; this is the same guard one level
+    // below the binding, so a C++ caller cannot reach the read either.
+    const std::vector<Real> s{1.0, 0.75, 0.5};
+    // Void-returning, as in test_distances.cpp: the function is [[nodiscard]]
+    // and doctest's macro does not itself discard the value.
+    const auto attempt = [](std::span<const Real> scores, std::int32_t j, Real tau) {
+        (void)tie_ball_interval(scores, j, tau);
+    };
+
+    CHECK_THROWS_AS(attempt(s, -1, 0.1), std::out_of_range);
+    CHECK_THROWS_AS(attempt(s, 3, 0.1), std::out_of_range);
+    CHECK_THROWS_AS(attempt(std::vector<Real>{}, 0, 0.1), std::out_of_range);
+
+    // The boundary either side, so the guard sits at the ends and not inside.
+    CHECK(tie_ball_interval(s, 0, 0.1).first == 0);
+    CHECK(tie_ball_interval(s, 2, 0.1).second == 3);
+}
+
+TEST_CASE("tie_groups: a NaN tolerance is refused rather than answered") {
+    // Every comparison with NaN is false, so `gap > tau` and `gap <= tau` are
+    // both false: this function, the chains and the cliques would each give a
+    // different answer to the same question and none would raise.
+    const std::vector<Real> s{1.0, 0.75, 0.5};
+    const auto attempt = [](std::span<const Real> scores, std::int32_t j, Real tau) {
+        (void)tie_ball_interval(scores, j, tau);
+    };
+
+    CHECK_THROWS_AS(attempt(s, 1, std::numeric_limits<Real>::quiet_NaN()), std::invalid_argument);
+    CHECK_THROWS_AS(attempt(s, 1, -1.0), std::invalid_argument);
+
+    CHECK(tie_ball_interval(s, 1, 0.0).first == 1);  // tau = 0 is admissible
 }

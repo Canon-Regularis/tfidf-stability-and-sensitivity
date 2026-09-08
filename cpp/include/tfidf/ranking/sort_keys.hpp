@@ -93,6 +93,17 @@ inline void build_keys(std::span<const Real> scores,
     return true;
 }
 
+/// Whether every attribute in `priority` fits in a key.
+///
+/// `build_keys` is `noexcept` and stops at `kMaxAttributes`, so a longer
+/// priority is silently truncated: the key then sorts on a prefix of the
+/// operator that was asked for, and the reference, whose tuple has no such
+/// bound, orders ties differently. The binding refuses an over-long priority;
+/// this is the same condition as a predicate, for the callers that cannot.
+[[nodiscard]] inline bool priority_fits(std::span<const std::int32_t> priority) noexcept {
+    return priority.size() <= kMaxAttributes;
+}
+
 /// Whether the keys are pairwise distinct.
 ///
 /// Injectivity is the precondition for the sorted permutation being unique.

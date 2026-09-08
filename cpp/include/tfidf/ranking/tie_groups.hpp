@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -44,8 +45,22 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
 /// binary64 and not merely in the reals.
 [[nodiscard]] inline Interval tie_ball_interval(std::span<const Real> sorted_scores,
                                                 std::int32_t j,
-                                                Real tau) noexcept {
+                                                Real tau) {
     const auto n = static_cast<std::int32_t>(sorted_scores.size());
+    // The only tie-group function taking an index, and the only one that read
+    // out of bounds without it: `sorted_scores[j]` on an out-of-range j is
+    // undefined, not merely wrong. The normative Python raises `IndexError`
+    // here and the binding refuses it; this is the same guard one level down,
+    // so a C++ caller cannot reach the read either.
+    if (j < 0 || j >= n) {
+        throw std::out_of_range("rank index out of range");
+    }
+    // `!(tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is
+    // false, so the second form admits NaN. With tau = NaN this function, the
+    // chains and the cliques give three contradictory answers and none raises.
+    if (!(tau >= 0.0)) {
+        throw std::invalid_argument("tau must be non-negative");
+    }
     const Real centre = sorted_scores[static_cast<std::size_t>(j)];
 
     // lo: first i in [0, j] with S[i] - centre <= tau.
