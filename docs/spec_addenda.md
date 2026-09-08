@@ -1364,3 +1364,40 @@ wrong direction unnoticed.
 **What G20's canonical ordering is still for.** It makes the feature *tuple*
 reproducible, and the profile digest is taken over the tuple. It is not what
 keeps scores stable, because on this construction nothing was destabilising them.
+
+---
+
+<a id="g29"></a>
+## G29. The two backends validate finiteness at different layers, on purpose
+
+**Where:** `ranking/margins.py`, `ranking/tie_groups.py` and their C++ mirrors,
+reached through `cpp/bindings/module.cpp`.
+
+The reference computes on a non-finite score; the native path refuses it. Both
+are deliberate, and neither is a defect, so the asymmetry is stated here rather
+than left to be rediscovered as one.
+
+**The reference.** `boundary_margin` and the tie-group functions do not
+re-validate finiteness. `rank` rejects a non-finite score before sorting, so the
+check happens once, at the point where a NaN would do real damage: it destroys
+the strict weak ordering the sort requires, which is undefined behaviour rather
+than a wrong answer. `boundary_margin((inf, 1.0), 1)` therefore returns a
+*defined* margin of `inf`, which `summarise_values` counts as `n_infinite` and
+keeps out of the statistics.
+
+**The native path.** `checked_scores` refuses any non-finite entry at every
+score-taking entry point. That guard was added after measuring a genuine
+disagreement: `min_adjacent_margin_top` returned `inf` where the reference
+returns `NaN`, because `std::min(inf, NaN)` keeps `inf` while Python's `min`
+propagates the `NaN` — and does so position-dependently.
+
+**Consequence for a caller.** For a non-finite score the two backends differ in
+kind: the reference returns a value, the native raises `ValueError`. They agree
+on every finite input, which is what the bit-exactness claim covers. A caller
+switching backends must therefore validate its own scores if it intends to feed
+non-finite ones to either.
+
+**Not to be "fixed" in either direction.** Adding the check to the reference
+would overturn a stated division of responsibility and change what
+`tests/test_margins_and_flip_radii.py` pins; removing it from the binding would
+reinstate a measured wrong answer.
