@@ -93,12 +93,6 @@ def mini_corpus() -> list[dict[str, object]]:
 
 
 @pytest.fixture(scope="session")
-def mini_queries() -> list[dict[str, object]]:
-    """Five queries, including two that embed to the zero vector by different routes."""
-    return _read_jsonl(FIXTURES / "mini_queries.jsonl")
-
-
-@pytest.fixture(scope="session")
 def pipeline() -> PreprocessingPipeline:
     """The normative preprocessing map."""
     return PreprocessingPipeline(PreprocessingConfig())
