@@ -94,11 +94,10 @@ def _band_of(value: float, defined: bool, bands: Sequence[tuple[str, float, floa
     for label, lo, hi in bands:
         if lo < value <= hi:
             return label
-    # The bands tile (0, inf) and zero is taken above, so only a negative value
-    # reaches here, which a gap between non-increasing scores cannot be. It
-    # stays in the partition so the per-k totals keep reconciling, and it goes
-    # to `undefined` rather than the top band: a margin from a broken sort is
-    # not evidence of separation.
+    # The bands tile (0, inf) and zero is handled above, so only a negative
+    # value reaches here, which non-increasing scores cannot produce. It joins
+    # `undefined` rather than the top band: a negative margin is not evidence of
+    # separation. Every value keeps a band, so the per-k totals reconcile.
     return UNDEFINED_BAND
 
 
@@ -180,8 +179,14 @@ def stratify_by_margin(
                     hi=hi,
                     n=len(group),
                     n_disagree=sum(p.sets_differ for p in group),
-                    mean_fks=sum(finite_fks) / len(finite_fks) if finite_fks else math.nan,
-                    mean_jaccard=sum(finite_jac) / len(finite_jac) if finite_jac else math.nan,
+                    # `math.fsum` matches `summarise_values`: these are
+                    # published columns, so the reduction must not vary with the
+                    # interpreter. CPython 3.12 and later compensate `sum` over
+                    # floats; on 3.11 and earlier it is a naive fold.
+                    mean_fks=math.fsum(finite_fks) / len(finite_fks) if finite_fks else math.nan,
+                    mean_jaccard=(
+                        math.fsum(finite_jac) / len(finite_jac) if finite_jac else math.nan
+                    ),
                 )
             )
     return strata
