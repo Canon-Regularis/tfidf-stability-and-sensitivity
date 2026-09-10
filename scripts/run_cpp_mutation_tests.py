@@ -273,11 +273,9 @@ def build_and_test(build: str, target: str, test_timeout: int) -> str:
 def verify_baseline(build: str, target: str, test_timeout: int) -> None:
     """Refuse to score anything against a tree whose tests already fail.
 
-    A verdict here is "ctest returned non-zero", so a red baseline scores every
-    mutant as killed and the campaign reports a clean sweep. A campaign killed
-    outright does not run its restore, so the tree it was mutating is one way a
-    baseline goes red. `build_and_test` names verdicts from the mutant's side,
-    so an unmutated tree that passes is `survived`.
+    A red baseline scores every mutant as killed, because `killed` means only
+    that ctest returned non-zero. `build_and_test` judges from the mutant's
+    side, so an unmutated tree that passes is `survived`.
     """
     verdict = build_and_test(build, target, test_timeout)
     if verdict != "survived":
@@ -308,7 +306,13 @@ def campaign(
             start = offset + 1
 
     candidates = scan(original)
-    if limit:
+    if limit is not None:
+        # `limit == 0` is a cap of zero candidates, not "no limit", so the test
+        # is against None. A negative cap would slice a candidate off the end
+        # while still marking the run partial, which suppresses stale-claim
+        # reporting, so it is refused.
+        if limit < 0:
+            raise SystemExit(f"--limit must be non-negative, got {limit}")
         candidates = candidates[:limit]
 
     claimed = load_equivalents(Path(relative))
@@ -364,7 +368,7 @@ def campaign(
         # A truncated run has not seen every candidate, so a claim it did not
         # reach is unmatched rather than stale. Reporting those would fail a
         # smoke run for entries that are perfectly good.
-        "partial": bool(limit),
+        "partial": limit is not None,
         "file": relative,
         "counts": counts,
         "score": round(100 * counts["killed"] / tried, 1) if tried else None,
