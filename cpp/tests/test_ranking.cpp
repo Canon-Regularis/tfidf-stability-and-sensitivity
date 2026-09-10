@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <set>
@@ -107,7 +108,10 @@ TEST_CASE("sort key: a duplicated identifier rank destroys injectivity") {
 TEST_CASE("sort key: finiteness guard") {
     CHECK(all_finite(std::vector<Real>{0.0, 1.0, -2.5}));
     CHECK_FALSE(all_finite(std::vector<Real>{0.0, std::nan("")}));
-    CHECK_FALSE(all_finite(std::vector<Real>{0.0, INFINITY}));
+    // `std::numeric_limits<Real>`, not the `INFINITY` macro: that macro is a
+    // `float`, so reaching a `Real` promotes it, which is the conversion
+    // `-Wdouble-promotion` exists to catch in a bit-exact codebase.
+    CHECK_FALSE(all_finite(std::vector<Real>{0.0, std::numeric_limits<Real>::infinity()}));
 }
 
 // -----------------------------------------------------------------------------
