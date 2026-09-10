@@ -1249,9 +1249,11 @@ def test_asking_for_no_documents_at_all_returns_nothing() -> None:
 
 
 def test_a_negative_top_k_is_refused_rather_than_dropping_from_the_end() -> None:
-    """`order[:-1]` is a legal slice, so an unchecked negative `k` returns
-    almost the whole ranking instead of a prefix. Both bounds are checked, so
-    the two ends of the range fail the same way rather than one silently.
+    """A negative `k` is refused rather than dropping from the end.
+
+    `order[:-1]` is a legal slice, so an unchecked negative `k` returns almost
+    the whole ranking instead of a prefix. Both bounds are checked, so the two
+    ends of the range fail the same way.
     """
     ranking = _ranked(4)
 
@@ -1650,15 +1652,13 @@ def test_a_truncated_ranking_leaves_the_degenerate_case_on_one_real_score() -> N
 # The spec's three enums are members, whatever spelling built them
 # ---------------------------------------------------------------------------
 def test_a_spec_built_from_strings_ranks_exactly_as_one_built_from_members() -> None:
-    """`Direction`, `AttributeDType` and `MissingPolicy` are all `str` enums, so
-    `"asc"` equals the member without being it, and every branch that reads them
-    selects on `is`. A string fell through to the default arm: descending order
-    for a spec that asked for ascending, and `missing_rank = n_distinct` for one
-    that asked for FIRST. Both change the rank encoding, and the ranks are what
-    the tie-break sorts on, so top-k membership moves.
+    """A spec built from strings ranks as one built from members.
 
-    Both attributes below discriminate: ascending and descending give different
-    rank vectors, as do the two missing placements.
+    `Direction`, `AttributeDType` and `MissingPolicy` are `str` enums: `"asc"`
+    equals the member without being it, and every branch reading them selects on
+    `is`. An uncoerced string takes the fall-through arm -- ascending order, and
+    `missing_rank = n_distinct` -- changing the rank encoding the tie-break
+    sorts on. Both fixtures below discriminate between the arms.
     """
     records = [{"doc_id": "a", "p": 10}, {"doc_id": "b", "p": 30}, {"doc_id": "c", "p": 20}]
 
@@ -1668,7 +1668,7 @@ def test_a_spec_built_from_strings_ranks_exactly_as_one_built_from_members() -> 
 
     assert ranks(Direction.ASC) == (0, 2, 1)
     assert ranks(Direction.DESC) == (2, 0, 1)
-    assert ranks("asc") == ranks(Direction.ASC), "the string must not fall through to DESC"
+    assert ranks("asc") == ranks(Direction.ASC), "the string must not fall through to ASC"
     assert ranks("desc") == ranks(Direction.DESC)
 
     absent = [{"doc_id": "a", "p": 10}, {"doc_id": "b"}, {"doc_id": "c", "p": 20}]
