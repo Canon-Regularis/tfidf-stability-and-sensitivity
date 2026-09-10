@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from collections.abc import Sequence
 from enum import Enum
 from typing import Protocol, runtime_checkable
@@ -83,7 +84,11 @@ class Lemmatiser(Protocol):
 # ---------------------------------------------------------------------------
 # Porter2 / Snowball English
 # ---------------------------------------------------------------------------
-_STEMMER = EnglishStemmer()
+#: One stemmer per thread. ``BaseStemmer.stemWord`` calls ``set_current``, which writes
+#: ``current``, ``cursor``, ``limit``, ``limit_backward``, ``bra`` and ``ket`` on the
+#: instance. Two threads sharing one instance interleave those writes and stem a spliced
+#: word. ``PreprocessingPipeline.preprocess_corpus`` documents this stage as parallelisable.
+_LOCAL = threading.local()
 
 
 def porter2_stem(word: str) -> str:
@@ -93,7 +98,11 @@ def porter2_stem(word: str) -> str:
     ``voc.txt``/``output.txt`` vector pair (42 649 words) by
     ``tests/test_preprocessing_determinism.py``.
     """
-    return str(_STEMMER.stemWord(word))
+    stemmer = getattr(_LOCAL, "stemmer", None)
+    if stemmer is None:
+        stemmer = EnglishStemmer()
+        _LOCAL.stemmer = stemmer
+    return str(stemmer.stemWord(word))
 
 
 # ---------------------------------------------------------------------------
