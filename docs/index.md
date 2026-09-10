@@ -84,13 +84,32 @@ recorded as an addendum and enforced by a test:
 ## Gates
 
 ```bash
-python -m pytest tests/ -q          # 1003 tests, 100% line and branch coverage
-ctest --preset mingw                # 79 cases, 20,074 assertions
+python -m pytest tests/ -q -m "not slow" --cov --cov-branch --cov-fail-under=100
+cmake --preset ci && cmake --build --preset ci && ctest --preset ci
 python scripts/benchmark.py         # speedups, each gated on bit-identity
-python -m ruff check src tests scripts && python -m ruff format --check src tests scripts
+python -m ruff check src tests scripts examples tooling
+python -m ruff format --check src tests scripts examples tooling
 python -m mypy
-python scripts/snapshot.py          # the cross-platform reproducibility digest
+python scripts/snapshot.py --check  # the recorded reproducibility digest
+python -m tooling.renumber_allowlists --check   # after editing a covered module
 ```
+
+The eight repository gates, which `ci.yml` runs and this list otherwise hides:
+
+```bash
+python scripts/check_dependencies.py   # pyproject and requirements agree
+python scripts/check_versions.py       # every stated version, and the binding ABI
+python scripts/check_vendored.py       # vendored files match their digests
+python scripts/check_layout.py         # the C++ tree mirrors the Python packages
+python scripts/check_python_floor.py   # no stdlib API newer than requires-python
+python scripts/check_cpp_format.py     # C++ matches the shipped .clang-format
+python scripts/check_docs.py           # every documented link and reference resolves
+python scripts/check_test_vacuity.py   # no test passes without asserting anything
+```
+
+`--preset ci` builds with whatever compiler the machine provides. `mingw`,
+`msvc`, `gcc` and `clang` pin one; `debug`, `asan`, `tsan` and
+`glibcxx-assertions` vary the build. `cmake --list-presets` names them all.
 
 `scripts/snapshot.py` is the acid test: CI computes it on Linux, macOS and
 Windows, at three optimisation levels, under both backends, and requires every
