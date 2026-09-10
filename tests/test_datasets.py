@@ -1129,6 +1129,7 @@ def _movielens_corpus(*, n_texts: int = 2, n_attributes: int = 2) -> movielens.M
         texts=tuple(f"t{i}" for i in range(n_texts)),
         attributes=tuple({"popularity": i} for i in range(n_attributes)),
         interactions=(),
+        min_weight=movielens.DEFAULT_MIN_WEIGHT,
         n_ratings=0,
         n_users=0,
         n_unrated=2,
@@ -1487,11 +1488,11 @@ def test_an_unpinned_download_is_placed_so_the_first_fetch_can_pin_it(
 
 
 def test_a_negative_near_tie_limit_is_refused_rather_than_dropping_the_widest_gap() -> None:
-    """`pairs[:-1]` is a legal slice, so a negative limit returned all but the
-    widest gap rather than nothing -- silently changing which pair section 7.4
-    selects as its constructed near-tie case study.
+    """A negative limit is refused rather than read as a slice from the end.
 
-    The boundary either side, so the guard sits at zero rather than below it.
+    `pairs[:-1]` is a legal slice, so a negative limit returns all but the
+    widest gap instead of raising, and the reduced count is reported as if it
+    were the whole grid. The boundary at zero is checked either side.
     """
     scores = [1.0, 0.9, 0.5, 0.1]
 
@@ -1501,3 +1502,38 @@ def test_a_negative_near_tie_limit_is_refused_rather_than_dropping_the_widest_ga
     assert synthetic.find_near_ties(scores, limit=0) == []
     assert len(synthetic.find_near_ties(scores, limit=1)) == 1
     assert len(synthetic.find_near_ties(scores, limit=99)) == 3
+
+
+def test_a_half_star_moves_the_rating_away_from_zero_in_both_directions() -> None:
+    """A doubled rating carries the half in the direction the rating points.
+
+    `int("-0")` is 0, so `doubled` carries no sign for "-0.5"; `sign` is read
+    from the leading '-' of `whole` instead. Each doubled value sums exactly
+    into `rating_sum2`, the `2*sum` half of G8's `(2*sum, count)` pair.
+    """
+    for text in ("0.0", "0.5", "3.5", "5.0", "-0.5", "-1.5", "-2.0", "-2.5"):
+        assert movielens._double_rating(text) == int(float(text) * 2), text
+
+
+@pytest.mark.parametrize(
+    ("label", "text"),
+    [
+        ("PEP 515 underscore", "1_0"),
+        ("non-ASCII digit", "\u0663.5"),
+        ("empty", ""),
+        ("a bare sign", "-"),
+        ("alphabetic", "abc"),
+        ("exponent form", "1e1"),
+        ("leading plus", "+3.5"),
+    ],
+)
+def test_a_rating_that_is_not_a_plain_decimal_is_refused(label: str, text: str) -> None:
+    """Only a plain decimal spelling of a rating is accepted.
+
+    `int()` would take PEP 515 underscores and any Unicode decimal digit, so
+    "1_0" reads as ten. The archive is pinned, so the parser takes the forms
+    `d`, `d.0`, `d.00`, `d.5` and `d.50`, and refuses the rest with
+    `DataIntegrityError`.
+    """
+    with pytest.raises(DataIntegrityError, match="not a plain decimal number"):
+        movielens._double_rating(text)

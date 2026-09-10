@@ -1,9 +1,10 @@
 """One way in to every dataset, and one place the provenance is recorded.
 
-The registry in ``configs/datasets.yaml`` names datasets; this module turns a
-name into records. The CLI, the experiment scripts and the notebooks all go
-through :func:`load_dataset` and none of them know whether the corpus was
-generated, downloaded or read off disk.
+:data:`DATASET_NAMES` below is the registry; this module turns a name into
+records. ``configs/datasets.yaml`` documents the same datasets and is loaded by
+nothing, so editing a value there changes no behaviour. The CLI, the experiment
+scripts and the notebooks all go through :func:`load_dataset` and none of them
+know whether the corpus was generated, downloaded or read off disk.
 
 :class:`LoadedDataset` carries a :attr:`~LoadedDataset.provenance` block that
 goes verbatim into the run manifest, so a synthetic result and a MovieLens result
@@ -66,10 +67,8 @@ class LoadedDataset:
     def digest(self) -> str:
         """Identity of the loaded corpus, for the manifest.
 
-        Over the records rather than the provenance: two loads producing
-        identical documents must agree here even if one came from a regenerated
-        spec and the other from a file, since the documents determine every
-        downstream number.
+        Over the records, not the provenance or the interaction set: two loads
+        at different ``min_weight`` share it; :attr:`provenance` records the threshold.
         """
         return hash_text(canonical_json(self.records, indent=None))
 
@@ -97,7 +96,10 @@ def load_jsonl_corpus(path: Path | str) -> LoadedDataset:
         provenance={
             "kind": "jsonl",
             "path": str(target),
-            # Of the file, so a corpus edited in place is detectable.
+            # Newline-normalised by `hash_text`, matching `cmd_build_corpus`, so
+            # a corpus another tool wrote with CRLF still has one identity.
+            # `atomic_write_text` emits LF everywhere, so a corpus this
+            # repository wrote hashes to `sha256sum` of the file.
             "sha256": hash_text(target.read_text(encoding="utf-8")),
             "n_documents": len(records),
         },
@@ -176,6 +178,10 @@ def load_dataset(
                 "n_ratings": films.n_ratings,
                 "n_users": films.n_users,
                 "n_unrated_documents": films.n_unrated,
+                # The threshold that decides which ratings become positive
+                # interactions. Changing it moves every profile built from this
+                # dataset, so the manifest records it.
+                "interaction_min_weight": films.min_weight,
                 # Recorded so the manifest shows at a glance that this result
                 # cannot be reproduced from the repository alone.
                 "redistributable": False,

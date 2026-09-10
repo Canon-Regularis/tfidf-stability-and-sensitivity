@@ -87,6 +87,10 @@ class MovieLensCorpus:
     texts: tuple[str, ...]
     attributes: tuple[dict[str, Any], ...]
     interactions: tuple[tuple[str, str, float], ...]
+    #: Rating at or above which a rating becomes a positive interaction. Carried
+    #: so the manifest records the threshold behind the interaction set;
+    #: changing it moves every profile built from the dataset.
+    min_weight: float
     n_ratings: int
     n_users: int
     n_unrated: int
@@ -114,14 +118,25 @@ def _double_rating(text: str) -> int:
     The raise below catches an input that breaks the assumption instead of
     rounding it silently.
     """
-    whole, _, frac = text.strip().partition(".")
+    stripped = text.strip()
+    whole, _, frac = stripped.partition(".")
+    # `int()` accepts PEP 515 underscores and non-ASCII decimal digits: without
+    # this guard "1_0" would parse as ten and "٣.5" as three point five.
+    # The archive is pinned, so this parser takes `d`, `d.0`, `d.00`, `d.5` and
+    # `d.50` only.
+    digits = whole.removeprefix("-")  # one sign; `lstrip` would accept "--3"
+    if not whole.isascii() or not digits.isdigit():
+        raise DataIntegrityError(f"rating {text!r} is not a plain decimal number")
+    # The half moves the rating away from zero, so it takes the sign of the
+    # whole part. `int("-0")` is 0, so `doubled` alone does not carry that sign
+    # for "-0.5". Each result sums into the `2*sum` half of G8's
+    # `(2*sum, count)` pair.
+    sign = -1 if whole.startswith("-") else 1
     doubled = int(whole) * 2
-    if not frac:
-        return doubled
-    if frac in ("0", "00"):
+    if not frac or frac in ("0", "00"):
         return doubled
     if frac in ("5", "50"):
-        return doubled + 1
+        return doubled + sign
     raise DataIntegrityError(
         f"rating {text!r} is not a multiple of 0.5; the exact (2*sum, count) "
         f"representation from spec_addenda G8 assumes half-integer ratings"
@@ -190,6 +205,12 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
     tags: defaultdict[str, list[str]] = defaultdict(list)
     for row in tag_rows:
         tags[row["movieId"]].append(row["tag"])
+    # Sorted, as the movie rows and the interactions below already are. Tags are
+    # concatenated into the document text, so their order decides which
+    # tag-to-tag n-grams exist. Under `tags.csv` row order the vocabulary would
+    # be a property of GroupLens' export, not of the data: hazard 1 above.
+    for movie in tags:
+        tags[movie].sort()
 
     # movieId as an integer, so ordering is a property of the data rather than
     # of CSV row order or string collation ("10" before "9").
@@ -236,6 +257,7 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
         texts=tuple(texts),
         attributes=tuple(attributes),
         interactions=tuple(interactions),
+        min_weight=min_weight,
         n_ratings=len(rating_rows),
         n_users=len(users),
         n_unrated=n_unrated,
