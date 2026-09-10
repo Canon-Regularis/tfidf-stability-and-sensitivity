@@ -418,3 +418,32 @@ def test_a_non_ascii_field_is_quoted_but_not_escaped() -> None:
     rendered = event.render()
     assert rendered == 'degenerate token="café au lait"'
     assert chr(92) not in rendered, "no escape sequences of any kind"
+
+
+def test_of_kind_accepts_the_string_spelling_of_a_kind() -> None:
+    """Both spellings of a kind select the same events.
+
+    `EventKind` is a `str` enum and `of_kind` compares with `is`, so an uncoerced
+    string selects nothing. A kind that was never recorded still returns an empty
+    list.
+    """
+    log = get_logger()
+    with capture() as recorder:
+        log_event(log, EventKind.DIGEST, artefact="vocabulary", value="abc")
+        log_event(log, EventKind.DIGEST, artefact="model", value="def")
+        log_event(log, EventKind.BACKEND_SELECTED, backend="reference")
+
+    assert len(recorder.of_kind(EventKind.DIGEST)) == 2
+    assert recorder.of_kind("digest") == recorder.of_kind(EventKind.DIGEST)
+    assert recorder.of_kind("backend_selected") == recorder.of_kind(EventKind.BACKEND_SELECTED)
+    assert recorder.of_kind(EventKind.DEGENERATE) == []
+
+
+def test_of_kind_refuses_a_kind_that_names_nothing() -> None:
+    """A misspelled kind raises ValueError instead of returning nothing."""
+    log = get_logger()
+    with capture() as recorder:
+        log_event(log, EventKind.DIGEST, artefact="vocabulary", value="abc")
+
+    with pytest.raises(ValueError, match="is not a valid EventKind"):
+        recorder.of_kind("digests")

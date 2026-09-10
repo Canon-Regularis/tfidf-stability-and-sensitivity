@@ -10,7 +10,7 @@ Closed vocabulary. :class:`EventKind` names every recordable kind and
 :func:`log_event` is the only emitter. Lines render as ``kind key=value ...``
 with keys sorted, so two runs that took the same decisions produce the same
 lines whatever order a call site passed its fields, matching the
-canonicalisation :func:`~tfidf_stability.utils.hashing.hash_json` applies to
+canonicalisation :func:`~tfidf_stability.utils.io.canonical_json` applies to
 configs.
 
 Volatile state stays off the reproducibility surface. A
@@ -45,7 +45,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import IO, Any
 
-from tfidf_stability.utils.hashing import hash_json
+from tfidf_stability.utils.hashing import hash_text
+from tfidf_stability.utils.io import canonical_json
 
 __all__ = [
     "DETERMINISTIC_FORMAT",
@@ -205,8 +206,14 @@ class EventRecorder(logging.Handler):
             self.events.append(event)
 
     def of_kind(self, kind: EventKind) -> list[Event]:
-        """Every recorded event of one kind, in the order they were emitted."""
-        return [event for event in self.events if event.kind is kind]
+        """Every recorded event of one kind, in the order they were emitted.
+
+        The argument is coerced because ``EventKind`` is a ``str`` enum: a spelling
+        equals a member without being it, and the filter below compares with ``is``.
+        An uncoerced string selects nothing and reports a kind as unrecorded.
+        """
+        wanted = EventKind(kind)
+        return [event for event in self.events if event.kind is wanted]
 
     def to_list(self) -> list[dict[str, Any]]:
         """The run record: structured events in emission order."""
@@ -217,8 +224,11 @@ class EventRecorder(logging.Handler):
 
         Order-sensitive: selecting the native backend after a fallback is a
         different run from selecting it outright.
+
+        Rendered by ``canonical_json``, so a non-finite field maps to ``null``
+        as it does in every JSON file this package writes.
         """
-        return hash_json(self.to_list())
+        return hash_text(canonical_json(self.to_list(), indent=None))
 
 
 @contextmanager
