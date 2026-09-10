@@ -126,12 +126,12 @@ biases upwards.
 
 **The admissible domain is `p ∈ [0, 1]`**, the two endpoints being exactly the
 biased readings above, and both implementations refuse anything else. The
-normalisation below depends on it: outside the range the ceiling `k² + p·k(k−1)`
-is no longer the maximum, and for `p` negative or NaN it is negative or
-undefined, so `K̄` leaves `[0, 1]` altogether. Left unchecked the failure was
-silent and in the worst direction — the ceiling failed a `> 0` test, the
-normalisation returned the `0.0` reserved for `k = 0`, and two disjoint lists
-reported perfect agreement.
+normalisation below depends on that domain: outside it the ceiling
+`k² + p·k(k−1)` is not the maximum, and for a NaN or sufficiently negative `p` the
+ceiling is undefined or negative, so `K̄` leaves `[0, 1]`. Without the check
+the ceiling fails a `> 0` test, the normalisation returns 0.0, the value that
+legitimately means no disagreement, and two disjoint lists report perfect
+agreement.
 
 > **Correction.** An earlier draft of this entry claimed `p = ½` makes `K⁽ᵖ⁾` a
 > genuine metric. **That is false.** Measured against this repository's own
@@ -1377,36 +1377,34 @@ keeps scores stable, because on this construction nothing was destabilising them
 ---
 
 <a id="g29"></a>
-## G29. The two backends validate finiteness at different layers, on purpose
+## G29. The two backends validate finiteness at different layers
 
 **Where:** `ranking/margins.py`, `ranking/tie_groups.py` and their C++ mirrors,
 reached through `cpp/bindings/module.cpp`.
 
 The reference computes on a non-finite score; the native path refuses it. Both
-are deliberate, and neither is a defect, so the asymmetry is stated here rather
-than left to be rediscovered as one.
+layers are deliberate, and the asymmetry is a contract rather than a defect.
 
 **The reference.** `boundary_margin` and the tie-group functions do not
 re-validate finiteness. `rank` rejects a non-finite score before sorting, so the
-check happens once, at the point where a NaN would do real damage: it destroys
-the strict weak ordering the sort requires, which is undefined behaviour rather
-than a wrong answer. `boundary_margin((inf, 1.0), 1)` therefore returns a
-*defined* margin of `inf`, which `summarise_values` counts as `n_infinite` and
-keeps out of the statistics.
+check happens once, where a NaN destroys the strict weak ordering the sort
+requires and the result is undefined behaviour rather than a wrong answer.
+`boundary_margin((inf, 1.0), 1)` therefore returns a defined margin of `inf`,
+which `summarise_values` counts as `n_infinite` and keeps out of the statistics.
 
 **The native path.** `checked_scores` refuses any non-finite entry at every
-score-taking entry point. That guard was added after measuring a genuine
-disagreement: `min_adjacent_margin_top` returned `inf` where the reference
-returns `NaN`, because `std::min(inf, NaN)` keeps `inf` while Python's `min`
-propagates the `NaN` — and does so position-dependently.
+free-function entry point; `NativeRanker::rank` and `top_k` do the same check
+through `all_finite`. Without that guard `min_adjacent_margin_top` returns
+`inf` where the reference returns `NaN`: `std::min(inf, NaN)` keeps `inf` while
+Python's `min` propagates the `NaN`, and does so position-dependently.
 
 **Consequence for a caller.** For a non-finite score the two backends differ in
-kind: the reference returns a value, the native raises `ValueError`. They agree
-on every finite input, which is what the bit-exactness claim covers. A caller
-switching backends must therefore validate its own scores if it intends to feed
-non-finite ones to either.
+kind: the reference returns a value, the native raises `ValueError`. The
+bit-exactness claim covers finite inputs, on which the two agree. A caller
+switching backends must validate its own scores before feeding a non-finite one
+to either.
 
-**Not to be "fixed" in either direction.** Adding the check to the reference
-would overturn a stated division of responsibility and change what
-`tests/test_margins_and_flip_radii.py` pins; removing it from the binding would
-reinstate a measured wrong answer.
+**Both checks stay where they are.** Adding the check to the reference changes
+what `tests/test_margins_and_flip_radii.py` pins and moves a stated division of
+responsibility; removing it from the binding restores the `inf`/`NaN`
+disagreement above.
