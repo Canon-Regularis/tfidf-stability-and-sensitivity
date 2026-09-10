@@ -900,12 +900,11 @@ def test_a_row_of_the_wrong_dimension_is_refused_wherever_it_sits(position: int)
 
 
 def test_a_negative_row_index_is_refused_rather_than_yielding_an_empty_row() -> None:
-    """`indptr[-1]` is the final offset and `indptr[0]` is zero, so the slice ran
-    backwards and came out empty. A row is a document's vector, so an empty one
-    scores zero against every query instead of reporting the mistake.
+    """A negative row index raises `IndexError`.
 
-    Both ends now say the same thing, which is the point: the positive side was
-    already checked, by `indptr[i + 1]` running off the tuple.
+    Unguarded, `indptr[-1]` is the final offset and `indptr[0]` is zero, so the
+    slice runs backwards and comes out empty. A row is a document's vector, so
+    an empty one scores zero against every query.
     """
     matrix = CsrMatrix.from_rows(
         [SparseVector.from_mapping({0: 1.0}, 4), SparseVector.from_mapping({1: 2.0}, 4)], n_cols=4

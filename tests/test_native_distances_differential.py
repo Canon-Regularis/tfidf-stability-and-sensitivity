@@ -224,13 +224,12 @@ def test_compare_top_k_rejects_a_negative_k() -> None:
 
 @pytest.mark.parametrize("penalty", [math.nan, math.inf, -math.inf, -1.0, -0.5, 1.5, 2.0])
 def test_both_backends_refuse_a_penalty_outside_the_domain(penalty: float) -> None:
-    """G2 fixes the case-4 penalty in [0, 1]. Neither backend validated it, and
-    the failure was silent in the worst direction: the normalising ceiling came
-    out NaN or negative, `ceiling > 0.0` was false, and the distance fell to the
-    branch meant for `k = 0` -- reporting two disjoint lists as identical.
+    """Both backends reject a case-4 penalty outside the G2 domain [0, 1].
 
-    Both refuse now, which is the point: guarding only the reference would have
-    made the backends disagree on which inputs are answerable.
+    A NaN or sufficiently negative penalty makes the ceiling NaN or
+    non-positive, so `ceiling > 0.0` is false and the distance takes the
+    `k = 0` branch, reporting two disjoint lists as identical. Guarding one
+    backend alone would make them disagree.
     """
     a, b = [1, 2, 3], [4, 5, 6]
 
@@ -247,9 +246,11 @@ def test_both_backends_refuse_a_penalty_outside_the_domain(penalty: float) -> No
 
 @pytest.mark.parametrize("penalty", [0.0, 1.0])
 def test_the_domain_endpoints_stay_admissible_and_bit_exact(penalty: float) -> None:
-    """G2 names p = 0 and p = 1 as the two biased readings it argues against, so
-    they are meaningful settings rather than out-of-range ones. A guard that
-    excluded either would refuse the spec's own comparison points.
+    """The endpoints p = 0 and p = 1 stay admissible and bit-exact.
+
+    G2 names both as the biased readings it argues against, so they are
+    meaningful settings rather than out-of-range ones. A guard excluding
+    either would refuse the spec's own comparison points.
     """
     a, b = [1, 2, 3], [4, 5, 6]
     for normalise in (True, False):

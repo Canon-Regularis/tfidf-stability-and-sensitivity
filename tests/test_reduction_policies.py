@@ -661,11 +661,11 @@ def test_the_smallest_positive_value_is_one_ulp_from_zero() -> None:
 
 
 def test_the_distance_between_the_extremes_stays_finite() -> None:
-    """Both arguments are finite, and the contract reserves `inf` for a
-    non-finite one. `b - a` is `-3.6e308` here and overflows, so the two values
-    are scaled before they are subtracted rather than after; `scale` is a power
-    of two, so that division is exact and the orders agree everywhere the
-    subtraction does not overflow.
+    """The distance between the two extremes is finite.
+
+    Both arguments are finite, and the contract reserves `inf` for a non-finite one.
+    `b - a` is `-3.6e308` here and overflows, so each value is divided by `scale`
+    first. `scale` is a power of two, so that division is exact.
     """
     got = ulps_between(sys.float_info.max, -sys.float_info.max)
     assert math.isfinite(got), "both arguments are finite, so the distance is too"

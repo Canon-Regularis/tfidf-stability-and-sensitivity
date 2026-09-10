@@ -202,9 +202,11 @@ def test_each_mutation_kind_is_produced_on_a_line_that_uses_it(before: str, afte
 
 @pytest.mark.parametrize("verdict", ["killed", "stillborn"])
 def test_a_red_baseline_stops_the_campaign_rather_than_being_scored(verdict: str) -> None:
-    """A verdict is "ctest returned non-zero", so a suite that fails before any
-    mutation scores every mutant as killed and the campaign reports a clean
-    sweep. Both ways a baseline can be red refuse to start one.
+    """A red baseline stops the campaign instead of being scored.
+
+    `killed` means only that ctest returned non-zero, so a suite that fails
+    before any mutation scores every mutant as killed. Both verdicts other
+    than `survived` are refused.
     """
     harness = _harness()
     harness.build_and_test = lambda build, target, test_timeout: verdict
@@ -214,9 +216,11 @@ def test_a_red_baseline_stops_the_campaign_rather_than_being_scored(verdict: str
 
 
 def test_a_green_baseline_starts_the_campaign_and_is_judged_unmutated() -> None:
-    """The contrast: `survived` is the unmutated tree passing its own tests, and
-    it is the only verdict that proceeds. The arguments reach `build_and_test`
-    as given, so the baseline is judged by the build the campaign then uses.
+    """A green baseline proceeds and is judged unmutated.
+
+    `survived` is the unmutated tree passing its own tests, and it is the only
+    verdict that proceeds. The arguments reach `build_and_test` unchanged, so
+    the baseline is judged by the build the campaign then uses.
     """
     harness = _harness()
     calls: list[tuple[str, str, int]] = []
@@ -234,9 +238,8 @@ def test_a_green_baseline_starts_the_campaign_and_is_judged_unmutated() -> None:
 #: Headers whose campaign has not been triaged, so they cannot join the nightly
 #: matrix without failing it every night. Each must say why; moving one out means
 #: killing its survivors or arguing them in configs/equivalent_mutants_cpp.txt.
-#: Every header is scheduled. Kept as an empty set rather than deleted: a new
-#: header must be either scheduled or deferred with a reason, and the test
-#: below needs somewhere to say the second.
+#: Currently empty: every header is scheduled. The mapping stays so a new
+#: header can be deferred here with its reason.
 _NOT_YET_RECONCILED: dict[str, str] = {}
 
 

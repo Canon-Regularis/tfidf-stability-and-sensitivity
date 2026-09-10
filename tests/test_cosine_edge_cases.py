@@ -647,14 +647,12 @@ def test_a_zero_vector_in_any_of_the_four_positions_is_refused(position: int) ->
 
 @pytest.mark.parametrize("position", [0, 1, 2, 3])
 def test_a_nan_norm_in_any_of_the_four_positions_is_refused(position: int) -> None:
-    """The contrast with the zero case above: a NaN norm is not caught by
-    comparing the minimum against zero, in any position.
+    """A NaN norm is refused in each of the four positions.
 
-    `min(...) <= 0.0` failed twice over. Every comparison with NaN is false, so
-    a NaN that reached the minimum passed the guard; and `min` keeps whichever
-    operand it saw first, so whether the NaN even became the minimum depended on
-    argument order. `C = 1 / NaN` is then NaN and the bound reports `holds` as
-    false for a reason that has nothing to do with the mathematics.
+    `min(...) <= 0.0` does not catch it: every comparison with NaN is false, and `min`
+    keeps whichever operand it saw first, so the outcome depends on argument order. A
+    NaN that reaches the minimum would give `C = 1 / NaN`; in any position `observed`
+    is NaN, so `holds` is false.
     """
     vectors = [sv({0: 1.0}), sv({0: 1.0}), sv({0: 2.0}), sv({0: 2.0})]
     vectors[position] = sv({0: math.nan})

@@ -674,17 +674,16 @@ def test_halving_a_margin_and_doubling_it_back_recovers_it_exactly(value: float)
 
 
 def test_the_exactness_claim_fails_for_every_odd_subnormal_margin() -> None:
-    """Where halving is not a shift.
+    """Halving a subnormal margin is not a shift.
 
     A subnormal has no exponent left to shift, so the halving rounds to nearest
-    even: every odd multiple of `5e-324` loses its low bit, and `5e-324` itself
-    halves to zero. Even multiples still round-trip, so the boundary is parity
-    in the subnormal range rather than the smallest subnormal alone.
+    even: an odd multiple `m` of `5e-324` moves to the nearest even multiple,
+    and `5e-324` itself halves to zero. Even multiples round-trip, so the
+    boundary is parity rather than the smallest subnormal alone.
 
-    The consequence is bounded: a radius that rounds down is *conservative* --
-    it certifies less than the true radius, so no ranking is ever wrongly
-    certified as stable. Reaching it needs two adjacent scores a subnormal
-    apart, far below the noise floor the tau band is derived from.
+    Halving rounds down for `m` congruent to 1 mod 4 and up for 3 mod 4, so a
+    subnormal radius can exceed the true one by at most `2**-1074`. Reaching it
+    needs two adjacent scores a subnormal apart, far below the tau band's floor.
     """
     smallest = 5e-324
 

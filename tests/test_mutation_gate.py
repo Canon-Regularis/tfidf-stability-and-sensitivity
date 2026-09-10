@@ -340,10 +340,10 @@ def test_the_sandbox_shadows_the_working_tree_rather_than_sitting_behind_it() ->
 # twice over -- stale here, undocumented there -- which reads as two findings
 # and is neither.
 #
-# That went unchecked because a campaign is the only thing that noticed, and
-# `nightly.yml` runs campaigns for three modules while this file documents
-# twenty. Adding five comment lines to `noise_floor.py` shifted nine of its
-# entries and no gate anywhere would have said so.
+# A campaign is the only thing that notices, and `nightly.yml` runs campaigns
+# for twelve modules while the allowlist argues about thirty-four. Adding five
+# comment lines to `noise_floor.py` shifts nine of its entries and no gate
+# anywhere would say so.
 #
 # It does not need a campaign. Whether a line still carries the mutation an
 # entry describes is answerable from the AST alone, in about a second for the
@@ -353,7 +353,7 @@ def _sites_by_key(runner: ModuleType, module: Path) -> set[tuple[int, str, str, 
 
     One pass rather than one per site. `_Mutator` is built to apply a single
     mutation chosen by index, so the obvious enumeration re-parses the module
-    once per site: over the twenty modules this file documents that was 23
+    once per site: over the modules this file documents that was 23
     seconds through `_apply`, which also unparses, and 11 through the mutator
     alone. `_hit` is called at every site whatever the target, so overriding it
     records the lot in a single visit and mutates nothing -- `target=-1` matches
@@ -605,8 +605,8 @@ def test_no_module_gains_an_unrecheckable_argument() -> None:
     The allowlist fails the build two ways: a survivor with no entry, and an
     entry matching no survivor. The second is what stops the file becoming a
     blanket suppression -- and it can only fire for a module the nightly matrix
-    actually runs. The matrix names three modules; the allowlist argues about
-    thirty-four, so most of the file is currently unfalsifiable.
+    actually runs. The matrix names twelve modules; the allowlist argues about
+    thirty-four, so 61 of its 105 entries are unfalsifiable.
 
     This does not fix that. It stops it growing: a NEW module cannot acquire an
     argument without either being scheduled or being added to the list above,
@@ -637,12 +637,9 @@ def test_no_module_gains_an_unrecheckable_argument() -> None:
 def test_every_scheduled_module_and_its_tests_exist() -> None:
     """A matrix entry names paths as bare strings, and nothing resolves them.
 
-    Both halves matter and both fail silently. A module path that no longer
-    exists makes the runner exit before it starts. A test path that no longer
-    exists is worse: pytest reports a collection error, the runner reads a
-    non-zero exit as "the tests noticed", and every mutant is scored killed --
-    a perfect mutation score for a module nothing tested. That mistake was made
-    while assembling this matrix, so it is not hypothetical.
+    A missing module path makes the runner exit before it starts. A missing
+    test path makes pytest report a collection error, which the runner reads
+    as a kill: every mutant scores killed for a module nothing tested.
     """
     import yaml
 
@@ -665,8 +662,11 @@ def test_every_scheduled_module_and_its_tests_exist() -> None:
 
 
 def test_no_scheduled_module_is_also_listed_as_pending() -> None:
-    """The two lists are maintained by hand and must not overlap: a module in
-    both reads as scheduled to the matrix and as deferred to a reader."""
+    """The matrix and `_NOT_YET_SCHEDULED` must not overlap.
+
+    Both lists are maintained by hand. A module in both reads as scheduled to
+    the matrix and as deferred to a reader.
+    """
     import yaml
 
     workflow = yaml.safe_load(

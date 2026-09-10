@@ -244,10 +244,11 @@ def test_a_boolean_k_is_the_integer_it_equals() -> None:
 
 
 def test_only_an_explicit_lenient_mode_clamps_an_over_large_k() -> None:
-    """`StrictMode` is a `str` enum, so `"strict"` compares equal to the strict
-    member without being it. The clamp is therefore guarded on `LENIENT`: the
-    string spelling, and any value that is neither member, raise rather than
-    clamp, which is G3's "never a silent clamp".
+    """Only an explicit lenient mode clamps an over-large `k`.
+
+    `StrictMode` is a `str` enum, so `"strict"` compares equal to the strict member
+    without being it. The clamp is guarded on `LENIENT`, so the string spelling of
+    strict, and any value unequal to `LENIENT`, raise. G3 forbids a silent clamp.
     """
     assert StrictMode.STRICT == "strict", "the premise: equality holds"
     assert StrictMode.STRICT is not "strict"  # noqa: F632 - the premise, stated

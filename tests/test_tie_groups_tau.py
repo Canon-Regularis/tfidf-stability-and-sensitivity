@@ -390,11 +390,10 @@ def test_report_carries_both_the_ball_and_the_partition_statistics() -> None:
     }
     assert report["rho"] == 3.0
 
-    # The ball was the one object missing, and this assertion was the reason it
-    # went unnoticed: the key set above is exhaustive, so it pinned the absence
-    # of the statistic the test is named for. Neither neighbour stands in for
-    # it -- a clique is complete-linkage, a chain single-linkage, and the ball
-    # lies strictly between them on this ladder.
+    # The key set above is exhaustive, so every statistic `report` carries is
+    # named there. Neither neighbour stands in for the ball: a clique is
+    # complete-linkage, a chain single-linkage, and the ball lies strictly
+    # between them on this ladder.
     assert report["largest_clique"] == 2
     assert report["largest_ball"] == 3
     assert report["largest_chain"] == 6
@@ -403,10 +402,9 @@ def test_report_carries_both_the_ball_and_the_partition_statistics() -> None:
 def test_the_ball_width_is_bracketed_by_the_clique_and_the_chain() -> None:
     """`largest_clique <= largest_ball <= largest_chain`, for every corpus.
 
-    The relation is what makes the three worth reporting together: a clique
-    requires every pair within tau, a ball only every member within tau of one
-    centre, and a chain only a path of steps within tau. Each is a weaker
-    requirement than the last, so each group can only grow.
+    A clique requires every pair within tau, a ball every member within tau of
+    one centre, and a chain only a path of steps within tau. Each requirement is
+    weaker than the last, so each group can only grow.
     """
     for scores, tau in (
         ([1.0 - i * 2**-20 for i in range(6)], 2**-20),
@@ -785,7 +783,7 @@ def test_an_empty_corpus_has_no_largest_group_rather_than_a_group_of_one() -> No
 
     All three statistics take the default, and each needs its own assertion:
     `largest_ball` folds over centres rather than over a stored list, so its
-    `default=` is a separate one from the two above it.
+    `default=` is separate from the two above it.
     """
     empty = TieGroupIndex.build((), 1.0)
     assert empty.largest_chain == 0

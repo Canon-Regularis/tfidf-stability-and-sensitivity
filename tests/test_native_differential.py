@@ -340,20 +340,19 @@ def test_a_scoring_algorithm_outside_the_enumeration_is_rejected(
     algorithm: int,
     index,  # type: ignore[no-untyped-def]
 ) -> None:
-    """The sibling of the reduction-policy hole above, in the same file.
+    """An algorithm outside `ALGORITHM` is refused rather than run as TAAT.
 
-    `score` reads `algorithm == Daat` and falls to TAAT otherwise, so an
-    out-of-range value silently ran TAAT while the manifest recorded what was
-    asked for. The two agree bit for bit -- the test above this one proves it --
-    so what a substitution costs is provenance, not the numbers.
+    `score` selects DAAT on `algorithm == Daat` and TAAT otherwise, so an
+    unguarded out-of-range value runs TAAT while the manifest records the
+    value asked for. The two agree bit for bit, so the cost is provenance.
     """
     qi = np.array([0], dtype=np.int32)
     qv = np.array([1.0], dtype=np.float64)
     with pytest.raises(ValueError, match="scoring algorithm out of range"):
         index.score(qi, qv, algorithm)
 
-    # Both in-range values are still accepted, so the guard bounds the enum
-    # rather than rejecting whatever looks large.
+    # Both in-range values are accepted, so the guard bounds the enum rather
+    # than rejecting large values.
     for value in nat.ALGORITHM.values():
         assert len(index.score(qi, qv, int(value))) > 0
 

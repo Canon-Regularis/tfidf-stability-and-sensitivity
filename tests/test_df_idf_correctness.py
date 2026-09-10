@@ -139,16 +139,16 @@ def test_platform_log_differs_from_correctly_rounded() -> None:
 
 
 def test_the_string_spelling_of_a_log_impl_selects_the_same_logarithm() -> None:
-    """`LogImpl` is a `str` enum, so `"platform"` equals the member without
-    being it. Selected on `is`, the string took the correctly-rounded branch and
-    reported the G13 gap this setting exists to measure as exactly zero.
+    """The string and the member spellings select the same logarithm.
 
-    The contrast is the point: the two spellings must agree bit for bit, and
-    must both differ from the correctly-rounded value.
+    `LogImpl` is a `str` enum, so `"platform"` equals the member without being
+    it, and an uncoerced selection on `is` would send the string to the
+    correctly-rounded branch. Both spellings must agree bit for bit and differ
+    from the correctly-rounded value.
     """
     n = 9742
     # The two logarithms agree on most df, so the case is chosen rather than
-    # assumed: a df they agree on would pass whichever branch the string took.
+    # assumed: a df they agree on passes whichever branch the string takes.
     df = next(
         d
         for d in range(1, n + 1)
@@ -173,8 +173,11 @@ def test_the_string_spelling_of_a_log_impl_selects_the_same_logarithm() -> None:
 
 
 def test_an_unrecognised_log_impl_is_refused_rather_than_defaulted() -> None:
-    """Coercion refuses what it cannot name, so a misspelling cannot quietly
-    select the default and be recorded as the one that was asked for."""
+    """An unrecognised `LogImpl` raises `ValueError`.
+
+    A misspelling therefore cannot select the default and then be recorded as
+    the value requested.
+    """
     for bad in ("Platform", "exact", ""):
         with pytest.raises(ValueError, match="is not a valid LogImpl"):
             smoothed_idf_one(3, 10, bad)  # type: ignore[arg-type]
@@ -456,14 +459,12 @@ def test_the_sklearn_compatible_policy_ignores_document_frequency_entirely() -> 
 
 
 def test_the_string_spelling_of_a_policy_selects_the_same_vocabulary() -> None:
-    """`MaxFeaturesPolicy` is a `str` enum, so `"cf_desc"` equals the member
-    without being it. `build_vocabulary` selects the ranking order on `is`, so
-    the string fell through to DF_DESC and a different set of tokens survived
-    the cut -- the vocabulary, and every number computed from it, while the
-    config still recorded the policy that was asked for.
+    """The string and the member spellings select the same vocabulary.
 
-    The corpus discriminates: `rare` wins on collection frequency and `common`
-    wins on document frequency, so the two policies cannot agree by accident.
+    `MaxFeaturesPolicy` is a `str` enum, so `"cf_desc"` equals the member
+    without being it, and `build_vocabulary` selects the ranking order on `is`.
+    `rare` wins on collection frequency and `common` on document frequency, so
+    the two policies cannot agree by accident.
     """
     corpus = [["rare", "rare", "rare"], ["common"], ["common"]]
 
@@ -483,8 +484,11 @@ def test_the_string_spelling_of_a_policy_selects_the_same_vocabulary() -> None:
 
 
 def test_an_unrecognised_max_features_policy_is_refused_rather_than_defaulted() -> None:
-    """A misspelling must not quietly select the default and then be recorded in
-    the manifest as the policy that was requested."""
+    """An unrecognised policy raises `ValueError`.
+
+    A misspelling therefore cannot select the default and then reach the
+    manifest as the policy requested.
+    """
     for bad in ("cf-desc", "CF_DESC", "frequency", ""):
         with pytest.raises(ValueError, match="is not a valid MaxFeaturesPolicy"):
             VocabularyConfig(max_features_policy=bad)  # type: ignore[arg-type]
