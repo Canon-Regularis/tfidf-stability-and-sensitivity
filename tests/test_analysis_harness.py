@@ -39,6 +39,7 @@ from tfidf_stability.perturbation.score_bounds import certified_radius
 from tfidf_stability.ranking.attributes import AttributeTable
 from tfidf_stability.similarity.cosine import cosine_against_corpus
 from tfidf_stability.utils.io import canonical_json
+from tfidf_stability.utils.numerics import same_bits
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
 
 
@@ -99,14 +100,11 @@ def test_an_all_nan_sample_summarises_without_raising() -> None:
 
 
 def test_an_infinity_is_counted_not_averaged_and_is_not_a_nan() -> None:
-    """An infinite margin is defined -- `boundary_margin((inf, 1.0), 1)` returns
-    one -- so it reaches a summary without passing through the NaN filter.
-    Averaged in, `mean` and the upper percentiles become infinite, and
-    `canonical_json` writes those as `null`, which is indistinguishable in the
-    published record from a serialisation fault.
+    """An infinite margin is defined, so the upstream filter passes it on.
 
-    Counted apart from NaN because both serialise to `null`: the two counts are
-    the only thing that says which one the sample held.
+    `boundary_margin((inf, 1.0), 1)` returns one. Averaged into the statistics
+    it makes `mean` and the upper percentiles infinite, which `canonical_json`
+    writes as `null`. `n_infinite` and `n_nan` keep the two kinds apart.
     """
     d = summarise_values("m", [1.0, 2.0, math.inf, 3.0])
     assert d.n == 3
@@ -1165,6 +1163,37 @@ def test_the_published_record_names_the_percentile_method() -> None:
     """
     recorded = summarise_values("m", [0.0, 1.0]).as_dict()
     assert recorded["percentile_method"] == "nearest-rank (no interpolation)"
+
+
+def test_a_signed_zero_does_not_make_the_extremes_depend_on_arrival_order() -> None:
+    """Signed zeros must not let arrival order set the reported extremes.
+
+    `-0.0 == 0.0` and `sorted` is stable, so without a sign-aware key the first
+    zero becomes `minimum` and the last `maximum`, changing the digest. Margin
+    distributions reach zero with both signs. `==` holds either way, so the
+    assertions compare bits.
+    """
+    forward = summarise_values("m", [-0.0, 0.0])
+    reversed_ = summarise_values("m", [0.0, -0.0])
+
+    assert same_bits(forward.minimum, reversed_.minimum)
+    assert same_bits(forward.maximum, reversed_.maximum)
+
+    # Each end follows IEEE-754 `totalOrder`: `-0.0` is the minimum and `+0.0`
+    # the maximum, matching IEEE 754-2019 `minimum`/`maximum`.
+    assert same_bits(forward.minimum, -0.0)
+    assert same_bits(forward.maximum, 0.0)
+
+    # The order is total across the whole sample, not only at the ends, so a
+    # percentile landing on zero is fixed too.
+    sample = [1.0, 0.0, -1.0, -0.0]
+    assert same_bits(
+        summarise_values("m", sample).percentiles["p50"],
+        summarise_values("m", list(reversed(sample))).percentiles["p50"],
+    )
+
+    # Both signs count as zero: the sort key must not change `n_zero`.
+    assert forward.n_zero == 2
 
 
 def test_the_record_carries_the_undefined_count_beside_the_statistics() -> None:

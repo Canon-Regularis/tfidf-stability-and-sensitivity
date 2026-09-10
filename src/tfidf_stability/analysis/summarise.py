@@ -48,6 +48,17 @@ __all__ = [
 DEFAULT_PERCENTILES: tuple[int, ...] = (0, 1, 5, 25, 50, 75, 95, 99, 100)
 
 
+def _signed_order(value: float) -> tuple[float, float]:
+    """Sort key placing ``-0.0`` below ``+0.0``.
+
+    ``sorted`` is stable and ``-0.0 == 0.0``, so sorting on the value alone lets
+    arrival order decide the sign of ``minimum``, ``maximum`` and a zero-valued
+    percentile, breaking bit-exactness. Over finite values the key is IEEE-754
+    ``totalOrder``.
+    """
+    return (value, math.copysign(1.0, value))
+
+
 def percentile(sorted_values: Sequence[float], p: float) -> float:
     """Nearest-rank percentile of an already-sorted sample.
 
@@ -85,8 +96,8 @@ class Distribution:
     n: int
     n_nan: int
     #: Observations that were infinite. Counted apart from ``n_nan`` because
-    #: ``canonical_json`` writes both as ``null``, so the counts are what tells
-    #: a reader which one a record held.
+    #: ``canonical_json`` writes both as ``null``; the two counts are what
+    #: separate them in the record.
     n_infinite: int
     n_zero: int
     minimum: float
@@ -126,19 +137,15 @@ def summarise_values(
     *,
     percentiles: Sequence[int] = DEFAULT_PERCENTILES,
 ) -> Distribution:
-    """Summarise a sample, keeping non-finite values out of the statistics but
-    not out of the record.
+    """Summarise a sample, keeping non-finite values out of the statistics.
 
-    NaN marks an undefined quantity here (``m_min^top`` at ``k = 1`` (G16), or a
-    margin on a degenerate query) and is never a measurement. Neither is an
-    infinity: ``boundary_margin`` returns a *defined* infinite margin for an
-    infinite score, and one carried into the statistics makes ``mean`` and the
-    upper percentiles infinite, which ``canonical_json`` then writes as ``null``.
-    Both kinds are excluded and counted separately, so a summary over mostly
-    undefined values is visibly thin and a reader can tell which kind it held.
+    NaN marks an undefined quantity (``m_min^top`` at ``k = 1`` (G16), a
+    degenerate query's margin). ``boundary_margin`` returns a defined infinity,
+    which would drive ``mean`` and the upper percentiles to infinity. ``n_nan``
+    and ``n_infinite`` count both kinds in the record.
     """
     collected = list(values)
-    finite = sorted(v for v in collected if math.isfinite(v))
+    finite = sorted((v for v in collected if math.isfinite(v)), key=_signed_order)
     n_nan = sum(1 for v in collected if math.isnan(v))
     n_infinite = len(collected) - len(finite) - n_nan
 
