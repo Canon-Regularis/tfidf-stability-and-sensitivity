@@ -416,15 +416,12 @@ def test_a_single_pair_of_disjoint_singletons_is_one_for_every_admissible_penalt
 def test_a_penalty_outside_the_domain_is_refused_by_both_entry_points(
     penalty: float,
 ) -> None:
-    """G2 fixes the case-4 penalty in `[0, 1]` and argues the choice on bias
-    grounds. Outside it the normalisation stops meaning anything, and the way it
-    failed was the worst available: `fks_max` is NaN for a NaN penalty and
-    negative for a sufficiently negative one, `ceiling > 0.0` is false in both
-    cases, and `kendall_fks` then took its `else 0.0` branch -- the branch that
-    exists for `k = 0`, where no pairs means no disagreement.
+    """A penalty outside `[0, 1]` is refused by both entry points.
 
-    So two disjoint lists, the furthest apart two top-k lists can be, came back
-    as being in perfect agreement.
+    G2 fixes the case-4 penalty in `[0, 1]`. Outside it `fks_max` is NaN for a
+    NaN penalty and negative for a sufficiently negative one, so `ceiling > 0.0`
+    is false and `kendall_fks` returns its `else 0.0` value, the one meant for
+    `k = 0`. Without the guard, two disjoint lists normalise to no disagreement.
     """
     with pytest.raises(ValueError, match=r"penalty must lie in \[0, 1\]"):
         fks_max(3, penalty)
@@ -435,9 +432,11 @@ def test_a_penalty_outside_the_domain_is_refused_by_both_entry_points(
 
 
 def test_disjoint_lists_are_maximally_distant_at_every_admissible_penalty() -> None:
-    """The property the guard protects, asserted directly rather than through the
-    guard: disjoint lists are the maximum, so their normalised distance is 1.0
-    whatever the penalty. A returned 0.0 here is the defect's signature.
+    """Disjoint lists normalise to 1.0 at every admissible penalty.
+
+    Disjoint lists attain `fks_max` by construction, so the normalised distance
+    is the maximum whatever the penalty. Asserted directly rather than through
+    the guard that keeps the penalty in range.
     """
     a, b = [1, 2, 3], [4, 5, 6]
     for penalty in (0.0, 0.25, 0.5, 1.0):
@@ -450,11 +449,10 @@ def test_no_pairs_means_the_penalty_term_never_runs(penalty: float) -> None:
     """`k = 0` short-circuits before the closed form.
 
     The guard is not observable: at `k = 0` the fall-through computes
-    `0.0 + p * 0.0 * -1.0`, which is bit-identically `+0.0` for every admissible
-    penalty, so the two routes agree. It used to be observable only because a
-    non-finite penalty made the fall-through NaN, and those are now refused
-    before `k` is looked at -- which is why the mutation allowlist carries an
-    argued entry for this guard in both languages.
+    `0.0 + p * 0.0 * -1.0`, bit-identically `+0.0` for every admissible penalty,
+    so the two routes agree. Non-finite penalties are refused before `k` is
+    read, so the mutation allowlist carries an argued entry for this guard in
+    both languages.
     """
     assert fks_max(0, penalty) == 0.0
     assert same_bits(fks_max(0, penalty), 0.0), "positive zero, not negative"
@@ -527,21 +525,25 @@ def test_comparing_no_documents_at_all_reports_a_wholly_degenerate_row() -> None
     assert math.isnan(result.kendall_intersection)
 
 
-def test_a_negative_prefix_length_silently_drops_from_the_end() -> None:
-    """`a[:-1]` is a legal slice, so a `k` that arrived negative compares almost
-    the whole lists and reports a `k` of -1 alongside. The third instance of the
-    same trap in this package, after `Ranking.top_k` and `short`.
+def test_a_negative_prefix_length_is_refused_rather_than_sliced_from_the_end() -> None:
+    """A negative prefix length is refused rather than sliced from the end.
+
+    `a[:-1]` is a legal slice, so an unchecked negative `k` compares almost the
+    whole lists and reports a `k` of -1 alongside. The native binding refuses
+    the argument, so the reference refuses it too and both backends answer the
+    same call the same way. `Ranking.top_k` refuses in the same words.
     """
-    result = compare_top_k([1, 2, 3], [3, 2, 1], -1)
-    assert result.k == -1
-    assert result.intersection_size == 1, "it compared the first two of each"
+    with pytest.raises(ValueError, match="non-negative"):
+        compare_top_k([1, 2, 3], [3, 2, 1], -1)
 
 
 def test_prefixes_of_different_lengths_report_the_documents_that_differ() -> None:
-    """Membership changes come in pairs only when the prefixes are the same
+    """Unequal prefixes report the documents that differ, not half of them.
+
+    Membership changes come in pairs only when the two prefixes are the same
     length. Halving the symmetric difference assumes they always do, so an odd
-    one floor-divided to zero swaps for a comparison that reported the sets as
-    differing in the same breath.
+    difference floor-divides to zero swaps for a comparison that reports the
+    sets as differing.
 
     Reachable whenever a fold's candidate set is smaller than `k`, which G19
     says happens by protocol rather than by accident. `swapped` is therefore the

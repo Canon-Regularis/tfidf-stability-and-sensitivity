@@ -156,10 +156,9 @@ def kendall_tau_distance(a: Sequence[int], b: Sequence[int]) -> float:
 def _checked_penalty(penalty: float) -> float:
     """Reject a case-4 penalty outside ``[0, 1]``.
 
-    ``not (0.0 <= p <= 1.0)`` rather than the positive form: every comparison
-    with NaN is false, so writing the test the other way admits NaN through a
-    guard whose message names a range. G2 fixes the domain, and the normalised
-    ``K-bar`` lies in ``[0, 1]`` only because of it.
+    ``not 0.0 <= p <= 1.0`` rather than ``p < 0.0 or p > 1.0``: every comparison
+    with NaN is false, so the decomposed form admits NaN. G2 fixes the domain,
+    and the normalised ``K-bar`` lies in ``[0, 1]`` only because of it.
     """
     if not 0.0 <= penalty <= 1.0:
         raise ValueError(f"the case-4 penalty must lie in [0, 1], got {penalty!r}")
@@ -228,12 +227,11 @@ def kendall_fks(
         The distance. ``0.0`` when both lists are empty or identical.
 
     Raises:
-        ValueError: If ``penalty`` lies outside ``[0, 1]``. Checked before the
-            enumeration, and not left to the division below: ``fks_max`` is NaN
-            for a NaN penalty and negative for a sufficiently negative one, and
-            ``ceiling > 0.0`` is false in both cases, so the normalisation
-            returned 0.0 -- reporting two disjoint lists, the furthest apart they
-            can be, as being in perfect agreement.
+        ValueError: If ``penalty`` lies outside ``[0, 1]``. The check runs
+            before the enumeration because the division below cannot catch it:
+            ``fks_max`` is NaN for a NaN penalty and negative for a very
+            negative one, ``ceiling > 0.0`` is false in both cases, and the
+            normalisation then reports disjoint lists as being in agreement.
     """
     _checked_penalty(penalty)
     union = list(dict.fromkeys([*a, *b]))
@@ -318,16 +316,23 @@ class TopKComparison:
     #: uninterpretable without it.
     intersection_size: int
     jaccard: float
-    #: The larger of the two one-way differences: how many documents left the
-    #: top-k, or entered it, whichever is greater. On equal-length prefixes the
-    #: two are equal and this is the number of swaps. On prefixes of different
-    #: lengths they are not, and halving their sum would round a one-document
-    #: difference down to no swaps while ``sets_differ`` reported a difference.
+    #: The larger of the two one-way differences: documents that left the top-k,
+    #: or entered it, whichever is greater. On equal-length prefixes the two are
+    #: equal and this counts swaps. On unequal ones, halving their sum rounds a
+    #: one-document difference down to zero while ``sets_differ`` stays true.
     swapped: int
 
 
 def compare_top_k(a: Sequence[int], b: Sequence[int], k: int) -> TopKComparison:
-    """Compare two top-k lists under every measure of G2(b) and G2(c)."""
+    """Compare two top-k lists under every measure of G2(b) and G2(c).
+
+    Raises:
+        ValueError: ``k`` is negative. ``a[:k]`` is then a legal slice that
+            drops from the end rather than taking a prefix, and the native
+            binding refuses the same argument. ``k = 0`` compares nothing.
+    """
+    if k < 0:
+        raise ValueError(f"compare_top_k({k}) is not a prefix; k must be non-negative")
     prefix_a, prefix_b = list(a[:k]), list(b[:k])
     sa, sb = set(prefix_a), set(prefix_b)
     shared = sa & sb
