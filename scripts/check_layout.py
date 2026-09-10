@@ -34,11 +34,7 @@ def main() -> int:
     py_root = REPO / "src" / "tfidf_stability"
 
     cpp = {p.name for p in cpp_root.iterdir() if p.is_dir()}
-    py = {
-        p.name
-        for p in py_root.iterdir()
-        if p.is_dir() and not p.name.startswith((".", "_")) and p.name != "backends"
-    }
+    py = {p.name for p in py_root.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))}
 
     orphaned = cpp - py - _CPP_ONLY
     if orphaned:

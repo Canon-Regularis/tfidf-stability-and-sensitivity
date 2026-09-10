@@ -39,6 +39,7 @@ exercises it.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import enum
 import importlib
@@ -371,26 +372,13 @@ def test_a_frozen_dataclass_actually_refuses_assignment() -> None:
 
 
 # ---------------------------------------------------------------------------
-# backends/: the third orphan -- a signpost, and it has to keep pointing right
+# The root docstring: it explains why there is no backend registry
 # ---------------------------------------------------------------------------
-# `backends/__init__.py` is a docstring and nothing else. It was the last module
-# in the package that no test file named. There is nothing in it to execute, so
-# what these pin is the claim: that the package is still empty, and that the two
-# things its docstring redirects to still exist under the names it uses. A
-# signpost that outlives what it points at is worse than no signpost.
-def test_the_backends_package_is_empty_as_its_docstring_says() -> None:
-    """It documents *why* there is no registry rather than providing one. A name
-    appearing here would mean the docstring had become false, and the redirect
-    to `_native` would be sending readers to the wrong place."""
-    from tfidf_stability import backends
-
-    public = [name for name in vars(backends) if not name.startswith("_")]
-    assert public == []
-    assert not hasattr(backends, "__all__"), "nothing to export"
-
-
+# The explanation is architectural rather than incidental, so it is pinned: a
+# reader who wants to add a third evaluator should find the reason it was not
+# done, and a docstring that outlives what it names is worse than none.
 def test_the_signpost_points_at_names_that_exist() -> None:
-    """The docstring says selection is "one availability check
+    """The root docstring says selection is "one availability check
     (`native_available()` plus an ABI guard)". Both are named here so that
     renaming either breaks this test rather than silently stranding the text."""
     from tfidf_stability import _native
@@ -399,15 +387,109 @@ def test_the_signpost_points_at_names_that_exist() -> None:
     assert _native.REQUIRED_ABI, "the ABI guard the docstring promises"
 
 
-def test_the_two_backends_the_docstring_names_are_the_two_that_exist() -> None:
-    """ "There are two backends": the pure-Python reference, and the C++ core.
-    Not a registry of interchangeable evaluators, and in particular no numpy one
-    -- numpy's reductions are pairwise with an unspecified block size, so it
-    could not reproduce the reference's summation order."""
-    from tfidf_stability import backends
+def test_the_root_docstring_explains_the_absent_numpy_evaluator() -> None:
+    """Absence with a stated reason, rather than an omission.
 
-    text = backends.__doc__ or ""
+    numpy's reductions are pairwise with an unspecified block size, so a numpy
+    evaluator could not reproduce the reference's summation order. That is a
+    research decision, and the docstring is where it is recorded.
+    """
+    import tfidf_stability
+
+    text = tfidf_stability.__doc__ or ""
+
     assert "numpy" in text, "the absent evaluator is explained, not merely absent"
+    assert "registry" in text, "and so is the absent registry"
 
-    with pytest.raises(ModuleNotFoundError, match=r"No module named .*numpy_backend"):
-        importlib.import_module("tfidf_stability.backends.numpy_backend")
+
+# ---------------------------------------------------------------------------
+# str-enum fields must be coerced where the package dispatches on `is`
+# ---------------------------------------------------------------------------
+#: Dataclass -> why a field of its is not coerced. Empty: every one is.
+#:
+#: The package's enums are all ``str`` enums, so ``"vector_mean"`` equals the
+#: member without being it, and the dispatch sites select with ``is``. A field
+#: left uncoerced therefore takes a different branch from the one its value
+#: names, silently: `similarity/scoring.py` falls through to the compensated arm
+#: for an uncoerced `Reduction`, while `utils/numerics.py` looks the same value
+#: up in a dict and gets the right answer. One string, two behaviours.
+_UNCOERCED_BY_DESIGN: dict[str, str] = {}
+
+
+def _str_enums(root: Path) -> set[str]:
+    """Every ``class X(str, Enum)`` the package defines."""
+    names: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        if "_snowball" in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            bases = {b.id for b in node.bases if isinstance(b, ast.Name)}
+            if {"str", "Enum"} <= bases:
+                names.add(node.name)
+    return names
+
+
+def _coerced_in(cls: ast.ClassDef) -> set[str]:
+    """Fields ``__post_init__`` passes through their own enum."""
+    post = next(
+        (n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "__post_init__"),
+        None,
+    )
+    if post is None:
+        return set()
+    coerced: set[str] = set()
+    for node in ast.walk(post):
+        # `self.x = Kind(self.x)` and `object.__setattr__(self, "x", Kind(self.x))`
+        # both read as a coercion of `x`; only the attribute name is needed.
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "self"
+        ):
+            coerced.add(node.attr)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            coerced.add(node.value)
+    return coerced
+
+
+def test_every_str_enum_field_of_a_dataclass_is_coerced() -> None:
+    """A ``str`` enum field must be normalised to its member in ``__post_init__``.
+
+    Without it a caller passing the string reaches a different branch from the
+    one the value names, and the record keeps the value that was asked for, so
+    nothing downstream can tell. This walks the package rather than naming
+    classes, so a new dataclass is covered the day it is written.
+    """
+    root = REPO / "src" / "tfidf_stability"
+    enums = _str_enums(root)
+    assert enums, "the premise: the package defines str enums"
+
+    missing: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        if "_snowball" in path.parts:
+            continue
+        for cls in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            if not any(
+                (isinstance(d, ast.Name) and d.id == "dataclass")
+                or (isinstance(d, ast.Call) and getattr(d.func, "id", "") == "dataclass")
+                for d in cls.decorator_list
+            ):
+                continue
+            coerced = _coerced_in(cls)
+            for field in cls.body:
+                if not isinstance(field, ast.AnnAssign) or not isinstance(field.target, ast.Name):
+                    continue
+                annotation = field.annotation
+                name = annotation.id if isinstance(annotation, ast.Name) else None
+                if name in enums and field.target.id not in coerced:
+                    missing.append(f"{cls.name}.{field.target.id}: {name}")
+
+    unexplained = [m for m in missing if m.split(".")[0] not in _UNCOERCED_BY_DESIGN]
+    assert unexplained == [], (
+        "str-enum fields that no __post_init__ coerces, and which are not listed "
+        f"as deliberate: {sorted(unexplained)}"
+    )
