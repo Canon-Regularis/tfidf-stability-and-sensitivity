@@ -708,3 +708,98 @@ def test_a_linter_stated_as_a_floor_is_rejected(tmp_path: Path) -> None:
     problems = _script("check_dependencies").check(tree)
 
     assert any("ruff" in p and "not an exact pin" in p for p in problems)
+
+
+# ---------------------------------------------------------------------------
+# check_test_vacuity.py
+# ---------------------------------------------------------------------------
+def _vacuity(tmp_path: Path, body: str) -> list[str]:
+    """The kinds `check_test_vacuity.py` reports for one crafted test file."""
+    crafted = tmp_path / "test_crafted.py"
+    crafted.write_text(body, encoding="utf-8")
+    return [finding.kind for finding in _script("check_test_vacuity").scan(crafted)]
+
+
+def test_the_vacuity_gate_reports_nothing_against_this_suite() -> None:
+    """The baseline, and the strongest of the three claims here: every test in
+    this repository can fail for a reason the gate recognises.
+
+    The gate is the largest in `scripts/` and runs in CI and in pre-commit, so a
+    passing direction that was never asserted is what the module docstring above
+    calls a gate nobody has seen fail.
+    """
+    gate = _script("check_test_vacuity")
+    findings = [f for path in sorted((REPO / "tests").glob("test_*.py")) for f in gate.scan(path)]
+
+    assert findings == [], "\n".join(f.format() for f in findings[:10])
+
+
+def test_a_test_that_asserts_nothing_is_reported(tmp_path: Path) -> None:
+    """The finding the gate exists for. A body that cannot fail is a test in
+    name only, and it passes every other check in the repository."""
+    assert "no-assertion" in _vacuity(tmp_path, "def test_x():\n    value = 1 + 1\n")
+
+
+def test_an_empty_test_is_reported(tmp_path: Path) -> None:
+    """A docstring is not a body. This is the shape a stubbed-out test takes."""
+    assert "empty" in _vacuity(tmp_path, 'def test_x():\n    """Planned."""\n')
+
+
+def test_a_constant_assertion_is_reported(tmp_path: Path) -> None:
+    """`assert True` passes whatever the code does, and `assert (a, b)` is a
+    non-empty tuple, which is the same thing spelled as a mistake."""
+    assert "constant-assert" in _vacuity(tmp_path, "def test_x():\n    assert True\n")
+
+
+def test_a_raises_over_a_broad_exception_is_reported(tmp_path: Path) -> None:
+    """`pytest.raises(Exception)` passes for a typo in the test itself, so it
+    asserts that something went wrong rather than that the guard fired."""
+    body = "import pytest\n\n\ndef test_x():\n    with pytest.raises(Exception):\n        f()\n"
+
+    assert "broad-raises" in _vacuity(tmp_path, body)
+
+
+def test_a_raises_without_a_match_is_reported(tmp_path: Path) -> None:
+    """A `ValueError` from the wrong line satisfies an unmatched `raises`, so
+    the message is what pins which guard fired."""
+    body = "import pytest\n\n\ndef test_x():\n    with pytest.raises(ValueError):\n        f()\n"
+
+    assert "unmatched-raises" in _vacuity(tmp_path, body)
+
+
+def test_an_assertion_reachable_only_through_a_filter_is_reported(tmp_path: Path) -> None:
+    """Looping is not itself suspicious; a narrowed iterable is.
+
+    A condition can exclude every element while the data still looks healthy, so
+    every assertion is skipped and the test passes. Iterating a fixture directly
+    is not reported, which is why the fixture here filters.
+    """
+    body = "def test_x(items):\n    for item in [i for i in items if i > 0]:\n        assert item\n"
+
+    assert "loop-only-assert" in _vacuity(tmp_path, body)
+
+
+def test_a_loop_over_an_unfiltered_sequence_is_not_reported(tmp_path: Path) -> None:
+    """The contrast that keeps the check above from reading as "loops are bad".
+    An empty fixture would be obviously broken, so the gate says nothing."""
+    body = "def test_x(items):\n    for item in items:\n        assert item\n"
+
+    assert _vacuity(tmp_path, body) == []
+
+
+def test_an_empty_parametrize_is_reported(tmp_path: Path) -> None:
+    """A parametrize with no cases collects no tests at all, and pytest reports
+    that as a pass rather than as a gap."""
+    body = (
+        "import pytest\n\n\n"
+        '@pytest.mark.parametrize("value", [])\n'
+        "def test_x(value):\n    assert value\n"
+    )
+
+    assert "empty-parametrize" in _vacuity(tmp_path, body)
+
+
+def test_a_file_that_cannot_be_parsed_is_reported(tmp_path: Path) -> None:
+    """An unparseable test file collects nothing, which pytest also reports as
+    a pass for that file. The gate answers for the file rather than the test."""
+    assert "unparseable" in _vacuity(tmp_path, "def test_x(:\n")
