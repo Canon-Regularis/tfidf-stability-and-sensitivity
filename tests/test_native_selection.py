@@ -22,6 +22,7 @@ resolved state rather than by re-importing.
 
 from __future__ import annotations
 
+import os
 import warnings
 
 import pytest
@@ -354,7 +355,11 @@ def test_the_warning_is_attributed_to_the_caller_not_to_this_module(
         _native.check_float_environment(restore=False)
 
     assert len(caught) == 1, "the premise: exactly one warning to attribute"
-    assert caught[0].filename == __file__, (
+    # `normcase` rather than `==`: Windows paths are case-insensitive, and the
+    # drive letter arrives as `C:` or `c:` depending on how the working
+    # directory was spelled at interpreter start. The spelling is a property of
+    # the shell, not of the warning's attribution.
+    assert os.path.normcase(caught[0].filename) == os.path.normcase(__file__), (
         f"the warning must point at the code that asked, not at the module that "
         f"raised it; it named {caught[0].filename}"
     )
