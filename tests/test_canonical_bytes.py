@@ -442,9 +442,10 @@ def test_the_two_renderings_disagree_once_a_value_is_not_finite() -> None:
 
 
 def test_the_hashed_form_emits_a_token_no_strict_reader_accepts() -> None:
-    """The reason the sanitiser exists at all. `json.loads` reads its own
-    extension back, so the divergence is invisible from Python; every other
-    parser rejects the document."""
+    """`json.loads` accepts its own `NaN` extension by default.
+
+    The divergence is therefore invisible from Python. Every other parser
+    rejects the document."""
     strict = {"parse_constant": _refuse_constant}
 
     assert json.loads(canonical_json(_UNDEFINED_PAYLOAD, indent=None), **strict) == {
@@ -456,23 +457,14 @@ def test_the_hashed_form_emits_a_token_no_strict_reader_accepts() -> None:
         json.loads('{"m":NaN}', **strict)
 
 
-def test_a_manifest_holding_an_undefined_value_cannot_verify_against_its_own_file(
+def test_a_manifest_holding_an_undefined_value_verifies_against_its_own_file(
     tmp_path,  # type: ignore[no-untyped-def]
 ) -> None:
-    """The consequence, pinned rather than repaired.
+    """The digest a manifest embeds is taken over the bytes the file holds.
 
-    `RunManifest.digest()` goes through `hash_json`, and `write()` goes through
-    `canonical_json`. So the `manifest_digest` embedded in the file is taken over
-    bytes the file does not contain, and a verifier that reads the manifest back
-    and recomputes the digest -- which is precisely what
-    ``docs/experiments.md`` describes as the check on a published number --
-    gets a different hex string.
-
-    Not reachable from a manifest today: the hashed fields carry `tau`, the `k`
-    set and artefact digests, all finite or textual. It is one undefined margin
-    away from being live, and the sanitiser's own docstring records that both
-    experiment result files did contain `NaN`.
-    """
+    Verification recomputes it from the file, so `digest()` renders with
+    `canonical_json` like `write()`. `hash_json` would emit the non-standard
+    `NaN` token where the file holds `null`."""
     manifest = RunManifest("stability_profile", parameters=dict(_UNDEFINED_PAYLOAD))
     path = tmp_path / "manifest.json"
     recorded = manifest.write(path)["manifest_digest"]
@@ -481,25 +473,38 @@ def test_a_manifest_holding_an_undefined_value_cannot_verify_against_its_own_fil
     loaded.pop("manifest_digest")
     payload = _as_the_manifest_hashes_it(loaded)
 
-    assert recorded != hash_json(payload), "the manifest now verifies; update this test"
+    assert recorded == hash_text(canonical_json(payload, indent=None))
     assert loaded["parameters"]["median_margin"] is None, "the file itself holds null"
+
+    # The in-memory payload still holds the NaN that the file renders as null,
+    # so digesting it with `hash_json` gives a different hex string.
+    in_memory = strip_volatile(manifest.to_dict(), extra=manifest._MACHINE_KEYS)
+    in_memory.pop("notes", None)
+    assert hash_json(in_memory) != recorded
+
+
+def test_the_two_renderers_agree_on_every_finite_payload() -> None:
+    """`canonical_json(..., indent=None)` and `hash_json` agree on finite input.
+
+    The two differ only by the non-finite sanitiser, so a payload of finite
+    numbers, strings and containers renders to the same bytes either way."""
+    finite = {
+        "tau": 1e-9,
+        "ks": [5, 10, 20],
+        "name": "café",
+        "nested": {"b": 2, "a": 1},
+        "flag": True,
+        "absent": None,
+    }
+    assert hash_json(finite) == hash_text(canonical_json(finite, indent=None))
 
 
 def _as_the_manifest_hashes_it(loaded: dict[str, object]) -> object:
     """Apply the exact stripping rule `RunManifest.digest` applies.
 
-    Local by house convention, and shared between the two tests around it so
-    they cannot drift apart. It reproduces the rule rather than calling
-    `digest()`, because what these tests model is an outside verifier working
-    from the written file -- calling the method would assert only that it equals
-    itself.
-
-    `_MACHINE_KEYS` is read from the class rather than restated, so a key added
-    there is covered here without an edit. Its absence was not a cosmetic
-    mismatch: without it the sibling above would still report `!=` and would
-    have gone on passing for the wrong reason, recording a machine identity
-    where it means to record the NaN round trip.
-    """
+    The rule is reproduced rather than calling `digest()`, so the tests model an
+    outside verifier working from the written file. `_MACHINE_KEYS` is read from
+    the class, so a key added there is covered here without an edit."""
     payload = strip_volatile(loaded, extra=RunManifest._MACHINE_KEYS)
     assert isinstance(payload, dict)
     payload.pop("notes", None)
@@ -650,17 +655,14 @@ def test_hashing_an_iterator_consumes_it_once() -> None:
 
 
 # ---------------------------------------------------------------------------
-# short: a display helper with a slicing trap
+# short: truncating a digest for display
 # ---------------------------------------------------------------------------
 def test_a_negative_length_is_refused_rather_than_dropping_from_the_end() -> None:
-    """`digest[:-1]` is a legal slice, so a length arriving as -1 returned almost
-    the whole digest rather than a short prefix of it -- the shape that most
-    looks like a full digest while not being one, in a value that reaches log
-    lines and filenames.
+    """`short` refuses a negative length.
 
-    The boundary either side, so the guard sits at zero rather than somewhere
-    below it: zero is a length, and an over-long one is the whole digest.
-    """
+    `digest[:-1]` is a legal slice, so -1 would return almost the whole digest
+    where a short prefix is expected. The value reaches log lines and filenames.
+    Zero is a length; an over-long one is the whole digest."""
     digest = "a" * 64
     with pytest.raises(ValueError, match="length must be non-negative"):
         short(digest, -1)
@@ -887,3 +889,39 @@ def test_a_written_file_uses_the_same_two_space_indent(tmp_path) -> None:  # typ
     write_json(path, {"a": {"b": 1}})
     assert path.read_text(encoding="utf-8") == canonical_json({"a": {"b": 1}})
     assert '\n  "a"' in path.read_text(encoding="utf-8")
+
+
+def test_an_absent_native_block_is_the_reference_and_certifies() -> None:
+    """An absent or null `native` block is the pure-Python reference.
+
+    The reference is reproducible on its own: no build flags are involved.
+    Refusing it would refuse every result from a machine without a compiler,
+    the case `test_a_model_built_without_a_native_backend_verifies_as_reproducible`
+    pins from the CLI side."""
+    for environment in ({}, {"native": None}):
+        manifest = RunManifest("stability_profile", environment=environment)
+        assert manifest.is_reproducible_build is True
+        manifest.require_reproducible()
+
+
+@pytest.mark.parametrize(
+    ("native", "expected"),
+    [
+        ({"reproducible": True}, True),
+        ({"reproducible": False}, False),
+        ({}, False),
+        ("not-a-mapping", False),
+        (42, False),
+    ],
+)
+def test_the_native_block_must_say_reproducible_to_certify(native: object, expected: bool) -> None:
+    """A present `native` block certifies only when it says `reproducible`.
+
+    A block that is not a mapping, or that omits the flag, is not a claim of
+    reproducibility; a non-mapping raises `RuntimeError`. An absent block is
+    the reference and certifies instead."""
+    manifest = RunManifest("stability_profile", environment={"native": native})
+    if not isinstance(native, dict):
+        with pytest.raises(RuntimeError, match="not a mapping"):
+            manifest.require_reproducible()
+    assert manifest.is_reproducible_build is expected

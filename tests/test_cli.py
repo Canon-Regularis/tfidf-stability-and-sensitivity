@@ -15,11 +15,16 @@ from unittest.mock import patch
 
 import pytest
 
-from tfidf_stability.cli.commands import load_config, write_report
+from tfidf_stability.cli.commands import (
+    load_config,
+    pipeline_from_config,
+    vectoriser_from_config,
+    write_report,
+)
 from tfidf_stability.cli.main import main
 from tfidf_stability.persistence.manifest import RunManifest
 from tfidf_stability.utils.hashing import hash_file
-from tfidf_stability.utils.numerics import same_bits
+from tfidf_stability.utils.numerics import Reduction, same_bits
 from tfidf_stability.utils.validation import ConfigError
 
 REPO = Path(__file__).resolve().parents[1]
@@ -356,11 +361,23 @@ def test_info_reports_the_float_environment(capsys) -> None:  # type: ignore[no-
     assert payload["environment"]["float"]["subnormals_supported"] is True
 
 
-def test_schema_describes_the_container(capsys) -> None:  # type: ignore[no-untyped-def]
+def test_schema_describes_the_whole_container(capsys) -> None:  # type: ignore[no-untyped-def]
+    """`schema` describes the whole container, not the arrays alone.
+
+    A reader needs the header to parse a file: `flags` is G13's logarithm
+    switch and `reduction` is the policy every sum is accumulated under.
+    `block_separator` divides the two string blocks, and a parser that misses
+    it misparses every container."""
     capsys.readouterr()
     assert main(["schema"]) == 0
-    fields = {f["name"] for f in json.loads(capsys.readouterr().out)}
-    assert {"indptr", "indices", "values", "idf", "norms", "tokens", "doc_ids"} <= fields
+    payload = json.loads(capsys.readouterr().out)
+
+    arrays = {f["name"] for f in payload["arrays"]}
+    assert {"indptr", "indices", "values", "idf", "norms", "tokens", "doc_ids"} <= arrays
+
+    header = {f["name"] for f in payload["header"]}
+    assert {"magic", "format_version", "flags", "reduction"} <= header
+    assert payload["block_separator"] == "\n"
 
 
 def test_no_arguments_prints_help_and_fails() -> None:
@@ -1274,3 +1291,61 @@ def test_an_untrustworthy_environment_is_not_swallowed_by_the_cli(
 
     with pytest.warns(RuntimeWarning, match="not trustworthy"):
         main(["build-corpus", str(CORPUS), "-o", str(out)])
+
+
+def test_a_misspelled_config_section_is_fatal_rather_than_inert(tmp_path: Path) -> None:
+    """An unrecognised config section raises `ConfigError`.
+
+    `_section` checks the keys within a section, not the section name. Without
+    the guard in `load_config` a misspelled `preprocesing:` would apply nothing
+    yet still be hashed into the manifest. The same keys spelled correctly are
+    honoured, so the rejection is on the name."""
+    bad = tmp_path / "typo.yaml"
+    bad.write_text("preprocesing:\n  n_max: 5\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="unrecognised config section"):
+        load_config(bad)
+
+    good = tmp_path / "fine.yaml"
+    good.write_text("preprocessing:\n  n_max: 5\n", encoding="utf-8")
+    assert pipeline_from_config(load_config(good)).config.n_max == 5
+
+
+@pytest.mark.parametrize("literal", ["0", "false", "''", "[]"])
+def test_a_falsy_scalar_section_is_refused_rather_than_taking_defaults(
+    literal: str, tmp_path: Path
+) -> None:
+    """A falsy scalar section raises `ConfigError`.
+
+    The fallback to an empty mapping tests `is None`, not falsiness, so
+    `numerics: 0` reaches the type check and is refused like `numerics: 3`."""
+    target = tmp_path / "falsy.yaml"
+    target.write_text(f"numerics: {literal}\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="must be a mapping"):
+        vectoriser_from_config(load_config(target))
+
+
+def test_an_explicitly_null_section_is_the_empty_one(tmp_path: Path) -> None:
+    """A section written with no body is absent, not malformed.
+
+    `numerics:` with no value takes the defaults rather than raising."""
+    target = tmp_path / "null.yaml"
+    target.write_text("numerics:\nvocabulary:\n", encoding="utf-8")
+    vectoriser = vectoriser_from_config(load_config(target))
+    assert vectoriser.reduction is Reduction.NAIVE
+
+
+def test_verify_refuses_a_manifest_whose_environment_is_not_a_mapping(
+    tmp_path: Path,
+) -> None:
+    """`cmd_verify` refuses an environment block that is not a mapping.
+
+    The block says which backend produced a file. Substituting an empty block
+    for a scalar would report `reference (pure Python)` for a manifest that
+    records no such thing."""
+    out = build(tmp_path)
+    path, manifest = _manifest_of(out)
+    manifest["environment"] = "not-a-mapping"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="not a mapping"):
+        main(["verify", str(out)])

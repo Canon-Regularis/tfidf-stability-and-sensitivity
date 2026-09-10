@@ -15,7 +15,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, TypeVar
 
-from tfidf_stability.persistence.manifest import RunManifest, environment_block
+from tfidf_stability.persistence.manifest import (
+    RunManifest,
+    environment_block,
+    is_reproducible_environment,
+)
 from tfidf_stability.persistence.save_load import load_model, save_model
 from tfidf_stability.preprocessing.lemmatise import LemmatiserKind
 from tfidf_stability.preprocessing.normalise import NormalisationConfig
@@ -88,8 +92,7 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
         text = target.read_text(encoding="utf-8")
     except OSError as exc:
         # OSError rather than FileNotFoundError: a directory, a permission
-        # failure and a missing file are the same mistake to the caller, and
-        # only one of them was being reported as one.
+        # failure and a missing file are the same mistake to the caller.
         raise ConfigError(f"cannot read config {target}: {exc}") from exc
     try:
         document = yaml.safe_load(text)
@@ -100,15 +103,32 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
             f"{target} must hold a mapping at the top level, got {type(document).__name__}"
         )
     parsed: dict[str, Any] = document
+    unknown = sorted(set(parsed) - _CONFIG_SECTIONS)
+    if unknown:
+        # `_section` rejects an unknown key within a section but not an unknown
+        # section name. Without this guard a misspelled `preprocesing:` applies
+        # nothing while the whole block is hashed into the manifest, so the
+        # manifest records a setting the run did not use.
+        raise ConfigError(
+            f"unrecognised config section(s): {', '.join(unknown)}. "
+            f"Known sections: {', '.join(sorted(_CONFIG_SECTIONS))}."
+        )
     parsed["_source"] = str(target.name)
     parsed["_digest"] = hash_file(target, text=True)
     return parsed
 
 
-# Every key ``configs/default.yaml`` declares, per section. A key listed here is
-# honoured, anything else rejected. Unlisted keys used to be read and ignored,
-# which made the manifest's ``config`` block a record of what was on disk rather
-# than of what was applied.
+#: Every top-level section `configs/default.yaml` declares. `ranking`,
+#: `evaluation` and `profiles` are recognised but read by no module. They are
+#: listed so the file validates; `test_cli.py` asserts the library defaults
+#: still agree with the values pinned there.
+_CONFIG_SECTIONS = frozenset(
+    {"preprocessing", "vocabulary", "numerics", "ranking", "evaluation", "profiles"}
+)
+
+#: Every key each section of `configs/default.yaml` declares. An unlisted key is
+#: rejected rather than read and ignored, so the manifest's `config` block
+#: records what was applied rather than what was on disk.
 _PREPROCESSING_KEYS = frozenset(
     {
         "unicode_form",
@@ -139,7 +159,13 @@ _VOCAB_DEFAULTS = VocabularyConfig()
 
 def _section(config: dict[str, Any], name: str, allowed: frozenset[str]) -> dict[str, Any]:
     """Return one config section, rejecting any key that would be ignored."""
-    section = config.get(name) or {}
+    # `config.get(name) or {}` would treat any falsy value as absent, so
+    # `numerics: 0` and `vocabulary: false` would skip the type check below.
+    # An absent or explicitly null section is the empty one; a scalar is an
+    # error, whether it is falsy or not.
+    section = config.get(name)
+    if section is None:
+        section = {}
     if not isinstance(section, dict):
         raise ConfigError(
             f"config section {name!r} must be a mapping, got {type(section).__name__}"
@@ -268,15 +294,10 @@ def cmd_build_corpus(args: argparse.Namespace) -> int:
         preprocessing=pipeline.fingerprint(),
         parameters={"reduction": str(model.reduction), "log_impl": str(model.idf.log_impl)},
     )
-    # Refuse BEFORE writing anything. `save_model` used to run first and this
-    # guard second, so on a fast-math or arch-tuned build the container and its
-    # readable sidecar were already on disk when `require_reproducible` raised
-    # and `manifest.write` was never reached. What that left behind is the worst
-    # of the three possible states: a complete-looking `.tfsx` with a sidecar
-    # full of digests, from a build this project declares unfit to produce
-    # publishable numbers, and no manifest to say so. `is_reproducible_build`
-    # reads only `environment["native"]`, so it needs nothing from `save_model`
-    # and can be asked first.
+    # Refuse before writing anything. A build refused after `save_model` leaves
+    # a complete `.tfsx` and its readable sidecar on disk, with no manifest
+    # recording that the build is unfit. `is_reproducible_build` reads only
+    # `environment["native"]`, so it needs nothing from `save_model`.
     manifest.require_reproducible()
 
     provenance = save_model(model, out)
@@ -363,12 +384,23 @@ def cmd_verify(args: argparse.Namespace) -> int:
         return 1
 
     # A build with fast-math or architecture tuning may not reproduce published
-    # numbers, so report what the manifest recorded. No native block means the
-    # pure-Python reference produced this, reproducible on its own.
-    native = recorded.get("environment", {}).get("native")
-    reproducible = True if native is None else bool(native.get("reproducible", False))
+    # numbers, so report what the manifest recorded. The rule lives in
+    # `is_reproducible_environment` so this command and
+    # `RunManifest.is_reproducible_build` answer one block the same way.
+    environment = recorded.get("environment", {})
+    if not isinstance(environment, dict):
+        raise ConfigError(
+            f"the manifest's environment block is {type(environment).__name__}, "
+            f"not a mapping, so the build cannot be described"
+        )
+    native = environment.get("native")
+    reproducible = is_reproducible_environment(environment)
 
-    backend = "reference (pure Python)" if native is None else native["compiler_id"]
+    backend = (
+        native["compiler_id"]
+        if isinstance(native, dict) and "compiler_id" in native
+        else "reference (pure Python)"
+    )
     print(f"verified: {model.n_documents} documents, |V| = {model.n_features}")
     print(f"  model digest    : {short(model.digest(), 16)}")
     print(f"  backend         : {backend}")
@@ -411,9 +443,25 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 def cmd_schema(args: argparse.Namespace) -> int:
     """Print the ``.tfsx`` on-disk schema."""
-    from tfidf_stability.persistence.model import describe_schema
+    from tfidf_stability.persistence.model import (
+        BLOCK_SEPARATOR,
+        describe_header,
+        describe_schema,
+    )
 
-    print(canonical_json(describe_schema()))
+    # The header and the separator go out with the arrays. A reader given the
+    # arrays alone cannot recover the header's `flags` or `reduction`, nor the
+    # byte between the token and document-id blocks, and misparses every
+    # container.
+    print(
+        canonical_json(
+            {
+                "header": describe_header(),
+                "arrays": describe_schema(),
+                "block_separator": BLOCK_SEPARATOR.decode("ascii"),
+            }
+        )
+    )
     return 0
 
 
