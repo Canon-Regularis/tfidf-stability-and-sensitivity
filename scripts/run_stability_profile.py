@@ -207,8 +207,24 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _check_counts(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Refuse a `--trials` or `--k` below 1.
+
+    `--trials` below 1 would empty `range(n_trials)`, so each `TransitionPoint` would
+    carry `n_trials = 0` and a NaN `flip_rate`. `canonical_json` would write null into
+    the `E2_transition` block, and `main` would exit 0. `--k` below 1 would instead
+    raise `KOutOfRangeError` in `resolve_k`. `build_query_grid` guards `--queries`.
+    """
+    if args.trials < 1:
+        parser.error(f"--trials must be at least 1, got {args.trials}")
+    if args.k < 1:
+        parser.error(f"--k must be at least 1, got {args.k}")
+
+
 def main() -> int:
-    args = _parser().parse_args()
+    parser = _parser()
+    args = parser.parse_args()
+    _check_counts(parser, args)
 
     data = load_dataset(args.dataset, archive=args.archive)
     pipeline = PreprocessingPipeline()

@@ -45,6 +45,18 @@ def main() -> int:
     parser.add_argument("--top", type=int, default=10, help="how many results to record")
     args = parser.parse_args()
 
+    # `type=int` has no lower bound, and `--top` and `--query-length` reach
+    # slices where a negative counts from the end and quietly shortens the
+    # result. Spelled as the negation of the non-negative test, matching
+    # `build_query_grid`, whose API can receive a non-integer.
+    for name, value in (
+        ("--queries", args.queries),
+        ("--query-length", args.query_length),
+        ("--top", args.top),
+    ):
+        if not value >= 0:
+            parser.error(f"{name} must be non-negative, got {value}")
+
     data = load_dataset(args.dataset, archive=args.archive)
     pipeline = PreprocessingPipeline()
     features = [pipeline.preprocess(str(r["text"])) for r in data.records]
