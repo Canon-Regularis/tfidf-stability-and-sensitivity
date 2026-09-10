@@ -114,11 +114,16 @@ jobs:
       # step above this one failed every native job on every OS.
       - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
       - name: Configure
+        # The one build here that is not a preset. This matrix is parameterised
+        # over CMAKE_BUILD_TYPE and a preset is a name rather than a parameter,
+        # so the flags are spelled out and TFIDF_WERROR is set to match what
+        # every preset inherits from `base`.
         timeout-minutes: 5
         run: >
           cmake -S . -B build-tests -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build }}
           -DTFIDF_BUILD_TESTS=ON
+          -DTFIDF_WERROR=ON
       - name: Build
         timeout-minutes: 12
         run: cmake --build build-tests
@@ -270,11 +275,11 @@ jobs:
       - run: python -m pip install --upgrade pip nanobind numpy
       - name: A fast-math build must be refused
         run: |
-          cmake -S . -B build-fastmath -G Ninja -DTFIDF_FAST_MATH=ON -DTFIDF_BUILD_TESTS=ON
+          cmake --preset fastmath-guard-check
           # Both streams: ninja buffers compiler output and re-emits it on
           # STDOUT, so capturing stderr alone yields an empty log and the grep
           # below can never match, which is how this job failed.
-          if cmake --build build-fastmath >build.log 2>&1; then
+          if cmake --build --preset fastmath-guard-check >build.log 2>&1; then
             echo "::error::a fast-math build compiled; the fp_guard.hpp guard is not working"
             exit 1
           fi

@@ -11,8 +11,14 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "TFIDF_BUILD_NATIVE": "ON",
-        "TFIDF_BUILD_TESTS": "ON"
+        "TFIDF_BUILD_TESTS": "ON",
+        "TFIDF_WERROR": "ON"
       }
+    },
+    {
+      "name": "ci",
+      "inherits": "base",
+      "displayName": "The default build, with whatever compiler the runner provides"
     },
     {
       "name": "mingw",
@@ -45,7 +51,22 @@
       "name": "debug",
       "inherits": "base",
       "displayName": "Unoptimised -- must produce byte-identical results to release",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "TFIDF_WERROR": "ON" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "cpp-only",
+      "inherits": "base",
+      "displayName": "The C++ suite alone, with no Python extension built",
+      "cacheVariables": { "TFIDF_BUILD_NATIVE": "OFF" }
+    },
+    {
+      "name": "glibcxx-assertions",
+      "inherits": "base",
+      "displayName": "Debug with libstdc++ bounds assertions armed",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-D_GLIBCXX_ASSERTIONS"
+      }
     },
     {
       "name": "asan",
@@ -80,11 +101,14 @@
     }
   ],
   "buildPresets": [
+    { "name": "ci", "configurePreset": "ci" },
     { "name": "mingw", "configurePreset": "mingw" },
     { "name": "msvc", "configurePreset": "msvc" },
     { "name": "gcc", "configurePreset": "gcc" },
     { "name": "clang", "configurePreset": "clang" },
     { "name": "debug", "configurePreset": "debug" },
+    { "name": "cpp-only", "configurePreset": "cpp-only" },
+    { "name": "glibcxx-assertions", "configurePreset": "glibcxx-assertions" },
     { "name": "asan", "configurePreset": "asan" },
     { "name": "tsan", "configurePreset": "tsan" },
     { "name": "bench", "configurePreset": "bench" },
@@ -97,11 +121,15 @@
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error", "stopOnFailure": false }
     },
+    { "name": "ci", "inherits": "base", "configurePreset": "ci" },
     { "name": "mingw", "inherits": "base", "configurePreset": "mingw" },
     { "name": "msvc", "inherits": "base", "configurePreset": "msvc" },
     { "name": "gcc", "inherits": "base", "configurePreset": "gcc" },
     { "name": "clang", "inherits": "base", "configurePreset": "clang" },
     { "name": "debug", "inherits": "base", "configurePreset": "debug" },
-    { "name": "asan", "inherits": "base", "configurePreset": "asan" }
+    { "name": "cpp-only", "inherits": "base", "configurePreset": "cpp-only" },
+    { "name": "glibcxx-assertions", "inherits": "base", "configurePreset": "glibcxx-assertions" },
+    { "name": "asan", "inherits": "base", "configurePreset": "asan" },
+    { "name": "tsan", "inherits": "base", "configurePreset": "tsan" }
   ]
 }

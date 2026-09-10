@@ -166,15 +166,15 @@ jobs:
         # A tree whose tests already fail would score every mutant as killed, so
         # the campaign would report a perfect score for a broken suite.
         run: |
-          cmake -S . -B build-tests -G Ninja -DCMAKE_BUILD_TYPE=Release                 -DTFIDF_BUILD_NATIVE=OFF -DTFIDF_BUILD_TESTS=ON
-          cmake --build build-tests --target tfidf_tests
-          ctest --test-dir build-tests --no-tests=error --output-on-failure
+          cmake --preset cpp-only
+          cmake --build --preset cpp-only --target tfidf_tests
+          ctest --preset cpp-only
       - name: Break ${{ matrix.header }} and see whether the native suite notices
         # Every survivor must be argued in configs/equivalent_mutants_cpp.txt,
         # and an entry there that matches no survivor fails too -- otherwise the
         # file accretes into a blanket suppression.
         run: |
-          python scripts/run_cpp_mutation_tests.py "${{ matrix.header }}"                  --test-timeout 60 --json "mutants.json"
+          python scripts/run_cpp_mutation_tests.py "${{ matrix.header }}"                  --build build/cpp-only --test-timeout 60 --json "mutants.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         if: always()
         with:
@@ -239,12 +239,12 @@ jobs:
             requirements-dev.txt
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - run: |
-          cmake -S . -B build-bench -G Ninja -DTFIDF_BUILD_BENCH=ON -DTFIDF_ARCH_TUNE=ON
-          cmake --build build-bench
+          cmake --preset bench
+          cmake --build --preset bench
       - name: Kernel microbenchmarks
         # Arch-tuned, therefore NOT reproducible: fine for timing, never for
         # results. The binary prints its own reproducible-build flag.
-        run: ./build-bench/cpp/bench/tfidf_bench
+        run: ./build/bench/cpp/bench/tfidf_bench
       - name: Native against the reference, with bit-identity proved first
         # No test in this repository uses a pytest-benchmark fixture, so
         # `pytest --benchmark-only` would collect nothing. scripts/benchmark.py
