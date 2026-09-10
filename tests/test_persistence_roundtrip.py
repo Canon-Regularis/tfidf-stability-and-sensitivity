@@ -12,14 +12,23 @@ reproducibility snapshot could not exist.
 
 from __future__ import annotations
 
+import dataclasses
 import struct
 
 import pytest
 
-from tfidf_stability.persistence.model import MODEL_FIELDS, describe_schema
+from tfidf_stability.persistence.model import (
+    BLOCK_SEPARATOR,
+    HEADER_FIELDS,
+    MODEL_FIELDS,
+    describe_header,
+    describe_schema,
+)
 from tfidf_stability.persistence.save_load import (
     _FLAG_MASK,
     _HEADER,
+    _REDUCTION_BY_CODE,
+    _REDUCTION_CODES,
     FORMAT_VERSION,
     MAGIC,
     _check_csr,
@@ -826,3 +835,142 @@ def test_the_rendered_schema_carries_the_same_fields_in_the_same_order() -> None
     """Positional agreement, not just set agreement: the printed table is read
     top to bottom against the byte layout."""
     assert [row["name"] for row in describe_schema()] == [f.name for f in MODEL_FIELDS]
+
+
+# ---------------------------------------------------------------------------
+# The header's reduction word is the format, not the enum's declaration order
+# ---------------------------------------------------------------------------
+def test_the_reduction_wire_values_are_pinned_to_the_format() -> None:
+    """Each `Reduction` member has a wire code fixed by the format.
+
+    Deriving the code from `list(Reduction)` order would tie the byte on disk to
+    the member order in `numerics.py`, so reordering a member would reinterpret
+    every existing container. The mapping is restated here, so changing it in
+    `save_load.py` alone fails.
+    """
+    # Such a reinterpretation would be silent. `FORMAT_VERSION` and the
+    # recorded `container_sha256` do not move, re-encoding a loaded container
+    # reproduces the same bytes, and `TfidfModel.digest()` does not hash the
+    # reduction.
+    assert _REDUCTION_CODES == {
+        Reduction.NAIVE: 0,
+        Reduction.NEUMAIER: 1,
+        Reduction.PAIRWISE: 2,
+        Reduction.EXACT: 3,
+    }
+    assert _REDUCTION_BY_CODE == {
+        0: Reduction.NAIVE,
+        1: Reduction.NEUMAIER,
+        2: Reduction.PAIRWISE,
+        3: Reduction.EXACT,
+    }
+    # Every member has a code, and the codes are distinct: a member added
+    # without one fails here rather than at the first save.
+    assert set(_REDUCTION_CODES) == set(Reduction)
+    assert len(set(_REDUCTION_CODES.values())) == len(Reduction)
+
+
+@pytest.mark.parametrize("policy", list(Reduction))
+def test_the_reduction_survives_the_round_trip_by_its_pinned_code(
+    mini_model,  # type: ignore[no-untyped-def]
+    policy: Reduction,
+    tmp_path,  # type: ignore[no-untyped-def]
+) -> None:
+    """The byte written is the pinned code, and it reads back as that member."""
+    model = dataclasses.replace(mini_model, reduction=policy)
+    path = tmp_path / "model.tfsx"
+    save_model(model, path)
+
+    header = _HEADER.unpack_from(path.read_bytes())
+    assert header[6] == _REDUCTION_CODES[policy], "the byte on disk is the pinned code"
+    assert load_model(path).reduction is policy
+
+
+# ---------------------------------------------------------------------------
+# The sidecar must not be written over the container
+# ---------------------------------------------------------------------------
+def test_a_json_container_path_is_refused_before_anything_is_written(
+    mini_model,  # type: ignore[no-untyped-def]
+    tmp_path,  # type: ignore[no-untyped-def]
+) -> None:
+    """A `.json` container path is refused before any byte is written.
+
+    `Path("m.json").with_suffix(".json")` is `m.json`, so the sidecar would overwrite the
+    container and its `container_sha256` would name bytes not on disk.
+    `tfidf-stability build-corpus -o model.json` reaches the case: `--output` is free-form.
+    """
+    target = tmp_path / "model.json"
+    with pytest.raises(TfsxFormatError, match=r"must not end in \.json"):
+        save_model(mini_model, target)
+    assert not target.exists(), "the container must not be written and then rejected"
+
+    # The same name with the container's own suffix is fine, and its sidecar
+    # lands beside it rather than on it.
+    good = tmp_path / "model.tfsx"
+    save_model(mini_model, good)
+    assert good.exists()
+    assert (tmp_path / "model.json").exists()
+    assert load_model(good).digest() == mini_model.digest()
+
+
+def test_the_sidecar_may_be_declined_for_a_json_path(
+    mini_model,  # type: ignore[no-untyped-def]
+    tmp_path,  # type: ignore[no-untyped-def]
+) -> None:
+    """The guard covers the collision, not the suffix.
+
+    With `sidecar=False` nothing would overwrite the container, so a `.json`
+    path is allowed."""
+    target = tmp_path / "model.json"
+    save_model(mini_model, target, sidecar=False)
+    assert load_model(target).digest() == mini_model.digest()
+
+
+# ---------------------------------------------------------------------------
+# The schema describes the whole container, not only its arrays
+# ---------------------------------------------------------------------------
+def test_the_header_schema_matches_the_struct_that_writes_it() -> None:
+    """`HEADER_FIELDS` describes every scalar `_HEADER` writes.
+
+    `MODEL_FIELDS` covers the arrays alone, so a reader built from
+    `tfidf-stability schema` recovers `flags` and `reduction` only from
+    `HEADER_FIELDS`. The count comes from `_HEADER`, so an undescribed scalar
+    fails.
+    """
+    # `flags` is G13's logarithm switch: it changes about 15% of the idf
+    # entries and the weights taken from them. `reduction` carries the
+    # reduction policy: it changes `norms` and the cosine scores computed
+    # under it.
+
+    # Counted by unpacking a zero header rather than by reading the format
+    # string, where "8s" is two characters for one field and "2I" is two fields.
+    field_count = len(_HEADER.unpack(bytes(_HEADER.size)))
+    assert len(HEADER_FIELDS) == field_count
+    assert [f.name for f in HEADER_FIELDS][:5] == [
+        "magic",
+        "format_version",
+        "n_docs",
+        "n_terms",
+        "nnz",
+    ]
+    assert [f.name for f in HEADER_FIELDS][-2:] == ["reserved_a", "reserved_b"]
+    assert all(f.purpose for f in HEADER_FIELDS)
+
+    # The separator is part of the layout and a reader that assumes the token
+    # and document-id blocks abut misparses every container.
+    assert BLOCK_SEPARATOR == b"\n"
+
+
+def test_the_two_schema_halves_are_disjoint_and_both_described() -> None:
+    """`MODEL_FIELDS` and `HEADER_FIELDS` describe disjoint halves.
+
+    `MODEL_FIELDS` names the arrays and `HEADER_FIELDS` the header scalars, so
+    no name belongs in both. `describe_header` renders the scalars in file
+    order."""
+    arrays = {f.name for f in MODEL_FIELDS}
+    scalars = {f.name for f in HEADER_FIELDS}
+    assert not arrays & scalars
+
+    described = describe_header()
+    assert [row["name"] for row in described] == [f.name for f in HEADER_FIELDS]
+    assert all(set(row) == {"name", "dtype", "purpose"} for row in described)

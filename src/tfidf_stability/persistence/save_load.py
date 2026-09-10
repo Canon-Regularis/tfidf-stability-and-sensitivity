@@ -89,17 +89,27 @@ _FLAG_CORRECTLY_ROUNDED_LOG: Final[int] = 1 << 0
 #: one model, and the reproducibility snapshot rests on the container being a
 #: bijection between models and byte strings.
 _FLAG_MASK: Final[int] = _FLAG_CORRECTLY_ROUNDED_LOG
+
+#: Wire values for the header's reduction word, written out rather than derived
+#: from the enum. Deriving them with `list(Reduction).index(...)` would tie the
+#: byte on disk to the member order in `numerics.py`, so inserting or reordering
+#: a member would reinterpret existing containers. The enum may be reordered.
+_REDUCTION_CODES: Final[dict[Reduction, int]] = {
+    Reduction.NAIVE: 0,
+    Reduction.NEUMAIER: 1,
+    Reduction.PAIRWISE: 2,
+    Reduction.EXACT: 3,
+}
+_REDUCTION_BY_CODE: Final[dict[int, Reduction]] = {v: k for k, v in _REDUCTION_CODES.items()}
 _LINE_SEP: Final[bytes] = b"\n"
 
 
 class TfsxFormatError(DataIntegrityError, ValueError):
     """The file is not a readable ``.tfsx`` container.
 
-    Both bases carry weight. ``DataIntegrityError`` puts container corruption in
-    the package hierarchy, so ``except TfidfStabilityError`` around a load
-    catches it and the fuzz harness can state its property as "nothing but a
-    package exception ever escapes". ``ValueError`` is kept for callers written
-    against the original signature.
+    ``DataIntegrityError`` puts container corruption in the package hierarchy,
+    so ``except TfidfStabilityError`` around a load catches it. ``ValueError``
+    keeps the signature callers already handle.
     """
 
 
@@ -180,7 +190,7 @@ def model_bytes(model: TfidfModel) -> bytes:
     doc_ids = _encode_strings(list(model.doc_ids), "document id")
 
     flags = _FLAG_CORRECTLY_ROUNDED_LOG if model.idf.log_impl is LogImpl.CORRECTLY_ROUNDED else 0
-    reduction = list(Reduction).index(model.reduction)
+    reduction = _REDUCTION_CODES[Reduction(model.reduction)]
 
     header = _HEADER.pack(
         MAGIC,
@@ -220,6 +230,15 @@ def save_model(model: TfidfModel, path: Path | str, *, sidecar: bool = True) -> 
     embedding in a run manifest.
     """
     target = Path(path)
+    # For a target already ending in `.json`, `target.with_suffix(".json")` is
+    # the target itself. Without this refusal the sidecar overwrites the
+    # container, and the manifest's container_sha256 names bytes absent from
+    # disk. The check runs before the first write, so a refusal writes nothing.
+    if sidecar and target.suffix.lower() == ".json":
+        raise TfsxFormatError(
+            f"the container path must not end in .json, got {target.name!r}: the sidecar "
+            f"is written to the same name and would overwrite the container"
+        )
     payload = model_bytes(model)
     atomic_write_bytes(target, payload)
 
@@ -283,9 +302,9 @@ def _read_header(data: bytes) -> _Header:
         raise TfsxFormatError(f"unknown flag bits set: {flags:#010x} (known mask {_FLAG_MASK:#x})")
     if reserved_a or reserved_b:
         raise TfsxFormatError(f"reserved header words must be zero, got {reserved_a}, {reserved_b}")
-    if not 0 <= reduction < len(Reduction):
+    if reduction not in _REDUCTION_BY_CODE:
         raise TfsxFormatError(
-            f"reduction policy {reduction} is out of range (0..{len(Reduction) - 1})"
+            f"reduction policy {reduction} is out of range (0..{max(_REDUCTION_BY_CODE)})"
         )
     return _Header(n_docs, n_terms, nnz, flags, reduction, token_bytes, doc_id_bytes)
 
@@ -319,24 +338,15 @@ def load_model(path: Path | str) -> TfidfModel:
 def model_from_bytes(data: bytes) -> TfidfModel:
     """Parse a ``.tfsx`` container, or raise.
 
+    The only parser here that reads untrusted input, and the fuzz target of
+    ``tests/test_fuzz_parsers.py``. Accepted bytes re-serialise identically.
     Every length comes from the header and is checked against the file size
-    before any slice is taken, so a truncated or corrupt file raises rather than
-    yielding a model built from adjacent bytes. This is the only parser here that
-    reads untrusted input, and the fuzz target of ``tests/test_fuzz_parsers.py``,
-    which holds it to two properties:
-
-    * anything it accepts re-serialises to the identical bytes, so the container
-      is a bijection and no two files decode to one model;
-    * anything it rejects raises a
-      :class:`~tfidf_stability.utils.validation.TfidfStabilityError`, never a
-      ``struct.error``, ``IndexError`` or ``UnicodeDecodeError`` from the
-      internals.
-
-    The second property is why the structural checks below live here rather than
-    with the first caller to trip over them. A CSR matrix whose ``indices`` point
-    outside the vocabulary raises ``IndexError`` somewhere unrelated, hours
-    later.
+    before any slice. Rejected bytes raise ``TfidfStabilityError``, never
+    ``struct.error``, ``IndexError`` or ``UnicodeDecodeError``.
     """
+    # The structural checks live in the parser rather than with the first caller
+    # to trip over them. Without them, a CSR matrix whose `indices` point
+    # outside the vocabulary raises `IndexError` somewhere unrelated.
     head = _read_header(data)
     offset = _HEADER.size
 
@@ -377,8 +387,7 @@ def model_from_bytes(data: bytes) -> TfidfModel:
 
     # The header fixes both block lengths, so this byte carries no information
     # and accepting any value for it breaks the model-to-bytes bijection.
-    # Before the check existed, all 255 other values decoded to a byte-identical
-    # model.
+    # Without the check, all 255 other values decode to a byte-identical model.
     separator = data[offset : offset + len(_LINE_SEP)]
     if separator != _LINE_SEP:
         raise TfsxFormatError(
@@ -389,8 +398,8 @@ def model_from_bytes(data: bytes) -> TfidfModel:
 
     # Through the guarded helper rather than `bytes.decode`: one flipped byte
     # makes a block invalid UTF-8, and a bare UnicodeDecodeError cannot be
-    # handled alongside the other container failures. Fuzzing found it with a
-    # single 0x80 in the token block.
+    # handled alongside the other container failures. A lone 0x80 in the token
+    # block is one such byte.
     tokens = _decode_block(token_block, head.n_terms, "token")
     doc_ids = _decode_block(doc_id_block, head.n_docs, "document id")
 
@@ -539,5 +548,5 @@ def model_from_bytes(data: bytes) -> TfidfModel:
         norms=norms,
         lengths=lengths,
         doc_ids=doc_ids,
-        reduction=list(Reduction)[head.reduction],
+        reduction=_REDUCTION_BY_CODE[head.reduction],
     )

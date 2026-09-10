@@ -11,7 +11,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-__all__ = ["MODEL_FIELDS", "ModelField", "describe_schema"]
+__all__ = [
+    "BLOCK_SEPARATOR",
+    "HEADER_FIELDS",
+    "MODEL_FIELDS",
+    "HeaderField",
+    "ModelField",
+    "describe_header",
+    "describe_schema",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +31,37 @@ class ModelField:
     length: str
     purpose: str
 
+
+@dataclass(frozen=True, slots=True)
+class HeaderField:
+    """One scalar in a saved model's header."""
+
+    name: str
+    dtype: str
+    purpose: str
+
+
+#: The header scalars, in file order. ``flags`` bit 0 carries
+#: :class:`~tfidf_stability.vectorisation.idf.LogImpl`, G13's cross-platform
+#: logarithm switch. ``reduction`` carries the accumulation policy of every sum.
+#: Both change the stored weights. The array schema records neither.
+HEADER_FIELDS: Final[tuple[HeaderField, ...]] = (
+    HeaderField("magic", "8 bytes", "the container's literal magic string"),
+    HeaderField("format_version", "uint32", "container layout version"),
+    HeaderField("n_docs", "uint32", "document count"),
+    HeaderField("n_terms", "uint32", "vocabulary size"),
+    HeaderField("nnz", "uint64", "stored non-zeros"),
+    HeaderField("flags", "uint32", "bit 0: idf used the correctly-rounded logarithm"),
+    HeaderField("reduction", "uint32", "0 naive, 1 neumaier, 2 pairwise, 3 exact"),
+    HeaderField("token_bytes", "uint64", "length of the encoded token block"),
+    HeaderField("doc_id_bytes", "uint64", "length of the encoded document-id block"),
+    HeaderField("reserved_a", "uint32", "must be zero; readers reject anything else"),
+    HeaderField("reserved_b", "uint32", "must be zero; readers reject anything else"),
+)
+
+#: Always present between the token block and the document-id block. A reader
+#: that assumes the two blocks abut misparses every container.
+BLOCK_SEPARATOR: Final[bytes] = b"\n"
 
 #: What a `.tfsx` container carries, in file order.
 #:
@@ -44,8 +83,17 @@ MODEL_FIELDS: Final[tuple[ModelField, ...]] = (
 
 
 def describe_schema() -> list[dict[str, str]]:
-    """The schema as plain data, for the manifest and for documentation."""
+    """The array schema as plain data, for the manifest and for documentation.
+
+    Arrays only. :func:`describe_header` carries the header scalars, and a
+    reader of a container needs both.
+    """
     return [
         {"name": f.name, "dtype": f.dtype, "length": f.length, "purpose": f.purpose}
         for f in MODEL_FIELDS
     ]
+
+
+def describe_header() -> list[dict[str, str]]:
+    """The header scalars as plain data, in file order."""
+    return [{"name": f.name, "dtype": f.dtype, "purpose": f.purpose} for f in HEADER_FIELDS]
