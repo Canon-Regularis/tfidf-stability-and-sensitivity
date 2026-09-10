@@ -53,13 +53,9 @@ std::span<const DocId> as_ids(const I32Array& a) {
 
 /// Build a sparse view, checking the two halves describe one vector.
 ///
-/// The free functions below take raw parallel arrays and were the only entry
-/// points not checking that the halves agree. `dot` built its SparseView from
-/// independently sized index and value spans, so 64 indices with 1 value read
-/// 63 doubles past the end of the values buffer: undefined behaviour reachable
-/// from pure Python with no unsafe API, returning a different answer on each
-/// call. The reference rejects the same input (`SparseVector` raises "indices
-/// and values differ in length") and the class methods here already checked it.
+/// `dot` builds its SparseView from independently sized index and value spans.
+/// Without this check, 64 indices with 1 value would read 63 doubles past the
+/// end of the values buffer. `SparseVector` rejects the same input.
 SparseView checked_view(const I32Array& idx, const F64Array& val, std::int32_t dim,
                         const char* what) {
     if (idx.shape(0) != val.shape(0)) {
@@ -71,10 +67,9 @@ SparseView checked_view(const I32Array& idx, const F64Array& val, std::int32_t d
 
 /// Reject a reduction policy outside the enumeration.
 ///
-/// `static_cast<Reduction>(999)` produced a value no switch handles and the sum
-/// fell back to one of the policies instead of failing. The policy is recorded
-/// in every run manifest and is never implicit, so substituting one silently is
-/// the worst available outcome. Python's `Reduction(999)` raises; so does this.
+/// `static_cast<Reduction>(999)` is a value no switch handles, so without this
+/// guard the sum falls back to one of the policies instead of failing. The
+/// policy is recorded in every run manifest. Python's `Reduction(999)` raises.
 Reduction checked_policy(std::int32_t policy) {
     if (policy < static_cast<std::int32_t>(Reduction::Naive) ||
         policy > static_cast<std::int32_t>(Reduction::Exact)) {
@@ -85,15 +80,10 @@ Reduction checked_policy(std::int32_t policy) {
 
 /// Reject non-finite scores before they reach a comparator.
 ///
-/// G3 requires this re-check at the boundary, the only thing between an
-/// arbitrary caller and undefined behaviour: a NaN makes `<` false in both
-/// directions and destroys the strict weak ordering `std::sort` and
-/// `std::min_element` require. `NativeRanker::rank` already did it, the free
-/// functions below did not, and two consequences were measured. `std::sort`
-/// over 65,536 scores containing NaN did not crash but is formally UB, and
-/// `min_adjacent_margin_top` returned `inf` where the normative Python
-/// reference returns `nan`, a bit-level divergence in a core contracted to be
-/// bit-identical with that reference.
+/// G3 requires this boundary re-check. A NaN makes `<` false in both
+/// directions, destroying the strict weak ordering `std::sort` and
+/// `std::min_element` need. An infinity would make `min_adjacent_margin_top`
+/// return `inf`, not the reference's `nan`.
 std::span<const double> checked_scores(const F64Array& scores) {
     const std::span<const double> span{scores.data(), scores.shape(0)};
     for (const double value : span) {
@@ -107,14 +97,9 @@ std::span<const double> checked_scores(const F64Array& scores) {
 /// Reject a tolerance that is negative or NaN.
 ///
 /// `!(tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
-/// so the second form passes NaN through a guard whose message says
-/// non-negative.
-///
-/// Applied to all four tie-group entry points. An earlier sweep added the check
-/// to `tie_ball_interval` alone, leaving `tie_chains`, `tie_cliques` and
-/// `chain_inflation_ratio` to accept a negative tau that the normative Python
-/// rejects, and to answer it: the ratio comes back as 1.0, its minimum, so an
-/// invalid tolerance serialises as the healthiest possible tie structure.
+/// so the second form admits NaN. Mirrors `ranking::checked_tau` at all four
+/// tie-group entry points. Absent any guard, a negative tau leaves every chain
+/// and clique one wide, so `chain_inflation_ratio` returns 1.0, its minimum.
 double checked_tau(double tau) {
     if (!(tau >= 0.0)) {
         throw std::invalid_argument("tau must be non-negative");
@@ -124,13 +109,11 @@ double checked_tau(double tau) {
 
 /// Reject a selection strategy outside the enum.
 ///
-/// The same hole `checked_policy` closes, with a weaker consequence: the sort
-/// key is injective, so every strategy returns the identical permutation and an
-/// out-of-range value still gets a correct answer from the `default:` arm. What
-/// it loses is provenance -- the run manifest and the benchmark table name a
-/// strategy that did not run.
-///
-/// Bounded against the enumerators, so adding a strategy cannot leave this stale.
+/// The sort key is injective, so every strategy gives the same permutation.
+/// Without this guard the `default:` arm would rank an out-of-range value
+/// correctly, but the run manifest would name a strategy that did not run.
+/// `checked_policy` closes the same hole for the reduction policy. The bounds
+/// name `FullSort` and `BoundedHeap`, the first and last enumerators.
 ranking::Selection checked_selection(std::int32_t selection) {
     if (selection < static_cast<std::int32_t>(ranking::Selection::FullSort) ||
         selection > static_cast<std::int32_t>(ranking::Selection::BoundedHeap)) {
@@ -141,10 +124,10 @@ ranking::Selection checked_selection(std::int32_t selection) {
 
 /// Reject a scoring algorithm outside the enum.
 ///
-/// `score` reads `algorithm == Daat` and falls to TAAT otherwise, so an
-/// out-of-range value silently ran TAAT while the manifest recorded what was
-/// asked for. The two agree bit for bit, so this is the same provenance
-/// argument as `checked_selection` rather than a numerical one.
+/// `score` tests `algorithm == Daat` and falls to TAAT otherwise. Without this
+/// guard an out-of-range value would run TAAT under a manifest naming the
+/// requested algorithm. TAAT and DAAT agree bit for bit, so the argument is
+/// provenance, as in `checked_selection`.
 ScoringAlgorithm checked_algorithm(std::int32_t algorithm) {
     if (algorithm < static_cast<std::int32_t>(ScoringAlgorithm::Taat) ||
         algorithm > static_cast<std::int32_t>(ScoringAlgorithm::Daat)) {
@@ -156,13 +139,10 @@ ScoringAlgorithm checked_algorithm(std::int32_t algorithm) {
 /// Reject a k the normative reference would refuse.
 ///
 /// `resolve_k` raises `KOutOfRangeError` for k <= 0 in both strict and lenient
-/// mode, so a Margin from the reference can never carry a non-positive
-/// `k_effective`. The margin entry points return that field to Python, so
-/// without this the two backends disagree on what they report for the same
-/// argument. `compare_top_k` below refuses a negative k for the same reason.
-///
-/// Applied to every entry point that takes a k, not one of them: the note on
-/// `checked_tau` records a sweep that guarded one of four and left three.
+/// mode, so a reference Margin never carries a negative `k_effective`. The
+/// margin entry points return that field to Python. `compare_top_k` must admit
+/// k == 0 and carries its own guard for a negative k; `fks_max` returns 0.0 for
+/// k < 1, as the reference does. `NativeRanker::top_k` checks `m` in place.
 std::int32_t checked_k(std::int32_t k) {
     if (k <= 0) {
         throw std::invalid_argument("k must be positive");
@@ -205,13 +185,10 @@ class NativeIndex {
           n_rows_(n_docs),
           n_cols_(n_terms),
           reduction_(checked_policy(reduction)) {
-        // Dimensions first, before any size arithmetic. `n_docs = -1` with an
-        // empty indptr passes the length check below (0 == -1 + 1), and then
-        // `is_canonical()` calls front()/back() on an empty span and
-        // `transpose()` sizes a colptr from a negative count. Four such inputs
-        // segfaulted the interpreter (SIGSEGV, rc 139) from pure Python with no
-        // unsafe API. Every later check casts to std::size_t, where a negative
-        // value wraps to something enormous.
+        // Dimensions first, before any size arithmetic. Without this check,
+        // `n_docs = -1` with an empty indptr would pass the length check below
+        // (0 == -1 + 1). `is_canonical()` would call front()/back() on an empty
+        // span, and `transpose()` would size a colptr from a negative count.
         if (n_docs < 0 || n_terms < 0) {
             throw std::invalid_argument("n_docs and n_terms must be non-negative");
         }
@@ -311,11 +288,10 @@ class NativeRanker {
                  std::int32_t n_attrs) {
         const auto n_docs = static_cast<std::int32_t>(id_ranks.shape(0));
         // G17 makes ranking an empty corpus an error, and `rank`/`rank_top_k`
-        // raise `EmptyCorpusError` for it. Without this the native side sorts an
-        // empty table and returns an empty permutation: `id_ranks_are_a_bijection`
-        // is vacuously true, so nothing else here refuses it. `NativeIndex`
-        // admits n_docs == 0 on purpose, since scoring an empty corpus is
-        // well defined; ranking one is not.
+        // raise `EmptyCorpusError`. Without this guard the sort returns an
+        // empty permutation, and `id_ranks_are_a_bijection` is vacuously true,
+        // so nothing else refuses it. `NativeIndex` admits n_docs == 0:
+        // scoring an empty corpus is defined.
         if (n_docs == 0) {
             throw std::invalid_argument("cannot rank an empty corpus");
         }
@@ -327,7 +303,8 @@ class NativeRanker {
         if (n_attrs > 0 && ranks.shape(0) != expected_ranks) {
             throw std::invalid_argument("the rank matrix does not match n_docs");
         }
-        if (priority.shape(0) > ranking::kMaxAttributes) {
+        if (!ranking::priority_fits(
+                std::span<const std::int32_t>(priority.data(), priority.shape(0)))) {
             throw std::invalid_argument("more attributes than the sort key can carry");
         }
 
@@ -364,8 +341,16 @@ class NativeRanker {
                                                std::int32_t m,
                                                std::int32_t selection) {
         prepare(scores);
-        const auto take = std::min<std::size_t>(static_cast<std::size_t>(std::max(m, 0)),
-                                                keys_.size());
+        // `m` is a k under another name. `Ranking.top_k` refuses a negative `m`
+        // and an `m` past the selection size, so both are errors here rather
+        // than clamped values.
+        if (m < 0) {
+            throw std::invalid_argument("m must be non-negative");
+        }
+        if (static_cast<std::size_t>(m) > keys_.size()) {
+            throw std::invalid_argument("m exceeds the number of ranked documents");
+        }
+        const auto take = static_cast<std::size_t>(m);
         std::vector<DocId> out(take);
         ranking::select_top(keys_, take, out, checked_selection(selection));
         return to_numpy_i32(std::vector<std::int32_t>(out.begin(), out.end()));
@@ -639,8 +624,8 @@ NB_MODULE(_tfidf_native, m) {
         "compare_top_k",
         [](const I32Array& a, const I32Array& b, std::int32_t k) {
             // Refused rather than clamped: a negative k is a Python slice
-            // counting from the end, a different question, and answering the
-            // wrong one silently is what this boundary exists to prevent.
+            // counting from the end, which drops from the end rather than
+            // taking a prefix.
             if (k < 0) {
                 throw std::invalid_argument("k must be non-negative");
             }

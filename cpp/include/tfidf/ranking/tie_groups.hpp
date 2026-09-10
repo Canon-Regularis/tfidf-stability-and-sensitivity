@@ -26,6 +26,18 @@
 
 namespace tfidf::ranking {
 
+/// Reject a tolerance that is negative or NaN.
+///
+/// `!(tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
+/// so the second form admits NaN. With tau = NaN the ball, the chains and the
+/// cliques answer differently and none raises, so all four entry points call
+/// this guard.
+inline void checked_tau(Real tau) {
+    if (!(tau >= 0.0)) {
+        throw std::invalid_argument("tau must be non-negative");
+    }
+}
+
 /// A half-open `[lo, hi)` range of ranks. Every group here is contiguous in the
 /// sorted order, so an interval is a complete description.
 using Interval = std::pair<std::int32_t, std::int32_t>;
@@ -47,20 +59,14 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
                                                 std::int32_t j,
                                                 Real tau) {
     const auto n = static_cast<std::int32_t>(sorted_scores.size());
-    // The only tie-group function taking an index, and the only one that read
-    // out of bounds without it: `sorted_scores[j]` on an out-of-range j is
-    // undefined, not merely wrong. The normative Python raises `IndexError`
-    // here and the binding refuses it; this is the same guard one level down,
-    // so a C++ caller cannot reach the read either.
+    // `sorted_scores[j]` with j outside `[0, n)` is undefined behaviour. The
+    // normative Python raises `IndexError` here and the binding refuses the
+    // index; the same guard one level down keeps a C++ caller from reaching
+    // the read.
     if (j < 0 || j >= n) {
         throw std::out_of_range("rank index out of range");
     }
-    // `!(tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is
-    // false, so the second form admits NaN. With tau = NaN this function, the
-    // chains and the cliques give three contradictory answers and none raises.
-    if (!(tau >= 0.0)) {
-        throw std::invalid_argument("tau must be non-negative");
-    }
+    checked_tau(tau);
     const Real centre = sorted_scores[static_cast<std::size_t>(j)];
 
     // lo: first i in [0, j] with S[i] - centre <= tau.
@@ -96,6 +102,7 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
 /// intervening points, along which gaps only shrink.
 [[nodiscard]] inline std::vector<Interval> tie_chains(std::span<const Real> sorted_scores,
                                                       Real tau) {
+    checked_tau(tau);
     std::vector<Interval> out;
     const auto n = static_cast<std::int32_t>(sorted_scores.size());
     if (n == 0) {
@@ -123,6 +130,7 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
 /// of them; `[a, R(a)]` is maximal iff `a == 0` or `R(a) > R(a-1)`.
 [[nodiscard]] inline std::vector<Interval> tie_cliques(std::span<const Real> sorted_scores,
                                                        Real tau) {
+    checked_tau(tau);
     std::vector<Interval> out;
     const auto n = static_cast<std::int32_t>(sorted_scores.size());
     if (n == 0) {
@@ -154,6 +162,7 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
 /// one. The normative Python says the same, and its docstring names
 /// `[0.07, 0.01, 0.84, 0.26, 0.23, 1.0]` at `tau = 0.2`, which gives 0.5.
 [[nodiscard]] inline Real chain_inflation_ratio(std::span<const Real> sorted_scores, Real tau) {
+    checked_tau(tau);
     const auto chains = tie_chains(sorted_scores, tau);
     const auto cliques = tie_cliques(sorted_scores, tau);
     if (chains.empty() || cliques.empty()) {

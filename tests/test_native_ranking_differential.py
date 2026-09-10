@@ -248,13 +248,11 @@ def test_native_ranker_rejects_non_bijective_identifier_ranks() -> None:
 
 
 def test_native_ranker_rejects_an_empty_corpus_as_the_reference_does() -> None:
-    """G17 makes ranking an empty corpus an error, and `rank`/`rank_top_k` raise
-    `EmptyCorpusError` for it. The native side sorted an empty table and returned
-    an empty permutation instead: nothing else in the constructor refuses it,
-    because `id_ranks_are_a_bijection` is vacuously true on an empty table.
+    """`NativeRanker` refuses an empty corpus, as `rank` does under G17.
 
-    `NativeIndex` admits an empty corpus on purpose -- scoring one is well
-    defined -- so this is a rule about ranking, not about the backend.
+    Nothing else in the constructor refuses one: `id_ranks_are_a_bijection`
+    holds vacuously on an empty table. `NativeIndex` admits an empty corpus
+    because scoring one is defined, so the rule covers ranking, not scoring.
     """
     empty = np.array([], dtype=np.int32)
     with pytest.raises(ValueError, match="cannot rank an empty corpus"):
@@ -266,11 +264,11 @@ def test_native_ranker_rejects_an_empty_corpus_as_the_reference_does() -> None:
 
 @pytest.mark.parametrize("selection", [-1, 5, 999, -(2**31 - 1)])
 def test_a_selection_outside_the_enum_is_refused(selection: int) -> None:
-    """The same hole `checked_policy` closes for `Reduction`, with a weaker
-    consequence: the sort key is injective, so every strategy returns the
-    identical permutation and the `default:` arm still gave a correct answer.
-    What was lost is provenance -- a manifest and a benchmark table naming a
-    strategy that did not run.
+    """`checked_selection` refuses a strategy outside `SELECTION`.
+
+    The sort key is injective, so every strategy returns the same permutation
+    and the `default:` arm answers correctly. The cost is provenance: a
+    manifest and a benchmark table would name a strategy that did not run.
     """
     rng = random.Random(3)
     scores, table = tie_heavy(rng, 6)
@@ -283,17 +281,17 @@ def test_a_selection_outside_the_enum_is_refused(selection: int) -> None:
         ranker.top_k(native, 2, selection)
 
     # Every in-range strategy is accepted, so the guard bounds the enum rather
-    # than merely rejecting large numbers.
+    # than rejecting large values.
     for name, value in nat.SELECTION.items():
         assert len(ranker.rank(native, int(value))) == len(scores), name
 
 
 def test_the_tie_group_binding_guards_refuse_what_the_reference_refuses() -> None:
-    """`checked_tau` and the `j` range check are the binding's own guards and had
-    no test of their own. The reference raises `IndexError` for an out-of-range
-    centre and `ValueError` for a tau that is negative or NaN; a NaN tau is the
-    case that matters, because every comparison with it is false and the three
-    tie-group functions would otherwise give three different answers in silence.
+    """The tie-group binding guards refuse what the reference refuses.
+
+    `checked_tau` and the `j` range check raise `ValueError` on a negative or
+    NaN tau and `IndexError` on an out-of-range centre. Every comparison with
+    a NaN tau is false, so the three tie-group functions would disagree.
     """
     scores = np.array([1.0, 0.75, 0.5], dtype=np.float64)
 
@@ -335,18 +333,11 @@ def test_native_ranker_rejects_an_unknown_attribute() -> None:
 
 @pytest.mark.parametrize("k", [0, -1, -5, -(2**31 - 1)])
 def test_both_backends_refuse_a_non_positive_k(k: int) -> None:
-    """The backends used to part company here, and no longer do.
+    """Both backends refuse a non-positive k.
 
-    ``resolve_k`` rejects non-positive k in strict and lenient modes alike, so
-    the reference can never return a margin for one. The native functions
-    returned an undefined margin instead, and worse, one carrying
-    ``k_effective = k``: ``std::min(k, n)`` on a negative k gives that k back,
-    and the binding hands the field straight to Python, so a value the reference
-    cannot produce reached a results file. Both now refuse.
-
-    The exception types differ by language convention -- ``KOutOfRangeError``
-    against nanobind's ``ValueError`` -- which is why this asserts refusal on
-    each side rather than one shared type.
+    ``resolve_k`` rejects one in strict and lenient modes alike. Without the
+    native guard, ``std::min(k, n)`` hands a negative k back as ``k_effective``.
+    The exception types differ by language convention, so each side is checked.
     """
     scores = np.array([1.0, 0.5, 0.25], dtype=np.float64)
 
@@ -363,9 +354,10 @@ def test_both_backends_refuse_a_non_positive_k(k: int) -> None:
 
 
 def test_the_effective_k_agrees_across_the_boundary_where_k_is_admissible() -> None:
-    """`k_effective` is the field the negative-k defect escaped through, and the
-    margin tests above compare it only for `k <= n`. Here it is compared across
-    the clamp, which is the boundary it is for.
+    """``k_effective`` agrees across the boundary for every admissible k.
+
+    The margin tests above compare it only for ``k <= n``. This test compares
+    it on both sides of the ``std::min(k, n)`` clamp.
     """
     scores = [1.0, 0.5, 0.25]
     native = np.array(scores, dtype=np.float64)
@@ -435,3 +427,59 @@ def test_the_margin_over_signed_zeros_agrees_bit_for_bit() -> None:
         checked += 1
 
     assert checked == 4, "every k was compared"
+
+
+def test_a_zero_length_top_k_is_an_empty_prefix_rather_than_a_refusal() -> None:
+    """`m = 0` is a length, not an error, so `top_k` returns an empty prefix.
+
+    The reference `Ranking.top_k(0)` returns the empty prefix and the binding
+    matches it. The guard is `m < 0`: `m <= 0` and `m < 1` would refuse this
+    input and agree with `m < 0` on every other one.
+    """
+    rng = random.Random(11)
+    scores, table = tie_heavy(rng, 5)
+    ranker = native_ranker(table, ATTRS)
+
+    assert list(ranker.top_k(np.array(scores, dtype=np.float64), 0)) == []
+    assert rank_top_k(scores, table, SortKeySpec("pi", ATTRS), k=2).top_k(0) == ()
+
+
+def test_a_top_k_past_the_ranked_documents_is_refused_rather_than_clamped() -> None:
+    """An `m` past the ranked documents is refused rather than clamped.
+
+    `m` is a k under another name, and `Ranking.top_k` refuses one past the
+    selection. Clamping would answer a different question.
+    """
+    rng = random.Random(12)
+    scores, table = tie_heavy(rng, 5)
+    ranker = native_ranker(table, ATTRS)
+    native = np.array(scores, dtype=np.float64)
+
+    with pytest.raises(ValueError, match="m exceeds the number of ranked documents"):
+        ranker.top_k(native, len(scores) + 1)
+    with pytest.raises(ValueError, match="m must be non-negative"):
+        ranker.top_k(native, -1)
+
+    # The whole selection is a legal prefix, so the bound is inclusive.
+    assert len(ranker.top_k(native, len(scores))) == len(scores)
+
+
+def test_a_priority_longer_than_the_sort_key_is_refused_by_the_binding() -> None:
+    """A priority longer than `kMaxAttributes` is refused by the binding.
+
+    `kMaxAttributes` is 4 and `build_keys` is noexcept, so it truncates instead
+    of raising and sorts on a prefix of the requested operator. The reference
+    tuple has no such bound, so the binding enforces it.
+    """
+    ids = np.array([2, 0, 1], dtype=np.int32)
+    with pytest.raises(ValueError, match="more attributes than the sort key can carry"):
+        nat.NativeRanker(
+            np.zeros(15, dtype=np.int32),
+            ids,
+            np.array([0, 1, 2, 3, 4], dtype=np.int32),
+            5,
+        )
+
+    # Four is the inclusive boundary, so the guard sits at the cap rather than
+    # below it.
+    nat.NativeRanker(np.zeros(12, dtype=np.int32), ids, np.array([0, 1, 2, 3], dtype=np.int32), 4)
