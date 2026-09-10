@@ -67,6 +67,16 @@ class TfidfModel:
     doc_ids: tuple[str, ...]
     reduction: Reduction
 
+    def __post_init__(self) -> None:
+        """Normalise ``reduction`` to its member.
+
+        ``similarity/scoring.py`` selects the summation policy with ``is``, so
+        an uncoerced string takes the compensated arm, while
+        ``utils/numerics.py`` looks the same value up in a dict and returns
+        the naive answer. One string, two behaviours.
+        """
+        object.__setattr__(self, "reduction", Reduction(self.reduction))
+
     @property
     def n_documents(self) -> int:
         return self.matrix.n_rows
@@ -160,6 +170,15 @@ class TfidfVectoriser:
     vocabulary_config: VocabularyConfig = field(default_factory=VocabularyConfig)
     log_impl: LogImpl = LogImpl.CORRECTLY_ROUNDED
     reduction: Reduction = Reduction.NAIVE
+
+    def __post_init__(self) -> None:
+        """Normalise both enums to their members.
+
+        Coerced at construction only, since the builder is mutable by design;
+        a field reassigned afterwards is caught downstream by the model.
+        """
+        self.log_impl = LogImpl(self.log_impl)
+        self.reduction = Reduction(self.reduction)
 
     def fit(
         self,

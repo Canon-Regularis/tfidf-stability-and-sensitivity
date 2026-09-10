@@ -67,6 +67,10 @@ class EditRecord:
     n_before: int
     n_after: int
 
+    def __post_init__(self) -> None:
+        """Normalise ``kind`` to its member; the readers select on ``is``."""
+        object.__setattr__(self, "kind", EditKind(self.kind))
+
     @property
     def changes_corpus_size(self) -> bool:
         """Whether ``N`` changed.

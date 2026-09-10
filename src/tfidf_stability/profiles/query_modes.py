@@ -93,6 +93,10 @@ class Query:
     excluded: frozenset[str] = field(default_factory=frozenset)
     n_candidates: int = 0
 
+    def __post_init__(self) -> None:
+        """Normalise ``mode`` to its member; the grid layer selects on ``is``."""
+        object.__setattr__(self, "mode", QueryMode(self.mode))
+
     @property
     def is_degenerate(self) -> bool:
         """Whether the query has no features at all.
@@ -124,6 +128,15 @@ class QuerySet:
     #: G14: section 7.1 defers these counts to "the dataset configuration", so
     #: they are fixed here and travel into the run manifest.
     n_users: int
+
+    def __post_init__(self) -> None:
+        """Normalise both enums to their members.
+
+        ``build_profile`` selects the divisor on ``aggregation`` with ``is``,
+        so an uncoerced string sums where the value asks for a mean.
+        """
+        object.__setattr__(self, "mode", QueryMode(self.mode))
+        object.__setattr__(self, "aggregation", ProfileAggregation(self.aggregation))
 
     def __len__(self) -> int:
         return len(self.queries)

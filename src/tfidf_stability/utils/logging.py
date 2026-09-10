@@ -147,6 +147,14 @@ class Event:
     kind: EventKind
     fields: tuple[tuple[str, Any], ...] = ()
 
+    def __post_init__(self) -> None:
+        """Normalise ``kind`` to its member.
+
+        ``EventRecorder.of_kind`` selects on the member, so a recorded string
+        would be invisible to a query for the kind it names.
+        """
+        object.__setattr__(self, "kind", EventKind(self.kind))
+
     @classmethod
     def build(cls, kind: EventKind, fields: Mapping[str, Any]) -> Event:
         """Canonicalise a mapping of fields into an event."""

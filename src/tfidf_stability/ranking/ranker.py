@@ -98,6 +98,10 @@ class Ranking:
     strict_mode: StrictMode
     k_effective: int | None = None
 
+    def __post_init__(self) -> None:
+        """Normalise ``strict_mode`` to its member; ``resolve_k`` compares it."""
+        object.__setattr__(self, "strict_mode", StrictMode(self.strict_mode))
+
     @property
     def is_complete(self) -> bool:
         """Whether every document was selected."""

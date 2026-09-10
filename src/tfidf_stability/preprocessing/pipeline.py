@@ -71,6 +71,10 @@ class PreprocessingConfig:
     n_max: int = 2
     cross_gaps: bool = False
 
+    def __post_init__(self) -> None:
+        """Normalise ``lemmatiser`` to its member; ``make_lemmatiser`` selects on it."""
+        object.__setattr__(self, "lemmatiser", LemmatiserKind(self.lemmatiser))
+
     def to_dict(self) -> dict[str, Any]:
         """A canonical, JSON-serialisable view, used for hashing and manifests."""
         return {
