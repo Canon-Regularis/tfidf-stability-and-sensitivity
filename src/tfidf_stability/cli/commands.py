@@ -38,10 +38,12 @@ __all__ = [
     "cmd_build_corpus",
     "cmd_info",
     "cmd_inspect",
+    "cmd_schema",
     "cmd_verify",
     "load_config",
     "pipeline_from_config",
     "vectoriser_from_config",
+    "write_report",
 ]
 
 _LOG = get_logger(__name__)
