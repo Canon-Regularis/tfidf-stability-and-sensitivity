@@ -157,5 +157,9 @@ def _score(model: TfidfModel, query_features: Sequence[str]) -> dict[str, float]
     """
     query = TfidfVectoriser.transform_query(query_features, model)
     docs = [model.document(i) for i in range(model.n_documents)]
-    scores = cosine_against_corpus(query, docs, model.norms)
+    # `model.reduction` matches what `analysis/query_grid.py` passes. `model.norms` is
+    # accumulated under the model's policy, so leaving the argument at its default
+    # divides compensated norms into naive dot products, a mixed policy the manifest
+    # records as a single one.
+    scores = cosine_against_corpus(query, docs, model.norms, model.reduction)
     return dict(zip(model.doc_ids, scores, strict=True))

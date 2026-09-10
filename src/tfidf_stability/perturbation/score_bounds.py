@@ -176,7 +176,11 @@ def flip_witness(
         up to half an ulp, which is what makes a naive version of this test
         flaky.
     """
-    n = len(scores)
+    # Bounded by whichever sequence runs out first. `order` may be a truncated Ranking,
+    # since `rank_top_k` returns `n_selected = min(k + 1, n)`, and the boundary needs
+    # `order[k - 1]` and `order[k]`. A `k` past the end of `order` returns None, as the
+    # signature documents, rather than raising IndexError.
+    n = min(len(scores), len(order))
     if not 1 <= k < n:
         return None
 

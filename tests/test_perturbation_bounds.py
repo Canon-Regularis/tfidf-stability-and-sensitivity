@@ -48,7 +48,7 @@ from tfidf_stability.perturbation.vector_perturb import (
     analyse_vector_shift,
 )
 from tfidf_stability.ranking.attributes import AttributeSpec, AttributeTable
-from tfidf_stability.ranking.ranker import rank, sorted_scores_desc
+from tfidf_stability.ranking.ranker import rank, rank_top_k, sorted_scores_desc
 from tfidf_stability.ranking.sort_keys import SortKeySpec
 from tfidf_stability.similarity.geometry import lipschitz_constant
 from tfidf_stability.vectorisation.idf import delta_idf, smoothed_idf_one
@@ -1023,3 +1023,26 @@ def test_a_discrepancy_one_ulp_past_the_tolerance_is_refused() -> None:
 
     assert just_over**2 > 1e-9
     assert not outside.pythagoras_holds
+
+
+def test_a_truncated_ranking_returns_no_witness_rather_than_raising() -> None:
+    """A `k` past the end of a truncated `order` yields None, not IndexError.
+
+    `rank_top_k` returns `n_selected = min(k + 1, n)`, so a truncated `Ranking` can
+    clear `k < len(scores)` while `order[k]` is out of range. The signature documents
+    `None` "when no witness exists: `k` out of range".
+    """
+    scores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]
+    table = table_of(6)
+    truncated = rank_top_k(scores, table, POP, k=2)
+    assert len(truncated.order) == 3 < len(scores), "the premise: order is shorter"
+
+    for k in (3, 4, 5):
+        assert flip_witness(scores, truncated.order, k) is None
+
+    # A `k` the truncated `order` covers still produces a witness, so the bound refuses
+    # only the unanswerable case.
+    assert flip_witness(scores, truncated.order, 1) is not None
+    # A complete `order` answers every `k` in range.
+    complete = rank(scores, table, POP)
+    assert flip_witness(scores, complete.order, 4) is not None
