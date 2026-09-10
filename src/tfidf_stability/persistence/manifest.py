@@ -176,18 +176,20 @@ class RunManifest:
         """Refuse to proceed on a build that cannot produce publishable numbers."""
         if self.is_reproducible_build:
             return
-        # Two failures get two messages: a `native` that is not a mapping, and a
-        # build whose flags say it is not reproducible. One message for both
-        # would call `.get` on a non-mapping, raising `AttributeError`, and would
-        # name `fast_math=None` as the cause when the flags are what disagree.
+        # Every refusal opens with the same phrase, so a caller matching on it
+        # gets the same answer whichever branch fires. A non-mapping `native`
+        # gets its own clause, since `.get` on it would raise `AttributeError`.
+        # `None` is the reference, and reaches here only under a patched
+        # property, so it takes the flag branch and reports no flags.
         native = self.environment.get("native")
-        if not isinstance(native, Mapping):
+        if native is not None and not isinstance(native, Mapping):
             raise RuntimeError(
-                f"this manifest's native block is {type(native).__name__}, not a "
-                f"mapping, so the build cannot be shown to be reproducible"
+                f"this build is not reproducible: the manifest's native block "
+                f"is {type(native).__name__}, not a mapping"
             )
+        flags: Mapping[str, Any] = native if isinstance(native, Mapping) else {}
         raise RuntimeError(
             "this build is not reproducible "
-            f"(fast_math={native.get('fast_math')}, arch_tune={native.get('arch_tune')}); "
+            f"(fast_math={flags.get('fast_math')}, arch_tune={flags.get('arch_tune')}); "
             "rebuild without TFIDF_FAST_MATH or TFIDF_ARCH_TUNE before producing results"
         )

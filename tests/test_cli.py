@@ -1051,17 +1051,11 @@ def test_the_exported_weight_is_exactly_tf_times_idf(tmp_path: Path) -> None:
 def test_an_unreproducible_build_leaves_no_artefact_behind(tmp_path: Path) -> None:
     """The guard runs before `save_model`, not after it.
 
-    `require_reproducible` refuses a fast-math or arch-tuned build, because such
-    a build cannot produce publishable numbers. It used to run *after*
-    `save_model`, so it raised with the container and its readable sidecar
-    already on disk and `manifest.write` never reached. Measured with the old
-    ordering: `['m.json', 'm.tfsx']` survived the exception.
-
-    That is the worst of the three possible outcomes. A refusal that writes
-    nothing is safe and a completed write with a manifest is honest; what was
-    left instead was a complete-looking model, carrying a sidecar full of
-    digests, from a build the project declares unfit -- and no manifest to say
-    which.
+    `require_reproducible` refuses a fast-math or arch-tuned build, which cannot
+    produce publishable numbers. Run after `save_model`, it would raise with the
+    container and its sidecar already on disk and `manifest.write` never
+    reached, leaving a complete-looking model from a build the project declares
+    unfit and no manifest to say so.
     """
     out = tmp_path / "m.tfsx"
 
