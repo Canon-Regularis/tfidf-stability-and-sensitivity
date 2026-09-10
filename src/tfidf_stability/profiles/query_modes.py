@@ -176,7 +176,7 @@ def _require_feature_bearing(aggregation: ProfileAggregation) -> None:
     so at the point of the choice, in the style `build_query_grid` already uses
     for the item-as-query mode it declines to run.
     """
-    if aggregation is not ProfileAggregation.TEXT_CONCAT:
+    if ProfileAggregation(aggregation) is not ProfileAggregation.TEXT_CONCAT:
         raise ValueError(
             f"{aggregation} builds a profile vector rather than a feature stream, "
             f"and the query grid carries features; use "

@@ -161,6 +161,7 @@ def build_query_grid(
         Interaction(user_id=u, doc_id=d, weight=w) for u, d, w in interactions
     )
 
+    mode = QueryMode(mode)  # a string spelling reached the "not evaluated" arm
     if mode is QueryMode.LEAVE_ONE_OUT:
         query_set = leave_one_out_queries(
             grouped,
