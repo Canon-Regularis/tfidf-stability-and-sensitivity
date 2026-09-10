@@ -42,7 +42,12 @@ from tfidf_stability.ranking.tie_groups import (
     tie_cliques,
 )
 from tfidf_stability.utils.numerics import same_bits
-from tfidf_stability.utils.validation import EmptyCorpusError, KOutOfRangeError, StrictMode
+from tfidf_stability.utils.validation import (
+    EmptyCorpusError,
+    KOutOfRangeError,
+    StrictMode,
+    TfidfStabilityError,
+)
 
 pytestmark = [
     pytest.mark.native,
@@ -255,11 +260,17 @@ def test_native_ranker_rejects_an_empty_corpus_as_the_reference_does() -> None:
     because scoring one is defined, so the rule covers ranking, not scoring.
     """
     empty = np.array([], dtype=np.int32)
-    with pytest.raises(ValueError, match="cannot rank an empty corpus"):
+    with pytest.raises(ValueError, match="empty corpus") as native:
         nat.NativeRanker(empty, empty, empty, 0)
 
-    with pytest.raises(EmptyCorpusError, match="empty corpus"):
+    with pytest.raises(ValueError, match="empty corpus") as reference:
         rank([], AttributeTable.from_records([], ()), SortKeySpec("pi", ()))
+
+    # One `except ValueError` catches both. The reference additionally names
+    # which rule fired; the binding carries no project leaf, because it has no
+    # access to the Python hierarchy.
+    assert isinstance(reference.value, EmptyCorpusError)
+    assert not isinstance(native.value, TfidfStabilityError)
 
 
 @pytest.mark.parametrize("selection", [-1, 5, 999, -(2**31 - 1)])
@@ -337,7 +348,8 @@ def test_both_backends_refuse_a_non_positive_k(k: int) -> None:
 
     ``resolve_k`` rejects one in strict and lenient modes alike. Without the
     native guard, ``std::min(k, n)`` hands a negative k back as ``k_effective``.
-    The exception types differ by language convention, so each side is checked.
+    One ``except ValueError`` catches both backends; the reference additionally
+    names which rule fired.
     """
     scores = np.array([1.0, 0.5, 0.25], dtype=np.float64)
 
@@ -345,12 +357,14 @@ def test_both_backends_refuse_a_non_positive_k(k: int) -> None:
         (nat.boundary_margin, boundary_margin),
         (nat.min_adjacent_margin_top, min_adjacent_margin_top),
     ):
-        with pytest.raises(ValueError, match="k must be positive"):
+        with pytest.raises(ValueError, match="k must be positive") as native:
             native_fn(scores, k)
+        assert not isinstance(native.value, TfidfStabilityError)
 
         for mode in (StrictMode.STRICT, StrictMode.LENIENT):
-            with pytest.raises(KOutOfRangeError, match="k must be positive"):
+            with pytest.raises(ValueError, match="k must be positive") as reference:
                 reference_fn([1.0, 0.5, 0.25], k, mode=mode)
+            assert isinstance(reference.value, KOutOfRangeError)
 
 
 def test_the_effective_k_agrees_across_the_boundary_where_k_is_admissible() -> None:

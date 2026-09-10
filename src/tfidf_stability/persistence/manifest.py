@@ -28,6 +28,7 @@ from typing import Any, ClassVar
 from tfidf_stability.utils.hashing import hash_text
 from tfidf_stability.utils.io import canonical_json, strip_volatile, write_json
 from tfidf_stability.utils.numerics import float_environment
+from tfidf_stability.utils.validation import UnreproducibleBuildError
 
 __all__ = ["RunManifest", "environment_block", "is_reproducible_environment"]
 
@@ -183,12 +184,12 @@ class RunManifest:
         # property, so it takes the flag branch and reports no flags.
         native = self.environment.get("native")
         if native is not None and not isinstance(native, Mapping):
-            raise RuntimeError(
+            raise UnreproducibleBuildError(
                 f"this build is not reproducible: the manifest's native block "
                 f"is {type(native).__name__}, not a mapping"
             )
         flags: Mapping[str, Any] = native if isinstance(native, Mapping) else {}
-        raise RuntimeError(
+        raise UnreproducibleBuildError(
             "this build is not reproducible "
             f"(fast_math={flags.get('fast_math')}, arch_tune={flags.get('arch_tune')}); "
             "rebuild without TFIDF_FAST_MATH or TFIDF_ARCH_TUNE before producing results"

@@ -33,10 +33,13 @@ __all__ = [
     "EmptyVocabularyError",
     "KOutOfRangeError",
     "NativeBackendUnavailableError",
+    "NegativeValueError",
+    "NonFiniteValueError",
     "NumericEnvironmentError",
     "StrictMode",
     "TauExceedsScoreRangeWarning",
     "TfidfStabilityError",
+    "UnreproducibleBuildError",
     "check_finite",
     "check_non_negative",
     "check_unique_ids",
@@ -69,7 +72,7 @@ class EmptyVocabularyError(TfidfStabilityError):
     """
 
 
-class DuplicateIdentifierError(TfidfStabilityError):
+class DuplicateIdentifierError(TfidfStabilityError, ValueError):
     """Two documents share an identifier.
 
     Fatal. The ranking operator of section 2.3.1 is a strict total order only
@@ -78,15 +81,46 @@ class DuplicateIdentifierError(TfidfStabilityError):
     """
 
 
-class KOutOfRangeError(TfidfStabilityError):
-    """``k`` exceeds the number of rankable documents."""
+class KOutOfRangeError(TfidfStabilityError, ValueError):
+    """``k`` exceeds the number of rankable documents.
+
+    A ``ValueError`` as well, so one ``except`` catches this and the native
+    side, which raises ``std::invalid_argument`` for the same input and reaches
+    Python as ``ValueError``. The pattern is
+    :class:`~tfidf_stability.persistence.save_load.TfsxFormatError`'s.
+    """
 
 
-class EmptyCorpusError(TfidfStabilityError):
+class EmptyCorpusError(TfidfStabilityError, ValueError):
     """Ranking was attempted over zero documents.
 
     ``docs/spec_addenda.md#g3`` calls this "an error on ranking" but names no
     exception class; this is that class (proposed as addendum G17).
+    """
+
+
+class NonFiniteValueError(TfidfStabilityError, ValueError):
+    """A value that must be finite is NaN or infinite.
+
+    A leaf rather than the base class, so a caller can tell a non-finite score
+    from any other refusal. ``ValueError`` as well, matching the native side.
+    """
+
+
+class NegativeValueError(TfidfStabilityError, ValueError):
+    """A value that must be non-negative is negative.
+
+    TF-IDF vectors live in the non-negative orthant (README section 2.2), which
+    is the only reason cosine similarity lies in ``[0, 1]``.
+    """
+
+
+class UnreproducibleBuildError(TfidfStabilityError, RuntimeError):
+    """The build cannot produce publishable numbers.
+
+    ``RuntimeError`` as well, so callers written against the previous type keep
+    working, while ``except TfidfStabilityError`` now catches the most
+    consequential refusal in the package.
     """
 
 
@@ -162,7 +196,7 @@ def check_finite(values: Sequence[float], what: str) -> None:
     """Raise if any value is NaN or infinite."""
     for i, v in enumerate(values):
         if not math.isfinite(v):
-            raise TfidfStabilityError(f"{what}[{i}] is {v!r}, which is not finite. {_FINITE_HINT}")
+            raise NonFiniteValueError(f"{what}[{i}] is {v!r}, which is not finite. {_FINITE_HINT}")
 
 
 def check_non_negative(values: Sequence[float], what: str) -> None:
@@ -174,7 +208,7 @@ def check_non_negative(values: Sequence[float], what: str) -> None:
     """
     for i, v in enumerate(values):
         if v < 0.0:
-            raise TfidfStabilityError(
+            raise NegativeValueError(
                 f"{what}[{i}] = {v!r} is negative; TF-IDF vectors must be non-negative "
                 f"(README section 2.2), and cos in [0, 1] depends on it."
             )
