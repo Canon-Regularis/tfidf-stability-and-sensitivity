@@ -1,10 +1,7 @@
-# The deep runs: too slow for a pull request, too valuable to skip.
+# Deep runs, scheduled nightly rather than per pull request.
 #
-# The pull-request suite runs Hypothesis at 1,000 examples. That is enough to
-# catch a broken invariant and nowhere near enough to be called an adversarial
-# search for a counterexample to the bounds of README section 4. This workflow
-# runs 100,000, the difference between "we checked the theorems" and
-# "we tried hard to break them".
+# The pull-request suite runs Hypothesis at 1,000 examples. This workflow runs
+# 100,000 to search for a counterexample to the bounds of README section 4.
 
 name: nightly
 
@@ -17,18 +14,15 @@ permissions:
   contents: read
 
 # One run per ref at a time. Without this every push to a branch leaves its
-# predecessor running to completion against code nobody will merge, which on a
-# matrix this wide is the difference between a queue that drains and one that
-# does not. Scheduled runs are keyed by workflow rather than ref so a nightly
-# cannot cancel a push.
+# predecessor running to completion against code nobody will merge. Scheduled
+# runs are keyed by workflow rather than ref so a nightly cannot cancel a push.
 concurrency:
   group: nightly-${{ github.ref }}
   cancel-in-progress: false
 
 # See ci.yml for why these are `-o` settings and not flags. The cap is an hour
-# rather than five minutes: this workflow runs Hypothesis at 100,000 examples,
-# where a single property test legitimately runs for many minutes, and a short
-# cap would kill the search this workflow exists to perform.
+# rather than five minutes. At 100,000 examples a single property test runs for
+# many minutes, and a five-minute cap would kill it mid-search.
 env:
   PYTEST_ADDOPTS: >-
     -o verbosity_test_cases=1
@@ -47,34 +41,30 @@ jobs:
       # package surface suite. Mutation cost is (sites x suite time), so pointing
       # every module at the whole suite would turn a twenty-minute run into days.
       #
-      # Why this list is three modules and not thirty-four, measured rather than
-      # assumed. Scoping a module to every test that can transitively reach it
-      # is the rigorous choice -- a mutant surviving that is a true survivor,
-      # with no risk of a false one from too narrow a scope -- but it does not
-      # fit: utils/numerics.py is reachable from 27 test files, a 210s run
-      # against 62 sites, which is 217 minutes; vectorisation/sparse.py is 20
-      # files and 182 minutes. Both exceed this job's budget several times over.
-      # Roughly 7 to 9 seconds of every run is interpreter startup and
-      # collection, so a narrow scope does not help as much as it looks.
+      # Scoping a module to every test that can transitively reach it reports
+      # no false survivor. Such a scope does not fit this job's 90-minute cap.
+      # utils/numerics.py is reachable from 27 test files, 62 sites at 210s a
+      # run, so 217 minutes; vectorisation/sparse.py is 20 files, 182 minutes.
       #
-      # The second constraint is subtler and is why modules cannot simply be
-      # added here: widening a module's scope kills mutants its original,
-      # narrower campaign recorded as survivors, and configs/equivalent_mutants
-      # .txt then fails on the other side -- an entry that matches no survivor.
-      # Adding a module therefore means running its campaign and reconciling its
-      # entries first, not editing this list.
+      # Interpreter startup and collection take 7 to 9 seconds of every run, so
+      # a narrow scope saves less than the test count suggests.
       #
-      # tests/test_mutation_gate.py tracks the consequence: 104 of the 109
-      # allowlist entries belong to modules no job here re-runs, so most of that
-      # file is currently unfalsifiable. Its _NOT_YET_SCHEDULED set names them.
+      # Widening a module's scope kills mutants recorded as survivors under a
+      # narrower one, and configs/equivalent_mutants.txt then fails on an entry
+      # that matches no survivor. Adding a module here means running its
+      # campaign and reconciling its entries first.
+      #
+      # tests/test_mutation_gate.py tracks the consequence: 61 of the 105
+      # allowlist entries belong to the 22 modules no job here re-runs, so
+      # nothing falsifies them. Its _NOT_YET_SCHEDULED set names those 22.
+      #
       # Splitting also means a survivor names the module it came from without any
       # further digging.
       #
-      # test_public_api_surface.py is in every entry because it pins invariants
-      # every module participates in -- frozen, slots, `__all__` -- and without it
-      # a mutated `@dataclass(frozen=True)` survives in each of them at once.
-      # Measured: scoping sort_keys.py to its own suite alone left two decorator
-      # mutants surviving that the surface suite kills outright.
+      # test_public_api_surface.py is in every entry. It pins invariants every
+      # module participates in: frozen, slots, `__all__`. Without it a mutated
+      # `@dataclass(frozen=True)` would survive in each module at once, and
+      # sort_keys.py would leave two decorator mutants surviving.
       matrix:
         include:
           - module: src/tfidf_stability/ranking/tie_groups.py
@@ -83,24 +73,16 @@ jobs:
             tests: tests/test_margins_and_flip_radii.py tests/test_public_api_surface.py
           - module: src/tfidf_stability/ranking/sort_keys.py
             tests: tests/test_ranking_tie_breaks.py tests/test_public_api_surface.py
-          # Added after running its campaign and confirming the result rather
-          # than by editing this list: 63 sites, 54 killed, and all 9 survivors
-          # already matched by an entry in the allowlist, in 346s. That takes
-          # nine of the entries nothing re-ran and makes them falsifiable again.
+          # 63 sites in 346s: 54 killed, 9 survivors, all in the allowlist.
           - module: src/tfidf_stability/analysis/noise_floor.py
             tests: tests/test_analysis_harness.py tests/test_public_api_surface.py
-          # Also run before being added, and it earned its place: 72 sites, 65
-          # killed, all 7 survivors documented -- and four entries that no
-          # longer matched anything, deleted in the same commit. Those four are
-          # what the rot looks like, and nothing had re-run this module to find
-          # them.
+          # 72 sites: 65 killed, 7 survivors, all in the allowlist.
           - module: src/tfidf_stability/analysis/stability_profile.py
             tests: >-
               tests/test_analysis_harness.py tests/test_doc_references.py
               tests/test_public_api_surface.py
-          # 51 sites, 46 killed, all 5 survivors already documented and nothing
-          # stale: this one needed no change at all, which is the outcome the
-          # other two had to be worked towards.
+          # 51 sites: 46 killed, 5 survivors, all in the allowlist, and no
+          # entry left unmatched.
           - module: src/tfidf_stability/perturbation/vector_perturb.py
             tests: >-
               tests/test_perturbation_bounds.py tests/test_perturbation_experiments.py
@@ -136,9 +118,9 @@ jobs:
             requirements-dev.txt
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: Break ${{ matrix.module }} and see whether its tests notice
-        # check_test_vacuity.py proves a test can fail. Only this proves it fails
-        # for the right reason. Nightly rather than per-PR because the cost is
-        # the suite time multiplied by the number of mutable sites.
+        # check_test_vacuity.py proves a test can fail. Mutation testing proves
+        # it fails for the right reason. Nightly rather than per-PR because the
+        # cost is the suite time multiplied by the number of mutable sites.
         run: |
           python scripts/run_mutation_tests.py "${{ matrix.module }}"             --tests ${{ matrix.tests }} --timeout 180
 
@@ -148,18 +130,19 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      # One job per header, for the same reason the Python matrix has one per
-      # module: cost is (sites x suite time), and a survivor names where it came
-      # from without further digging. The C++ suite is a single ctest target, so
-      # there is no per-header test list to choose -- every mutant is judged by
-      # the whole native suite.
-      # Only headers whose survivors have been reconciled: every one of them is
-      # either killed by a test or argued in equivalent_mutants_cpp.txt. A
-      # header whose campaign has not been triaged yet would fail here every
-      # night regardless of the state of the tests, and a gate that always fails
-      # stops being read -- the same argument the allowlist header makes.
-      # tests/test_cpp_mutation_gate.py holds the ones still to come, with the
-      # reason each is absent, so the list cannot quietly stay short.
+      # One job per header, as the Python matrix has one per module. Cost is
+      # (sites x suite time), and a survivor names its own header. The C++ suite
+      # is a single ctest target, so every mutant is judged by the whole native
+      # suite.
+      #
+      # Every header listed here has had its campaign triaged: each mutant that
+      # scores as `survived` is argued in configs/equivalent_mutants_cpp.txt. A
+      # header whose campaign has not been triaged would fail here every night
+      # regardless of the state of the tests.
+      #
+      # tests/test_cpp_mutation_gate.py fails if a header is neither listed here
+      # nor deferred in its `_NOT_YET_RECONCILED` map with a reason. That map is
+      # empty: all 11 headers are scheduled.
       matrix:
         header:
           - cpp/include/tfidf/core/reduction.hpp
@@ -220,8 +203,7 @@ jobs:
         # such as filter_too_much) which the bare exit code does not. It is a
         # diagnostic only: nothing is suppressed, so a genuine counterexample
         # still fails the build.
-        # No -q: it suppresses the statistics section entirely, which made the
-        # first attempt at this instrumentation print nothing at all.
+        # No -q: it suppresses the statistics section entirely.
         run: >
           python -m pytest tests/test_perturbation_bounds.py
           tests/test_cosine_edge_cases.py --hypothesis-show-statistics
@@ -261,14 +243,13 @@ jobs:
           cmake --build build-bench
       - name: Kernel microbenchmarks
         # Arch-tuned, therefore NOT reproducible: fine for timing, never for
-        # results. The binary reports that itself.
+        # results. The binary prints its own reproducible-build flag.
         run: ./build-bench/cpp/bench/tfidf_bench
       - name: Native against the reference, with bit-identity proved first
-        # Was `pytest --benchmark-only`, which collected nothing: no test in this
-        # repository uses a pytest-benchmark fixture, so the step errored, `|| true`
-        # swallowed it, and the artifact it uploaded was zero bytes. The measuring
-        # is done by scripts/benchmark.py, which also refuses to print a ratio
-        # until it has checked the two backends agree to the last bit.
+        # No test in this repository uses a pytest-benchmark fixture, so
+        # `pytest --benchmark-only` would collect nothing. scripts/benchmark.py
+        # does the measuring, and checks the two backends agree to the last bit
+        # before printing a ratio.
         #
         # Build isolation ON, as in ci.yml and determinism.yml:
         # --no-build-isolation could not find the build backend on Windows.
