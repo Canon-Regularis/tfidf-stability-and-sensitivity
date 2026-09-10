@@ -522,13 +522,10 @@ TEST_CASE("margins: k = 0 is undefined rather than a read below the first score"
 }
 
 TEST_CASE("margins: a refused k reports no effective k rather than a negative one") {
-    // `k_effective` is assigned past the `k <= 0` guard, so it keeps its default
-    // 0. `std::min(k, n)` on a negative k gives that k back, and the binding
-    // returns this field to Python, where `resolve_k` raises for k <= 0 and no
-    // Margin can carry a non-positive `k_effective`.
-    //
-    // The `defined` flag cannot see this: it is false either way. Only the field
-    // itself distinguishes them, which is why the case below reads it.
+    // `k_effective` is assigned past the `k <= 0` guard, so a refused k keeps
+    // the default 0. Assigned above it, `std::min(k, n)` would return the
+    // negative k, which `resolve_k` never yields on the Python side. `defined`
+    // is false for every refused k, so `k_effective` is the only field left.
     const std::vector<Real> s{1.0, 0.75, 0.5};
 
     for (const std::int32_t k : {-1, -5, -1073741824, 0}) {
@@ -537,10 +534,9 @@ TEST_CASE("margins: a refused k reports no effective k rather than a negative on
         CHECK(boundary_margin(s, k).k == k);  // the requested k is still reported
     }
 
-    // A k the guard admits still resolves normally, so the move did not disturb
-    // the clamp itself. k = 1 is the case that separates the guard from the
-    // `k_effective < 2` test below it: the margin is undefined either way, so
-    // only this field distinguishes a guard placed at 0 from one placed at 1.
+    // A k the guard admits still clamps normally. k = 1 separates the `k <= 0`
+    // guard from the `k_effective < 2` test below it. The margin is undefined
+    // under both, so only `k_effective` tells a guard at 0 from one at 1.
     CHECK(min_adjacent_margin_top(s, 1).k_effective == 1);
     CHECK_FALSE(min_adjacent_margin_top(s, 1).defined);
     CHECK(boundary_margin(s, 2).k_effective == 2);
@@ -590,11 +586,10 @@ TEST_CASE("margins: two scores are enough for a minimum over the top") {
 }
 
 TEST_CASE("margins: a computed minimum is marked defined") {
-    // `m.defined = true` at the end of `min_adjacent_margin_top` had no
-    // assertion behind it: every existing case reads `.value`, which is set on
-    // the same path, and the only `.defined` assertions are the FALSE ones on
-    // the undefined branches. Flipped to false, every certificate built from
-    // this margin would silently become undefined.
+    // `min_adjacent_margin_top` sets `.value` and `.defined` on the same path,
+    // so reading `.value` alone says nothing about the flag. An undefined
+    // margin is excluded from the margin distributions, so the flag decides
+    // whether a computed minimum is counted at all.
     const std::vector<Real> s{1.0, 0.75, 0.5};
 
     const Margin m = min_adjacent_margin_top(s, 2);
@@ -633,10 +628,10 @@ TEST_CASE("ranker: select_top writes the first slot, not only the rest") {
 }
 
 TEST_CASE("ranker: partition_is_valid can actually say no") {
-    // Its false branch had no test. Every call site asserts the postcondition
-    // holds, so a body that returned true unconditionally satisfied all of
-    // them -- and the check is the only guarantee this project has about
-    // `nth_element`, whose remainder is explicitly implementation-defined.
+    // Outside this case every call site asserts that the partition holds, so
+    // without a false case a body returning true satisfies all of them.
+    // The predicate is this project's only guarantee about `nth_element`,
+    // whose remainder is implementation-defined.
     const std::vector<Real> scores{0.9, 0.7, 0.5, 0.3, 0.1};
     const RankTable t = make_table({0, 0, 0, 0, 0});
     const std::vector<std::int32_t> priority{0};
@@ -699,11 +694,10 @@ TEST_CASE("attributes: an empty table is vacuously a bijection") {
 }
 
 TEST_CASE("sort_keys: a priority longer than the key can carry is reported") {
-    // `build_keys` is noexcept and stops at kMaxAttributes, so a longer priority
-    // is truncated in silence and the key sorts on a prefix of the operator that
-    // was asked for. The reference tuple has no such bound, so the two order ties
-    // differently. A predicate is the only form this condition can take in a
-    // noexcept function; the binding raises on the same input.
+    // `build_keys` is `noexcept` and stops at `kMaxAttributes`, so a longer
+    // priority is truncated silently and the key breaks ties on a prefix of the
+    // requested operator. The reference tuple has no such bound, so the two
+    // order ties differently. The binding raises; a noexcept function cannot.
     const std::vector<std::int32_t> three{0, 1, 2};
     const std::vector<std::int32_t> four{0, 1, 2, 3};
     const std::vector<std::int32_t> five{0, 1, 2, 3, 0};
@@ -715,8 +709,8 @@ TEST_CASE("sort_keys: a priority longer than the key can carry is reported") {
 }
 
 TEST_CASE("tie_groups: an out-of-range centre is refused rather than read") {
-    // `sorted_scores[j]` on an out-of-range j is undefined, not merely wrong.
-    // The normative Python raises IndexError; this is the same guard one level
+    // `sorted_scores[j]` on an out-of-range j is undefined behaviour. The
+    // normative Python raises IndexError, and the same guard sits one level
     // below the binding, so a C++ caller cannot reach the read either.
     const std::vector<Real> s{1.0, 0.75, 0.5};
     // Void-returning, as in test_distances.cpp: the function is [[nodiscard]]
@@ -729,15 +723,15 @@ TEST_CASE("tie_groups: an out-of-range centre is refused rather than read") {
     CHECK_THROWS_AS(attempt(s, 3, 0.1), std::out_of_range);
     CHECK_THROWS_AS(attempt(std::vector<Real>{}, 0, 0.1), std::out_of_range);
 
-    // The boundary either side, so the guard sits at the ends and not inside.
+    // Both end indices are admitted, so the guard rejects only out-of-range j.
     CHECK(tie_ball_interval(s, 0, 0.1).first == 0);
     CHECK(tie_ball_interval(s, 2, 0.1).second == 3);
 }
 
 TEST_CASE("tie_groups: a NaN tolerance is refused rather than answered") {
     // Every comparison with NaN is false, so `gap > tau` and `gap <= tau` are
-    // both false: this function, the chains and the cliques would each give a
-    // different answer to the same question and none would raise.
+    // both false. Without the guard `tie_ball_interval`, `tie_chains` and
+    // `tie_cliques` would each group the same input differently, none raising.
     const std::vector<Real> s{1.0, 0.75, 0.5};
     const auto attempt = [](std::span<const Real> scores, std::int32_t j, Real tau) {
         (void)tie_ball_interval(scores, j, tau);

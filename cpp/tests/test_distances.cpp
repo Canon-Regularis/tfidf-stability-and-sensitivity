@@ -117,14 +117,11 @@ TEST_CASE("kendall tau: differing sets are refused, not approximated") {
     CHECK_THROWS_AS(attempt({1, 2}, {1, 3}), std::invalid_argument);
     CHECK_THROWS_AS(attempt({1, 2}, {1}), std::invalid_argument);
 
-    // The guard is `a.size() != b.size() || sa != sb`, and neither case above
-    // separates the two arms: the first differs in membership at equal size,
-    // the second differs in both. Repeating an element differs in size alone,
-    // so only the size arm can refuse it -- and without that arm the function
-    // does not fail, it answers. `positions` keeps the last index of a repeat,
-    // so {1,2} against {1,2,2} maps to [0,2], counts no inversions, and divides
-    // by the pair count of a.size(): a confident 0.0 for two lists that are not
-    // orderings of the same thing.
+    // The guard is `a.size() != b.size() || sa != sb` over sorted copies.
+    // Without it {1, 2} against {1, 2, 2} answers rather than fails.
+    // `positions` keeps the last index of a repeat, so the mapping would be
+    // [0, 2], and zero inversions over the one pair of a.size() = 2 would
+    // give 0.0.
     CHECK_THROWS_AS(attempt({1, 2}, {1, 2, 2}), std::invalid_argument);
 }
 
@@ -304,10 +301,10 @@ TEST_CASE("compare_top_k: identical lists") {
 }
 
 TEST_CASE("compare_top_k: prefixes of different lengths report what differs") {
-    // Membership changes come in pairs only when the prefixes are the same
-    // length. Halving the symmetric difference assumes they always do, so an
-    // odd one truncated to zero swaps while sets_differ reported a difference.
-    // G19 makes unequal prefixes a protocol case, not an accident.
+    // Membership changes come in pairs only when the prefixes have the same
+    // length. `swapped` reports the larger one-way difference, so an odd
+    // symmetric difference cannot round to 0 while `sets_differ` reports true.
+    // G19 makes unequal prefixes a protocol case.
     const TopKComparison one =
         compare_top_k(std::vector<DocId>{1, 2, 3}, std::vector<DocId>{1, 2}, 3);
     CHECK(one.sets_differ);
@@ -391,16 +388,13 @@ TEST_CASE("compare_top_k: k beyond the lists, and k = 0") {
 TEST_CASE("fks: the union is walked in first-appearance order, not sorted") {
     // Every penalty this suite uses elsewhere is dyadic -- kFksPenalty is 0.5,
     // and the sweeps use 0, 0.25, 0.5, 1 -- so every partial sum is exact and
-    // any enumeration order reproduces the same double. The ordering contract
-    // with the reference is therefore invisible to those cases: sorting the
-    // union, or iterating the `seen` set instead of the `uni` vector, would
-    // change nothing they can see.
+    // any enumeration order reproduces the same double. Sorting the union, or
+    // walking the `seen` set instead of the `uni` vector, is invisible there.
     //
     // A penalty of 1/3 is not dyadic, so the order of the additions decides the
-    // last bit. These two lists are disjoint, which puts every pair into case 3
-    // or case 4 and makes the addend sequence depend on nothing but the union
-    // order. The value is `math.fsum`-free: it is what the normative Python
-    // returns, which is the whole point of pinning it.
+    // last bit. These two lists are disjoint, so every pair falls in case 3 or
+    // case 4 and the addend sequence depends only on the union order. The value
+    // below is what the normative Python returns, which sums with `+`.
     const std::vector<DocId> a{5, 3, 1};
     const std::vector<DocId> b{4, 2, 0};
 
@@ -416,13 +410,10 @@ TEST_CASE("compare_top_k: a negative k is an empty prefix here, unlike in Python
     // `std::max(k, 0)`, so a negative k compares nothing and every field
     // reports "no evidence" while `k` carries the negative value through.
     //
-    // The normative Python slices `a[:k]`, which counts from the END: it
-    // compares [1, 2] against [3, 2] and reports sets_differ, an intersection
-    // of one and a jaccard of 2/3. The two disagree, and the only thing between
-    // them is the binding, which refuses k < 0 before the header is reached
-    // (cpp/bindings/module.cpp, "k must be non-negative"). Relaxing that throw,
-    // or adding a second C++ caller, makes the disagreement live -- so the
-    // header's own behaviour is stated here rather than left to be discovered.
+    // Both Python entry points refuse a negative k: `compare_top_k` raises
+    // `ValueError`, and the binding raises before the header is reached
+    // (cpp/bindings/module.cpp, "k must be non-negative"). Relaxing either
+    // throw, or adding a second C++ caller, makes the divergence live.
     const std::vector<DocId> a{1, 2, 3};
     const std::vector<DocId> b{3, 2, 1};
     const std::vector<DocId> empty{};
@@ -439,8 +430,8 @@ TEST_CASE("compare_top_k: a negative k is an empty prefix here, unlike in Python
     CHECK(same_bits(c.fks, kendall_fks(empty, empty)));
     CHECK(same_bits(c.jaccard, jaccard_distance(empty, empty)));
 
-    // And the comparison the clamp threw away really was informative, so the
-    // divergence is a difference in answers rather than in presentation.
+    // The prefix the clamp empties is informative at k = 2, so the divergence
+    // is a difference in answers rather than in presentation.
     const auto two = compare_top_k(a, b, 2);
     CHECK(two.sets_differ);
     CHECK(two.intersection_size == 1);
@@ -450,31 +441,27 @@ TEST_CASE("fks: the normaliser is zero for every k below one, not just at zero")
     // `fks_max` guards with `k < 1`, and the guard is not observable at all:
     // relaxing it to `k < 0` differs only at k == 0, where the fall-through
     // computes 0*0 + p*0*(0-1) = 0.0 + (-0.0) = +0.0, the same double the guard
-    // returns, and every k below zero still takes the early return. That is an
-    // argued equivalence in configs/equivalent_mutants_cpp.txt rather than
-    // something a test can refuse. What is pinned here is the stated domain:
-    // the normaliser is zero wherever there is no pair to disagree about.
+    // returns. configs/equivalent_mutants_cpp.txt argues that equivalence.
+    //
+    // What is pinned here is the stated domain: the normaliser is zero wherever
+    // there is no pair to disagree about.
     CHECK(fks_max(0) == 0.0);
     CHECK(fks_max(-1) == 0.0);
     CHECK(fks_max(-2) == 0.0);
 
-    // The values the relaxed guard would produce instead, named so the case
-    // reads as the discrimination it is: at kFksPenalty = 0.5, k = -1 gives
+    // Without any guard, at kFksPenalty = 0.5, k = -1 gives
     // 1 + 0.5*(-1)*(-2) = 2.0 and k = -2 gives 4 + 0.5*(-2)*(-3) = 7.0.
     CHECK(fks_max(1) == 1.0);   // and k = 1 is NOT degenerate: one case-3 pair
     CHECK(fks_max(2) == 5.0);   // 4 + 0.5*2*1
 }
 
 TEST_CASE("kendall tau: the same set with different multiplicities is refused") {
-    // The guard compared `unordered_set`s, which are blind to multiplicity, so
-    // {1, 1, 2} against {1, 2, 2} passed both halves -- same size, same set --
-    // and `positions` then kept only the last index of each repeat. The
-    // inversion count ran over a mapping that had lost a document and the
-    // function returned 0.0: two lists called identical orderings when one is
-    // not an ordering of that multiset at all.
+    // An `unordered_set` comparison would be blind to multiplicity: {1, 1, 2}
+    // and {1, 2, 2} share a set and a size. `positions` keeps only the last
+    // index of each repeat, so the inversion count would run over a mapping
+    // missing a document and report 0.0. Sorted copies compare multisets.
     //
-    // The normative Python compared `set()`s and was blind the same way, so the
-    // two agreed on the wrong answer and no differential test could see it.
+    // The normative Python compares Counters, so both sides refuse this input.
     const auto attempt = [](const std::vector<DocId>& a, const std::vector<DocId>& b) {
         static_cast<void>(kendall_tau_distance(a, b));
     };
@@ -487,15 +474,13 @@ TEST_CASE("kendall tau: the same set with different multiplicities is refused") 
 }
 
 TEST_CASE("fks: a penalty outside [0, 1] is refused by both entry points") {
-    // G2 fixes the case-4 penalty in [0, 1] and argues the choice on bias
-    // grounds. Outside it the normalisation stops meaning anything, and the way
-    // it failed was the worst available: fks_max is NaN for a NaN penalty and
-    // negative for a sufficiently negative one, the `ceiling > 0.0` test is
-    // false in both cases, and kendall_fks then took the branch that exists for
-    // k = 0 -- so two disjoint lists came back as being in perfect agreement.
+    // G2 fixes the case-4 penalty in [0, 1] on bias grounds. Without the guard
+    // a NaN penalty would make `fks_max` NaN and a negative one would make it
+    // negative; `ceiling > 0.0` would then fail and `kendall_fks` would fall to
+    // the 0.0 reserved for k = 0, reporting two disjoint lists as in agreement.
     //
-    // Void-returning, since both functions are [[nodiscard]] and doctest's macro
-    // does not itself discard the value.
+    // Void-returning, since both functions are [[nodiscard]] and doctest's
+    // macro does not itself discard the value.
     const auto max_attempt = [](Real p) { (void)fks_max(3, p); };
     const auto fks_attempt = [](Real p) {
         (void)kendall_fks(std::vector<DocId>{1, 2, 3}, std::vector<DocId>{4, 5, 6}, p, true);
@@ -520,8 +505,8 @@ TEST_CASE("fks: a penalty outside [0, 1] is refused by both entry points") {
 TEST_CASE("fks: k = 0 short-circuits before the penalty term runs") {
     // The guard is not observable: at k = 0 the fall-through computes
     // 0 + p * 0.0 * -1.0, which is bit-identically +0.0 for every admissible
-    // penalty. It was observable only while a non-finite penalty could make that
-    // NaN, and those are refused before k is looked at.
+    // penalty. A non-finite penalty would make that NaN, and `checked_penalty`
+    // refuses one before k is tested.
     for (const Real p : {0.0, 0.25, kFksPenalty, 1.0}) {
         CHECK(fks_max(0, p) == 0.0);
         CHECK(std::signbit(fks_max(0, p)) == false);  // positive zero
