@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Verify that every place this project states its version agrees.
+"""Verify that every place this project states a version agrees.
 
 Four files name it, and nothing made them agree: `pyproject.toml` and
 `src/tfidf_stability/__init__.py` said 0.2.0 while `CITATION.cff` still said
 0.1.0. A citation carrying the wrong version is worse than an unversioned one --
 it is a claim about which code produced a published number, and this project's
 whole argument is that a result is a function of the repository's contents.
+
+The binding ABI is a second, independent claim, named by
+`cpp/bindings/module.cpp` and `src/tfidf_stability/_native/__init__.py`. It sits
+on its own axis: a release can leave the binding surface untouched, and a new
+binding can land inside one release. A disagreement there makes every process
+fall back to the reference backend, and the differential suite then skips rather
+than fails, so the run stays green while testing nothing.
 
 On a tag build the tag joins the set. `release.yml` triggers on `v*` and hands
 the tag to nothing that checks it, so `git tag v0.3.0` on a tree declaring 0.2.0
@@ -49,8 +56,28 @@ _SOURCES: dict[str, tuple[str, str]] = {
 }
 
 
-def _stated(relative: str, pattern: str) -> str | None:
-    path = REPO / relative
+#: The ABI is a second version, on its own axis: a release can leave the binding
+#: surface untouched, and a new binding can land inside one release. Two files
+#: state it and nothing compared them.
+_ABI_SOURCES: dict[str, tuple[str, str]] = {
+    "cpp/bindings/module.cpp": (
+        r'^constexpr\s+const\s+char\*\s+kAbi\s*=\s*"([^"]+)"',
+        "the surface the compiled extension declares",
+    ),
+    "src/tfidf_stability/_native/__init__.py": (
+        r'^REQUIRED_ABI\s*=\s*"([^"]+)"',
+        "the surface the Python package requires",
+    ),
+}
+
+#: The line that carries `kAbi` to Python. Without it the two literals could
+#: agree while the extension exported something else, and the check above would
+#: pass while saying nothing.
+_ABI_EXPORT = 'm.attr("__abi__") = kAbi;'
+
+
+def _stated(relative: str, pattern: str, repo: Path = REPO) -> str | None:
+    path = repo / relative
     if not path.exists():
         return None
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -58,6 +85,37 @@ def _stated(relative: str, pattern: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def check_abi(repo: Path = REPO) -> list[str]:
+    """Whether the two statements of the binding ABI agree.
+
+    Textual, so it holds on a checkout with nothing built: the reference CI legs
+    never compile the extension, and a mismatch there degrades every process to
+    the reference backend without saying so.
+    """
+    problems: list[str] = []
+    found: dict[str, str] = {}
+    for relative, (pattern, description) in _ABI_SOURCES.items():
+        stated = _stated(relative, pattern, repo)
+        if stated is None:
+            problems.append(f"{relative}: no ABI found ({description})")
+            continue
+        found[relative] = stated
+
+    if len(set(found.values())) > 1:
+        problems.append("the binding ABI is stated differently in different places:")
+        for where, abi in sorted(found.items()):
+            problems.append(f"    {where}: {abi}")
+
+    binding = repo / "cpp/bindings/module.cpp"
+    if binding.exists() and _ABI_EXPORT not in binding.read_text(encoding="utf-8"):
+        problems.append(f"cpp/bindings/module.cpp: no `{_ABI_EXPORT}`, so kAbi reaches nothing")
+
+    if not problems:
+        shown = next(iter(set(found.values())), "?")
+        print(f"binding ABI {shown} agrees across {len(found)} places")
+    return problems
 
 
 def check(tag: str | None = None) -> list[str]:
@@ -96,7 +154,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    problems = check(args.tag)
+    problems = check(args.tag) + check_abi()
     if problems:
         print("version check FAILED:", file=sys.stderr)
         for problem in problems:

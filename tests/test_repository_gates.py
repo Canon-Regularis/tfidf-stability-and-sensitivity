@@ -569,3 +569,142 @@ def test_a_call_the_floor_cannot_make_is_reported(tmp_path: Path) -> None:
         "the same call is legal from 3.13, so the gate is banning the argument "
         "rather than checking the version"
     )
+
+
+# ---------------------------------------------------------------------------
+# check_versions.py: the binding ABI
+# ---------------------------------------------------------------------------
+def _abi_tree(tmp_path: Path, cpp: str, python: str, *, export: bool = True) -> Path:
+    """A tree stating the ABI twice, and optionally exporting it to Python."""
+    (tmp_path / "cpp" / "bindings").mkdir(parents=True)
+    (tmp_path / "src" / "tfidf_stability" / "_native").mkdir(parents=True)
+    body = f'constexpr const char* kAbi = "{cpp}";\n'
+    if export:
+        body += 'm.attr("__abi__") = kAbi;\n'
+    (tmp_path / "cpp" / "bindings" / "module.cpp").write_text(body, encoding="utf-8")
+    (tmp_path / "src" / "tfidf_stability" / "_native" / "__init__.py").write_text(
+        f'REQUIRED_ABI = "{python}"\n', encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_the_abi_gate_passes_on_this_repository() -> None:
+    """The baseline. The two literals in the tree agree, so the arm marked
+    `# pragma: no cover` in `_native/__init__.py` can only fire on a stale build
+    on disk rather than on a repository nobody reconciled."""
+    assert _script("check_versions").check_abi() == []
+
+
+def test_two_abis_that_disagree_are_rejected(tmp_path: Path) -> None:
+    """The failure the gate exists for. A mismatch degrades every process to the
+    reference backend, and the differential suite then skips rather than fails,
+    so the run stays green while testing nothing."""
+    problems = _script("check_versions").check_abi(_abi_tree(tmp_path, "0.5.0", "0.4.0"))
+
+    assert problems, "a disagreement must be reported"
+    assert any("stated differently" in p for p in problems)
+    assert any("0.5.0" in p for p in problems), "the message names the values"
+
+
+def test_an_abi_the_binding_never_exports_is_rejected(tmp_path: Path) -> None:
+    """Agreement between the two literals says nothing unless `kAbi` is what the
+    module publishes. Without the export the gate would pass while the extension
+    reported anything at all."""
+    problems = _script("check_versions").check_abi(
+        _abi_tree(tmp_path, "0.4.0", "0.4.0", export=False)
+    )
+
+    assert any("reaches nothing" in p for p in problems)
+
+
+def test_an_abi_literal_that_cannot_be_found_is_rejected(tmp_path: Path) -> None:
+    """A regex that stops matching must fail loudly rather than report agreement
+    between two absent values."""
+    problems = _script("check_versions").check_abi(tmp_path)
+
+    assert len(problems) == 2, "both files are reported"
+    assert all("no ABI found" in p for p in problems)
+
+
+def test_the_abi_gate_names_every_file_it_reads_in_its_docstring() -> None:
+    """The same doctrine as the version count above, for the second claim.
+
+    A table that grows a source its own prose does not mention is how a reader
+    comes to believe the gate covers less than it does, or more.
+    """
+    gate = _script("check_versions")
+    doc = gate.__doc__ or ""
+
+    unmentioned = [relative for relative in gate._ABI_SOURCES if relative not in doc]
+
+    assert unmentioned == [], f"the docstring does not name {unmentioned}"
+
+
+# ---------------------------------------------------------------------------
+# check_dependencies.py
+# ---------------------------------------------------------------------------
+def _dep_tree(tmp_path: Path, pyproject: str, runtime: str, development: str) -> Path:
+    (tmp_path / "pyproject.toml").write_text(pyproject, encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text(runtime, encoding="utf-8")
+    (tmp_path / "requirements-dev.txt").write_text(development, encoding="utf-8")
+    return tmp_path
+
+
+_DEP_PYPROJECT = (
+    "[build-system]\nrequires = []\n"
+    '[project]\ndependencies = ["numpy>=1.24"]\n'
+    '[project.optional-dependencies]\ndev = ["ruff==0.16.2", "mypy==2.3.0"]\n'
+)
+_DEP_DEV = "-r requirements.txt\nruff==0.16.2\nmypy==2.3.0\n"
+
+
+def test_the_dependency_gate_passes_on_this_repository() -> None:
+    """The baseline, and a live statement: `pyproject.toml` and the requirements
+    files name the same packages at the same versions."""
+    assert _script("check_dependencies").check() == []
+
+
+def test_a_package_in_the_requirements_file_alone_is_rejected(tmp_path: Path) -> None:
+    """The direction that was live: `snowballstemmer` was pinned in
+    `requirements-dev.txt` and named in no pyproject group, so
+    `pip install -e .[all]` and `pip install -r requirements-dev.txt` gave
+    different environments."""
+    tree = _dep_tree(tmp_path, _DEP_PYPROJECT, "numpy>=1.24\n", _DEP_DEV + "extra-pkg>=1\n")
+
+    problems = _script("check_dependencies").check(tree)
+
+    assert any("extra-pkg" in p and "no pyproject group" in p for p in problems)
+
+
+def test_a_package_in_pyproject_alone_is_rejected(tmp_path: Path) -> None:
+    """The other direction, which the `docs` extra occupies today and which is
+    excluded by name rather than by accident."""
+    tree = _dep_tree(tmp_path, _DEP_PYPROJECT, "\n", _DEP_DEV)
+
+    problems = _script("check_dependencies").check(tree)
+
+    assert any("numpy" in p and "no requirements file" in p for p in problems)
+
+
+def test_two_specifiers_for_one_package_are_rejected(tmp_path: Path) -> None:
+    """Agreeing on the name is not agreeing on the version. A floor stated twice
+    at two values resolves to whichever file the installer read."""
+    tree = _dep_tree(tmp_path, _DEP_PYPROJECT, "numpy>=2.0\n", _DEP_DEV)
+
+    problems = _script("check_dependencies").check(tree)
+
+    assert any(">=1.24" in p and ">=2.0" in p for p in problems)
+
+
+def test_a_linter_stated_as_a_floor_is_rejected(tmp_path: Path) -> None:
+    """A floor on a linter promises that every future release agrees with this
+    one. Ruff 0.16 stabilising a rule the tree had never been checked against
+    failed the lint job on a commit that changed no Python."""
+    floored = _DEP_PYPROJECT.replace('"ruff==0.16.2"', '"ruff>=0.16"')
+    tree = _dep_tree(
+        tmp_path, floored, "numpy>=1.24\n", "-r requirements.txt\nruff>=0.16\nmypy==2.3.0\n"
+    )
+
+    problems = _script("check_dependencies").check(tree)
+
+    assert any("ruff" in p and "not an exact pin" in p for p in problems)

@@ -6,8 +6,10 @@
 # third-party code. numpy is needed only by the native adapter and the analysis
 # layer; pyyaml only by the config loader.
 #
-# For a reproducible environment use `uv pip sync requirements-dev.txt` against
-# the committed lock, not this file.
+# For a development environment install `requirements-dev.txt`, which includes
+# this file. The linters there are pinned exactly and everything else is
+# floored; `scripts/check_dependencies.py` holds that file and `pyproject.toml`
+# to the same set.
 
 numpy>=1.24
 PyYAML>=6.0

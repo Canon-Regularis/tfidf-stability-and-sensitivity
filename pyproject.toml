@@ -48,6 +48,10 @@ dev = [
   # `.[dev]` a different linter from the one CI runs.
   "ruff==0.16.2", "mypy==2.3.0",
   "scikit-learn>=1.4",          # external oracle for the differential tests
+  # A test-time oracle only, never a runtime dependency: the generated stemmer
+  # is vendored under preprocessing/_snowball/, and this pin is what lets CI
+  # assert the vendored copy still matches upstream.
+  "snowballstemmer>=3.0",
   "types-PyYAML",
 ]
 viz = ["matplotlib>=3.8", "pandas>=2.0"]
@@ -102,6 +106,10 @@ TFIDF_BUILD_TESTS = "OFF"
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+# The repository root, so `tooling` imports. Not `src`: `tests/conftest.py`
+# adds that only when the package cannot already be imported, which is what
+# lets `release.yml` test a built wheel rather than the source tree.
+pythonpath = ["."]
 addopts = "-ra --strict-markers --strict-config"
 markers = [
   # Deselected from the coverage job, so a slow test can never be the only cover
@@ -126,6 +134,12 @@ src = ["src", "tests", "scripts", "examples"]
 # Vendored upstream code is verified by SHA-256 against its recorded manifest,
 # not by our style rules. Reformatting it would break that verification.
 extend-exclude = ["src/tfidf_stability/preprocessing/_snowball"]
+
+[tool.ruff.lint.isort]
+# `tooling` is a package at the repository root rather than under a `src`
+# entry, so it is named here to sort with the package instead of with the
+# third-party imports.
+known-first-party = ["tfidf_stability", "tooling"]
 
 [tool.ruff.lint]
 select = [
@@ -175,7 +189,7 @@ python_version = "3.11"
 strict = true
 warn_unreachable = true
 disallow_any_generics = true
-files = ["src/tfidf_stability"]
+files = ["src/tfidf_stability", "tooling"]
 # Same reasoning as the ruff exclusion: the vendored stemmer is generated code
 # whose identity is its hash. Annotating it would invalidate the manifest.
 exclude = ["src/tfidf_stability/preprocessing/_snowball/"]
