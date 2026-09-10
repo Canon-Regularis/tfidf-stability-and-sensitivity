@@ -43,35 +43,35 @@
 # pairing. Measuring against a different one will disagree.
 
 # --- ranking/attributes.py -------------------------------------------------
-src/tfidf_stability/ranking/attributes.py  174  constant  2 -> 1  # src=ed5d525b at one pair every combination collides on the index, so the scan finds nothing and returns without raising -- the same outcome as the early return
-src/tfidf_stability/ranking/attributes.py  184  constant  0 -> 1  # src=251dd565 the raise fires only when worst > _INT64_MAX > 0, which means the loop already assigned it
-src/tfidf_stability/ranking/attributes.py  185  constant  0 -> 1  # src=cf1cab30 likewise worst_pair: never reported with its initial value
-src/tfidf_stability/ranking/attributes.py  188  compare  Gt -> GtE  # src=1e18980f changes only which of two equal-product pairs the message names, not whether the error fires
-src/tfidf_stability/ranking/attributes.py  302  constant  True -> False  # src=197c8ca6 the two strict zips in _build_column run over the same pair of sequences; removing one leaves the other raising
-src/tfidf_stability/ranking/attributes.py  325  constant  True -> False  # src=5ff58930 the second half of that same redundant pair
-src/tfidf_stability/ranking/attributes.py  430  constant  0 -> 1  # src=567b3f00 id_ranks is filled and then every entry overwritten by the loop below
-src/tfidf_stability/ranking/attributes.py  455  constant  0 -> 1  # src=ca15ce49 the missing-ratio placeholder is filtered out by has_value before ordering
-src/tfidf_stability/ranking/attributes.py  455  constant  1 -> 0  # src=ca15ce49 likewise the denominator of that placeholder
-src/tfidf_stability/ranking/attributes.py  457  compare  Lt -> LtE  # src=f0761228 a zero denominator is diverted to the missing branch two lines earlier, so den != 0 here
-src/tfidf_stability/ranking/attributes.py  457  constant  0 -> 1  # src=f0761228 same unreachable boundary from the other side
-src/tfidf_stability/ranking/attributes.py  466  constant  0 -> 1  # src=ce4e4d1b the missing-scalar placeholder, filtered out by has_value
+src/tfidf_stability/ranking/attributes.py  172  constant  2 -> 1  # src=ed5d525b at one pair every combination collides on the index, so the scan finds nothing and returns without raising -- the same outcome as the early return
+src/tfidf_stability/ranking/attributes.py  182  constant  0 -> 1  # src=251dd565 the raise fires only when worst > _INT64_MAX > 0, which means the loop already assigned it
+src/tfidf_stability/ranking/attributes.py  183  constant  0 -> 1  # src=cf1cab30 likewise worst_pair: never reported with its initial value
+src/tfidf_stability/ranking/attributes.py  186  compare  Gt -> GtE  # src=1e18980f changes only which of two equal-product pairs the message names, not whether the error fires
+src/tfidf_stability/ranking/attributes.py  300  constant  True -> False  # src=197c8ca6 the two strict zips in _build_column run over the same pair of sequences; removing one leaves the other raising
+src/tfidf_stability/ranking/attributes.py  323  constant  True -> False  # src=5ff58930 the second half of that same redundant pair
+src/tfidf_stability/ranking/attributes.py  428  constant  0 -> 1  # src=567b3f00 id_ranks is filled and then every entry overwritten by the loop below
+src/tfidf_stability/ranking/attributes.py  453  constant  0 -> 1  # src=ca15ce49 the missing-ratio placeholder is filtered out by has_value before ordering
+src/tfidf_stability/ranking/attributes.py  453  constant  1 -> 0  # src=ca15ce49 likewise the denominator of that placeholder
+src/tfidf_stability/ranking/attributes.py  455  compare  Lt -> LtE  # src=f0761228 a zero denominator is diverted to the missing branch two lines earlier, so den != 0 here
+src/tfidf_stability/ranking/attributes.py  455  constant  0 -> 1  # src=f0761228 same unreachable boundary from the other side
+src/tfidf_stability/ranking/attributes.py  464  constant  0 -> 1  # src=ce4e4d1b the missing-scalar placeholder, filtered out by has_value
 
 # --- ranking/ranker.py -----------------------------------------------------
-src/tfidf_stability/ranking/ranker.py  188  compare  Lt -> LtE  # src=59e83664 sort keys terminate in the unique doc id, so no two compare equal and the tie branch is unreachable
+src/tfidf_stability/ranking/ranker.py  187  compare  Lt -> LtE  # src=59e83664 sort keys terminate in the unique doc id, so no two compare equal and the tie branch is unreachable
 
 # --- ranking/tie_groups.py -------------------------------------------------
 src/tfidf_stability/ranking/tie_groups.py  227  boolop  Or -> And  # src=28312cda chains and cliques are always both empty or both non-empty, both being covers of the same input; asserted by test_chains_and_cliques_are_empty_together and checked over 31248 (scores, tau) combinations
-src/tfidf_stability/ranking/tie_groups.py  335  boolop  Or -> And  # src=5f0336ee the same pair on the cached property
+src/tfidf_stability/ranking/tie_groups.py  333  boolop  Or -> And  # src=5f0336ee the same pair on the cached property
 
 # --- ranking/margins.py ----------------------------------------------------
-src/tfidf_stability/ranking/margins.py  149  constant  2 -> 1  # src=8f629c39 marked `# pragma: no cover - defensive`; n < 2 is refused before this point
-src/tfidf_stability/ranking/margins.py  150  constant  False -> True  # src=c19c3ab9 the same unreachable defensive return
+src/tfidf_stability/ranking/margins.py  150  constant  2 -> 1  # src=8f629c39 marked `# pragma: no cover - defensive`; n < 2 is refused before this point
+src/tfidf_stability/ranking/margins.py  151  constant  False -> True  # src=c19c3ab9 the same unreachable defensive return
 
 # --- ranking/distances.py --------------------------------------------------
 src/tfidf_stability/ranking/distances.py  87  constant  0 -> 1  # src=df18baa6 a merge scratch buffer, every entry overwritten before it is read
-src/tfidf_stability/ranking/distances.py  185  constant  1 -> 0  # src=5560e194 the mirror of distances.hpp:203. At k = 0 the fall-through computes 0.0 + p * 0.0 * -1.0, which is bit-identically +0.0 for every admissible penalty, so the short circuit and the closed form agree. Killed until _checked_penalty fixed the domain: a non-finite penalty made the fall-through NaN, and a test passed one
-src/tfidf_stability/ranking/distances.py  252  compare  Lt -> LtE  # src=75c13ecb ranking positions are distinct by construction
-src/tfidf_stability/ranking/distances.py  260  compare  Lt -> LtE  # src=234423a3 likewise, within each of the two lists
+src/tfidf_stability/ranking/distances.py  184  constant  1 -> 0  # src=5560e194 the mirror of distances.hpp:203. At k = 0 the fall-through computes 0.0 + p * 0.0 * -1.0, which is bit-identically +0.0 for every admissible penalty, so the short circuit and the closed form agree. Killed until _checked_penalty fixed the domain: a non-finite penalty made the fall-through NaN, and a test passed one
+src/tfidf_stability/ranking/distances.py  250  compare  Lt -> LtE  # src=75c13ecb ranking positions are distinct by construction
+src/tfidf_stability/ranking/distances.py  258  compare  Lt -> LtE  # src=234423a3 likewise, within each of the two lists
 
 # --- ranking/sort_keys.py --------------------------------------------------
 src/tfidf_stability/ranking/sort_keys.py  155  compare  LtE -> Lt  # src=7c4df57a the self-check runs an extra size or one fewer; keys are tuples and therefore transitive, so neither finds a violation
@@ -99,10 +99,10 @@ src/tfidf_stability/vectorisation/sparse.py  118  compare  Lt -> LtE  # src=0c22
 
 # --- vectorisation/vocabulary.py -------------------------------------------
 src/tfidf_stability/vectorisation/vocabulary.py  76  constant  1 -> 0  # src=a0ce1b7a every term in the counter has df >= 1, so thresholds of 0 and 1 admit the same set
-src/tfidf_stability/vectorisation/vocabulary.py  178  constant  True -> False  # src=e5184d35 tokens, df and cf are built from one list three lines apart
-src/tfidf_stability/vectorisation/vocabulary.py  189  compare  Lt -> LtE  # src=59c2c5ed tokens are unique, so their byte keys are distinct
-src/tfidf_stability/vectorisation/vocabulary.py  256  compare  Gt -> GtE  # src=8c9a86ae truncating to exactly max_features is a no-op, and survivors are re-sorted by byte key afterwards regardless
-src/tfidf_stability/vectorisation/vocabulary.py  266  constant  0 -> 1  # src=40926f5c a constant middle component of the sort key, identical across every term
+src/tfidf_stability/vectorisation/vocabulary.py  177  constant  True -> False  # src=e5184d35 tokens, df and cf are built from one list three lines apart
+src/tfidf_stability/vectorisation/vocabulary.py  188  compare  Lt -> LtE  # src=59c2c5ed tokens are unique, so their byte keys are distinct
+src/tfidf_stability/vectorisation/vocabulary.py  255  compare  Gt -> GtE  # src=8c9a86ae truncating to exactly max_features is a no-op, and survivors are re-sorted by byte key afterwards regardless
+src/tfidf_stability/vectorisation/vocabulary.py  265  constant  0 -> 1  # src=40926f5c a constant middle component of the sort key, identical across every term
 
 # --- vectorisation/tfidf.py ------------------------------------------------
 src/tfidf_stability/vectorisation/tfidf.py  123  constant  True -> False  # src=afc7ee3d strict zip behind SparseVector.__post_init__
@@ -142,7 +142,7 @@ src/tfidf_stability/perturbation/vector_perturb.py  201  constant  0.0 -> 1.0  #
 
 # --- perturbation/experiments.py -------------------------------------------
 src/tfidf_stability/perturbation/experiments.py  92  compare  Lt -> LtE  # src=3487de65 separable only by a shift landing exactly on the certified radius
-src/tfidf_stability/perturbation/experiments.py  161  constant  True -> False  # src=af3b9798 doc ids and scores both come from the same model
+src/tfidf_stability/perturbation/experiments.py  165  constant  True -> False  # src=af3b9798 doc ids and scores both come from the same model
 
 # --- preprocessing/tokenise.py ---------------------------------------------
 src/tfidf_stability/preprocessing/tokenise.py  39  constant  1 -> 0  # src=3f11ea04 the pattern matches at least one character, so minimum lengths of 0 and 1 admit the same tokens
@@ -157,17 +157,17 @@ src/tfidf_stability/preprocessing/ngrams.py  77  constant  1 -> 0  # src=3822bf7
 src/tfidf_stability/profiles/query_modes.py  205  constant  2 -> 1  # src=69347c47 the clamp sits behind `if min_interactions >= 2`, which makes it dead
 
 # --- profiles/user_profile.py ----------------------------------------------
-src/tfidf_stability/profiles/user_profile.py  275  constant  True -> False  # src=2181b96d strict zip behind SparseVector.__post_init__
+src/tfidf_stability/profiles/user_profile.py  279  constant  True -> False  # src=2181b96d strict zip behind SparseVector.__post_init__
 
 # --- analysis/stratify.py --------------------------------------------------
 src/tfidf_stability/analysis/stratify.py  95  compare  Lt -> LtE  # src=a8d4f837 the bands are contiguous, so a value equal to a lower bound already matched the band before it
 
 # --- analysis/summarise.py -------------------------------------------------
-src/tfidf_stability/analysis/summarise.py  72  compare  LtE -> Lt  # src=440ee8e3 at p = 0 the general path computes rank 0, which max(1, rank) clamps to the same element the shortcut returns
-src/tfidf_stability/analysis/summarise.py  74  compare  GtE -> Gt  # src=81dabb68 at p = 100 the general path computes rank n, the same element the shortcut returns
+src/tfidf_stability/analysis/summarise.py  83  compare  LtE -> Lt  # src=440ee8e3 at p = 0 the general path computes rank 0, which max(1, rank) clamps to the same element the shortcut returns
+src/tfidf_stability/analysis/summarise.py  85  compare  GtE -> Gt  # src=81dabb68 at p = 100 the general path computes rank n, the same element the shortcut returns
 
 # --- analysis/query_grid.py ------------------------------------------------
-src/tfidf_stability/analysis/query_grid.py  192  compare  Gt -> GtE  # src=ae54178c truncating a set to exactly its own length is a no-op
+src/tfidf_stability/analysis/query_grid.py  193  compare  Gt -> GtE  # src=ae54178c truncating a set to exactly its own length is a no-op
 
 # --- analysis/noise_floor.py -----------------------------------------------
 src/tfidf_stability/analysis/noise_floor.py  126  constant  0.0 -> 1.0  # src=b6ab684f the default fires only if _INSTRUMENTS is empty, which it never is
@@ -175,10 +175,10 @@ src/tfidf_stability/analysis/noise_floor.py  259  constant  True -> False  # src
 src/tfidf_stability/analysis/noise_floor.py  305  compare  LtE -> Lt  # src=07f65c1e n_in_band is zero by the band's definition, as the comment beside it states
 src/tfidf_stability/analysis/noise_floor.py  305  constant  1 -> 0  # src=07f65c1e counting zero of them either way
 src/tfidf_stability/analysis/noise_floor.py  342  constant  0.0 -> 1.0  # src=f092c723 every probe stays inside the band, and the tie structure is constant across it
-src/tfidf_stability/analysis/noise_floor.py  355  binop  Sub -> Add  # src=4d99f0f5 the top probe is pinned to the band edge on the line below, so the spacing cannot move it out
-src/tfidf_stability/analysis/noise_floor.py  355  constant  1 -> 0  # src=4d99f0f5 likewise
-src/tfidf_stability/analysis/noise_floor.py  363  compare  LtE -> Lt  # src=d76e72af no positive gap lies below tau_floor, so tau = 0 gives the same chains as any tau inside the band
-src/tfidf_stability/analysis/noise_floor.py  363  constant  0.0 -> 1.0  # src=d76e72af likewise
+src/tfidf_stability/analysis/noise_floor.py  356  binop  Sub -> Add  # src=4d99f0f5 the top probe is pinned to the band edge on the line below, so the spacing cannot move it out
+src/tfidf_stability/analysis/noise_floor.py  356  constant  1 -> 0  # src=4d99f0f5 likewise
+src/tfidf_stability/analysis/noise_floor.py  364  compare  LtE -> Lt  # src=d76e72af no positive gap lies below tau_floor, so tau = 0 gives the same chains as any tau inside the band
+src/tfidf_stability/analysis/noise_floor.py  364  constant  0.0 -> 1.0  # src=d76e72af likewise
 
 # --- analysis/stability_profile.py -----------------------------------------
 src/tfidf_stability/analysis/stability_profile.py  207  compare  GtE -> Gt  # src=13ab22bd at k == n the margin is undefined, so both paths exclude the query
@@ -199,7 +199,7 @@ src/tfidf_stability/cli/main.py  104  constant  False -> True  # src=d898869c ar
 src/tfidf_stability/cli/main.py  110  constant  False -> True  # src=cef12337 likewise for version
 
 # --- cli/commands.py -------------------------------------------------------
-src/tfidf_stability/cli/commands.py  424  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
+src/tfidf_stability/cli/commands.py  472  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
 
 # --- datasets/synthetic.py -------------------------------------------------
 src/tfidf_stability/datasets/synthetic.py  136  constant  1 -> 0  # src=a05543f2 the quotient reaches zero only above a vocabulary of 2**40 terms
@@ -211,7 +211,7 @@ src/tfidf_stability/datasets/synthetic.py  285  constant  1 -> 0  # src=5f0c004a
 src/tfidf_stability/datasets/synthetic.py  313  constant  1 -> 0  # src=41434a9a the clamp bites only above 64 interactions per user, against a default of 12
 
 # --- persistence/save_load.py ----------------------------------------------
-src/tfidf_stability/persistence/save_load.py  506  constant  True -> False  # src=97e31d7a df and cf are unpacked two lines apart with the same count=head.n_terms, and neither is rebound before the zip, so their lengths cannot differ; the bookkeeping still runs, it is the ValueError that is unreachable
+src/tfidf_stability/persistence/save_load.py  515  constant  True -> False  # src=97e31d7a df and cf are unpacked two lines apart with the same count=head.n_terms, and neither is rebound before the zip, so their lengths cannot differ; the bookkeeping still runs, it is the ValueError that is unreachable
 
 # --- _native/__init__.py ---------------------------------------------------
 src/tfidf_stability/_native/__init__.py  73  constant  True -> False  # src=9d3aa03f inside the ABI mismatch arm, which needs a stale build on disk and is marked `# pragma: no cover`; selection happens once at import and a process that has imported this module cannot replay it against a differently-versioned extension
