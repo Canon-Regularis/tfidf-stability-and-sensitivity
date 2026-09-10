@@ -116,8 +116,7 @@ class Ranking:
         """The first ``k`` document indices.
 
         Both bounds are checked: ``order[:k]`` is a legal slice for a negative
-        ``k`` and returns all but the last few, which is not a prefix of any
-        length a caller asked for.
+        ``k`` and drops from the end rather than taking a prefix.
         """
         if k < 0:
             raise ValueError(f"top_k({k}) is not a prefix; k must be non-negative")

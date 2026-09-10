@@ -112,9 +112,8 @@ def short(digest: str, length: int = 12) -> str:
 
     Raises:
         ValueError: If ``length`` is negative. ``digest[:-1]`` is a legal slice
-            that drops the last character, so a negative length returned a
-            digest one character short of the full one rather than a short
-            prefix of it, and log lines and filenames carried it.
+            that drops the last character, so a negative length would yield a
+            near-complete digest rather than a short prefix.
     """
     if length < 0:
         raise ValueError(f"length must be non-negative, got {length}")

@@ -120,12 +120,10 @@ class AttributeSpec:
     def __post_init__(self) -> None:
         """Normalise the three enums to their members, refusing unknown values.
 
-        All three are ``str`` enums, so ``"ratio_i64"`` equals the member without
-        being it, and every branch that reads them selects on ``is``. A string
-        ``dtype`` fell through to the plain sort and a string ``missing_policy``
-        to ``missing_rank = n_distinct``, which changes the rank encoding and so
-        the tie-break that decides top-k membership. ``AttributeSpec`` is public
-        and constructed directly, so the coercion belongs here.
+        All three are ``str`` enums: ``"ratio_i64"`` equals the member without
+        being it, and every branch reading them selects on ``is``. An uncoerced
+        string takes the default arm, changing the rank encoding that the
+        tie-break sorts on and so top-k membership.
         """
         object.__setattr__(self, "direction", Direction(self.direction))
         object.__setattr__(self, "dtype", AttributeDType(self.dtype))

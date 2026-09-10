@@ -66,10 +66,10 @@ def smoothed_idf_one(df: int, n_documents: int, impl: LogImpl = LogImpl.CORRECTL
     if df > n_documents:
         raise ValueError(f"df={df} exceeds the corpus size N={n_documents}")
 
-    # Coerced, not compared with `is`: LogImpl is a str enum, so "platform"
-    # equals the member without being it and would silently take the
-    # correctly-rounded path, reporting the G13 gap this setting exists to
-    # measure as exactly zero. LogImpl() refuses an unrecognised value outright.
+    # LogImpl is a str enum, so "platform" equals the member without being it.
+    # An uncoerced comparison with `is` takes the correctly-rounded path and
+    # reports the G13 gap as exactly zero, so coerce first. LogImpl() also
+    # refuses an unrecognised value.
     if LogImpl(impl) is LogImpl.PLATFORM:
         return platform_log_ratio(1 + n_documents, 1 + df) + 1.0
     return correctly_rounded_log_ratio(1 + n_documents, 1 + df) + 1.0
@@ -87,10 +87,9 @@ class IdfVector:
         """Normalise ``log_impl`` to the member, refusing an unknown value.
 
         ``LogImpl`` is a ``str`` enum, so ``"platform"`` equals the member
-        without being it. The container flag in ``persistence/save_load.py``
-        selects on ``is`` and would record ``PLATFORM`` for a model computed with
-        correctly-rounded logarithms, giving a round-tripped model a different
-        digest from the one saved.
+        without being it. ``persistence/save_load.py`` selects the container
+        flag on ``is``, so an uncoerced ``"correctly_rounded"`` records
+        ``PLATFORM`` and alters the round-tripped digest.
         """
         object.__setattr__(self, "log_impl", LogImpl(self.log_impl))
 

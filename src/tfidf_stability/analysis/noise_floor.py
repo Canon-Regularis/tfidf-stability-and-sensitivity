@@ -348,14 +348,15 @@ def verify_band_invariance(
     hi = math.log10(upper)
     # A single probe cannot be spaced across the band, and `i / (probes - 1)`
     # divided by zero rather than saying so. One probe starts at the lower
-    # endpoint, which the clamp below then moves to the top of the band.
+    # endpoint; the clamp below moves it to the top of the band whenever
+    # `g_min` is finite.
     if probes == 1:
         taus = [lower]
     else:
         taus = [10.0 ** (lo + (hi - lo) * i / (probes - 1)) for i in range(probes)]
-    # The top end must stay strictly inside the band. Applied to the sweep's last
-    # point while it is still the last element: the exact-tie baseline is
-    # appended after, and clamping that instead would drop tau = 0.
+    # The top end must stay strictly inside the band. The clamp runs before the
+    # exact-tie baseline is appended, so `taus[-1]` is still the sweep's last
+    # point; clamping the appended baseline would drop tau = 0.
     if math.isfinite(band.g_min):
         taus[-1] = math.nextafter(band.g_min, 0.0)
     # tau = 0 is admissible whenever the floor is 0, and it is the exact-tie

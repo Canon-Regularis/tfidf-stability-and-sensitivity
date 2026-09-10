@@ -83,9 +83,8 @@ class VocabularyConfig:
 
         ``MaxFeaturesPolicy`` is a ``str`` enum, so ``"cf_desc"`` equals the
         member without being it. ``build_vocabulary`` selects the ranking order
-        on ``is``, so the string fell through to ``DF_DESC``: a different set of
-        tokens survives the cut, which changes the vocabulary and every number
-        computed from it, with the config still recording the policy asked for.
+        on ``is``, so an uncoerced string ranks by ``DF_DESC``, changing which
+        tokens survive the cut while the config records the policy requested.
         """
         object.__setattr__(self, "max_features_policy", MaxFeaturesPolicy(self.max_features_policy))
 

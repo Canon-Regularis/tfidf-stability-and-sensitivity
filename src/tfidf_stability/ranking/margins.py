@@ -70,8 +70,9 @@ class Margin:
 
         Halving shifts the exponent, so ``2 * flip_radius`` recovers ``value``
         bit for bit for every normal margin. Subnormals have no exponent left to
-        shift: an odd multiple of ``5e-324`` loses its low bit to round-half-to-
-        even, and ``5e-324`` itself halves to zero.
+        shift: an odd multiple ``m`` of ``5e-324`` rounds to the nearest even
+        multiple, down for ``m`` congruent to 1 mod 4 and up for 3 mod 4, and
+        ``5e-324`` itself halves to zero.
         """
         return self.value / 2.0
 

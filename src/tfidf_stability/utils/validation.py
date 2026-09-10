@@ -195,14 +195,10 @@ def check_unique_ids(ids: Sequence[object]) -> None:
 def resolve_k(k: int, n: int, mode: StrictMode = StrictMode.STRICT) -> int:
     """Validate ``k`` against a corpus of ``n`` rankable documents.
 
-    Returns the effective ``k``. Only ``StrictMode.LENIENT`` clamps to ``n``,
-    with the caller then recording ``k_effective``; every other mode raises, so
-    an unrecognised one cannot clamp in silence. See ``docs/spec_addenda.md#g3``.
-
-    Tested against ``StrictMode.LENIENT`` rather than ``StrictMode.STRICT``
-    because ``StrictMode`` is a ``str`` enum: ``"strict"`` equals the strict
-    member without being it, so an identity test on the strict branch sends the
-    documented string spelling to the clamp.
+    Returns the effective ``k``. Only a mode equal to ``StrictMode.LENIENT``
+    clamps to ``n``, and the caller then records ``k_effective``. ``StrictMode``
+    is a ``str`` enum, so ``"lenient"`` clamps as well and every other value
+    raises ``KOutOfRangeError``. See ``docs/spec_addenda.md#g3``.
     """
     if k <= 0:
         raise KOutOfRangeError(f"k must be positive, got {k}")

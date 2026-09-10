@@ -316,13 +316,11 @@ class TieGroupIndex:
     def largest_ball(self) -> int:
         """The widest ball over every centre.
 
-        G1 makes the ball the primary reported object, and this was the one
-        statistic :meth:`report` did not carry -- neither of the others stands
-        in for it. A clique is complete-linkage and a chain single-linkage, and
-        the ball sits between them, so
-        ``largest_clique <= largest_ball <= largest_chain`` and the two bounds
-        can be far apart: on the adversarial ladder the chain is the whole
-        corpus while every ball spans three.
+        G1 makes the ball the primary reported object. A clique is
+        complete-linkage and a chain single-linkage, and the ball sits between
+        them: ``largest_clique <= largest_ball <= largest_chain``. The bounds
+        are loose; on the adversarial ladder the chain spans the whole corpus
+        while the widest ball spans three.
         """
         return max(
             (hi - lo for lo, hi in (self.ball(j) for j in range(len(self.sorted_scores)))),
