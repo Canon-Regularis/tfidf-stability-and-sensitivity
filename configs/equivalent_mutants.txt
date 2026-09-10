@@ -57,7 +57,7 @@ src/tfidf_stability/ranking/attributes.py  455  constant  0 -> 1  # src=f0761228
 src/tfidf_stability/ranking/attributes.py  464  constant  0 -> 1  # src=ce4e4d1b the missing-scalar placeholder, filtered out by has_value
 
 # --- ranking/ranker.py -----------------------------------------------------
-src/tfidf_stability/ranking/ranker.py  187  compare  Lt -> LtE  # src=59e83664 sort keys terminate in the unique doc id, so no two compare equal and the tie branch is unreachable
+src/tfidf_stability/ranking/ranker.py  191  compare  Lt -> LtE  # src=59e83664 sort keys terminate in the unique doc id, so no two compare equal and the tie branch is unreachable
 
 # --- ranking/tie_groups.py -------------------------------------------------
 src/tfidf_stability/ranking/tie_groups.py  227  boolop  Or -> And  # src=28312cda chains and cliques are always both empty or both non-empty, both being covers of the same input; asserted by test_chains_and_cliques_are_empty_together and checked over 31248 (scores, tau) combinations
@@ -105,9 +105,9 @@ src/tfidf_stability/vectorisation/vocabulary.py  255  compare  Gt -> GtE  # src=
 src/tfidf_stability/vectorisation/vocabulary.py  265  constant  0 -> 1  # src=40926f5c a constant middle component of the sort key, identical across every term
 
 # --- vectorisation/tfidf.py ------------------------------------------------
-src/tfidf_stability/vectorisation/tfidf.py  123  constant  True -> False  # src=afc7ee3d strict zip behind SparseVector.__post_init__
-src/tfidf_stability/vectorisation/tfidf.py  200  constant  True -> False  # src=3e101fd9 likewise
-src/tfidf_stability/vectorisation/tfidf.py  229  constant  True -> False  # src=09cf396a likewise
+src/tfidf_stability/vectorisation/tfidf.py  133  constant  True -> False  # src=afc7ee3d strict zip behind SparseVector.__post_init__
+src/tfidf_stability/vectorisation/tfidf.py  219  constant  True -> False  # src=3e101fd9 likewise
+src/tfidf_stability/vectorisation/tfidf.py  248  constant  True -> False  # src=09cf396a likewise
 
 # --- vectorisation/df_counts.py --------------------------------------------
 src/tfidf_stability/vectorisation/df_counts.py  73  constant  0 -> 1  # src=9465f86c -1 and 0 both take the `<= 0` branch, so the .get default is unobservable
@@ -154,7 +154,7 @@ src/tfidf_stability/preprocessing/stopwords.py  67  boolop  Or -> And  # src=586
 src/tfidf_stability/preprocessing/ngrams.py  77  constant  1 -> 0  # src=3822bf73 the unigram fast path and the general path produce identical output at n = 1
 
 # --- profiles/query_modes.py -----------------------------------------------
-src/tfidf_stability/profiles/query_modes.py  205  constant  2 -> 1  # src=69347c47 the clamp sits behind `if min_interactions >= 2`, which makes it dead
+src/tfidf_stability/profiles/query_modes.py  218  constant  2 -> 1  # src=69347c47 the clamp sits behind `if min_interactions >= 2`, which makes it dead
 
 # --- profiles/user_profile.py ----------------------------------------------
 src/tfidf_stability/profiles/user_profile.py  279  constant  True -> False  # src=2181b96d strict zip behind SparseVector.__post_init__
@@ -199,7 +199,7 @@ src/tfidf_stability/cli/main.py  104  constant  False -> True  # src=d898869c ar
 src/tfidf_stability/cli/main.py  110  constant  False -> True  # src=cef12337 likewise for version
 
 # --- cli/commands.py -------------------------------------------------------
-src/tfidf_stability/cli/commands.py  472  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
+src/tfidf_stability/cli/commands.py  474  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
 
 # --- datasets/synthetic.py -------------------------------------------------
 src/tfidf_stability/datasets/synthetic.py  136  constant  1 -> 0  # src=a05543f2 the quotient reaches zero only above a vocabulary of 2**40 terms
