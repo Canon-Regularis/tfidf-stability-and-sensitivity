@@ -35,6 +35,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
+# Python puts this script's own directory on `sys.path`, not the repository
+# root, so `tooling` needs the root added before it can be imported.
+sys.path.insert(0, str(REPO))
+
+from tooling.gate import report  # noqa: E402 - needs REPO on the path above
+
 #: file -> (regex capturing the version, human description of the line)
 _SOURCES: dict[str, tuple[str, str]] = {
     "pyproject.toml": (r"^version\s*=\s*[\"']([^\"']+)[\"']", "the distribution version"),
@@ -155,12 +161,7 @@ def main() -> int:
     args = parser.parse_args()
 
     problems = check(args.tag) + check_abi()
-    if problems:
-        print("version check FAILED:", file=sys.stderr)
-        for problem in problems:
-            print(f"  {problem}", file=sys.stderr)
-        return 1
-    return 0
+    return report(problems, "version check")
 
 
 if __name__ == "__main__":

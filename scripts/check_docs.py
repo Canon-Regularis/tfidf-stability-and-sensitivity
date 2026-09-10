@@ -34,6 +34,13 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+
+# Python puts this script's own directory on `sys.path`, not the repository
+# root, so `tooling` needs the root added before it can be imported.
+sys.path.insert(0, str(REPO))
+
+from tooling.gate import report  # noqa: E402 - needs REPO on the path above
+
 DOCS = REPO / "docs"
 
 _LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -310,12 +317,7 @@ def check() -> list[str]:
 
 def main() -> int:
     problems = check()
-    if problems:
-        print("documentation check FAILED:", file=sys.stderr)
-        for problem in problems:
-            print(f"  {problem}", file=sys.stderr)
-        return 1
-    return 0
+    return report(problems, "documentation check")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
+# Python puts this script's own directory on `sys.path`, not the repository
+# root, so `tooling` needs the root added before it can be imported.
+sys.path.insert(0, str(REPO))
+
+from tooling.gate import report  # noqa: E402 - needs REPO on the path above
+
 #: Files a vendored directory may contain without being listed in its manifest.
 _EXEMPT = {"MANIFEST.sha256", "__init__.py", "__pycache__"}
 
@@ -97,12 +103,7 @@ def check() -> list[str]:
 
 def main() -> int:
     problems = check()
-    if problems:
-        print("vendored asset verification FAILED:", file=sys.stderr)
-        for problem in problems:
-            print(f"  {problem}", file=sys.stderr)
-        return 1
-    return 0
+    return report(problems, "vendored asset verification")
 
 
 if __name__ == "__main__":
