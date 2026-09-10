@@ -567,80 +567,137 @@ def test_an_entry_whose_only_reason_is_its_fingerprint_is_refused(tmp_path: Path
 #: be re-checked rather than left to rot", and that check only runs for modules
 #: the matrix names. Scheduling one needs its scoped test list measured, because
 #: too narrow a list reports survivors the whole suite would kill.
-_NOT_YET_SCHEDULED = {
-    "src/tfidf_stability/ranking/attributes.py",
-    "src/tfidf_stability/utils/numerics.py",
-    "src/tfidf_stability/datasets/synthetic.py",
-    "src/tfidf_stability/vectorisation/sparse.py",
-    "src/tfidf_stability/vectorisation/vocabulary.py",
-    "src/tfidf_stability/vectorisation/tfidf.py",
-    "src/tfidf_stability/benchmarks/tfidf_perf.py",
-    "src/tfidf_stability/similarity/cosine.py",
-    "src/tfidf_stability/perturbation/experiments.py",
-    "src/tfidf_stability/cli/main.py",
-    "src/tfidf_stability/ranking/ranker.py",
-    "src/tfidf_stability/utils/io.py",
-    "src/tfidf_stability/vectorisation/df_counts.py",
-    "src/tfidf_stability/preprocessing/tokenise.py",
-    "src/tfidf_stability/preprocessing/stopwords.py",
-    "src/tfidf_stability/preprocessing/ngrams.py",
-    "src/tfidf_stability/profiles/user_profile.py",
-    "src/tfidf_stability/analysis/stratify.py",
-    "src/tfidf_stability/analysis/query_grid.py",
-    "src/tfidf_stability/cli/commands.py",
-    "src/tfidf_stability/persistence/save_load.py",
-    "src/tfidf_stability/_native/__init__.py",
+_NOT_YET_SCHEDULED: dict[str, str] = {
+    "src/tfidf_stability/ranking/attributes.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/utils/numerics.py": (
+        "reachable from 27 test files; a full scope is 217 minutes against a 90-minute cap"
+    ),
+    "src/tfidf_stability/datasets/synthetic.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/vectorisation/sparse.py": (
+        "reachable from 20 test files; a full scope is 182 minutes"
+    ),
+    "src/tfidf_stability/vectorisation/vocabulary.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/vectorisation/tfidf.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/benchmarks/tfidf_perf.py": (
+        "the benchmark harness; its timings are not asserted, so every mutant survives"
+    ),
+    "src/tfidf_stability/similarity/cosine.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/perturbation/experiments.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/cli/main.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/ranking/ranker.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/utils/io.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/vectorisation/df_counts.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/preprocessing/tokenise.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/preprocessing/stopwords.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/preprocessing/ngrams.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/profiles/user_profile.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/analysis/stratify.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/analysis/query_grid.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/cli/commands.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/persistence/save_load.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
+    "src/tfidf_stability/_native/__init__.py": (
+        "no scoped test list measured yet; too narrow a list reports false survivors"
+    ),
 }
 
 
-def test_no_module_gains_an_unrecheckable_argument() -> None:
-    """An equivalence argument is only as good as the campaign that rechecks it.
+def _scheduled() -> set[str]:
+    """Every module the nightly mutation matrix runs a campaign for.
 
-    The allowlist fails the build two ways: a survivor with no entry, and an
-    entry matching no survivor. The second is what stops the file becoming a
-    blanket suppression -- and it can only fire for a module the nightly matrix
-    actually runs. The matrix names twelve modules; the allowlist argues about
-    thirty-four, so 61 of its 105 entries are unfalsifiable.
-
-    This does not fix that. It stops it growing: a NEW module cannot acquire an
-    argument without either being scheduled or being added to the list above,
-    which is a visible admission rather than a silent one.
+    The workflow is the single source of truth: this reads it rather than
+    restating it, so the two cannot drift.
     """
     import yaml
 
     workflow = yaml.safe_load(
         (REPO / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
     )
-    scheduled = {e["module"] for e in workflow["jobs"]["mutation"]["strategy"]["matrix"]["include"]}
+    return {e["module"] for e in workflow["jobs"]["mutation"]["strategy"]["matrix"]["include"]}
+
+
+def _matrix_entries() -> list[dict[str, str]]:
+    """The matrix rows, for the checks that need the test lists as well."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
+    )
+    return list(workflow["jobs"]["mutation"]["strategy"]["matrix"]["include"])
+
+
+def test_every_argued_module_is_scheduled_or_deferred_with_a_reason() -> None:
+    """The four relations between the matrix, the allowlist and the deferrals.
+
+    An equivalence argument is only as good as the campaign that rechecks it,
+    and the "matched no survivor" half can only fire for a module the matrix
+    runs. This does not schedule the rest; it stops the gap growing silently.
+
+    Stated as one test over four relations, matching
+    `tests/test_cpp_mutation_gate.py`, so the two languages reconcile the same
+    way rather than in three tests here and one there.
+    """
+    scheduled, pending = _scheduled(), set(_NOT_YET_SCHEDULED)
     claimed = {path for path, *_ in _stamped_entries()}
 
     assert claimed, "no module carries an argued equivalence; the check is vacuous"
-    unaccounted = claimed - scheduled - _NOT_YET_SCHEDULED
-    assert not unaccounted, (
+    assert not scheduled & pending, f"scheduled and deferred at once: {sorted(scheduled & pending)}"
+    assert not claimed - scheduled - pending, (
         "modules whose equivalence arguments nothing rechecks, and which are not "
-        f"listed as pending: {sorted(unaccounted)}"
+        f"listed as pending: {sorted(claimed - scheduled - pending)}"
     )
-    stale = _NOT_YET_SCHEDULED & scheduled
-    assert not stale, (
-        f"listed as pending but now scheduled -- drop them from the list: {sorted(stale)}"
+    assert not {m for m in pending if not (REPO / m).exists()}, (
+        f"deferred modules that no longer exist: "
+        f"{sorted(m for m in pending if not (REPO / m).exists())}"
     )
-    gone = {m for m in _NOT_YET_SCHEDULED if not (REPO / m).exists()}
-    assert not gone, f"pending modules that no longer exist: {sorted(gone)}"
+    assert all(reason.strip() for reason in _NOT_YET_SCHEDULED.values()), (
+        "a deferral with no reason is indistinguishable from an oversight"
+    )
 
 
 def test_every_scheduled_module_and_its_tests_exist() -> None:
     """A matrix entry names paths as bare strings, and nothing resolves them.
 
     A missing module path makes the runner exit before it starts. A missing
-    test path makes pytest report a collection error, which the runner reads
-    as a kill: every mutant scores killed for a module nothing tested.
+    test path makes pytest report a collection error, which the runner scores
+    as `killed`: every mutant passes for a module nothing tested.
     """
-    import yaml
-
-    workflow = yaml.safe_load(
-        (REPO / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
-    )
-    entries = workflow["jobs"]["mutation"]["strategy"]["matrix"]["include"]
+    entries = _matrix_entries()
     assert entries, "no module is scheduled; the check is vacuous"
 
     missing = []
@@ -653,22 +710,6 @@ def test_every_scheduled_module_and_its_tests_exist() -> None:
     assert not missing, "nightly mutation matrix points at paths that do not exist: " + "; ".join(
         missing
     )
-
-
-def test_no_scheduled_module_is_also_listed_as_pending() -> None:
-    """The matrix and `_NOT_YET_SCHEDULED` must not overlap.
-
-    Both lists are maintained by hand. A module in both reads as scheduled to
-    the matrix and as deferred to a reader.
-    """
-    import yaml
-
-    workflow = yaml.safe_load(
-        (REPO / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
-    )
-    scheduled = {e["module"] for e in workflow["jobs"]["mutation"]["strategy"]["matrix"]["include"]}
-    overlap = scheduled & _NOT_YET_SCHEDULED
-    assert not overlap, f"scheduled and deferred at once: {sorted(overlap)}"
 
 
 # ---------------------------------------------------------------------------
