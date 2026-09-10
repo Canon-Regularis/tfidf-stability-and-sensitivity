@@ -56,6 +56,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+# Python puts this script's own directory on `sys.path`, not the repository
+# root, so `tooling` needs the root added before it can be imported.
+sys.path.insert(0, str(REPO))
+
+from tooling.allowlist import (  # noqa: E402 - needs REPO on the path above
+    claims_python,
+    parse_python,
+    without_stamp,
+)
+
+__all__ = ["without_stamp"]
 
 #: What a run needs to be a working checkout: the package, the suite that
 #: imports it, the pytest configuration that declares markers and turns warnings
@@ -92,6 +103,9 @@ _SANDBOX_CONTENTS = (
     "docs",
     "examples",
     "scripts",
+    # The suite imports `tooling.allowlist`, so a sandbox without it fails
+    # the baseline before a single mutant is applied.
+    "tooling",
     "pyproject.toml",
     "CITATION.cff",
     "README.md",
@@ -361,42 +375,12 @@ _Key = tuple[int, str, str, str]
 def _load_equivalents(module: Path) -> dict[_Key, str]:
     """Documented equivalent mutants for one module, keyed by what was mutated.
 
-    A line without a reason is ignored rather than honoured: an entry that does
-    not say why the mutation cannot be observed is a suppression, and this file
-    exists to hold arguments, not to silence output.
+    Reads ``_EQUIVALENTS`` at call time, so a test pointing the module at another
+    file gets that file. The format itself lives in ``tooling.allowlist``.
     """
     if not _EQUIVALENTS.exists():
         return {}
-
-    wanted = module.as_posix()
-    claims: dict[_Key, str] = {}
-    for raw in _EQUIVALENTS.read_text(encoding="utf-8").splitlines():
-        statement, _, reason = raw.partition("#")
-        fields = statement.split()
-        if len(fields) < 6 or fields[0] != wanted or fields[4] != "->":
-            continue
-        # A reason may be prefixed `src=<8 hex>`, a fingerprint of the source
-        # line the entry was written about, checked by the allowlist test in
-        # tests/test_mutation_gate.py. Stripped here: it is bookkeeping for that
-        # guard, not part of the argument the campaign prints.
-        #
-        # Emptiness is tested after stripping it. Testing `reason` instead let an
-        # entry whose whole reason was its own fingerprint through, carrying an
-        # empty argument -- the suppression this file's header refuses.
-        argument = _without_stamp(reason)
-        if not argument:
-            continue
-        claims[(int(fields[1]), fields[2], fields[3], fields[5])] = argument
-    return claims
-
-
-def _without_stamp(reason: str) -> str:
-    """Drop a leading `src=<hash>` marker from an allowlist reason."""
-    text = reason.strip()
-    head, _, rest = text.partition(" ")
-    if head.startswith("src=") and len(head) == len("src=") + 8:
-        return rest.strip()
-    return text
+    return claims_python(parse_python(_EQUIVALENTS.read_text(encoding="utf-8")), module)
 
 
 def main() -> int:
@@ -463,10 +447,10 @@ def main() -> int:
         for mutant in survivors:
             print(f"  {relative}:{mutant.line}: {mutant.describe()}", file=sys.stderr)
 
-    return _verdict(relative, survivors)
+    return _verdict(relative, survivors, partial=limit < total)
 
 
-def _verdict(relative: Path, survivors: Sequence[Mutant]) -> int:
+def _verdict(relative: Path, survivors: Sequence[Mutant], *, partial: bool = False) -> int:
     """Exit code, once documented equivalents are accounted for.
 
     Two ways to fail, both deliberate. A survivor nobody has explained is the
@@ -474,6 +458,10 @@ def _verdict(relative: Path, survivors: Sequence[Mutant]) -> int:
     just as bad in the other direction: the mutant is killed now, or the line
     moved, and an argument nobody re-reads is how an equivalents file turns into
     a blanket suppression.
+
+    ``partial`` reports a run stopped by ``--max-mutants``. A claim that run
+    did not reach is unmatched rather than stale, so the second failure is
+    withheld.
     """
     claims = _load_equivalents(relative)
     if not claims:
@@ -495,7 +483,15 @@ def _verdict(relative: Path, survivors: Sequence[Mutant]) -> int:
         for line, kind, before, after in sorted(unexplained):
             print(f"  {relative}:{line}: {kind} {before} -> {after}", file=sys.stderr)
 
-    if stale:
+    if partial and stale:
+        # A claim the run never reached is unmatched rather than stale. The
+        # C++ campaign withholds the same failure for the same reason.
+        print(
+            f"\n{len(stale)} unmatched claim(s) not reported: --max-mutants "
+            f"stopped the run, and a truncated run cannot tell stale from unreached.",
+            file=sys.stderr,
+        )
+    elif stale:
         print(f"\nStale entries in {_EQUIVALENTS.name}:", file=sys.stderr)
         for line, kind, before, after in sorted(stale):
             print(
@@ -503,7 +499,7 @@ def _verdict(relative: Path, survivors: Sequence[Mutant]) -> int:
                 file=sys.stderr,
             )
 
-    return 1 if unexplained or stale else 0
+    return 1 if unexplained or (stale and not partial) else 0
 
 
 if __name__ == "__main__":

@@ -16,7 +16,6 @@ ever prunes them, and the campaign goes green whatever the tests do.
 from __future__ import annotations
 
 import ast
-import hashlib
 import importlib.util
 import shutil
 import sys
@@ -24,6 +23,10 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from tooling import renumber_allowlists as renumber
+from tooling.allowlist import fingerprint as _fingerprint
+from tooling.allowlist import parse_python
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "run_mutation_tests.py"
@@ -460,15 +463,6 @@ def _stamped_entries() -> list[tuple[str, int, str, str]]:
     return entries
 
 
-def _fingerprint(line: str) -> str:
-    """Hash of the source line with whitespace collapsed.
-
-    Whitespace only, so reindenting a block does not invalidate every entry in
-    it while a changed expression still does.
-    """
-    return hashlib.sha256(" ".join(line.split()).encode("utf-8")).hexdigest()[:8]
-
-
 def test_every_allowlist_entry_still_describes_the_line_it_names() -> None:
     """The half `..._still_names_a_mutation_that_exists` does not cover.
 
@@ -675,3 +669,137 @@ def test_no_scheduled_module_is_also_listed_as_pending() -> None:
     scheduled = {e["module"] for e in workflow["jobs"]["mutation"]["strategy"]["matrix"]["include"]}
     overlap = scheduled & _NOT_YET_SCHEDULED
     assert not overlap, f"scheduled and deferred at once: {sorted(overlap)}"
+
+
+# ---------------------------------------------------------------------------
+# The renumbering tool: what it moves, and what it refuses to move
+# ---------------------------------------------------------------------------
+def _crafted(tmp_path: Path, source: str, line: int, argument: str = "an argument") -> list[object]:
+    """A one-entry Python allowlist over a crafted module, parsed.
+
+    The stamp is taken from ``source``'s line ``line``, so the entry starts out
+    describing exactly what it names.
+    """
+    module = tmp_path / "src" / "crafted.py"
+    module.parent.mkdir(parents=True, exist_ok=True)
+    module.write_text(source, encoding="utf-8")
+    stamp = _fingerprint(source.split("\n")[line - 1])
+    text = f"src/crafted.py  {line}  compare  LtE -> Lt  # src={stamp} {argument}\n"
+    return parse_python(text)
+
+
+def test_the_renumberer_proposes_nothing_on_a_clean_tree() -> None:
+    """The live direction. Every entry in both allowlists names the line its
+    stamp describes, so the tool has nothing to do and the gates agree."""
+    for path, parse in renumber.ALLOWLISTS.items():
+        moves, refusals = renumber.plan_file(parse(path.read_text(encoding="utf-8")))
+
+        assert moves == [], f"{path.name} has entries whose line has moved"
+        assert refusals == [], f"{path.name} has entries the tool cannot place"
+
+
+def test_a_stamped_line_that_moved_down_is_relocated(tmp_path: Path) -> None:
+    """The operation the tool exists for: an edit above a covered line shifts it,
+    and the stamp says which line it became."""
+    entries = _crafted(tmp_path, "a = 1\nif x <= y:\nb = 2\n", 2)
+    (tmp_path / "src" / "crafted.py").write_text(
+        "# added\n# added\na = 1\nif x <= y:\nb = 2\n", encoding="utf-8"
+    )
+
+    moves, refusals = renumber.plan_file(entries, repo=tmp_path)
+
+    assert refusals == []
+    assert [(m.entry.line, m.to_line) for m in moves] == [(2, 4)]
+
+
+def test_an_entry_whose_expression_changed_is_refused(tmp_path: Path) -> None:
+    """A changed expression is not a moved line. Only a reader can say whether
+    the argument still holds, so the tool reports and changes nothing."""
+    entries = _crafted(tmp_path, "a = 1\nif x <= y:\nb = 2\n", 2)
+    (tmp_path / "src" / "crafted.py").write_text("a = 1\nif x < y:\nb = 2\n", encoding="utf-8")
+
+    moves, refusals = renumber.plan_file(entries, repo=tmp_path)
+
+    assert moves == []
+    assert len(refusals) == 1
+    assert "no line carries its stamp" in refusals[0].detail
+
+
+def test_an_entry_whose_stamp_matches_two_lines_is_refused_as_ambiguous(tmp_path: Path) -> None:
+    """Why the line stays the key and the stamp stays corroborating.
+
+    Thirteen of the Python entries and five of the C++ ones sit on line text that
+    is not unique in its own file, so a stamp alone cannot place an entry. Where
+    it cannot, the tool refuses rather than picking one.
+    """
+    entries = _crafted(tmp_path, "a = 1\nif x <= y:\nb = 2\n", 2)
+    # The entry's own line must stop matching first: an entry still sitting on a
+    # line its stamp describes is left alone whatever else the file holds.
+    (tmp_path / "src" / "crafted.py").write_text(
+        "a = 1\nb = 2\nif x <= y:\nif x <= y:\n", encoding="utf-8"
+    )
+
+    moves, refusals = renumber.plan_file(entries, repo=tmp_path)
+
+    assert moves == []
+    assert len(refusals) == 1
+    assert "ambiguous" in refusals[0].detail
+    assert "[3, 4]" in refusals[0].detail, "the reader is told which lines to choose between"
+
+
+def test_a_refusal_carries_the_argument_a_reader_must_re_read(tmp_path: Path) -> None:
+    """The reason is the whole point of a refusal: it is what the reader has to
+    judge, and it would otherwise have to be looked up by hand."""
+    entries = _crafted(
+        tmp_path, "a = 1\nif x <= y:\n", 2, argument="the branches agree at equal magnitude"
+    )
+    (tmp_path / "src" / "crafted.py").write_text("a = 1\nif x < y:\n", encoding="utf-8")
+
+    _moves, refusals = renumber.plan_file(entries, repo=tmp_path)
+
+    assert refusals[0].entry.reason == "the branches agree at equal magnitude"
+
+
+def test_a_move_rewrites_only_the_position_field(tmp_path: Path) -> None:
+    """Every other byte survives, so a renumbered allowlist diffs as one number
+    per entry rather than as a reformatting."""
+    entries = _crafted(tmp_path, "a = 1\nif x <= y:\n", 2, argument="unchanged prose")
+    (tmp_path / "src" / "crafted.py").write_text("# added\na = 1\nif x <= y:\n", encoding="utf-8")
+    moves, _refusals = renumber.plan_file(entries, repo=tmp_path)
+
+    before = entries[0].raw
+    after = renumber.apply_moves(before, moves)
+
+    assert after == before.replace("  2  ", "  3  ", 1)
+    assert "unchanged prose" in after
+
+
+def test_a_truncated_run_does_not_report_a_claim_it_never_reached() -> None:
+    """`--max-mutants` stops the campaign early, so a claim past the cut is
+    unmatched rather than stale. Reporting it fails a smoke run for entries that
+    are perfectly good, which is what the C++ campaign's `partial` flag avoids.
+    """
+    runner = _runner()
+    module = Path("src/tfidf_stability/ranking/sort_keys.py")
+
+    assert runner._load_equivalents(module), "the premise: this module is documented"
+    assert runner._verdict(module, [], partial=True) == 0
+
+
+def test_a_complete_run_still_reports_the_same_claim_as_stale() -> None:
+    """The other half. Withholding the failure on a truncated run must not
+    withhold it on a full one, or the anti-accretion half stops working."""
+    runner = _runner()
+    module = Path("src/tfidf_stability/ranking/sort_keys.py")
+
+    assert runner._verdict(module, [], partial=False) == 1
+
+
+def test_a_truncated_run_still_fails_on_an_undocumented_survivor() -> None:
+    """Truncation withholds one failure, not both. A survivor the run did see is
+    evidence whatever the cut was."""
+    runner = _runner()
+    module = Path("src/tfidf_stability/ranking/sort_keys.py")
+    survivors = [_mutant(runner, 42, "constant", "1", "0")]
+
+    assert runner._verdict(module, survivors, partial=True) == 1

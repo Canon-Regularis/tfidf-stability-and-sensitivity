@@ -44,7 +44,6 @@ native suite is their only coverage in either language.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import subprocess
@@ -53,6 +52,19 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+# Python puts this script's own directory on `sys.path`, not the repository
+# root, so `tooling` needs the root added before it can be imported.
+sys.path.insert(0, str(REPO))
+
+from tooling.allowlist import (  # noqa: E402 - needs REPO on the path above
+    claims_cpp,
+    fingerprint,
+    parse_cpp,
+    without_stamp,
+)
+
+__all__ = ["fingerprint", "without_stamp"]
+
 EQUIVALENTS = REPO / "configs" / "equivalent_mutants_cpp.txt"
 
 #: Ordered longest-first, so `<=` is matched before `<`.
@@ -78,15 +90,6 @@ WORDS: list[tuple[str, str]] = [("true", "false"), ("false", "true")]
 NUMBERS: list[tuple[str, str]] = [("0", "1"), ("1", "0"), ("2", "3")]
 
 _IDENT = re.compile(r"[A-Za-z_0-9]")
-
-
-def fingerprint(line: str) -> str:
-    """The stamp recorded beside an allowlist entry.
-
-    Whitespace-normalised, so reindenting a line does not invalidate an argument
-    about it, while changing the expression does.
-    """
-    return hashlib.sha256(" ".join(line.split()).encode("utf-8")).hexdigest()[:8]
 
 
 def scan(text: str) -> list[tuple[int, str, str]]:
@@ -169,42 +172,12 @@ def scan(text: str) -> list[tuple[int, str, str]]:
 def load_equivalents(module: Path) -> dict[tuple[int, int, str, str], str]:
     """Argued equivalences for one header, keyed by ``(line, column, before, after)``.
 
-    The column is part of the key because a line can carry two candidates that
-    read the same and are equivalent for different reasons: in the fsum
-    correction, one `<` compares the remainder against zero and the other
-    compares a partial, and the arguments are not interchangeable.
+    Reads ``EQUIVALENTS`` at call time, so a test pointing the module at another
+    file gets that file. The format itself lives in ``tooling.allowlist``.
     """
     if not EQUIVALENTS.exists():
         return {}
-    wanted = module.as_posix()
-    claims: dict[tuple[int, int, str, str], str] = {}
-    for raw in EQUIVALENTS.read_text(encoding="utf-8").splitlines():
-        line = raw.split("#", 1)
-        body, reason = line[0].strip(), (line[1].strip() if len(line) > 1 else "")
-        if not body:
-            continue
-        fields = body.split()
-        if len(fields) < 5 or fields[0] != wanted or fields[3] != "->":
-            continue
-        where, _, column = fields[1].partition(":")
-        if not column:
-            continue  # an entry without a column cannot say which token it means
-        # Emptiness is tested AFTER the stamp is stripped. Testing the raw text
-        # would let an entry whose whole reason is its own fingerprint through,
-        # carrying an empty argument -- the suppression this file refuses.
-        argument = without_stamp(reason)
-        if not argument:
-            continue
-        claims[(int(where), int(column), fields[2], fields[4])] = argument
-    return claims
-
-
-def without_stamp(reason: str) -> str:
-    """Drop a leading ``src=<8 hex>`` marker from an allowlist reason."""
-    head, _, rest = reason.partition(" ")
-    if head.startswith("src=") and len(head) == len("src=") + 8:
-        return rest.strip()
-    return reason.strip()
+    return claims_cpp(parse_cpp(EQUIVALENTS.read_text(encoding="utf-8")), module)
 
 
 def build_and_test(build: str, target: str, test_timeout: int) -> str:
