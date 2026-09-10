@@ -24,14 +24,11 @@ namespace tfidf::ranking {
 
 /// Which sorting strategy produces the order.
 ///
-/// Unlike `Reduction`, these values do NOT correspond to
-/// `tfidf_stability.ranking.ranker.Selection`, whose members past the first two
-/// name different algorithms. Only the names in the `SELECTION` dict cross the
-/// boundary; the integers are meaningful to this header alone.
-///
-/// The strategy never changes the answer -- the sort key is injective, so every
-/// one of them yields the same permutation. It is recorded because a run
-/// manifest and a benchmark table name the strategy that ran.
+/// Unlike `Reduction`, these integers do not cross the language boundary; only
+/// the `SELECTION` names do. The Python `Selection` names other algorithms past
+/// its first two members. The sort key is injective, so every strategy gives the
+/// same permutation; `benchmarks/tfidf_perf.py` names the strategy each timing
+/// ran under.
 enum class Selection : std::int32_t {
     FullSort = 0,
     StableSort = 1,

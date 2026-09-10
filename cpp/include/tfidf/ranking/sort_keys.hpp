@@ -95,11 +95,9 @@ inline void build_keys(std::span<const Real> scores,
 
 /// Whether every attribute in `priority` fits in a key.
 ///
-/// `build_keys` is `noexcept` and stops at `kMaxAttributes`, so a longer
-/// priority is silently truncated: the key then sorts on a prefix of the
-/// operator that was asked for, and the reference, whose tuple has no such
-/// bound, orders ties differently. The binding refuses an over-long priority;
-/// this is the same condition as a predicate, for the callers that cannot.
+/// `build_keys` is `noexcept` and truncates past `kMaxAttributes`, so the key
+/// sorts on a prefix and orders ties differently from the unbounded Python
+/// tuple. The binding raises; this predicate serves callers that cannot raise.
 [[nodiscard]] inline bool priority_fits(std::span<const std::int32_t> priority) noexcept {
     return priority.size() <= kMaxAttributes;
 }

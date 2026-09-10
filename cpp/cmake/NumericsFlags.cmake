@@ -40,11 +40,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
   )
   include(CheckCXXCompilerFlag)
 
-  # rule 3, probed rather than assumed: GCC implements it for C++ only from
-  # GCC 13 and earlier front ends reject it outright, failing the build.
-  # manylinux_2_28 ships GCC 12. Where it is unavailable the rule rests on the
-  # target evaluating each operation in its own type, which fp_guard.hpp reads
-  # off FLT_EVAL_METHOD and `fp_selftest` reports.
+  # rule 3, probed rather than assumed: GCC accepts the flag for C++ only from
+  # GCC 13, and manylinux_2_28 ships GCC 12. Where the probe fails, rule 3 rests
+  # on the target evaluating each operation in its own type, which fp_guard.hpp
+  # reads off FLT_EVAL_METHOD and `fp_selftest` reports.
   check_cxx_compiler_flag("-fexcess-precision=standard" TFIDF_HAS_EXCESS_PRECISION)
   if(TFIDF_HAS_EXCESS_PRECISION)
     target_compile_options(tfidf_numerics_strict INTERFACE -fexcess-precision=standard)

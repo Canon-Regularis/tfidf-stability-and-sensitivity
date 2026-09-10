@@ -169,35 +169,30 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 // ---------------------------------------------------------------------------
 // Fagin-Kumar-Sivakumar generalised Kendall distance
 // ---------------------------------------------------------------------------
-/// The maximum of `K^(p)` over two top-k lists, attained when they are disjoint.
+/// Reject a case-4 penalty outside the `[0, 1]` domain G2 fixes.
 ///
-/// Disjoint lists put every pair of the 2k-element union into case 3 (k^2 pairs,
-/// one each) or case 4 (2 * C(k, 2) pairs, `p` each), giving
-/// `k^2 + p * k * (k - 1)`.
-///
-/// Reject a case-4 penalty outside `[0, 1]`.
-///
-/// `!(0.0 <= p && p <= 1.0)` rather than the positive form: every comparison
-/// with NaN is false, so the other spelling admits NaN through a guard whose
-/// message names a range. G2 fixes the domain, and the normalised `K-bar` lies
-/// in `[0, 1]` only because of it.
-///
-/// Left unchecked, a NaN or sufficiently negative penalty made the normalising
-/// ceiling NaN or negative, `ceiling > 0.0` false, and the distance 0.0: two
-/// disjoint lists, the furthest apart they can be, reported as identical.
+/// `penalty < 0.0 || penalty > 1.0` would admit NaN, since every comparison
+/// with NaN is false. Left unchecked, a NaN or sufficiently negative penalty
+/// makes `fks_max` NaN or non-positive, `ceiling > 0.0` fails, and disjoint
+/// lists yield 0.0.
 inline void checked_penalty(Real penalty) {
     if (!(penalty >= 0.0 && penalty <= 1.0)) {
         throw std::invalid_argument("the case-4 penalty must lie in [0, 1]");
     }
 }
 
+/// The maximum of `K^(p)` over two top-k lists, attained when they are disjoint.
+///
+/// Disjoint lists put every pair of the 2k-element union into case 3 (k^2 pairs,
+/// one each) or case 4 (2 * C(k, 2) pairs, `p` each), giving
+/// `k^2 + p * k * (k - 1)`.
+///
 /// `k = 1` is not degenerate: two disjoint singletons still contribute one
 /// case-3 pair, so the maximum is 1. An early guard of the form `if k < 2:
 /// return 0` normalised two entirely disjoint lists to distance zero.
 ///
-/// `noexcept` is deliberately absent: the penalty is validated here, and the
-/// normative Python raises for the same domain. Leaving this permissive while
-/// the reference refused would be a divergence rather than a saving.
+/// Not `noexcept`: `checked_penalty` throws for a penalty outside `[0, 1]`,
+/// where the reference raises `ValueError`.
 [[nodiscard]] inline Real fks_max(std::int32_t k, Real penalty = kFksPenalty) {
     checked_penalty(penalty);
     if (k < 1) {
@@ -339,11 +334,11 @@ struct TopKComparison {
     Real kendall_intersection = std::numeric_limits<Real>::quiet_NaN();
     std::int32_t intersection_size = 0;
     Real jaccard = 0.0;
-    /// The larger of the two one-way differences: how many documents left the
-    /// top-k, or entered it, whichever is greater. On equal-length prefixes the
-    /// two are equal and this is the number of swaps. On prefixes of different
-    /// lengths they are not, and halving their sum would round a one-document
-    /// difference down to no swaps while `sets_differ` reported a difference.
+    /// The larger of the two one-way differences: documents that left the
+    /// top-k, or documents that entered it. On equal-length prefixes the two
+    /// are equal and the count is the number of swaps. On unequal lengths half
+    /// their sum rounds a one-document difference down to 0 while `sets_differ`
+    /// reports true.
     std::int32_t swapped = 0;
 };
 
