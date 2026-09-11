@@ -332,3 +332,123 @@ def test_the_entry_the_gate_suggests_actually_loads(tmp_path: Path) -> None:
     assert (57, 14, "<", "<=") in claims, (
         f"the gate suggests an entry its own loader ignores:\n  {suggestion}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The build the campaign scores against
+# ---------------------------------------------------------------------------
+def _mutation_preset() -> str:
+    """The configure preset the nightly builds its mutation baseline with."""
+    import re
+
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["cpp-mutation"]["steps"]
+    named = re.findall(r"cmake --preset (\S+)", "\n".join(str(s.get("run", "")) for s in steps))
+
+    assert named, "the cpp-mutation job configures no preset"
+    assert len(set(named)) == 1, f"it configures more than one: {sorted(set(named))}"
+    return named[0]
+
+
+def _presets_by_name() -> dict[str, dict[str, object]]:
+    """Every configure preset, keyed by name."""
+    import json
+
+    presets = json.loads((REPO / "CMakePresets.json").read_text(encoding="utf-8"))
+    return {p["name"]: p for p in presets["configurePresets"]}
+
+
+def _resolved_cache(name: str) -> dict[str, str]:
+    """A configure preset's ``cacheVariables``, with inherited ones merged in.
+
+    Walks ``inherits`` to the root and applies parents first, so a child's own
+    value wins. Without this the check would read only the preset's own block
+    and miss anything it takes from ``base``.
+    """
+    import json
+
+    presets = json.loads((REPO / "CMakePresets.json").read_text(encoding="utf-8"))
+    by_name = {p["name"]: p for p in presets["configurePresets"]}
+
+    chain: list[dict[str, object]] = []
+    current: str | None = name
+    while current is not None:
+        assert current in by_name, f"preset {current!r} is named but not defined"
+        preset = by_name[current]
+        chain.append(preset)
+        inherits = preset.get("inherits")
+        current = inherits if isinstance(inherits, str) else None
+
+    cache: dict[str, str] = {}
+    for preset in reversed(chain):
+        cache.update(preset.get("cacheVariables", {}))  # type: ignore[arg-type]
+    return cache
+
+
+def test_the_mutation_baseline_does_not_treat_warnings_as_errors() -> None:
+    """Warnings-as-errors and mutation testing are incompatible purposes.
+
+    A mutation deliberately writes code that trips a warning: `< -> <=` makes a
+    comparison always true, `+ -> -` converts a sign, `|| -> &&` makes a branch
+    unreachable. Under `-Werror` those mutants fail to compile and score
+    `stillborn`, counted neither killed nor survived, so the tests never see
+    them. Measured on `sort_keys.hpp`: 26 killed and 23 stillborn became 16 and
+    35, and two argued survivors stopped surviving.
+
+    The workflow and the preset are one fact in two files, so this reads the
+    preset the job actually names rather than restating it.
+    """
+    cache = _resolved_cache(_mutation_preset())
+
+    assert cache.get("TFIDF_WERROR") == "OFF", (
+        "the mutation baseline inherits -Werror, which scores every mutant that "
+        "trips a warning as stillborn instead of running the tests against it"
+    )
+    assert cache.get("TFIDF_BUILD_TESTS") == "ON", "the campaign's verdict is ctest"
+
+
+def test_the_campaign_scores_against_the_directory_that_preset_builds() -> None:
+    """The `--build` path and the preset name are the same fact twice.
+
+    Presets build into `build/<presetName>`, so a renamed preset leaves the
+    campaign pointed at a directory nothing wrote and the run dies before it
+    scores anything.
+    """
+    import re
+
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "nightly.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["cpp-mutation"]["steps"]
+    text = "\n".join(str(s.get("run", "")) for s in steps)
+    # `(?!--)` so `cmake --build --preset mutation` does not read as a build
+    # directory named `--preset`.
+    built = re.findall(r"--build (?!--)(\S+)", text)
+
+    assert built, "the campaign names no build directory"
+    assert set(built) == {f"build/{_mutation_preset()}"}, (
+        f"the campaign reads {sorted(set(built))}, which is not where the preset builds"
+    )
+
+
+def test_the_resolver_sees_a_value_a_preset_only_inherits() -> None:
+    """The check above is only meaningful if inheritance is followed.
+
+    `TFIDF_WERROR` is set once, in the hidden `base` preset, and every other
+    preset takes it from there. A resolver that read a preset's own block alone
+    would report nothing for `ci` and so would never catch the mutation preset
+    inheriting it either.
+    """
+    assert _resolved_cache("ci").get("TFIDF_WERROR") == "ON", (
+        "`ci` states no TFIDF_WERROR of its own, so reading ON proves the "
+        "inherited value is what the check above would have seen"
+    )
+    assert "TFIDF_WERROR" not in _presets_by_name()["ci"].get("cacheVariables", {}), (
+        "the premise: `ci` does not state it directly"
+    )

@@ -166,15 +166,15 @@ jobs:
         # A tree whose tests already fail would score every mutant as killed, so
         # the campaign would report a perfect score for a broken suite.
         run: |
-          cmake --preset cpp-only
-          cmake --build --preset cpp-only --target tfidf_tests
-          ctest --preset cpp-only
+          cmake --preset mutation
+          cmake --build --preset mutation --target tfidf_tests
+          ctest --preset mutation
       - name: Break ${{ matrix.header }} and see whether the native suite notices
         # Every survivor must be argued in configs/equivalent_mutants_cpp.txt,
         # and an entry there that matches no survivor fails too -- otherwise the
         # file accretes into a blanket suppression.
         run: |
-          python scripts/run_cpp_mutation_tests.py "${{ matrix.header }}"                  --build build/cpp-only --test-timeout 60 --json "mutants.json"
+          python scripts/run_cpp_mutation_tests.py "${{ matrix.header }}"                  --build build/mutation --test-timeout 60 --json "mutants.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         if: always()
         with:

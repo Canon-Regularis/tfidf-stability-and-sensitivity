@@ -54,10 +54,11 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },
     {
-      "name": "cpp-only",
+      "name": "mutation",
       "inherits": "base",
-      "displayName": "The C++ suite alone, with no Python extension built",
-      "cacheVariables": { "TFIDF_BUILD_NATIVE": "OFF" }
+      "displayName": "The baseline the nightly mutation campaign scores against",
+      "description": "Warnings are not errors here. A mutation deliberately writes code that trips one -- `< -> <=` makes a comparison always true, `+ -> -` converts a sign -- so under -Werror those mutants fail to compile and score `stillborn` instead of being scored against the tests. The C++ extension is off because the campaign's verdict is ctest alone.",
+      "cacheVariables": { "TFIDF_BUILD_NATIVE": "OFF", "TFIDF_WERROR": "OFF" }
     },
     {
       "name": "glibcxx-assertions",
@@ -107,7 +108,7 @@
     { "name": "gcc", "configurePreset": "gcc" },
     { "name": "clang", "configurePreset": "clang" },
     { "name": "debug", "configurePreset": "debug" },
-    { "name": "cpp-only", "configurePreset": "cpp-only" },
+    { "name": "mutation", "configurePreset": "mutation" },
     { "name": "glibcxx-assertions", "configurePreset": "glibcxx-assertions" },
     { "name": "asan", "configurePreset": "asan" },
     { "name": "tsan", "configurePreset": "tsan" },
@@ -127,7 +128,7 @@
     { "name": "gcc", "inherits": "base", "configurePreset": "gcc" },
     { "name": "clang", "inherits": "base", "configurePreset": "clang" },
     { "name": "debug", "inherits": "base", "configurePreset": "debug" },
-    { "name": "cpp-only", "inherits": "base", "configurePreset": "cpp-only" },
+    { "name": "mutation", "inherits": "base", "configurePreset": "mutation" },
     { "name": "glibcxx-assertions", "inherits": "base", "configurePreset": "glibcxx-assertions" },
     { "name": "asan", "inherits": "base", "configurePreset": "asan" },
     { "name": "tsan", "inherits": "base", "configurePreset": "tsan" }
