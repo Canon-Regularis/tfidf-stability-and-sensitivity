@@ -21,9 +21,10 @@ __all__ = ["GAP", "Token", "TokenisationConfig", "tokenise", "tokenise_with_offs
 #: preprocessing order. See ``docs/spec_addenda.md#g7``.
 GAP: Final[str] = "\x00"
 
-#: Unicode word pattern: runs of letters or digits. Apostrophes and hyphens are
-#: excluded, so "don't" tokenises as ("don", "t"). Pinned here and hashed into
-#: the manifest.
+#: Unicode word pattern: runs of letters or digits, so "don't" tokenises as
+#: ("don", "t"). A combining mark is neither, so one that NFKC leaves uncomposed
+#: separates tokens: "Istanbul" spelt with U+0130 lowercases to "i" plus U+0307
+#: and gives ("i", "stanbul"). See spec_addenda.md#g7. Hashed into the manifest.
 DEFAULT_PATTERN: Final[str] = r"[^\W_]+"
 
 #: ASCII-only alternative, for the restricted profile used in fuzzing where

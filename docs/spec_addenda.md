@@ -344,6 +344,23 @@ injective); and **stopword removal precedes n-gram generation, with n-grams
 forbidden from spanning a removed token**, since otherwise "king of pop" silently
 manufactures the bigram "king pop".
 
+**What the token pattern admits.** `[^\W_]+` matches runs of letters and digits.
+A combining mark is neither, so one that NFKC leaves uncomposed separates
+tokens: `İstanbul` lowercases to `i` followed by U+0307, which has no composed
+form, and tokenises as `("i", "stanbul")`. Scripts that write their marks as
+separate code points split the same way. Making the pattern mark-aware would
+change a value the manifest hashes, and Python's `re` offers no `\p{M}`, so it
+would need either hand-listed Unicode blocks or a dependency this project does
+not carry. Recorded here so the current behaviour is a decision rather than an
+accident.
+
+**Which control characters are deleted.** `Cc`, `Cf`, `Co` and `Cs`, before
+tokenisation. `Cn` (unassigned) is excluded deliberately: which code points are
+unassigned changes with the Unicode version, so deleting them would make the
+token stream depend on the interpreter's `unicodedata` rather than on the text.
+A `Cn` code point is not a letter or a digit, so it separates tokens where
+deleting it would have joined them: `ab<U+0378>cd` gives `("ab", "cd")`.
+
 ---
 
 <a id="g8"></a>

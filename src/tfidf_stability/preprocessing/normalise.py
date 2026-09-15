@@ -23,8 +23,10 @@ UnicodeForm = Literal["NFC", "NFD", "NFKC", "NFKD"]
 #: routinely mix the two.
 _FORM: Final[UnicodeForm] = "NFKC"
 
-#: Characters we delete outright rather than map to a separator. Control
-#: characters would otherwise collide with the n-gram joiner (see ngrams.py).
+#: Characters deleted outright rather than mapped to a separator, since a
+#: control character would otherwise collide with the n-gram joiner (ngrams.py).
+#: `Cn` is excluded deliberately: which code points are unassigned changes with
+#: the Unicode version, so deleting them would tie the token stream to that.
 _CONTROL_CATEGORIES: Final = frozenset({"Cc", "Cf", "Co", "Cs"})
 
 
