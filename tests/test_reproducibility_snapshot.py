@@ -28,6 +28,7 @@ from the subprocess rather than as an ImportError naming the cause.
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 import sys
 from pathlib import Path
@@ -195,6 +196,33 @@ def test_the_serialised_model_is_byte_stable_across_processes() -> None:
 # ---------------------------------------------------------------------------
 # The manifest
 # ---------------------------------------------------------------------------
+def test_the_written_manifest_covers_every_declared_field() -> None:
+    """``to_dict`` is what both :meth:`write` and :meth:`digest` read.
+
+    A field it omits is absent from every published manifest and from the
+    digest, with nothing left to report the omission.
+    """
+    manifest = RunManifest("stability_profile", parameters={"tau": 1e-9})
+
+    assert list(manifest.to_dict()) == [f.name for f in dataclasses.fields(manifest)]
+
+
+def test_the_manifest_digest_is_taken_over_a_recorded_set_of_bytes() -> None:
+    """The digest of a manifest whose every field is fixed here.
+
+    ``environment`` is supplied rather than measured, so the value depends on
+    the manifest's contents alone and holds on any machine. A changed key set
+    moves it; ``canonical_json`` sorts keys, so a changed key order does not.
+    """
+    manifest = RunManifest(
+        "stability_profile",
+        parameters={"tau": 1e-9},
+        environment={"float": {"mantissa_dig": 53}, "native": None},
+    )
+
+    assert manifest.digest() == "25e1dfbec26aedf6c20b504f259245a0d9469a32300d2af2028e1bf481e1e85a"
+
+
 def test_the_manifest_digest_ignores_volatile_fields() -> None:
     """Two identical runs at different times on different machines must agree,
     or the digest could only record a run rather than verify one."""

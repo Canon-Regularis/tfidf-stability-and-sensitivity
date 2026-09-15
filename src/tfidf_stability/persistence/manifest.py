@@ -21,7 +21,7 @@ from __future__ import annotations
 import platform
 import sys
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -94,6 +94,9 @@ class RunManifest:
         parameters: Experiment parameters: ``tau``, the ``k`` set, the reduction
             policy, the operator priorities.
         results: Digests of the output artefacts.
+        environment: Interpreter, platform and native-build provenance, from
+            :func:`environment_block`. :data:`_MACHINE_KEYS` is stripped before
+            the digest; the keys that move numbers are not.
         notes: Free text. Never hashed.
     """
 
@@ -109,19 +112,15 @@ class RunManifest:
     notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        """The full manifest, including the volatile parts."""
-        return {
-            "run_kind": self.run_kind,
-            "config": self.config,
-            "dataset": self.dataset,
-            "preprocessing": self.preprocessing,
-            "model": self.model,
-            "queries": self.queries,
-            "parameters": self.parameters,
-            "results": self.results,
-            "environment": self.environment,
-            "notes": self.notes,
-        }
+        """The full manifest, including the volatile parts.
+
+        Read from the declared fields rather than restated, so a field added
+        above cannot be missing from the written manifest and from
+        :meth:`digest`. Not ``dataclasses.asdict``, which deep-copies and
+        recurses: the values here are shared with the caller's, and the digest
+        would copy the whole manifest on every call.
+        """
+        return {f.name: getattr(self, f.name) for f in fields(self)}
 
     #: Environment keys identifying the machine, not the arithmetic. Stripped
     #: for the digest, kept in the written JSON, so
