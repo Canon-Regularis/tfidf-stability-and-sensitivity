@@ -24,22 +24,18 @@
 \usepackage{listings}
 \usepackage{xcolor}
 
-\theoremstyle{plain}
-\newtheorem{proposition}{Proposition}
-\theoremstyle{remark}
+\theoremstyle{plain} \newtheorem{proposition}{Proposition} \theoremstyle{remark}
 \newtheorem{finding}{Finding}
 
 \newcommand{\addendum}[1]{\textsf{G#1}}
 \newcommand{\code}[1]{\texttt{\small #1}}
 
-% reports/figures/ is committed -- seven PNGs, tracked, with no .gitignore entry.
-% This comment used to say the opposite, and the argument it gave for that is
-% still worth stating: matplotlib stamps its own version into every PNG, so the
-% committed bytes are tied to the plotting library as well as to the result, and
-% a matplotlib upgrade shows up as a diff in files nobody edited. Measured while
-% checking this: the seven regenerate byte-identically under matplotlib 3.11.1,
-% and four of them changed the moment a report digest they are stamped with
-% moved -- which is the stamp doing its job and the coupling being real.
+% reports/figures/ holds seven committed PNGs, tracked, with no .gitignore rule.
+% matplotlib stamps its own version into every PNG, so the committed bytes are
+% tied to the plotting library as well as to the result: an upgrade shows up as
+% a diff in files nobody edited. The seven regenerate byte-identically under one
+% matplotlib version, and a figure changes whenever a report digest it is
+% stamped with moves, which is the stamp doing its job.
 %
 % Because they are committed, the fallback below cannot fire in this repository.
 % It is kept for a tree where the figures have not been generated yet, and it
@@ -55,7 +51,7 @@
     \textbf{Figure not generated.}\\[0.4em]
     \texttt{#3}\\
     % -{}- rather than --, which TeX ligatures into an en dash even in \texttt.
-    % The box exists to hand someone a command that runs, and "-reports" does not.
+    % The box hands someone a command that runs, and "-reports" does not.
     \texttt{python scripts/make\_figures.py -{}-reports reports/}%
     \vspace{1em}}}%
   }
@@ -130,9 +126,9 @@ falsifies the reproducibility claim.
 
 IDF is therefore computed once in Python via \code{decimal.Decimal.ln()} at
 60~digits and rounded once to binary64. The C++ core never sees a logarithm; it
-receives IDF as data. What remains is $+$, $-$, $\times$, $\div$ and $\sqrt{\ }$,
-which IEEE-754 requires to be correctly rounded~\cite{ieee754-2019}, so every
-conforming platform must agree.
+receives IDF as data. What remains is $+$, $-$, $\times$, $\div$ and $\sqrt{\
+}$, which IEEE-754 requires to be correctly rounded~\cite{ieee754-2019}, so
+every conforming platform must agree.
 
 \subsection{The tie-break}
 
@@ -147,8 +143,8 @@ guarantee.
 \S7.1 asks that $\tau$ ``exceed floating-point noise while remaining small
 relative to typical score separations''. The constraint is two-sided and
 qualitative: it delimits an interval and supplies no procedure for choosing a
-point inside it. Deriving a single number from it would manufacture precision the
-specification does not contain.
+point inside it. Deriving a single number from it would manufacture precision
+the specification does not contain.
 
 \subsection{The lower endpoint}
 
@@ -175,11 +171,11 @@ the largest absolute deviation observed.}
 \label{tab:noise}
 \begin{tabular}{lrrr}
 \toprule
-reduction policy & scores differing & $\eta$ & max ulps \\
+reduction policy & scores differing & $\eta$                & max ulps \\
 \midrule
-naive fold & $65.56\%$ & $5.551\times10^{-16}$ & $8$ \\
-pairwise   & $65.56\%$ & $5.551\times10^{-16}$ & $8$ \\
-Neumaier   & $0.00\%$  & $0$                   & $0$ \\
+naive fold       & $65.56\%$        & $5.551\times10^{-16}$ & $8$ \\
+pairwise         & $65.56\%$        & $5.551\times10^{-16}$ & $8$ \\
+Neumaier         & $0.00\%$         & $0$                   & $0$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -210,22 +206,22 @@ s_b$. Such a difference is a sum of consecutive gaps, and a sum of gaps is not i
 general a gap, so the adjacent gaps do not exhaust the breakpoints.
 \end{proof}
 
-An earlier version of this proposition put the breakpoints at observed gap values
-alone. That is false for the complete-linkage objects, and measurably so: across
-the swept range $\rho(\tau)$ has $129$ discontinuities, of which $18$ are at an
-adjacent gap and $111$ at a clique threshold that is not one. Sweeping the gaps
-alone located one in seven and interpolated the rest, so the runner now evaluates
-both sets; see Figure~\ref{fig:rho}.
+An earlier version of this proposition put the breakpoints at observed gap
+values alone. That is false for the complete-linkage objects, and measurably so:
+across the swept range $\rho(\tau)$ has $129$ discontinuities, of which $18$ are
+at an adjacent gap and $111$ at a clique threshold that is not one. Sweeping the
+gaps alone located one in seven and interpolated the rest, so the runner now
+evaluates both sets; see Figure~\ref{fig:rho}.
 
 Consequently, if $[\tau_{\text{floor}}, g_{\min})$ contains no pairwise
 difference, every $\tau$ within it yields bit-identical tie structure. It cannot
-contain one: a strictly-positive difference is a sum of adjacent gaps of which at
-least one is positive, so it is at least $g_{\min}$. The band is therefore empty
-of breakpoints by construction and not by observation, which makes the invariance
-across it weaker evidence than it first appears, as
-Finding~\ref{find:plateau} records. Measured: $\eta =
-5.551\times10^{-16}$, $\tau_{\text{floor}} = 1.110\times10^{-15}$, $g_{\min} =
-3.709\times10^{-8}$, a band of $7.52$ decades.
+contain one: a strictly-positive difference is a sum of adjacent gaps of which
+at least one is positive, so it is at least $g_{\min}$. The band is therefore
+empty of breakpoints by construction and not by observation, which makes the
+invariance across it weaker evidence than it first appears, as
+Finding~\ref{find:plateau} records. Measured: $\eta = 5.551\times10^{-16}$,
+$\tau_{\text{floor}} = 1.110\times10^{-15}$, $g_{\min} = 3.709\times10^{-8}$, a
+band of $7.52$ decades.
 
 This is not circular: $\tau_{\text{floor}}$ comes from arithmetic and $g_{\min}$
 from the score lattice, and neither is a function of $\tau$.
@@ -263,13 +259,13 @@ trials. Seven queries are excluded for $m_k = 0$, which is A2's regime.}
 \toprule
 $\varepsilon / (m_k/2)$ & flip rate \\
 \midrule
-$0.25$ to $0.99$ & $0.00\%$ \\
-$1.00$         & $0.00\%$ \\
-$1.01$         & $0.00\%$ \\
-$1.10$         & $0.15\%$ \\
-$2.00$         & $22.35\%$ \\
-$5.00$         & $60.61\%$ \\
-$20.00$        & $91.82\%$ \\
+$0.25$ to $0.99$        & $0.00\%$ \\
+$1.00$                  & $0.00\%$ \\
+$1.01$                  & $0.00\%$ \\
+$1.10$                  & $0.15\%$ \\
+$2.00$                  & $22.35\%$ \\
+$5.00$                  & $60.61\%$ \\
+$20.00$                 & $91.82\%$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -307,11 +303,11 @@ radius.}{fig:cascade}
 The claim that tie-break effects are independent of numerical error is earned
 structurally. \code{rank\_all\_operators} shares one sorted-score object across
 $\pi$, $\pi_{\text{score}}$ and $\pi_{\text{alt}}$, so no arithmetic separates
-them and a disagreement admits a single cause. The runner verifies this with
-an identity check before reporting anything, and aborts otherwise.
-Identity rather than bit comparison: the three share one score array, so
-comparing values would compare that array with itself and pass whatever
-happened, including after the sharing was removed.
+them and a disagreement admits a single cause. The runner verifies this with an
+identity check before reporting anything, and aborts otherwise. Identity rather
+than bit comparison: the three share one score array, so comparing values would
+compare that array with itself and pass whatever happened, including after the
+sharing was removed.
 
 Against $\pi_{\text{score}}$ disagreement concentrates sharply at $k=1$:
 $42.5\%$, against at most $10\%$ at every other $k$ measured. The leading
@@ -391,12 +387,12 @@ regime and outside A1's. Conflating the two would misattribute the cause
 \label{tab:scales}
 \begin{tabular}{lr}
 \toprule
-quantity & magnitude \\
+quantity                      & magnitude \\
 \midrule
-arithmetic noise floor $\eta$      & ${\sim}10^{-16}$ \\
-smallest non-zero score gap        & ${\sim}4\times10^{-8}$ \\
-typical adjacent gap               & $10^{-4}$ to $10^{-2}$ \\
-corpus-edit perturbation           & $10^{-4}$ to $10^{-1}$ \\
+arithmetic noise floor $\eta$ & ${\sim}10^{-16}$ \\
+smallest non-zero score gap   & ${\sim}4\times10^{-8}$ \\
+typical adjacent gap          & $10^{-4}$ to $10^{-2}$ \\
+corpus-edit perturbation      & $10^{-4}$ to $10^{-1}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -407,11 +403,10 @@ floor of $1.665\times10^{-16}$ on that corpus --- widening to fifteen at the far
 ends. Twelve is the figure the argument needs, being the closest the two regimes
 ever come. Numerical error never came within seven orders of closing a real gap.
 A1's bounded perturbations are therefore entirely about semantic perturbation;
-floating-point error is not a threat to ranking at any scale this system operates
-at. That is a positive result for the numerical
-design of \S6,
-and it is what leaves A1 and A2 as separable questions rather than two names for
-one effect.
+floating-point error is not a threat to ranking at any scale this system
+operates at. That is a positive result for the numerical design of \S6, and it
+is what leaves A1 and A2 as separable questions rather than two names for one
+effect.
 
 \section{Threats to validity}
 
@@ -423,18 +418,18 @@ a run against a different vocabulary or reduction is not covered by that floor.
 therefore a lower bound on the true worst case. It is reported as measured, with
 its grid size, rather than as a proven bound.
 
-\paragraph{Corpus dependence.} The gap distribution shares vary with corpus size,
-vocabulary and query; an earlier draft quoted one configuration's table as
+\paragraph{Corpus dependence.} The gap distribution shares vary with corpus
+size, vocabulary and query; an earlier draft quoted one configuration's table as
 canonical and was corrected. The same draft claimed the interval $(0, 10^{-9})$
 was invariably empty, and that does not survive either. It holds on the seeded
 generator, where a test enforces it and says in its own docstring that it
 generalises no further. MovieLens falsifies it: $197$ of $114{,}504$ adjacent
-pairs fall below that corpus's own $\tau_{\text{floor}}$ of $4.441\times10^{-16}$
---- not the $1.110\times10^{-15}$ derived above, which belongs to the synthetic
-corpus, though the count is $197$ against either threshold --- and the smallest
-strictly-positive gap is $1.4\times10^{-11}$ even with the scores recomputed
-exactly, so the emptiness is a property of the generator rather than of TF-IDF
-(\addendum{22}).
+pairs fall below that corpus's own $\tau_{\text{floor}}$ of
+$4.441\times10^{-16}$ --- not the $1.110\times10^{-15}$ derived above, which
+belongs to the synthetic corpus, though the count is $197$ against either
+threshold --- and the smallest strictly-positive gap is $1.4\times10^{-11}$ even
+with the scores recomputed exactly, so the emptiness is a property of the
+generator rather than of TF-IDF (\addendum{22}).
 
 \paragraph{Synthetic data.} The controlled results use a seeded generator.
 MovieLens supplies external validity but may not be redistributed, so results on

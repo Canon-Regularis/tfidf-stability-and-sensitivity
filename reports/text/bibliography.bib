@@ -6,12 +6,23 @@
 % compensated summation -- which the README does not cite but which the
 % correctness argument requires. G13 (the logarithm) and G23 (the measured noise
 % floor) are unintelligible without it.
+%
+% Most entries here are deliberately uncited. main.tex cites four; the rest are
+% the reading this study rests on, kept in one place because nothing else in the
+% repository records them. Pruning to the cited four would make the file match
+% the document and lose that list, so it is a reading list that a bibliography
+% is drawn from rather than a bibliography alone.
+%
+% Every title is wrapped in a second pair of braces. `plain.bst` lowercases a
+% title except its first word, so without it "IEEE Standard for Floating-Point
+% Arithmetic" renders as "standard for floating-point arithmetic", and the
+% German nouns in the Neumaier title lose their capitals.
 
 % ---------------------------------------------------------------------------
 % Classical information retrieval
 % ---------------------------------------------------------------------------
 @book{manning2008introduction,
-  title     = {Introduction to Information Retrieval},
+  title     = {{Introduction to Information Retrieval}},
   author    = {Manning, Christopher D. and Raghavan, Prabhakar and Sch{\"u}tze, Hinrich},
   year      = {2008},
   publisher = {Cambridge University Press},
@@ -20,7 +31,7 @@
 }
 
 @article{salton1988term,
-  title   = {Term-weighting approaches in automatic text retrieval},
+  title   = {{Term-weighting approaches in automatic text retrieval}},
   author  = {Salton, Gerard and Buckley, Christopher},
   journal = {Information Processing \& Management},
   volume  = {24},
@@ -31,7 +42,7 @@
 }
 
 @article{zobel2006inverted,
-  title   = {Inverted files for text search engines},
+  title   = {{Inverted files for text search engines}},
   author  = {Zobel, Justin and Moffat, Alistair},
   journal = {ACM Computing Surveys},
   volume  = {38},
@@ -42,7 +53,7 @@
 }
 
 @article{cover1967nearest,
-  title   = {Nearest neighbor pattern classification},
+  title   = {{Nearest neighbor pattern classification}},
   author  = {Cover, Thomas M. and Hart, Peter E.},
   journal = {IEEE Transactions on Information Theory},
   volume  = {13},
@@ -56,7 +67,7 @@
 % Numerical linear algebra and stability
 % ---------------------------------------------------------------------------
 @book{higham2002accuracy,
-  title     = {Accuracy and Stability of Numerical Algorithms},
+  title     = {{Accuracy and Stability of Numerical Algorithms}},
   author    = {Higham, Nicholas J.},
   edition   = {2},
   year      = {2002},
@@ -66,7 +77,7 @@
 }
 
 @book{trefethen1997numerical,
-  title     = {Numerical Linear Algebra},
+  title     = {{Numerical Linear Algebra}},
   author    = {Trefethen, Lloyd N. and Bau, David},
   year      = {1997},
   publisher = {SIAM},
@@ -78,7 +89,7 @@
 % Sparse geometry, similarity, statistical learning
 % ---------------------------------------------------------------------------
 @book{aggarwal2015data,
-  title     = {Data Mining: The Textbook},
+  title     = {{Data Mining: The Textbook}},
   author    = {Aggarwal, Charu C.},
   year      = {2015},
   publisher = {Springer},
@@ -86,7 +97,7 @@
 }
 
 @book{leskovec2020mining,
-  title     = {Mining of Massive Datasets},
+  title     = {{Mining of Massive Datasets}},
   author    = {Leskovec, Jure and Rajaraman, Anand and Ullman, Jeffrey D.},
   edition   = {3},
   year      = {2020},
@@ -94,7 +105,7 @@
 }
 
 @book{hastie2009elements,
-  title     = {The Elements of Statistical Learning},
+  title     = {{The Elements of Statistical Learning}},
   author    = {Hastie, Trevor and Tibshirani, Robert and Friedman, Jerome},
   edition   = {2},
   year      = {2009},
@@ -103,7 +114,7 @@
 }
 
 @book{shalevshwartz2014understanding,
-  title     = {Understanding Machine Learning: From Theory to Algorithms},
+  title     = {{Understanding Machine Learning: From Theory to Algorithms}},
   author    = {Shalev-Shwartz, Shai and Ben-David, Shai},
   year      = {2014},
   publisher = {Cambridge University Press},
@@ -118,8 +129,8 @@
 % at-sign as the start of an entry even on a comment line, so entry types must
 % never be named with their sigil in prose here.
 @techreport{ieee754-2019,
+  title       = {{{IEEE} Standard for Floating-Point Arithmetic}},
   author      = {{IEEE}},
-  title       = {{IEEE} Standard for Floating-Point Arithmetic},
   number      = {IEEE Std 754-2019},
   institution = {IEEE},
   year        = {2019},
@@ -130,7 +141,7 @@
 }
 
 @article{goldberg1991what,
-  title   = {What every computer scientist should know about floating-point arithmetic},
+  title   = {{What every computer scientist should know about floating-point arithmetic}},
   author  = {Goldberg, David},
   journal = {ACM Computing Surveys},
   volume  = {23},
@@ -141,7 +152,7 @@
 }
 
 @article{shewchuk1997adaptive,
-  title   = {Adaptive precision floating-point arithmetic and fast robust geometric predicates},
+  title   = {{Adaptive precision floating-point arithmetic and fast robust geometric predicates}},
   author  = {Shewchuk, Jonathan Richard},
   journal = {Discrete \& Computational Geometry},
   volume  = {18},
@@ -155,7 +166,7 @@
 }
 
 @article{neumaier1974rundungsfehler,
-  title   = {Rundungsfehleranalyse einiger Verfahren zur Summation endlicher Summen},
+  title   = {{Rundungsfehleranalyse einiger Verfahren zur Summation endlicher Summen}},
   author  = {Neumaier, Arnold},
   journal = {Zeitschrift f{\"u}r Angewandte Mathematik und Mechanik},
   volume  = {54},
@@ -168,7 +179,7 @@
 }
 
 @book{muller2018handbook,
-  title     = {Handbook of Floating-Point Arithmetic},
+  title     = {{Handbook of Floating-Point Arithmetic}},
   author    = {Muller, Jean-Michel and Brunie, Nicolas and de Dinechin, Florent
                and Jeannerod, Claude-Pierre and Joldes, Mioara and Lef{\`e}vre,
                Vincent and Melquiond, Guillaume and Revol, Nathalie and Torres, Serge},
@@ -182,7 +193,7 @@
 % Rank comparison
 % ---------------------------------------------------------------------------
 @inproceedings{fagin2003comparing,
-  title     = {Comparing top $k$ lists},
+  title     = {{Comparing top $k$ lists}},
   author    = {Fagin, Ronald and Kumar, Ravi and Sivakumar, D.},
   booktitle = {Proceedings of the 14th Annual ACM-SIAM Symposium on Discrete Algorithms},
   pages     = {28--36},
@@ -194,7 +205,7 @@
 }
 
 @article{kendall1938new,
-  title   = {A new measure of rank correlation},
+  title   = {{A new measure of rank correlation}},
   author  = {Kendall, Maurice G.},
   journal = {Biometrika},
   volume  = {30},
@@ -205,7 +216,7 @@
 }
 
 @article{roberts1971homogeneous,
-  title   = {Homogeneous families of semiorders and the theory of probabilistic consistency},
+  title   = {{Homogeneous families of semiorders and the theory of probabilistic consistency}},
   author  = {Roberts, Fred S.},
   journal = {Journal of Mathematical Psychology},
   volume  = {8},
@@ -223,7 +234,7 @@
 % Data
 % ---------------------------------------------------------------------------
 @article{harper2015movielens,
-  title   = {The {MovieLens} datasets: History and context},
+  title   = {{The {MovieLens} datasets: History and context}},
   author  = {Harper, F. Maxwell and Konstan, Joseph A.},
   journal = {ACM Transactions on Interactive Intelligent Systems},
   volume  = {5},
@@ -235,7 +246,7 @@
 }
 
 @misc{porter2002snowball,
-  title  = {Snowball: A language for stemming algorithms},
+  title  = {{Snowball: A language for stemming algorithms}},
   author = {Porter, Martin F.},
   year   = {2002},
   note   = {The English (Porter2) stemmer. Vendored from the official generated
