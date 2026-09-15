@@ -39,6 +39,7 @@
       "min_normal": 2.2250738585072014e-308,
       "no_reassociation": true,
       "rounds": 1,
+      "rounds_live": true,
       "subnormals_supported": true
     },
     "implementation": "CPython",
@@ -49,7 +50,7 @@
       "compiler_id": "GNU",
       "compiler_ver": "13.2.0",
       "fast_math": false,
-      "git_sha": "1aa26bf9cb3f",
+      "git_sha": "0fb1344b3dab",
       "numeric_flags": "-ffp-contract=off -fno-fast-math -fno-associative-math -fno-reciprocal-math -fno-unsafe-math-optimizations -fno-finite-math-only -fsigned-zeros -fexcess-precision=standard -mfpmath=sse",
       "processor": "AMD64",
       "reproducible": true,
@@ -128,6 +129,7 @@
       "mean": 0.005963662399913032,
       "min": 0.0,
       "n": 200,
+      "n_infinite": 0,
       "n_nan": 0,
       "n_zero": 136,
       "name": "kendall_fks",
@@ -2365,5 +2367,5 @@
       ]
     }
   },
-  "result_digest": "f7946bd9203a9ae4a1eec61fd5091cd9179c3142172093a836563082c8897e72"
+  "result_digest": "c11e158556407b8e2b7922780d13199d6d55a53a57fc97c3a29ae756aa5d8b1e"
 }
