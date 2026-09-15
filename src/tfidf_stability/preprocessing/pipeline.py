@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -41,9 +41,15 @@ from tfidf_stability.preprocessing.stopwords import (
     load_stopwords,
     remove_stopwords,
 )
-from tfidf_stability.preprocessing.tokenise import TokenisationConfig, tokenise
+from tfidf_stability.preprocessing.tokenise import GAP, TokenisationConfig, tokenise
 
-__all__ = ["PreprocessedDocument", "PreprocessingConfig", "PreprocessingPipeline"]
+__all__ = [
+    "PreprocessedDocument",
+    "PreprocessingConfig",
+    "PreprocessingPipeline",
+    "preprocess_all",
+    "preprocess_records",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,15 +247,50 @@ class PreprocessingPipeline:
         }
 
     # --- the map ------------------------------------------------------------
-    def preprocess(self, text: str) -> list[str]:
-        """Apply the full map, returning the feature (n-gram) stream."""
+    def _tokenise(self, text: str) -> list[str]:
+        """Normalise and tokenise: the stages before a gap sentinel can exist."""
         cfg = self.config
-        tokens = tokenise(normalise(text, cfg.normalisation), cfg.tokenisation)
+        return tokenise(normalise(text, cfg.normalisation), cfg.tokenisation)
+
+    def _after_tokenisation(self, tokens: Sequence[str]) -> tuple[list[str], list[str]]:
+        """Stopwords, lemmatisation and n-grams, as ``(lemmas, features)``."""
+        cfg = self.config
         kept = remove_stopwords(tokens, self._stopwords, insert_gaps=cfg.insert_gaps)
         lemmas = self._lemmatiser.apply(kept)
-        return generate_ngrams(
+        features = generate_ngrams(
             lemmas, cfg.n_min, cfg.n_max, joiner=JOINER, cross_gaps=cfg.cross_gaps
         )
+        return lemmas, features
+
+    def preprocess(self, text: str) -> list[str]:
+        """Apply the full map, returning the feature (n-gram) stream."""
+        return self._after_tokenisation(self._tokenise(text))[1]
+
+    def preprocess_fields(self, fields: Sequence[str]) -> list[str]:
+        """As :meth:`preprocess`, with a hard boundary between the fields.
+
+        A document assembled from separate fields -- a title, a genre list, a
+        set of free-text tags -- has no continuous text across the seams, so an
+        n-gram spanning one is manufactured by the assembly order rather than
+        found in the data. Each field is tokenised alone and the streams are
+        joined with :data:`~tfidf_stability.preprocessing.tokenise.GAP`, the
+        sentinel :func:`~tfidf_stability.preprocessing.ngrams.generate_ngrams`
+        already segments on.
+
+        Joining the fields into one string first cannot do this: ``GAP`` is a
+        control character and :func:`normalise` deletes those, so the seam would
+        close rather than hold.
+
+        ``insert_gaps=False`` drops every sentinel, these included, and
+        ``cross_gaps=True`` bridges them. Both are ablations of exactly this
+        boundary, so under either the seams are not held, by construction.
+        """
+        stream: list[str] = []
+        for text in fields:
+            if stream:
+                stream.append(GAP)
+            stream.extend(self._tokenise(text))
+        return self._after_tokenisation(stream)[1]
 
     def preprocess_document(self, doc_id: str, text: str) -> PreprocessedDocument:
         """As :meth:`preprocess`, retaining the intermediate stages for inspection.
@@ -257,13 +298,8 @@ class PreprocessingPipeline:
         Section 1.2 of the paper requires intermediate quantities to stay
         accessible; the chain starts here.
         """
-        cfg = self.config
-        raw = tokenise(normalise(text, cfg.normalisation), cfg.tokenisation)
-        kept = remove_stopwords(raw, self._stopwords, insert_gaps=cfg.insert_gaps)
-        lemmas = self._lemmatiser.apply(kept)
-        features = generate_ngrams(
-            lemmas, cfg.n_min, cfg.n_max, joiner=JOINER, cross_gaps=cfg.cross_gaps
-        )
+        raw = self._tokenise(text)
+        lemmas, features = self._after_tokenisation(raw)
         return PreprocessedDocument(
             doc_id=doc_id,
             features=tuple(features),
@@ -295,3 +331,22 @@ def preprocess_all(
     """Convenience wrapper for callers that only need the feature streams."""
     pipeline = PreprocessingPipeline(config)
     return [pipeline.preprocess(t) for t in texts]
+
+
+def preprocess_records(
+    pipeline: PreprocessingPipeline, records: Iterable[Mapping[str, Any]]
+) -> list[list[str]]:
+    """Feature streams for corpus records, honouring a field boundary if present.
+
+    A record carrying ``fields`` goes through
+    :meth:`PreprocessingPipeline.preprocess_fields`; one carrying only ``text``
+    goes through :meth:`PreprocessingPipeline.preprocess`. Every driver reads a
+    corpus the same way, so a dataset that knows its own field boundaries does
+    not depend on which script loaded it.
+    """
+    return [
+        pipeline.preprocess_fields([str(f) for f in record["fields"]])
+        if record.get("fields")
+        else pipeline.preprocess(str(record["text"]))
+        for record in records
+    ]

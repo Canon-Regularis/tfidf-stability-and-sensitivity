@@ -24,7 +24,10 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
 from tfidf_stability.datasets.loaders import load_dataset  # noqa: E402
-from tfidf_stability.preprocessing.pipeline import PreprocessingPipeline  # noqa: E402
+from tfidf_stability.preprocessing.pipeline import (  # noqa: E402
+    PreprocessingPipeline,
+    preprocess_records,
+)
 from tfidf_stability.utils.io import write_json  # noqa: E402
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser  # noqa: E402
 
@@ -39,7 +42,7 @@ def main() -> int:
 
     data = load_dataset(args.dataset, archive=args.archive)
     pipeline = PreprocessingPipeline()
-    features = [pipeline.preprocess(str(r["text"])) for r in data.records]
+    features = preprocess_records(pipeline, data.records)
     model = TfidfVectoriser().fit(features, data.doc_ids)
 
     doc_id = args.doc or data.doc_ids[0]

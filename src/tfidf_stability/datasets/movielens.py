@@ -85,6 +85,10 @@ class MovieLensCorpus:
     archive_sha256: str
     doc_ids: tuple[str, ...]
     texts: tuple[str, ...]
+    #: The same documents before the fields were joined: title, genres, then one
+    #: entry per tag. Carried so n-grams do not span a seam between two of them,
+    #: which the joined text alone cannot express (``spec_addenda.md#g7``).
+    fields: tuple[tuple[str, ...], ...]
     attributes: tuple[dict[str, Any], ...]
     interactions: tuple[tuple[str, str, float], ...]
     #: Rating at or above which a rating becomes a positive interaction. Carried
@@ -100,11 +104,17 @@ class MovieLensCorpus:
         return len(self.doc_ids)
 
     def records(self) -> list[dict[str, Any]]:
-        """Corpus rows in the shape :class:`AttributeTable` and the CLI expect."""
+        """Corpus rows in the shape :class:`AttributeTable` and the CLI expect.
+
+        ``text`` is the joined form every consumer already reads; ``fields`` is
+        the same content unjoined, which
+        :func:`~tfidf_stability.preprocessing.pipeline.preprocess_records` uses
+        in preference. A reader that knows only ``text`` is unaffected.
+        """
         return [
-            {"doc_id": doc_id, "text": text, **attributes}
-            for doc_id, text, attributes in zip(
-                self.doc_ids, self.texts, self.attributes, strict=True
+            {"doc_id": doc_id, "text": text, "fields": list(parts), **attributes}
+            for doc_id, text, parts, attributes in zip(
+                self.doc_ids, self.texts, self.fields, self.attributes, strict=True
             )
         ]
 
@@ -218,6 +228,7 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
 
     doc_ids: list[str] = []
     texts: list[str] = []
+    fields: list[tuple[str, ...]] = []
     attributes: list[dict[str, Any]] = []
     n_unrated = 0
     for row in movie_rows:
@@ -225,15 +236,13 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
         n = count[movie]
         n_unrated += n == 0
         doc_ids.append(f"m{movie}")
-        texts.append(
-            " ".join(
-                (
-                    _title_tokens(row["title"]),
-                    row["genres"].replace("|", " "),
-                    *tags[movie],
-                )
-            )
-        )
+        # Title, genres and each tag are separate fields, not one passage: an
+        # n-gram bridging two of them is a product of this concatenation rather
+        # than of the data. Both forms are carried, and `preprocess_records`
+        # takes the unjoined one.
+        parts = (_title_tokens(row["title"]), row["genres"].replace("|", " "), *tags[movie])
+        fields.append(parts)
+        texts.append(" ".join(parts))
         attributes.append(
             {
                 "popularity": n,
@@ -255,6 +264,7 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
         archive_sha256=digest,
         doc_ids=tuple(doc_ids),
         texts=tuple(texts),
+        fields=tuple(fields),
         attributes=tuple(attributes),
         interactions=tuple(interactions),
         min_weight=min_weight,

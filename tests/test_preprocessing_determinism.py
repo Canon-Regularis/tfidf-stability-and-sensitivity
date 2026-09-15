@@ -34,11 +34,16 @@ from tfidf_stability.preprocessing.ngrams import (
     ngram_order,
     split_ngram,
 )
-from tfidf_stability.preprocessing.normalise import NormalisationConfig, normalise
+from tfidf_stability.preprocessing.normalise import (
+    _CONTROL_CATEGORIES,
+    NormalisationConfig,
+    normalise,
+)
 from tfidf_stability.preprocessing.pipeline import (
     PreprocessingConfig,
     PreprocessingPipeline,
     preprocess_all,
+    preprocess_records,
 )
 from tfidf_stability.preprocessing.stopwords import (
     StopwordSet,
@@ -81,6 +86,37 @@ def test_normalisation_folds_compatibility_forms() -> None:
     assert normalise("①②③") == "123"  # circled digits
     assert normalise("  a   b  ") == "a b"  # whitespace collapse
     assert normalise("a\u200bb") == "ab"  # zero-width space removed
+
+
+def test_a_combining_mark_nfkc_cannot_compose_separates_tokens() -> None:
+    """The token pattern admits letters and digits, and a combining mark is
+    neither. Pinned because it decides the vocabulary for every script that
+    writes its marks as separate code points (spec_addenda.md#g7).
+    """
+    normalised = normalise("\u0130stanbul")
+
+    assert normalised == "i\u0307stanbul", "U+0130 lowercases to i followed by U+0307"
+    assert unicodedata.category("\u0307") == "Mn", "and the mark survives NFKC uncomposed"
+    assert tokenise(normalised) == ["i", "stanbul"]
+
+
+def test_a_precomposed_mark_is_kept_inside_its_token() -> None:
+    """The contrasting case, without which the test above would read as
+    "accented text is shredded" rather than as a statement about composition."""
+    assert tokenise(normalise("caf\u00e9 na\u00efve")) == ["caf\u00e9", "na\u00efve"]
+
+
+def test_an_unassigned_code_point_is_not_stripped_as_a_control() -> None:
+    """``Cn`` membership changes with the Unicode version, so deleting it would
+    tie the token stream to the interpreter's ``unicodedata`` rather than to the
+    text. It separates tokens where deleting it would have joined them.
+    """
+    assert "Cn" not in _CONTROL_CATEGORIES, "adding it makes the map version-dependent"
+    assert unicodedata.category("\u0378") == "Cn", "the premise: this one is unassigned"
+
+    assert normalise("ab\u0378cd") == "ab\u0378cd", "kept, unlike the Cf case above"
+    assert tokenise(normalise("ab\u0378cd")) == ["ab", "cd"]
+    assert tokenise(normalise("ab\u200bcd")) == ["abcd"], "a Cf character is deleted, and joins"
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +170,53 @@ def test_ngrams_never_span_a_removed_stopword() -> None:
     tokens = ["king", GAP, "pop"]
     assert generate_ngrams(tokens, 1, 2) == ["king", "pop"]
     assert f"king{JOINER}pop" not in generate_ngrams(tokens, 1, 2)
+
+
+def test_an_ngram_cannot_span_the_seam_between_two_fields() -> None:
+    """A document assembled from a title and a genre list has no text running
+    across the seam, so a bigram bridging one is a product of the concatenation
+    order rather than of the data (spec_addenda.md#g7).
+    """
+    pipeline = PreprocessingPipeline()
+
+    joined = pipeline.preprocess("heat 1995 action crime")
+    apart = pipeline.preprocess_fields(["heat 1995", "action crime"])
+
+    assert set(joined) - set(apart) == {f"1995{JOINER}action"}
+    assert set(apart) - set(joined) == set(), "and no new feature is manufactured"
+
+
+def test_one_field_is_preprocessed_exactly_as_the_same_text_would_be() -> None:
+    """There is no seam in a single field, so the two entry points must agree.
+    Otherwise splitting a corpus into fields would move every number in it."""
+    pipeline = PreprocessingPipeline()
+
+    assert pipeline.preprocess_fields(["heat 1995 action"]) == pipeline.preprocess(
+        "heat 1995 action"
+    )
+
+
+def test_preprocess_records_uses_fields_when_a_record_carries_them() -> None:
+    """Every driver reads a corpus through this, so a dataset that knows its own
+    field boundaries keeps them whichever script loaded it."""
+    pipeline = PreprocessingPipeline()
+    parts = ["heat 1995", "action crime"]
+
+    assert preprocess_records(pipeline, [{"text": " ".join(parts), "fields": parts}]) == [
+        pipeline.preprocess_fields(parts)
+    ]
+
+
+def test_preprocess_records_falls_back_to_text_without_fields() -> None:
+    """A corpus that states no boundaries behaves exactly as it did before the
+    field form existed. An empty list states none, so it falls back too."""
+    pipeline = PreprocessingPipeline()
+    expected = [pipeline.preprocess("heat 1995 action crime")]
+
+    assert preprocess_records(pipeline, [{"text": "heat 1995 action crime"}]) == expected
+    assert preprocess_records(pipeline, [{"text": "heat 1995 action crime", "fields": []}]) == (
+        expected
+    )
 
 
 def test_ngrams_may_span_gaps_when_explicitly_asked() -> None:

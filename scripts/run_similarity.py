@@ -24,7 +24,10 @@ sys.path.insert(0, str(REPO / "src"))
 
 from tfidf_stability.analysis.summarise import ExperimentResult  # noqa: E402
 from tfidf_stability.datasets.loaders import load_dataset  # noqa: E402
-from tfidf_stability.preprocessing.pipeline import PreprocessingPipeline  # noqa: E402
+from tfidf_stability.preprocessing.pipeline import (  # noqa: E402
+    PreprocessingPipeline,
+    preprocess_records,
+)
 from tfidf_stability.ranking.attributes import AttributeTable  # noqa: E402
 from tfidf_stability.ranking.margins import margin_profile  # noqa: E402
 from tfidf_stability.ranking.ranker import rank_all_operators  # noqa: E402
@@ -59,7 +62,7 @@ def main() -> int:
 
     data = load_dataset(args.dataset, archive=args.archive)
     pipeline = PreprocessingPipeline()
-    features = [pipeline.preprocess(str(r["text"])) for r in data.records]
+    features = preprocess_records(pipeline, data.records)
     model = TfidfVectoriser().fit(features, data.doc_ids)
     table = AttributeTable.from_records(data.records)
     documents = [model.document(i) for i in range(model.n_documents)]

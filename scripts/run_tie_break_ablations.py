@@ -44,7 +44,10 @@ from tfidf_stability.analysis.tie_break_ablations import (  # noqa: E402
 )
 from tfidf_stability.datasets.loaders import load_dataset  # noqa: E402
 from tfidf_stability.datasets.synthetic import find_near_ties  # noqa: E402
-from tfidf_stability.preprocessing.pipeline import PreprocessingPipeline  # noqa: E402
+from tfidf_stability.preprocessing.pipeline import (  # noqa: E402
+    PreprocessingPipeline,
+    preprocess_records,
+)
 from tfidf_stability.profiles.query_modes import QueryMode  # noqa: E402
 from tfidf_stability.ranking.attributes import AttributeTable  # noqa: E402
 from tfidf_stability.ranking.ranker import rank_all_operators  # noqa: E402
@@ -357,7 +360,7 @@ def main() -> int:
 
     data = load_dataset(args.dataset, archive=args.archive)
     pipeline = PreprocessingPipeline()
-    features = [pipeline.preprocess(str(r["text"])) for r in data.records]
+    features = preprocess_records(pipeline, data.records)
     model = TfidfVectoriser().fit(features, data.doc_ids)
 
     # Section 7.1's protocol; document prefixes are a different and much easier

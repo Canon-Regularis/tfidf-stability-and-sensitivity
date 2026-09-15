@@ -39,7 +39,10 @@ sys.path.insert(0, str(REPO / "src"))
 
 from tfidf_stability.persistence.manifest import environment_block  # noqa: E402
 from tfidf_stability.persistence.save_load import model_bytes  # noqa: E402
-from tfidf_stability.preprocessing.pipeline import PreprocessingPipeline  # noqa: E402
+from tfidf_stability.preprocessing.pipeline import (  # noqa: E402
+    PreprocessingPipeline,
+    preprocess_records,
+)
 from tfidf_stability.ranking.attributes import AttributeTable  # noqa: E402
 from tfidf_stability.ranking.margins import margin_profile  # noqa: E402
 from tfidf_stability.ranking.ranker import rank_all_operators  # noqa: E402
@@ -82,7 +85,7 @@ def compute() -> dict[str, str]:
     """
     records = list(read_jsonl(CORPUS))
     pipeline = PreprocessingPipeline()
-    features = [pipeline.preprocess(str(r["text"])) for r in records]
+    features = preprocess_records(pipeline, records)
     ids = [str(r["doc_id"]) for r in records]
 
     model = TfidfVectoriser().fit(features, ids)

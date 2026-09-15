@@ -172,6 +172,31 @@ def test_genres_and_years_are_split_into_tokens() -> None:
     assert "fun" in text
 
 
+def test_the_fields_are_the_joined_text_taken_apart() -> None:
+    """Both forms describe the same document, so a reader that uses only `text`
+    sees what it always did."""
+    corpus = movielens.parse_archive(_archive())
+
+    assert corpus.texts, "the premise: this archive yields documents to compare"
+    for text, parts in zip(corpus.texts, corpus.fields, strict=True):
+        assert " ".join(parts) == text
+
+
+def test_the_title_the_genres_and_each_tag_are_separate_fields() -> None:
+    """The seam an n-gram must not span. Joined into one string the boundary is
+    unrecoverable, and a bigram spanning it records the concatenation order
+    rather than the data (spec_addenda.md#g7).
+    """
+    corpus = movielens.parse_archive(_archive())
+    parts = dict(zip(corpus.doc_ids, corpus.fields, strict=True))["m1"]
+
+    assert "1995" in parts[0], "the title field carries the unbracketed year"
+    assert "Adventure" in parts[1], "the genres are their own field"
+    assert "|" not in parts[1], "and they are split, as in the joined text"
+    assert list(parts[2:]) == sorted(parts[2:]), "one field per tag, in sorted order"
+    assert any("pixar" in p for p in parts[2:])
+
+
 def test_only_ratings_at_or_above_the_threshold_become_interactions() -> None:
     """G10 item 5: the boundary is inclusive, so 4.0 is in and 3.5 is out."""
     corpus = movielens.parse_archive(_archive())
@@ -1120,13 +1145,16 @@ def test_an_empty_vocabulary_names_the_field_rather_than_indexing_off_the_end() 
 # corpus silently loses its tail: `N` shrinks, and `N` is inside the idf of every
 # term, so every weight in the corpus moves. The failure would surface as a set
 # of plausible numbers rather than as an error.
-def _movielens_corpus(*, n_texts: int = 2, n_attributes: int = 2) -> movielens.MovieLensCorpus:
+def _movielens_corpus(
+    *, n_texts: int = 2, n_attributes: int = 2, n_fields: int = 2
+) -> movielens.MovieLensCorpus:
     """Two documents, with the parallel arrays independently sized so a test can
     make one short. Local by house convention."""
     return movielens.MovieLensCorpus(
         archive_sha256="0" * 64,
         doc_ids=("m1", "m2"),
         texts=tuple(f"t{i}" for i in range(n_texts)),
+        fields=tuple((f"t{i}",) for i in range(n_fields)),
         attributes=tuple({"popularity": i} for i in range(n_attributes)),
         interactions=(),
         min_weight=movielens.DEFAULT_MIN_WEIGHT,
@@ -1143,6 +1171,7 @@ def test_a_movielens_corpus_with_arrays_in_step_renders_every_document() -> None
 
     assert [r["doc_id"] for r in records] == ["m1", "m2"]
     assert records[0]["text"] == "t0"
+    assert records[0]["fields"] == ["t0"]
     assert records[0]["popularity"] == 0
 
 
@@ -1152,6 +1181,7 @@ def test_a_movielens_corpus_with_arrays_in_step_renders_every_document() -> None
         ("one text short", {"n_texts": 1}),
         ("one attribute short", {"n_attributes": 1}),
         ("one text too many", {"n_texts": 3}),
+        ("one field list short", {"n_fields": 1}),
     ],
 )
 def test_a_movielens_corpus_whose_arrays_disagree_is_refused(
