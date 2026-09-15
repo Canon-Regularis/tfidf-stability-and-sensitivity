@@ -39,6 +39,7 @@
       "min_normal": 2.2250738585072014e-308,
       "no_reassociation": true,
       "rounds": 1,
+      "rounds_live": true,
       "subnormals_supported": true
     },
     "implementation": "CPython",
@@ -49,7 +50,7 @@
       "compiler_id": "GNU",
       "compiler_ver": "13.2.0",
       "fast_math": false,
-      "git_sha": "82d84156d05b",
+      "git_sha": "0fb1344b3dab",
       "numeric_flags": "-ffp-contract=off -fno-fast-math -fno-associative-math -fno-reciprocal-math -fno-unsafe-math-optimizations -fno-finite-math-only -fsigned-zeros -fexcess-precision=standard -mfpmath=sse",
       "processor": "AMD64",
       "reproducible": true,
@@ -75,32 +76,32 @@
         "margins": {
           "k1": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.08993303495201663,
+            "is_exact_tie": false,
             "value": 0.17986606990403325
           },
           "k10": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.009026533610180576,
+            "is_exact_tie": false,
             "value": 0.018053067220361152
           },
           "k20": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.00014760658476101196,
+            "is_exact_tie": false,
             "value": 0.0002952131695220239
           },
           "k5": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0011733231196222604,
+            "is_exact_tie": false,
             "value": 0.002346646239244521
           },
           "k50": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0039842007274779045,
+            "is_exact_tie": false,
             "value": 0.007968401454955809
           }
         },
@@ -171,32 +172,32 @@
         "margins": {
           "k1": {
             "defined": true,
-            "exact_tie": true,
             "flip_radius": 0.0,
+            "is_exact_tie": true,
             "value": 0.0
           },
           "k10": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0012654087385593205,
+            "is_exact_tie": false,
             "value": 0.002530817477118641
           },
           "k20": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0016148361209851608,
+            "is_exact_tie": false,
             "value": 0.0032296722419703217
           },
           "k5": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0031360944323897133,
+            "is_exact_tie": false,
             "value": 0.006272188864779427
           },
           "k50": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.00033425097368752765,
+            "is_exact_tie": false,
             "value": 0.0006685019473750553
           }
         },
@@ -267,32 +268,32 @@
         "margins": {
           "k1": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.07632550894096571,
+            "is_exact_tie": false,
             "value": 0.15265101788193142
           },
           "k10": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0006181852326617512,
+            "is_exact_tie": false,
             "value": 0.0012363704653235025
           },
           "k20": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.00020866633187310163,
+            "is_exact_tie": false,
             "value": 0.00041733266374620326
           },
           "k5": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.00393771645822244,
+            "is_exact_tie": false,
             "value": 0.00787543291644488
           },
           "k50": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0004803873980398221,
+            "is_exact_tie": false,
             "value": 0.0009607747960796442
           }
         },
@@ -363,32 +364,32 @@
         "margins": {
           "k1": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.1735357886573964,
+            "is_exact_tie": false,
             "value": 0.3470715773147928
           },
           "k10": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0014000303486534638,
+            "is_exact_tie": false,
             "value": 0.0028000606973069275
           },
           "k20": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.00015206439046735326,
+            "is_exact_tie": false,
             "value": 0.0003041287809347065
           },
           "k5": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0017414564290886142,
+            "is_exact_tie": false,
             "value": 0.0034829128581772284
           },
           "k50": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 3.83610957155299e-05,
+            "is_exact_tie": false,
             "value": 7.67221914310598e-05
           }
         },
@@ -459,32 +460,32 @@
         "margins": {
           "k1": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.11190597192329055,
+            "is_exact_tie": false,
             "value": 0.2238119438465811
           },
           "k10": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.000299606752244011,
+            "is_exact_tie": false,
             "value": 0.000599213504488022
           },
           "k20": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0001517012490438452,
+            "is_exact_tie": false,
             "value": 0.0003034024980876904
           },
           "k5": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.002846388540079771,
+            "is_exact_tie": false,
             "value": 0.005692777080159542
           },
           "k50": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.00012103599037243881,
+            "is_exact_tie": false,
             "value": 0.00024207198074487762
           }
         },
@@ -555,32 +556,32 @@
         "margins": {
           "k1": {
             "defined": true,
-            "exact_tie": true,
             "flip_radius": 0.0,
+            "is_exact_tie": true,
             "value": 0.0
           },
           "k10": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.009977395003119206,
+            "is_exact_tie": false,
             "value": 0.019954790006238413
           },
           "k20": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.001007408054730069,
+            "is_exact_tie": false,
             "value": 0.002014816109460138
           },
           "k5": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.00024209095333491137,
+            "is_exact_tie": false,
             "value": 0.00048418190666982275
           },
           "k50": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 6.273375490767862e-05,
+            "is_exact_tie": false,
             "value": 0.00012546750981535723
           }
         },
@@ -651,32 +652,32 @@
         "margins": {
           "k1": {
             "defined": true,
-            "exact_tie": true,
             "flip_radius": 0.0,
+            "is_exact_tie": true,
             "value": 0.0
           },
           "k10": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.006752383727237896,
+            "is_exact_tie": false,
             "value": 0.013504767454475791
           },
           "k20": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.00013649138856677845,
+            "is_exact_tie": false,
             "value": 0.0002729827771335569
           },
           "k5": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0020495035079651364,
+            "is_exact_tie": false,
             "value": 0.004099007015930273
           },
           "k50": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0003320636542311142,
+            "is_exact_tie": false,
             "value": 0.0006641273084622284
           }
         },
@@ -747,32 +748,32 @@
         "margins": {
           "k1": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.07555064561401577,
+            "is_exact_tie": false,
             "value": 0.15110129122803154
           },
           "k10": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0023497291067913553,
+            "is_exact_tie": false,
             "value": 0.004699458213582711
           },
           "k20": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 4.6038792417588126e-05,
+            "is_exact_tie": false,
             "value": 9.207758483517625e-05
           },
           "k5": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.007364134165465358,
+            "is_exact_tie": false,
             "value": 0.014728268330930716
           },
           "k50": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 2.1106547080401716e-05,
+            "is_exact_tie": false,
             "value": 4.221309416080343e-05
           }
         },
@@ -843,32 +844,32 @@
         "margins": {
           "k1": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.06387466003153094,
+            "is_exact_tie": false,
             "value": 0.1277493200630619
           },
           "k10": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.00125979562862992,
+            "is_exact_tie": false,
             "value": 0.00251959125725984
           },
           "k20": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0014361905138456782,
+            "is_exact_tie": false,
             "value": 0.0028723810276913564
           },
           "k5": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.011205254168609145,
+            "is_exact_tie": false,
             "value": 0.02241050833721829
           },
           "k50": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0003022397606168275,
+            "is_exact_tie": false,
             "value": 0.000604479521233655
           }
         },
@@ -939,32 +940,32 @@
         "margins": {
           "k1": {
             "defined": true,
-            "exact_tie": true,
             "flip_radius": 0.0,
+            "is_exact_tie": true,
             "value": 0.0
           },
           "k10": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.001076307137347382,
+            "is_exact_tie": false,
             "value": 0.002152614274694764
           },
           "k20": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.00021630748787513157,
+            "is_exact_tie": false,
             "value": 0.00043261497575026314
           },
           "k5": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.020592413080996477,
+            "is_exact_tie": false,
             "value": 0.041184826161992955
           },
           "k50": {
             "defined": true,
-            "exact_tie": false,
             "flip_radius": 0.0014040868756048895,
+            "is_exact_tie": false,
             "value": 0.002808173751209779
           }
         },
@@ -1032,5 +1033,5 @@
       }
     ]
   },
-  "result_digest": "530315399bad08a0f2d11af6946a66ebd0e5ec821f17c8ae11f8401740d14bf2"
+  "result_digest": "5f2d0708910c530c367be935a6361a1ea32c3082862e0f380fff9268ee80ed2b"
 }

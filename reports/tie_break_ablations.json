@@ -125,9 +125,9 @@
       }
     },
     "E3_fks_distance": {
-      "max": 1.0,
+      "maximum": 1.0,
       "mean": 0.005963662399913032,
-      "min": 0.0,
+      "minimum": 0.0,
       "n": 200,
       "n_infinite": 0,
       "n_nan": 0,
@@ -2367,5 +2367,5 @@
       ]
     }
   },
-  "result_digest": "c11e158556407b8e2b7922780d13199d6d55a53a57fc97c3a29ae756aa5d8b1e"
+  "result_digest": "c159225b26bac4a48788f7749f6405c26e4ebbca79a8faa8e21cabb3d1820913"
 }
