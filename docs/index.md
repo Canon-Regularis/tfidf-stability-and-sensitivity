@@ -109,7 +109,11 @@ python scripts/check_test_vacuity.py   # no test passes without asserting anythi
 
 `--preset ci` builds with whatever compiler the machine provides. `mingw`,
 `msvc`, `gcc` and `clang` pin one; `debug`, `asan`, `tsan` and
-`glibcxx-assertions` vary the build. `cmake --list-presets` names them all.
+`glibcxx-assertions` vary the build. Three are not general-purpose: `bench`
+tunes for the host and is therefore not reproducible, `mutation` drops
+`-Werror` so that a mutant tripping a warning is scored against the tests
+instead of failing to compile, and `fastmath-guard-check` is unsound by design
+because CI asserts the guards reject it. `cmake --list-presets` names them all.
 
 `scripts/snapshot.py` is the acid test: CI computes it on Linux, macOS and
 Windows, at three optimisation levels, under both backends, and requires every

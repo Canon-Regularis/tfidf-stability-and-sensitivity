@@ -4,7 +4,7 @@
 The implementation notes cross-reference the code heavily, which is what makes
 them rot: a module renamed in `src/` leaves a link in `docs/` pointing nowhere.
 
-Three checks, in increasing order of how often they catch something:
+Five checks, in increasing order of how often they catch something:
 
 1. Relative links resolve. `[text](path)` and `[text](path#anchor)` must name an
    existing file.
@@ -14,10 +14,10 @@ Three checks, in increasing order of how often they catch something:
 3. Referenced source files exist. A backticked path like
    `analysis/noise_floor.py` or `src/tfidf_stability/ranking/margins.py` is
    checked against the tree.
-
 4. Source docstrings resolve. The modules cite each other far more densely than
-    cites them, and a rename leaves a  role pointing at nothing.
+   `docs/` cites them, and a rename leaves a `:func:` role pointing at nothing.
    Sphinx would report it; nothing here runs Sphinx.
+5. The CMake presets and the docs agree, in both directions.
 
 External links (http, https, mailto) go unfetched; the build stays hermetic and
 offline.
@@ -28,6 +28,7 @@ from __future__ import annotations
 import ast
 import builtins
 import importlib
+import json
 import re
 import sys
 from collections.abc import Iterator, Sequence
@@ -85,6 +86,61 @@ def _check_link(document: Path, target: str, text: str, cache: dict[Path, set[st
         if anchor not in cache[resolved]:
             return f"{document.name}: {resolved.name} has no anchor #{anchor}"
     return None
+
+
+# ---------------------------------------------------------------------------
+# The build presets
+# ---------------------------------------------------------------------------
+# A preset is the documented way to build this project, so the two files drift
+# in both directions: a preset added and never written down is invisible to a
+# reader, and a preset renamed leaves a command in the docs that configures
+# nothing. Both have happened.
+
+PRESETS = REPO / "CMakePresets.json"
+
+#: Inline code spans, and the bodies of fenced blocks. A preset counts as
+#: documented when it is named as code, never when the word appears in prose.
+_INLINE_CODE = re.compile(r"`([^`\n]+)`")
+_FENCED = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+
+#: `cmake --preset ci`, `ctest --preset debug`, `cmake --build --preset ci`.
+_PRESET_USE = re.compile(r"--preset\s+([A-Za-z0-9_-]+)")
+
+_PRESET_GROUPS = ("configurePresets", "buildPresets", "testPresets")
+
+
+def check_presets(documents: Sequence[Path]) -> tuple[list[str], int]:
+    """Check that the docs name every preset, and name only presets that exist.
+
+    Hidden presets are excluded: they exist to be inherited from, and a reader
+    cannot invoke one.
+    """
+    presets = json.loads(PRESETS.read_text(encoding="utf-8"))
+    configure = [p for p in presets["configurePresets"] if not p.get("hidden")]
+    defined = {
+        p["name"] for group in _PRESET_GROUPS for p in presets.get(group, []) if not p.get("hidden")
+    }
+
+    quoted: set[str] = set()
+    used: set[tuple[str, str]] = set()
+    for document in documents:
+        text = document.read_text(encoding="utf-8")
+        for span in _INLINE_CODE.findall(text) + _FENCED.findall(text):
+            quoted.update(span.split())
+        for name in _PRESET_USE.findall(text):
+            used.add((document.name, name))
+
+    problems = [
+        f"{PRESETS.name}: preset `{p['name']}` is named in no document"
+        for p in configure
+        if p["name"] not in quoted
+    ]
+    problems += [
+        f"{document}: --preset {name} names no preset in {PRESETS.name}"
+        for document, name in sorted(used)
+        if name not in defined
+    ]
+    return problems, len(configure)
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +359,9 @@ def check() -> list[str]:
             if not any(c.exists() for c in candidates):
                 problems.append(f"{document.name}: no such file referenced: `{reference}`")
 
+    preset_problems, n_presets = check_presets(documents)
+    problems.extend(preset_problems)
+
     docstring_problems, n_refs = check_docstrings(anchor_cache)
     problems.extend(docstring_problems)
 
@@ -312,6 +371,7 @@ def check() -> list[str]:
             f"{n_paths} source references all resolve"
         )
         print(f"checked {n_refs} cross-references in source docstrings")
+        print(f"checked {n_presets} build presets against the documents")
     return problems
 
 
