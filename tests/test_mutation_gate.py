@@ -3,7 +3,7 @@
 A mutation that no test kills is usually a gap. Sometimes it is not: the
 expression cannot be reached, or reaches the same answer another way, and no
 test could tell the difference. `configs/equivalent_mutants.txt` records those
-with their reasons, and `run_mutation_tests.py` reads it to decide whether a
+with their reasons, and `tooling/mutation_python.py` reads it to decide whether a
 campaign passed.
 
 That decision is the whole value of the nightly job, so it is tested here rather
@@ -16,40 +16,21 @@ ever prunes them, and the campaign goes green whatever the tests do.
 from __future__ import annotations
 
 import ast
-import importlib.util
 import shutil
-import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
+from tooling import mutation_python as runner
 from tooling import renumber_allowlists as renumber
 from tooling.allowlist import fingerprint as _fingerprint
 from tooling.allowlist import parse_python
 
 REPO = Path(__file__).resolve().parents[1]
-SCRIPT = REPO / "scripts" / "run_mutation_tests.py"
 ALLOWLIST = REPO / "configs" / "equivalent_mutants.txt"
 
 
-def _runner() -> ModuleType:
-    """Import ``scripts/run_mutation_tests.py``. Local by house convention.
-
-    Registered in ``sys.modules`` before execution because the module defines
-    slotted dataclasses, and ``dataclasses`` resolves ``__module__`` through
-    that table while processing them.
-    """
-    spec = importlib.util.spec_from_file_location("_mutation_runner", SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["_mutation_runner"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _mutant(runner: ModuleType, line: int, kind: str, before: str, after: str) -> object:
+def _mutant(line: int, kind: str, before: str, after: str) -> object:
     return runner.Mutant(line=line, kind=kind, before=before, after=after)
 
 
@@ -98,7 +79,6 @@ def test_the_allowlist_covers_more_than_one_module() -> None:
 def test_claims_are_loaded_only_for_the_module_asked_about() -> None:
     """Keyed by path, so one module's equivalences cannot excuse another's
     survivors."""
-    runner = _runner()
 
     numerics = runner._load_equivalents(Path("src/tfidf_stability/utils/numerics.py"))
     sort_keys = runner._load_equivalents(Path("src/tfidf_stability/ranking/sort_keys.py"))
@@ -111,7 +91,6 @@ def test_claims_are_loaded_only_for_the_module_asked_about() -> None:
 def test_a_claim_resolves_to_its_reason() -> None:
     """The key is the whole mutation, not just the line: two mutable sites share
     a line often enough that a line-only key would excuse the wrong one."""
-    runner = _runner()
     claims = runner._load_equivalents(Path("src/tfidf_stability/ranking/sort_keys.py"))
 
     assert (155, "compare", "LtE", "Lt") in claims
@@ -124,20 +103,18 @@ def test_a_claim_resolves_to_its_reason() -> None:
 def test_a_documented_survivor_does_not_fail_the_campaign() -> None:
     """The reason the file exists. Every module has equivalents, so without this
     the nightly fails every night whatever the tests do."""
-    runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
-    survivors = [_mutant(runner, 155, "compare", "LtE", "Lt")]
+    survivors = [_mutant(155, "compare", "LtE", "Lt")]
 
     assert runner._verdict(module, survivors) == 0
 
 
 def test_an_undocumented_survivor_fails_the_campaign() -> None:
     """The gap the tool exists to find, which the allowlist must not swallow."""
-    runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
     survivors = [
-        _mutant(runner, 155, "compare", "LtE", "Lt"),
-        _mutant(runner, 42, "constant", "1", "0"),
+        _mutant(155, "compare", "LtE", "Lt"),
+        _mutant(42, "constant", "1", "0"),
     ]
 
     assert runner._verdict(module, survivors) == 1
@@ -146,7 +123,6 @@ def test_an_undocumented_survivor_fails_the_campaign() -> None:
 def test_a_claim_that_matches_no_survivor_fails_the_campaign() -> None:
     """The anti-accretion half. The mutant is killed now, or the line moved;
     either way the argument has to be re-read rather than left standing."""
-    runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
 
     assert runner._verdict(module, []) == 1
@@ -163,7 +139,6 @@ def test_a_module_with_no_claims_still_fails_on_any_survivor(
     named carries real entries, which places the emptiness in the substituted
     file rather than in the module.
     """
-    runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
 
     assert runner._load_equivalents(module), "the premise: this module is documented"
@@ -173,7 +148,7 @@ def test_a_module_with_no_claims_still_fails_on_any_survivor(
     monkeypatch.setattr(runner, "_EQUIVALENTS", empty)
 
     assert runner._load_equivalents(module) == {}, "and now, by construction, it is not"
-    assert runner._verdict(module, [_mutant(runner, 155, "compare", "LtE", "Lt")]) == 1
+    assert runner._verdict(module, [_mutant(155, "compare", "LtE", "Lt")]) == 1
     assert runner._verdict(module, []) == 0
 
 
@@ -190,10 +165,9 @@ def test_a_near_miss_is_not_covered_by_the_claim(
 ) -> None:
     """Every field is part of the key. A different mutation on the same line, or
     the same mutation one line over, is a different claim and needs its own."""
-    runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
 
-    assert runner._verdict(module, [_mutant(runner, line, kind, before, after)]) == 1
+    assert runner._verdict(module, [_mutant(line, kind, before, after)]) == 1
 
 
 def test_one_claim_covers_every_mutant_sharing_its_key() -> None:
@@ -209,11 +183,10 @@ def test_one_claim_covers_every_mutant_sharing_its_key() -> None:
     survivors under one claim read as two accounted for and not as one still
     outstanding.
     """
-    runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
     twins = [
-        _mutant(runner, 155, "compare", "LtE", "Lt"),
-        _mutant(runner, 155, "compare", "LtE", "Lt"),
+        _mutant(155, "compare", "LtE", "Lt"),
+        _mutant(155, "compare", "LtE", "Lt"),
     ]
 
     assert runner._verdict(module, twins) == 0
@@ -228,9 +201,8 @@ def test_a_claim_does_not_cover_the_same_mutation_one_line_over() -> None:
     What is asserted is the consequence: a claim is keyed by line, so moving the
     expression invalidates it.
     """
-    runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
-    moved = [_mutant(runner, 156, "compare", "LtE", "Lt")]
+    moved = [_mutant(156, "compare", "LtE", "Lt")]
 
     assert runner._verdict(module, moved) == 1, "the claim at 155 must not cover 156"
 
@@ -275,7 +247,6 @@ def test_a_test_run_inside_the_sandbox_imports_the_sandbox_copy() -> None:
     That is the same signal a mutated module gives, arrived at without having to
     mutate anything.
     """
-    runner = _runner()
     sandbox = runner._make_sandbox()
     try:
         probe = sandbox / "src" / "tfidf_stability" / "_sandbox_probe.py"
@@ -308,7 +279,6 @@ def test_the_sandbox_shadows_the_working_tree_rather_than_sitting_behind_it() ->
     real module is replaced outright, so the only way the run can fail is if the
     sandbox is what got imported.
     """
-    runner = _runner()
     sandbox = runner._make_sandbox()
     try:
         shadowed = sandbox / "src" / "tfidf_stability" / "utils" / "numerics.py"
@@ -351,7 +321,7 @@ def test_the_sandbox_shadows_the_working_tree_rather_than_sitting_behind_it() ->
 # It does not need a campaign. Whether a line still carries the mutation an
 # entry describes is answerable from the AST alone, in about a second for the
 # whole file, so it belongs in the PR tier rather than the nightly.
-def _sites_by_key(runner: ModuleType, module: Path) -> set[tuple[int, str, str, str]]:
+def _sites_by_key(module: Path) -> set[tuple[int, str, str, str]]:
     """Every mutable site in `module`, keyed the way the allowlist keys them.
 
     One pass rather than one per site. `_Mutator` is built to apply a single
@@ -368,7 +338,7 @@ def _sites_by_key(runner: ModuleType, module: Path) -> set[tuple[int, str, str, 
     """
     source = module.read_text(encoding="utf-8")
 
-    class _Recorder(runner._Mutator):  # type: ignore[name-defined,misc]
+    class _Recorder(runner._Mutator):
         def __init__(self) -> None:
             super().__init__(target=-1)
             self.sites: list[tuple[int, str, str, str]] = []
@@ -398,7 +368,6 @@ def test_every_allowlist_entry_still_names_a_mutation_that_exists() -> None:
     The failure message carries the whole key, because the fix is a renumber and
     the only thing needed to make it is the line the mutation moved to.
     """
-    runner = _runner()
     entries = [
         line.split()
         for line in ALLOWLIST.read_text(encoding="utf-8").splitlines()
@@ -415,7 +384,7 @@ def test_every_allowlist_entry_still_names_a_mutation_that_exists() -> None:
     for path, fields_list in by_module.items():
         module = REPO / path
         assert module.exists(), f"{path}: the allowlist names a module that is gone"
-        sites = _sites_by_key(runner, module)
+        sites = _sites_by_key(module)
         for fields in fields_list:
             key = (int(fields[1]), fields[2], fields[3], fields[5])
             if key not in sites:
@@ -527,7 +496,9 @@ def test_a_stamp_pointing_at_a_different_expression_is_rejected() -> None:
     )
 
 
-def test_an_entry_whose_only_reason_is_its_fingerprint_is_refused(tmp_path: Path) -> None:
+def test_an_entry_whose_only_reason_is_its_fingerprint_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The emptiness test runs after the `src=` stamp is stripped, not before.
 
     A reason may carry a `src=<8 hex>` prefix, which the loader removes because
@@ -539,13 +510,12 @@ def test_an_entry_whose_only_reason_is_its_fingerprint_is_refused(tmp_path: Path
     The stamped-and-argued form must still load, or the fix would silence the
     real allowlist instead.
     """
-    runner = _runner()
     allowlist = tmp_path / "equivalent_mutants.txt"
     entry = "src/tfidf_stability/utils/numerics.py  112  compare  GtE -> Gt  #"
     module = Path("src/tfidf_stability/utils/numerics.py")
 
     allowlist.write_text(f"{entry} src=2a87a12d\n", encoding="utf-8")
-    runner._EQUIVALENTS = allowlist
+    monkeypatch.setattr(runner, "_EQUIVALENTS", allowlist)
     assert runner._load_equivalents(module) == {}, "a stamp is not an argument"
 
     allowlist.write_text(f"{entry}\n", encoding="utf-8")
@@ -820,7 +790,6 @@ def test_a_truncated_run_does_not_report_a_claim_it_never_reached() -> None:
     unmatched rather than stale. Reporting it fails a smoke run for entries that
     are perfectly good, which is what the C++ campaign's `partial` flag avoids.
     """
-    runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
 
     assert runner._load_equivalents(module), "the premise: this module is documented"
@@ -830,7 +799,6 @@ def test_a_truncated_run_does_not_report_a_claim_it_never_reached() -> None:
 def test_a_complete_run_still_reports_the_same_claim_as_stale() -> None:
     """The other half. Withholding the failure on a truncated run must not
     withhold it on a full one, or the anti-accretion half stops working."""
-    runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
 
     assert runner._verdict(module, [], partial=False) == 1
@@ -839,8 +807,7 @@ def test_a_complete_run_still_reports_the_same_claim_as_stale() -> None:
 def test_a_truncated_run_still_fails_on_an_undocumented_survivor() -> None:
     """Truncation withholds one failure, not both. A survivor the run did see is
     evidence whatever the cut was."""
-    runner = _runner()
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
-    survivors = [_mutant(runner, 42, "constant", "1", "0")]
+    survivors = [_mutant(42, "constant", "1", "0")]
 
     assert runner._verdict(module, survivors, partial=True) == 1

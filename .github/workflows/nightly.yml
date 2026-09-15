@@ -122,7 +122,7 @@ jobs:
         # it fails for the right reason. Nightly rather than per-PR because the
         # cost is the suite time multiplied by the number of mutable sites.
         run: |
-          python scripts/run_mutation_tests.py "${{ matrix.module }}"             --tests ${{ matrix.tests }} --timeout 180
+          python -m tooling.mutation_python "${{ matrix.module }}"             --tests ${{ matrix.tests }} --timeout 180
 
   cpp-mutation:
     name: C++ mutation testing
@@ -174,7 +174,7 @@ jobs:
         # and an entry there that matches no survivor fails too -- otherwise the
         # file accretes into a blanket suppression.
         run: |
-          python scripts/run_cpp_mutation_tests.py "${{ matrix.header }}"                  --build build/mutation --test-timeout 60 --json "mutants.json"
+          python -m tooling.mutation_cpp "${{ matrix.header }}"                  --build build/mutation --test-timeout 60 --json "mutants.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         if: always()
         with:

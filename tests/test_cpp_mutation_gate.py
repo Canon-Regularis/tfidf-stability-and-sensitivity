@@ -6,33 +6,20 @@ earliest, and only on the header that happened to be scheduled. These checks are
 the part that can run in a second: every claim must name a line that exists, a
 column that holds the token it claims, and a digest that still matches.
 
-The campaign itself is `scripts/run_cpp_mutation_tests.py`, which owns the other
-two failure modes: an unlisted survivor, and an entry matching no survivor.
+The campaign itself is `tooling/mutation_cpp.py`, which owns the other two
+failure modes: an unlisted survivor, and an entry matching no survivor.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
+from tooling import mutation_cpp as harness
+
 REPO = Path(__file__).resolve().parents[1]
 ALLOWLIST = REPO / "configs" / "equivalent_mutants_cpp.txt"
-
-
-def _harness() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "_cpp_mutation", REPO / "scripts" / "run_cpp_mutation_tests.py"
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["_cpp_mutation"] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def _entries() -> list[tuple[str, int, int, str, str, str, str]]:
@@ -73,7 +60,6 @@ def test_every_claim_still_digests_to_its_recorded_stamp() -> None:
     claim pointing at whatever took its place. The digest is of the line's own
     text, so it catches that without needing a campaign to notice.
     """
-    harness = _harness()
     wrong = []
     for path, line, _, before, after, stamp, _ in _entries():
         assert stamp.startswith("src="), (
@@ -96,7 +82,6 @@ def test_every_claim_names_a_column_holding_the_token_it_claims() -> None:
     Without this a claim about one `<` silences the other on the same line, and
     the second could be a real gap.
     """
-    harness = _harness()
     for path, line, column, before, after, _, _ in _entries():
         with (REPO / path).open(encoding="utf-8", newline="") as handle:
             text = handle.read()
@@ -113,7 +98,6 @@ def test_every_claim_names_a_column_holding_the_token_it_claims() -> None:
 
 def test_every_claim_carries_an_argument_and_not_only_a_stamp() -> None:
     """An entry whose whole reason is its own fingerprint is a suppression."""
-    harness = _harness()
     for path, line, _, before, after, stamp, argument in _entries():
         assert argument.strip(), (
             f"{path}:{line} ({before} -> {after}) states no reason; "
@@ -126,7 +110,6 @@ def test_an_entry_without_a_column_is_refused(tmp_path: Path) -> None:
     """The Python allowlist keys on an AST node kind; this one has only position,
     so an entry that omits the column cannot say which token it means and must
     not be honoured by default."""
-    harness = _harness()
     allowlist = tmp_path / "equivalent_mutants_cpp.txt"
     module = Path("cpp/include/tfidf/core/reduction.hpp")
     harness.EQUIVALENTS = allowlist
@@ -141,7 +124,6 @@ def test_an_entry_without_a_column_is_refused(tmp_path: Path) -> None:
 
 
 def test_an_entry_whose_only_reason_is_its_stamp_is_refused(tmp_path: Path) -> None:
-    harness = _harness()
     allowlist = tmp_path / "equivalent_mutants_cpp.txt"
     module = Path("cpp/include/tfidf/core/reduction.hpp")
     harness.EQUIVALENTS = allowlist
@@ -165,7 +147,6 @@ def test_the_scanner_never_mutates_a_comment_or_a_string() -> None:
     That mutation does not compile, so it costs a build and is scored stillborn
     rather than producing a wrong verdict.
     """
-    harness = _harness()
     source = (
         "// a < b and a > b in a line comment\n"
         "/* a + b and a - b in a block comment */\n"
@@ -194,7 +175,6 @@ def test_each_mutation_kind_is_produced_on_a_line_that_uses_it(before: str, afte
     """Guards the operator table against a silent shrink: dropping an entry would
     quietly stop testing that operator everywhere, and the campaign would report
     a better score for it."""
-    harness = _harness()
     source = "if (a < b && c > d && e == f) { x = x + 0; }\n"
     produced = {(b, a) for _, b, a in harness.scan(source)}
     assert (before, after) in produced
@@ -208,7 +188,6 @@ def test_a_red_baseline_stops_the_campaign_rather_than_being_scored(verdict: str
     before any mutation scores every mutant as killed. Both verdicts other
     than `survived` are refused.
     """
-    harness = _harness()
     harness.build_and_test = lambda build, target, test_timeout: verdict
 
     with pytest.raises(SystemExit, match="baseline is not green"):
@@ -222,7 +201,6 @@ def test_a_green_baseline_starts_the_campaign_and_is_judged_unmutated() -> None:
     verdict that proceeds. The arguments reach `build_and_test` unchanged, so
     the baseline is judged by the build the campaign then uses.
     """
-    harness = _harness()
     calls: list[tuple[str, str, int]] = []
 
     def fake_build_and_test(build: str, target: str, test_timeout: int) -> str:
@@ -311,7 +289,6 @@ def test_the_entry_the_gate_suggests_actually_loads(tmp_path: Path) -> None:
     suggestion produced a claim that was silently ignored and the gate failed
     again on the next run with the same message.
     """
-    harness = _harness()
     module = Path("cpp/include/tfidf/core/reduction.hpp")
     survivor = {
         "line": 57,
