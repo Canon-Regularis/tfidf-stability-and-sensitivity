@@ -54,23 +54,68 @@ import argparse
 import json
 import math
 import sys
+import textwrap
 from itertools import pairwise
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-#: Slots 1 and 2 of a validated light-mode categorical palette: adjacent CVD
-#: delta-E 24.7 (target >= 8), normal-vision delta-E 33.6 (floor >= 15). Keeps the
-#: two series separable for colour-blind readers and in greyscale print.
-_INK = "#2a78d6"
-_ACCENT = "#eb6834"
-#: Recessive ink for chrome and annotation. Text never wears a series colour; the
-#: coloured mark beside it carries the identity.
-_MUTED = "#52514e"
-#: Five slots for the cascade, in the palette's fixed order. Validated as a set:
-#: worst adjacent CVD delta-E 9.1, normal-vision 19.6. Three sit below 3:1
-#: against the surface, so every series carries a direct label.
+#: The categorical ramp, in the palette's fixed order, and the one place a
+#: series colour is defined. Validated as a set: worst adjacent CVD delta-E 9.1
+#: (target >= 8), normal-vision 19.6 (floor >= 15).
+#:
+#: Three slots sit below 3:1 against the surface, and the set is not separable
+#: in greyscale either -- the closest pair is 1.05:1 and the widest 2.04:1. So
+#: colour is never the only encoding here: every categorical series carries a
+#: direct label or a legend entry, and that relief is what a low-contrast,
+#: colour-blind or greyscale reader depends on.
 _SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4")
+
+#: Fixed roles, so a hue means one thing across the seven figures: slot 0 is the
+#: quantity a figure is about, slot 1 the landmark it is read against -- a
+#: certified radius, a band centre, a median, a peak. Aliases into the ramp
+#: rather than second definitions, so no hex is written twice.
+_PRIMARY = _SERIES[0]
+_LANDMARK = _SERIES[1]
+
+#: Recessive ink for chrome, annotation and the provenance stamp. Text never
+#: wears a series colour; the coloured mark beside it carries the identity.
+_MUTED = "#52514e"
+#: Absence rather than identity: a trajectory the figure is not about, and the
+#: fill for a band holding no observation. Neither is a category, so neither
+#: takes a slot from the ramp.
+_INERT = "#c9c9c6"
+_EMPTY = "#f0efec"
+
+#: One geometry and one type scale for all seven, so a reader meets the same
+#: proportions throughout. `_PLOT` is the default; the other three exist because
+#: a band is one-dimensional, the cascade needs room for end-of-line labels, and
+#: the stratified panels are a row of small multiples.
+_DPI = 200
+_PLOT = (6.4, 4.0)
+_BAND = (6.4, 2.4)
+_CASCADE = (7.0, 4.2)
+_PANELS = (9.6, 5.0)
+
+#: Applied once, before any figure is drawn, in place of the per-figure literals
+#: that had drifted to four grid alphas and three title sizes.
+_RC = {
+    "figure.dpi": _DPI,
+    "savefig.dpi": _DPI,
+    "axes.titlesize": 10,
+    "axes.labelsize": 9,
+    "axes.edgecolor": _MUTED,
+    "axes.labelcolor": _MUTED,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8,
+    "xtick.color": _MUTED,
+    "ytick.color": _MUTED,
+    "legend.fontsize": 8,
+    "legend.framealpha": 0.95,
+    "grid.alpha": 0.3,
+    "grid.linewidth": 0.5,
+    "grid.color": _MUTED,
+}
 
 #: The operators as section 2.3.1 writes them. The legend previously showed the
 #: payload key with its underscores replaced, so the figure named its series
@@ -126,6 +171,31 @@ def _series_handles(ks: list[int]) -> list:
     ]
 
 
+def _margin_handles() -> list:
+    """The three marks in `fig_margins`, named in a key rather than in prose.
+
+    The whisker, the median dot and the zero-reaching triangle are three
+    separate encodings, so each is named rather than described in the axis label.
+    """
+    import matplotlib.pyplot as plt
+
+    return [
+        plt.Line2D([], [], color=_PRIMARY, linewidth=2.0, label="p5 to p95"),
+        plt.Line2D(
+            [], [], color=_LANDMARK, marker="o", linestyle="none", markersize=5, label="median"
+        ),
+        plt.Line2D(
+            [],
+            [],
+            color=_PRIMARY,
+            marker="v",
+            linestyle="none",
+            markersize=7,
+            label="p5 is exactly 0",
+        ),
+    ]
+
+
 def _wilson(successes: int, trials: int, z: float = 1.96) -> tuple[float, float]:
     """95% Wilson score interval for a proportion, as percentages.
 
@@ -174,9 +244,33 @@ def _load(path: Path) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _stamp(figure, text: str) -> None:
-    """Every figure carries the digest of the result it was built from."""
-    figure.text(0.01, 0.01, text, fontsize=6, color="#666666")
+def _stamp(figure, digest: str, *fields: str) -> int:
+    """Every figure carries the digest of the result it was built from.
+
+    One grammar for all seven: the digest first, then ``key = value`` fields in
+    the same ASCII spelling every stamp uses. Taking the fields apart rather than
+    one pre-joined string is what keeps the separator and the ordering from
+    drifting figure to figure.
+
+    Returns the number of lines drawn, which the caller reserves in its layout:
+    a wrapped stamp otherwise grows upward into the x-axis label.
+    """
+    line = "  |  ".join([f"result {digest[:16]}", *fields])
+    # Wrapped to the figure's own width rather than to a constant: at 6 pt a
+    # stamp fits roughly 19 characters per inch, and the widest figure here is
+    # half as wide again as the narrowest. Without this the longest stamp ran
+    # off the right edge, taking the end of its own provenance with it.
+    budget = max(40, int(figure.get_size_inches()[0] * 19))
+    wrapped = textwrap.wrap(line, budget) or [line]
+    figure.text(
+        0.01,
+        0.01,
+        "\n".join(textwrap.wrap(line, budget) or [line]),
+        fontsize=6,
+        color=_MUTED,
+        va="bottom",
+    )
+    return len(wrapped)
 
 
 def fig_transition(record: dict, out: Path) -> bool:
@@ -189,14 +283,14 @@ def fig_transition(record: dict, out: Path) -> bool:
     rates = [100.0 * p["flip_rate"] for p in points]
     peak = max(rates) if rates else 100.0
 
-    figure, axes = plt.subplots(figsize=(6.4, 4.0))
-    axes.plot(ratios, rates, marker="o", linewidth=1.6, color=_INK)
-    axes.axvline(1.0, linestyle="--", color=_ACCENT, linewidth=1.2)
+    figure, axes = plt.subplots(figsize=_PLOT)
+    axes.plot(ratios, rates, marker="o", linewidth=1.6, color=_PRIMARY)
+    axes.axvline(1.0, linestyle="--", color=_LANDMARK, linewidth=1.2)
     axes.annotate(
         "certified radius\n$\\epsilon = m_k/2$",
         xy=(1.15, peak * 0.30),
         fontsize=8,
-        color=_ACCENT,
+        color=_MUTED,
     )
     axes.set_xscale("log")
     _uniform_log_minor(axes.xaxis)
@@ -233,20 +327,18 @@ def fig_transition(record: dict, out: Path) -> bool:
     )
     axes.set_ylabel("top-$k$ set flip rate (%)")
     axes.set_title(
-        f"Ranking stability transition (k={transition['k']}, "
+        f"Ranking stability transition ($k$={transition['k']}, "
         f"{transition['n_queries_used']} queries)",
-        fontsize=10,
     )
-    axes.grid(alpha=0.3, linewidth=0.5)
-    _stamp(
+    axes.grid()
+    lines = _stamp(
         figure,
-        f"result {record['result_digest'][:16]}  |  "
-        f"{transition['n_queries_excluded_exact_tie']} queries excluded "
-        f"(m_k = 0, A2's regime)  |  {transition['violations']} recorded "
-        f"certificate violations",
+        record["result_digest"],
+        f"queries excluded (m_k = 0, A2's regime) = {transition['n_queries_excluded_exact_tie']}",
+        f"recorded certificate violations = {transition['violations']}",
     )
-    figure.tight_layout()
-    figure.savefig(out, dpi=200)
+    figure.tight_layout(rect=(0, 0.022 * lines, 1, 1))
+    figure.savefig(out)
     plt.close(figure)
     return True
 
@@ -278,11 +370,11 @@ def fig_tau_band(record: dict, out: Path) -> bool:
     # band is [2 eta, g_min). Drawing from eta would show a band the derivation
     # never claims, so eta is marked separately as the measured floor.
     lower = 2.0 * eta
-    figure, axes = plt.subplots(figsize=(6.4, 2.4))
-    axes.hlines(0.5, lower, g_min, color=_INK, linewidth=2.0)
-    axes.vlines([lower, g_min], 0.38, 0.62, color=_INK, linewidth=2.0)
+    figure, axes = plt.subplots(figsize=_BAND)
+    axes.hlines(0.5, lower, g_min, color=_PRIMARY, linewidth=2.0)
+    axes.vlines([lower, g_min], 0.38, 0.62, color=_PRIMARY, linewidth=2.0)
     axes.vlines([eta], 0.44, 0.56, color=_MUTED, linewidth=1.2)
-    axes.plot([tau], [0.5], marker="o", markersize=8, color=_ACCENT, zorder=3)
+    axes.plot([tau], [0.5], marker="o", markersize=8, color=_LANDMARK, zorder=3)
 
     # Three labels only: the endpoints define the band, and the marker sits inside
     # it.
@@ -316,7 +408,7 @@ def fig_tau_band(record: dict, out: Path) -> bool:
         ha="center",
         va="top",
         fontsize=8,
-        color=_ACCENT,
+        color=_MUTED,
     )
 
     axes.set_xscale("log")
@@ -327,20 +419,21 @@ def fig_tau_band(record: dict, out: Path) -> bool:
     axes.set_xlabel("score separation")
     axes.set_title(
         f"Every $\\tau$ in the {decades:.2f}-decade band gives the same tie groups",
-        fontsize=10,
     )
-    axes.grid(axis="x", alpha=0.3, linewidth=0.5)
+    axes.grid(axis="x")
     for side in ("left", "right", "top"):
         axes.spines[side].set_visible(False)
-    _stamp(
+    lines = _stamp(
         figure,
-        f"result {record['result_digest'][:16]}  |  "
-        f"band [2 eta, g_min) = [{2 * eta:.3e}, {g_min:.3e})  |  "
-        f"{band['n_positive_gaps']} non-zero gaps, "
-        f"{band['n_exact_ties']} exact ties off a log axis",
+        record["result_digest"],
+        # The endpoints are named on the plot itself, so the stamp gives the
+        # interval without repeating which quantity each end is.
+        f"band = [{2 * eta:.3e}, {g_min:.3e})",
+        f"non-zero gaps = {band['n_positive_gaps']}",
+        f"exact ties off a log axis = {band['n_exact_ties']}",
     )
-    figure.tight_layout()
-    figure.savefig(out, dpi=200)
+    figure.tight_layout(rect=(0, 0.022 * lines, 1, 1))
+    figure.savefig(out)
     plt.close(figure)
     return True
 
@@ -380,8 +473,8 @@ def fig_rho_discontinuity(record: dict, out: Path) -> bool:
     peak = max(rho)
     peak_tau = taus[rho.index(peak)]
 
-    figure, axes = plt.subplots(figsize=(6.4, 4.0))
-    axes.step(taus, rho, where="post", linewidth=1.6, color=_INK)
+    figure, axes = plt.subplots(figsize=_PLOT)
+    axes.step(taus, rho, where="post", linewidth=1.6, color=_PRIMARY)
     axes.axhline(1.0, color=_MUTED, linewidth=0.8)
     # Headroom, or the top spine clips the peak's label. The baseline note also
     # has to clear the step, which runs along rho = 1 across the left half.
@@ -395,7 +488,7 @@ def fig_rho_discontinuity(record: dict, out: Path) -> bool:
         color=_MUTED,
     )
     # One direct label, on the extreme. Never a number on every step.
-    axes.plot([peak_tau], [peak], marker="o", markersize=7, color=_ACCENT, zorder=3)
+    axes.plot([peak_tau], [peak], marker="o", markersize=7, color=_LANDMARK, zorder=3)
     axes.annotate(
         f"$\\rho$ = {peak:.2f}",
         xy=(peak_tau, peak),
@@ -403,7 +496,7 @@ def fig_rho_discontinuity(record: dict, out: Path) -> bool:
         textcoords="offset points",
         ha="center",
         fontsize=8,
-        color=_ACCENT,
+        color=_MUTED,
     )
 
     axes.set_xscale("log")
@@ -418,9 +511,8 @@ def fig_rho_discontinuity(record: dict, out: Path) -> bool:
     axes.set_title(
         f"Chain inflation is a step function of $\\tau$ ({risers} jumps, "
         f"each at its exact $\\tau$)",
-        fontsize=10,
     )
-    axes.grid(alpha=0.3, linewidth=0.5)
+    axes.grid()
     # Where the peak sits relative to the tau in use. The sweep covers the range
     # over which rho varies at all, and this record's tau is seven decades below
     # its lower end, so the peak belongs to a regime none of the results occupy.
@@ -432,16 +524,17 @@ def fig_rho_discontinuity(record: dict, out: Path) -> bool:
     operative = record.get("parameters", {}).get("tau")
     below = sweep.get("rho_below_range")
     if isinstance(operative, int | float) and operative < taus[0] and below is not None:
-        note = f"  |  run tau = {operative:.3e} is below the sweep, rho = {below:.0f}"
+        note = f"run tau = {operative:.3e}, below the sweep, rho = {below:.0f}"
     else:
         note = ""
-    _stamp(
+    lines = _stamp(
         figure,
-        f"result {record['result_digest'][:16]}  |  {len(taus)} exact tau: "
-        f"every adjacent gap and clique threshold{note}",
+        record["result_digest"],
+        f"exact tau = {len(taus)}, one per adjacent gap and clique threshold",
+        *([note] if note else []),
     )
-    figure.tight_layout()
-    figure.savefig(out, dpi=200)
+    figure.tight_layout(rect=(0, 0.022 * lines, 1, 1))
+    figure.savefig(out)
     plt.close(figure)
     return True
 
@@ -489,39 +582,42 @@ def fig_rank_cascade(record: dict, out: Path) -> bool:
         doc for doc, series in ranks.items() if any((r <= k) != inside_at_rest[doc] for r in series)
     ]
 
-    figure, axes = plt.subplots(figsize=(7.0, 4.2))
+    figure, axes = plt.subplots(figsize=_CASCADE)
     for doc, series in ranks.items():
         if doc in crossers:
             continue
-        axes.plot(ratios, series, linewidth=1.0, color="#c9c9c6", zorder=1)
+        axes.plot(ratios, series, linewidth=1.0, color=_INERT, zorder=1)
     for index, doc in enumerate(crossers):
         colour = _SERIES[index % len(_SERIES)]
         axes.plot(ratios, ranks[doc], linewidth=1.8, color=colour, zorder=3)
-        # Direct labels at the endpoint rather than a legend: three of the five
-        # hues sit below 3:1 against the surface and need a visible label anyway.
+        # The document id, in monospace so it reads as a key. The label sits at
+        # the line's right-hand end, where the axis is rank: any bare number
+        # there is taken for the rank the line has reached, which is a different
+        # quantity and roughly five times larger.
         axes.annotate(
             f"  {doc}",
             xy=(ratios[-1], ranks[doc][-1]),
             fontsize=7,
-            color=colour,
+            color=_MUTED,
+            fontfamily="monospace",
             va="center",
             annotation_clip=False,
         )
 
     # Grey against coloured is the whole encoding, so it is named rather than left
-    # to be inferred. The five hues are not in the legend: each already carries its
-    # document id at the end of its own line, and repeating them would be a second
-    # key for the same thing.
+    # to be inferred. The five hues are not in the legend: each already carries a
+    # label at the end of its own line, and repeating them would be a second key
+    # for the same thing.
     handles = [
         plt.Line2D([], [], color=_SERIES[0], linewidth=1.8, label=f"crosses the top-{k} boundary"),
-        plt.Line2D([], [], color="#c9c9c6", linewidth=1.0, label="stays on its side"),
+        plt.Line2D([], [], color=_INERT, linewidth=1.0, label="stays on its side"),
     ]
     axes.legend(
         handles=handles,
         fontsize=8,
         loc="lower left",
         framealpha=0.95,
-        title="line colour  (labels at right are document ids)",
+        title="line colour  (labels at right: document id)",
         title_fontsize=7,
     )
 
@@ -569,16 +665,17 @@ def fig_rank_cascade(record: dict, out: Path) -> bool:
     axes.set_title(
         f"Rank trajectories along one perturbation direction "
         f"({len(crossers)} of {len(ranks)} cross the boundary)",
-        fontsize=10,
     )
-    axes.grid(alpha=0.3, linewidth=0.5)
-    _stamp(
+    axes.grid()
+    lines = _stamp(
         figure,
-        f"result {record['result_digest'][:16]}  |  "
-        f"k={k}, one direction scaled over {len(ratios)} steps, seed {trajectories['seed']}",
+        record["result_digest"],
+        f"k = {k}",
+        f"one direction scaled over {len(ratios)} steps",
+        f"trajectory seed = {trajectories['trajectory_seed']}",
     )
-    figure.tight_layout()
-    figure.savefig(out, dpi=200)
+    figure.tight_layout(rect=(0, 0.022 * lines, 1, 1))
+    figure.savefig(out)
     plt.close(figure)
     return True
 
@@ -589,7 +686,8 @@ def fig_margins(record: dict, out: Path) -> bool:
 
     dists = record["payload"]["E1_margin_distributions"]
     labels = sorted(dists, key=lambda s: int(s[1:]))
-    figure, axes = plt.subplots(figsize=(6.4, 4.0))
+    ks = [int(label[1:]) for label in labels]
+    figure, axes = plt.subplots(figsize=_PLOT)
 
     # A log axis has no zero, and p5 is exactly zero wherever the exact-tie share
     # exceeds 5% (k = 1, 10, 20 on the synthetic corpus). Clamping those to a
@@ -614,10 +712,10 @@ def fig_margins(record: dict, out: Path) -> bool:
         mid = max(percentiles["p50"], floor)
         reaches_zero = percentiles["p5"] <= 0.0
         lo = floor if reaches_zero else percentiles["p5"]
-        axes.plot([offset, offset], [lo, hi], color=_INK, linewidth=2.0)
+        axes.plot([offset, offset], [lo, hi], color=_PRIMARY, linewidth=2.0)
         if reaches_zero:
-            axes.plot([offset], [lo], marker="v", color=_INK, markersize=7)
-        axes.plot([offset], [mid], marker="o", color=_ACCENT, markersize=5)
+            axes.plot([offset], [lo], marker="v", color=_PRIMARY, markersize=7)
+        axes.plot([offset], [mid], marker="o", color=_LANDMARK, markersize=5)
         # One row, in axes coordinates. Anchoring each label to its own whisker
         # top put k=1's outside the axes entirely, since an annotation does not
         # extend the data limits and k=1 has both the tallest p95 and the largest
@@ -632,7 +730,7 @@ def fig_margins(record: dict, out: Path) -> bool:
             fontsize=7,
             ha="center",
             va="top",
-            color=_ACCENT,
+            color=_MUTED,
         )
 
     axes.set_yscale("log")
@@ -664,15 +762,26 @@ def fig_margins(record: dict, out: Path) -> bool:
     # Half a slot either side. The default 5% margin is narrower than the labels
     # over the first and last column, which then overhang the spines.
     axes.set_xlim(-0.5, len(labels) - 0.5)
-    axes.set_ylabel("$m_k$  (p5 to p95, median marked; triangle = reaches 0)")
+    axes.set_xlabel("rank cut-off $k$")
+    axes.set_ylabel("score-separation margin $m_k$")
     # m_min^top stays off this axis: it constrains a disjoint set of gaps, so
     # sharing one axis would invite the reading that either bounds the other. It
     # sits in the JSON alongside.
-    axes.set_title("Score-separation margins by rank", fontsize=10)
-    axes.grid(alpha=0.3, axis="y", linewidth=0.5)
-    _stamp(figure, f"result {record['result_digest'][:16]}")
-    figure.tight_layout()
-    figure.savefig(out, dpi=200)
+    axes.set_title("Score-separation margins by rank")
+    # Three marks mean three different things, so they are named rather than
+    # packed into the axis label, where the reader met them as prose.
+    # Below the annotation row rather than at the corner: lower left sits on the
+    # k=1 whisker, which reaches the floor, and a flush upper right covers the
+    # exact-tie figure over the last column.
+    axes.legend(handles=_margin_handles(), loc="upper right", bbox_to_anchor=(1.0, 0.92))
+    axes.grid(axis="y")
+    lines = _stamp(
+        figure,
+        record["result_digest"],
+        f"k = {', '.join(str(k) for k in ks)}",
+    )
+    figure.tight_layout(rect=(0, 0.022 * lines, 1, 1))
+    figure.savefig(out)
     plt.close(figure)
     return True
 
@@ -690,7 +799,7 @@ def fig_ablation(record: dict, out: Path) -> bool:
 
     # Without an explicit colour this fell through to matplotlib's default cycle,
     # making it the one figure not drawn from the validated palette.
-    figure, axes = plt.subplots(figsize=(6.4, 4.0))
+    figure, axes = plt.subplots(figsize=_PLOT)
     for i, pair in enumerate(pairs):
         values = [100.0 * rates[pair][k]["rate"] for k in ks]
         positions = [x + i * width for x in range(len(ks))]
@@ -716,20 +825,41 @@ def fig_ablation(record: dict, out: Path) -> bool:
             capsize=2.5,
             error_kw={"ecolor": _MUTED, "elinewidth": 0.9, "capthick": 0.9},
         )
+        # A rate of exactly zero draws no bar, leaving a bare whisker that reads
+        # as a missing measurement. `fig_stratified` states the rule this obeys:
+        # "no query was tested here" and "every query agreed" are opposite
+        # claims, so a measured zero is marked rather than left blank.
+        for x, value in zip(positions, values, strict=True):
+            if value == 0.0:
+                axes.plot(
+                    [x - width * 0.46, x + width * 0.46],
+                    [0.0, 0.0],
+                    color=_SERIES[i % len(_SERIES)],
+                    linewidth=2.4,
+                    solid_capstyle="butt",
+                    zorder=3,
+                )
 
     axes.set_xticks([x + width * (len(pairs) - 1) / 2 for x in range(len(ks))])
     axes.set_xticklabels([f"$k$={k[1:]}" for k in ks])
     axes.set_ylabel("top-$k$ set disagreement (%)")
-    axes.set_title("Tie-break ablation: disagreement at identical scores", fontsize=10)
-    axes.legend(fontsize=8)
-    axes.grid(alpha=0.3, axis="y", linewidth=0.5)
-    _stamp(
+    axes.set_title("Tie-break ablation: disagreement at identical scores")
+    # An explicit corner. `loc="best"` is chosen from the bar heights, so a rerun
+    # with different data silently moves the legend and the figure re-diffs.
+    axes.legend(loc="upper right")
+    axes.grid(axis="y")
+    # Not "scores are bit-identical across operators": section 7.3 rejects that
+    # framing, because the three operators consume one shared score array and
+    # comparing it with itself would pass whatever happened. What makes a bar
+    # attributable to the tie-break is the sharing, not a comparison.
+    lines = _stamp(
         figure,
-        f"result {record['result_digest'][:16]}  |  scores are bit-identical "
-        f"across operators, so every bar is caused by the tie-break",
+        record["result_digest"],
+        "the three operators consume one shared score array, "
+        "so every bar is caused by the tie-break",
     )
-    figure.tight_layout()
-    figure.savefig(out, dpi=200)
+    figure.tight_layout(rect=(0, 0.022 * lines, 1, 1))
+    figure.savefig(out)
     plt.close(figure)
     return True
 
@@ -784,7 +914,7 @@ def fig_stratified(record: dict, out: Path) -> bool:
     # one pair's rows describe both panels.
     census = {(row["k"], row["band"]): row["n"] for row in strata[pairs[0]]}
 
-    figure, axes_pair = plt.subplots(1, len(pairs), figsize=(9.6, 4.2), sharey=True, sharex=True)
+    figure, axes_pair = plt.subplots(1, len(pairs), figsize=_PANELS, sharey=True, sharex=True)
     axes_list = list(axes_pair) if len(pairs) > 1 else [axes_pair]
 
     # A band is empty for the corpus, not per operator, so the shading is computed
@@ -796,7 +926,7 @@ def fig_stratified(record: dict, out: Path) -> bool:
     for axes, pair in zip(axes_list, pairs, strict=True):
         rows = {(r["k"], r["band"]): r for r in strata[pair]}
         for run in runs:
-            axes.axvspan(run[0] - 0.5, run[-1] + 0.5, color="#f0efec", zorder=0)
+            axes.axvspan(run[0] - 0.5, run[-1] + 0.5, color=_EMPTY, zorder=0)
         for position, (band, _) in enumerate(_BANDS):
             if not populated[position]:
                 continue
@@ -835,8 +965,8 @@ def fig_stratified(record: dict, out: Path) -> bool:
                 fontsize=8,
                 color=_MUTED,
             )
-        axes.set_title(_PAIR_LABELS.get(pair, pair.replace("_", " ")), fontsize=10)
-        axes.grid(axis="y", alpha=0.3, linewidth=0.5)
+        axes.set_title(_PAIR_LABELS.get(pair, pair.replace("_", " ")))
+        axes.grid(axis="y")
         # sharex propagates the tick locations but not their formatting, so the
         # second panel kept the default horizontal labels and they collided.
         axes.set_xticks(range(len(_BANDS)))
@@ -866,7 +996,7 @@ def fig_stratified(record: dict, out: Path) -> bool:
     # The axis is denominated in tau, and this record's tau is not the band centre
     # fig_tau_band marks, so the value is named rather than left to be assumed.
     tau = record.get("parameters", {}).get("tau")
-    tau_note = f"tau = {tau:.3e}  |  " if isinstance(tau, int | float) else ""
+    tau_note = [f"tau = {tau:.3e}"] if isinstance(tau, int | float) else []
 
     # The title states the result, so it is derived from the result rather than
     # written in. A run that broke A2 would retitle itself.
@@ -877,15 +1007,21 @@ def fig_stratified(record: dict, out: Path) -> bool:
         fontsize=11,
         y=0.98,
     )
-    figure.supxlabel("score-separation margin $m_k$", fontsize=9, y=0.02)
-    _stamp(
+    lines = _stamp(
         figure,
-        f"result {record['result_digest'][:16]}  |  {tau_note}"
+        record["result_digest"],
+        *tau_note,
         f"{n_disagree} of {n_separated} separated query-k observations disagree "
         f"(95% upper bound {_wilson(n_disagree, n_separated)[1]:.1f}%)",
     )
-    figure.tight_layout(rect=(0, 0.02, 1, 0.96))
-    figure.savefig(out, dpi=200)
+    # Three things share the bottom edge here: the rotated band labels, the axis
+    # label and the stamp. Each is placed above the band the one below it needs,
+    # measured from the stamp's own line count, so a wrapped stamp pushes the
+    # other two up rather than being drawn over.
+    stamped = 0.022 * lines
+    figure.supxlabel("score-separation margin $m_k$", fontsize=9, y=stamped + 0.02)
+    figure.tight_layout(rect=(0, stamped + 0.06, 1, 0.96))
+    figure.savefig(out)
     plt.close(figure)
     return True
 
@@ -907,6 +1043,10 @@ def main() -> int:
         return 1
     # Non-interactive: this runs in CI, where there is no display.
     matplotlib.use("Agg")
+    # One style for all seven, applied before anything is drawn. Set here rather
+    # than at import so importing a single `fig_*` leaves the caller's rcParams
+    # alone; `main` is the only path that writes files.
+    matplotlib.rcParams.update(_RC)
 
     output = args.output or args.reports / "figures"
     output.mkdir(parents=True, exist_ok=True)
