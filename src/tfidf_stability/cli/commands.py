@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from enum import Enum
 from pathlib import Path
 from typing import Any, TypeVar
@@ -23,7 +24,11 @@ from tfidf_stability.persistence.manifest import (
 from tfidf_stability.persistence.save_load import load_model, save_model
 from tfidf_stability.preprocessing.lemmatise import LemmatiserKind
 from tfidf_stability.preprocessing.normalise import NormalisationConfig
-from tfidf_stability.preprocessing.pipeline import PreprocessingConfig, PreprocessingPipeline
+from tfidf_stability.preprocessing.pipeline import (
+    PreprocessingConfig,
+    PreprocessingPipeline,
+    preprocess_records,
+)
 from tfidf_stability.preprocessing.tokenise import TokenisationConfig
 from tfidf_stability.utils.hashing import hash_bytes, hash_file, short
 from tfidf_stability.utils.io import canonical_json, read_jsonl, write_json
@@ -254,14 +259,19 @@ def vectoriser_from_config(config: dict[str, Any]) -> TfidfVectoriser:
     )
 
 
-def _read_corpus(path: Path) -> tuple[list[str], list[str]]:
-    """Read a JSONL corpus of ``{doc_id, text}`` records."""
+def _read_corpus(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
+    """Read a JSONL corpus of ``{doc_id, text}`` records.
+
+    The whole record is returned rather than the text alone, so a corpus that
+    also carries ``fields`` keeps its field boundaries; see
+    :func:`~tfidf_stability.preprocessing.pipeline.preprocess_records`.
+    """
     ids: list[str] = []
-    texts: list[str] = []
+    records: list[dict[str, Any]] = []
     for record in read_jsonl(path):
         ids.append(str(record["doc_id"]))
-        texts.append(str(record["text"]))
-    return ids, texts
+        records.append(record)
+    return ids, records
 
 
 def cmd_build_corpus(args: argparse.Namespace) -> int:
@@ -269,8 +279,8 @@ def cmd_build_corpus(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     pipeline = pipeline_from_config(config)
 
-    ids, texts = _read_corpus(Path(args.corpus))
-    features = [pipeline.preprocess(t) for t in texts]
+    ids, records = _read_corpus(Path(args.corpus))
+    features = preprocess_records(pipeline, records)
     model = vectoriser_from_config(config).fit(features, ids)
 
     log_event(_LOG, EventKind.REDUCTION_POLICY, stage="vectorisation", policy=model.reduction)
@@ -410,36 +420,92 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if reproducible else 1
 
 
+def _native_diagnosis() -> list[str]:
+    """Why the compiled backend did not load, in the order a reader needs it.
+
+    Extensions are listed as found beside the package and again as filtered by
+    :data:`importlib.machinery.EXTENSION_SUFFIXES`, because the usual cause is a
+    build tagged for another interpreter, and the two lists differ exactly then.
+    """
+    import importlib
+    import importlib.machinery
+
+    from tfidf_stability import _native
+
+    beside = Path(_native.__file__).parent
+    present = sorted(p.name for p in beside.glob("_tfidf_native*") if p.is_file())
+    loadable = sorted(
+        {
+            candidate.name
+            for suffix in importlib.machinery.EXTENSION_SUFFIXES
+            for candidate in beside.glob(f"_tfidf_native{suffix}")
+        }
+    )
+
+    lines = [f"the compiled backend did not load: {_native.unavailable_reason() or 'unknown'}"]
+    lines += [
+        f"{label + ':':<31}{value}"
+        for label, value in (
+            ("required ABI", _native.REQUIRED_ABI),
+            ("extensions beside the package", present or "NONE"),
+            ("tagged for this interpreter", loadable or "NONE"),
+        )
+    ]
+    try:
+        importlib.import_module("tfidf_stability._native._tfidf_native")
+    except Exception as exc:  # the raw error is the whole diagnostic
+        lines.append(f"raw import error: {type(exc).__name__}: {exc}")
+    return lines
+
+
 def cmd_info(args: argparse.Namespace) -> int:
     """Report the environment a run would execute in.
 
     The first question about a surprising number is which build produced it.
     This answers it without running an experiment.
+
+    ``--require-native`` turns the report into an assertion. Every native test
+    is guarded on ``native_available()`` and pytest exits 0 when all of them
+    skip, so a job that builds the extension but cannot load it reports green
+    having compared nothing.
     """
     payload: dict[str, Any] = {"environment": environment_block()}
     if args.config:
         payload["config"] = load_config(args.config)
-    if args.json:
-        print(canonical_json(payload))
-        return 0
 
     env = payload["environment"]
-    print(f"python     {env['python']} ({env['implementation']})")
-    print(f"platform   {env['platform']}")
     native = env.get("native")
-    if native is None:
-        print("native     not built -- the pure-Python reference is normative and complete")
+    unmet = getattr(args, "require_native", False) and native is None
+
+    if args.json:
+        print(canonical_json(payload))
     else:
+        print(f"python     {env['python']} ({env['implementation']})")
+        print(f"platform   {env['platform']}")
+        if native is None:
+            print(
+                "native     not built"
+                if unmet
+                else "native     not built -- the pure-Python reference is normative and complete"
+            )
+        else:
+            print(
+                f"native     {native['compiler_id']} {native['compiler_ver']} "
+                f"({native['build_type']})"
+            )
+            print(f"           reproducible = {native['reproducible']}")
+            print(f"           flags = {native['numeric_flags']}")
+        float_env = env["float"]
         print(
-            f"native     {native['compiler_id']} {native['compiler_ver']} ({native['build_type']})"
+            f"float      mantissa {float_env['mantissa_dig']} bits, "
+            f"subnormals {'ok' if float_env['subnormals_supported'] else 'FLUSHED'}"
         )
-        print(f"           reproducible = {native['reproducible']}")
-        print(f"           flags = {native['numeric_flags']}")
-    float_env = env["float"]
-    print(
-        f"float      mantissa {float_env['mantissa_dig']} bits, "
-        f"subnormals {'ok' if float_env['subnormals_supported'] else 'FLUSHED'}"
-    )
+
+    if unmet:
+        # stderr, so the diagnosis never lands in the JSON on stdout.
+        for line in _native_diagnosis():
+            print(line, file=sys.stderr)
+        return 1
     return 0
 
 

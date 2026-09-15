@@ -145,7 +145,7 @@ src/tfidf_stability/perturbation/experiments.py  92  compare  Lt -> LtE  # src=3
 src/tfidf_stability/perturbation/experiments.py  165  constant  True -> False  # src=af3b9798 doc ids and scores both come from the same model
 
 # --- preprocessing/tokenise.py ---------------------------------------------
-src/tfidf_stability/preprocessing/tokenise.py  39  constant  1 -> 0  # src=3f11ea04 the pattern matches at least one character, so minimum lengths of 0 and 1 admit the same tokens
+src/tfidf_stability/preprocessing/tokenise.py  40  constant  1 -> 0  # src=3f11ea04 the pattern matches at least one character, so minimum lengths of 0 and 1 admit the same tokens
 
 # --- preprocessing/stopwords.py --------------------------------------------
 src/tfidf_stability/preprocessing/stopwords.py  67  boolop  Or -> And  # src=586815b3 a blank or comment line that is not skipped still fails the `name == asset` test two lines later
@@ -195,11 +195,11 @@ src/tfidf_stability/benchmarks/tfidf_perf.py  213  constant  True -> False  # sr
 src/tfidf_stability/benchmarks/tfidf_perf.py  364  constant  1 -> 0  # src=f21a8bca the inner clamp guards a division reachable only at n_queries = 0, which fails earlier at queries[0]
 
 # --- cli/main.py -----------------------------------------------------------
-src/tfidf_stability/cli/main.py  104  constant  False -> True  # src=d898869c argparse always sets log_timestamps, so the getattr default never fires
-src/tfidf_stability/cli/main.py  110  constant  False -> True  # src=cef12337 likewise for version
+src/tfidf_stability/cli/main.py  109  constant  False -> True  # src=d898869c argparse always sets log_timestamps, so the getattr default never fires
+src/tfidf_stability/cli/main.py  115  constant  False -> True  # src=cef12337 likewise for version
 
 # --- cli/commands.py -------------------------------------------------------
-src/tfidf_stability/cli/commands.py  474  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
+src/tfidf_stability/cli/commands.py  540  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
 
 # --- datasets/synthetic.py -------------------------------------------------
 src/tfidf_stability/datasets/synthetic.py  136  constant  1 -> 0  # src=a05543f2 the quotient reaches zero only above a vocabulary of 2**40 terms

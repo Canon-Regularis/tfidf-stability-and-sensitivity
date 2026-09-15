@@ -141,18 +141,13 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "10.15"
           # Test the INSTALLED wheel rather than the checkout.
           CIBW_TEST_REQUIRES: "pytest hypothesis scikit-learn"
-          # Asserted, not printed. This read `print(..., n.native_available())`,
-          # which succeeds whether the answer is True or False -- so a wheel
-          # whose extension built but could not load (a missing runtime DLL is
-          # the usual cause, and this matrix covers three platforms) shipped
-          # green. `sys.exit(str)` exits 1 with the message, which is what makes
-          # this a gate rather than a log line.
+          # Asserted, not printed. A wheel whose extension built but could not
+          # load (a missing runtime DLL is the usual cause, and this matrix
+          # covers three platforms) would otherwise ship green, because every
+          # native test skips and pytest exits 0 having compared nothing.
           CIBW_TEST_COMMAND: >
-            python -c "import sys, tfidf_stability as t, tfidf_stability._native as n;
-            print('version', t.__version__);
-            sys.exit(None if n.native_available() else
-            '::error::the wheel imports but its extension does not load: '
-            + (n.unavailable_reason() or 'unknown'))" &&
+            python -c "import tfidf_stability as t; print('version', t.__version__)" &&
+            python -m tfidf_stability.cli.main info --require-native &&
             python -m pytest {project}/tests -q -x
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -204,13 +199,9 @@ jobs:
         # Run outside the checkout so the installed wheel is what is imported.
         run: |
           cd "$RUNNER_TEMP"
+          python -m tfidf_stability.cli.main info --require-native
           python - <<'PY'
-          from tfidf_stability._native import build_info, native_available, unavailable_reason
-
-          if not native_available():
-              raise SystemExit(
-                  f"installed wheel has no native backend: {unavailable_reason()}"
-              )
+          from tfidf_stability._native import build_info
 
           info = build_info()
           print("build_info:", info)

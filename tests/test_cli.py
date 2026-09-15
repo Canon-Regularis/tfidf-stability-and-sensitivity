@@ -760,6 +760,95 @@ def test_info_reports_an_absent_native_backend_as_normative_not_broken(
     assert "reproducible =" not in out, "nothing may be reported about a backend that is absent"
 
 
+def test_info_requiring_a_native_backend_fails_when_there_is_none(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    """The gate the workflows use in place of five hand-written variants.
+
+    Every native test is guarded on ``native_available()`` and pytest exits 0
+    when all of them skip, so a job that builds the extension but cannot load it
+    would otherwise report green having compared nothing.
+    """
+    from tfidf_stability.cli import commands
+
+    real = commands.environment_block
+    monkeypatch.setattr(commands, "environment_block", lambda: {**real(), "native": None})
+
+    assert main(["info", "--require-native"]) == 1
+
+    captured = capsys.readouterr()
+    assert "normative" not in captured.out, "the reassuring wording belongs to the other arm"
+    assert "did not load" in captured.err
+    assert "required ABI" in captured.err, "the two ABIs are what a reader compares"
+
+
+def test_info_requiring_a_native_backend_passes_when_there_is_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other direction: the flag must not fail a build that has a backend,
+    or CI would be red on every machine that did the right thing."""
+    from tfidf_stability.cli import commands
+
+    real = commands.environment_block
+    loaded = {
+        "compiler_id": "GNU",
+        "compiler_ver": "13.2.0",
+        "build_type": "Release",
+        "reproducible": True,
+        "numeric_flags": "-ffp-contract=off",
+    }
+    monkeypatch.setattr(commands, "environment_block", lambda: {**real(), "native": loaded})
+
+    assert main(["info", "--require-native"]) == 0
+
+
+def test_info_still_emits_its_json_when_the_native_requirement_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    """The diagnosis goes to stderr, so stdout stays parseable. A gate that
+    corrupted its own machine-readable output would be unusable in a pipe."""
+    import json as _json
+
+    from tfidf_stability.cli import commands
+
+    real = commands.environment_block
+    monkeypatch.setattr(commands, "environment_block", lambda: {**real(), "native": None})
+
+    assert main(["info", "--json", "--require-native"]) == 1
+
+    captured = capsys.readouterr()
+    assert _json.loads(captured.out)["environment"]["native"] is None
+    assert "did not load" in captured.err
+
+
+def test_the_native_diagnosis_reports_the_raw_import_error_when_there_is_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The loader's reason can be a summary. The raw exception is what names a
+    missing runtime DLL, which is the usual cause on Windows."""
+    import importlib
+
+    from tfidf_stability.cli.commands import _native_diagnosis
+
+    def explode(name: str) -> None:
+        raise ImportError("libwinpthread-1.dll not found")
+
+    monkeypatch.setattr(importlib, "import_module", explode)
+
+    assert any("libwinpthread-1.dll" in line for line in _native_diagnosis())
+
+
+def test_the_native_diagnosis_separates_what_is_built_from_what_can_load() -> None:
+    """The usual cause is a build tagged for another interpreter, and only the
+    difference between the two lists says so."""
+    from tfidf_stability.cli.commands import _native_diagnosis
+
+    lines = _native_diagnosis()
+
+    assert any(line.startswith("extensions beside the package") for line in lines)
+    assert any(line.startswith("tagged for this interpreter") for line in lines)
+
+
 def test_a_log_level_configures_logging_and_names_the_backend(capsys) -> None:  # type: ignore[no-untyped-def]
     """Logging is configured only on request, so the configured path is separate
     from every other invocation in this file."""

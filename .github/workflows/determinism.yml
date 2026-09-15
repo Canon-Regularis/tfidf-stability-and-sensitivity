@@ -156,13 +156,7 @@ jobs:
           # runtime DLL is the usual cause, and this job builds on three
           # platforms) would skip the entire comparison and report the native
           # backend bit-identical to the reference having compared nothing.
-          python - <<'PY'
-          import sys
-          from tfidf_stability._native import native_available, unavailable_reason
-          if not native_available():
-              sys.exit(f"::error::native backend not importable: {unavailable_reason() or 'unknown'}")
-          print("native backend importable; the differential suite will not skip")
-          PY
+          python -m tfidf_stability.cli.main info --require-native
           python -m pytest tests/ -q -m "differential or native" --junitxml=diff.xml
           # Belt and braces: even with the backend present, a marker rename or a
           # collection error could select nothing. Require real executions.

@@ -82,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
     info = sub.add_parser("info", help="report the build and floating-point environment")
     info.add_argument("-c", "--config", default=None, help="also resolve and print a config")
     info.add_argument("--json", action="store_true", help="machine-readable output")
+    info.add_argument(
+        "--require-native",
+        action="store_true",
+        help="exit 1, with the diagnosis, if the compiled backend did not load",
+    )
     info.set_defaults(func=cmd_info)
 
     schema = sub.add_parser("schema", help="print the .tfsx on-disk schema")

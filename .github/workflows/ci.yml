@@ -263,31 +263,10 @@ jobs:
         # extension that builds but cannot load turns this job into a second run
         # of the reference suite while still reporting the native backend green.
         #
-        # Diagnostic on failure rather than a bare non-zero: when this fired on
-        # windows-latest there was nothing in the log to say whether the import
-        # failed or the ABI disagreed, which is the whole question.
-        run: |
-          python - <<'PY'
-          import sys, pathlib
-          from tfidf_stability._native import (
-              REQUIRED_ABI, build_info, native_available, unavailable_reason,
-          )
-          if native_available():
-              print(f"native backend importable, ABI {REQUIRED_ABI}")
-              print(build_info())
-              sys.exit(0)
-          print(f"::error::native backend not importable: {unavailable_reason() or 'unknown'}")
-          print(f"expected ABI: {REQUIRED_ABI}")
-          built = sorted(pathlib.Path("src").rglob("_tfidf_native*"))
-          print(f"built artefacts found: {[str(p) for p in built] or 'NONE'}")
-          for p in built:
-              print(f"  {p}  ({p.stat().st_size} bytes)")
-          try:
-              import tfidf_stability._native._tfidf_native  # noqa: F401
-          except Exception as exc:
-              print(f"raw import error: {type(exc).__name__}: {exc}")
-          sys.exit(1)
-          PY
+        # The diagnosis on failure -- the reason, both ABIs, and which
+        # extensions are tagged for this interpreter -- belongs to the CLI, so
+        # the five jobs that need this assertion cannot drift apart.
+        run: python -m tfidf_stability.cli.main info --require-native
 
       - name: Run the full suite with the native backend present
         run: python -m pytest tests/ -q
@@ -342,12 +321,7 @@ jobs:
         # native paths unexecuted, and the floor below reports the shortfall as a
         # coverage regression somewhere in the Python. Naming the cause here
         # costs one step and saves the misdiagnosis.
-        run: |
-          python - <<'CHECK'
-          import sys
-          from tfidf_stability._native import native_available, unavailable_reason
-          sys.exit(None if native_available() else unavailable_reason())
-          CHECK
+        run: python -m tfidf_stability.cli.main info --require-native
       - name: Coverage, with a floor
         # A coverage number nobody gates on is decoration. The floor ratchets and
         # is never lowered to make a build pass.
@@ -518,4 +492,14 @@ jobs:
         # `pip install . -C cmake.define.TFIDF_BUILD_NATIVE=OFF` is the
         # documented escape hatch; if it breaks, the claim that the reference
         # backend stands alone is false.
-        run: python -c "from tfidf_stability._native import native_available; print('native:', native_available())"
+        #
+        # Both directions. The first command proves the install runs at all; the
+        # second proves it really is reference-only, since a step that merely
+        # printed `native_available()` passed whether the answer was True or
+        # False, and so could not tell this install from an ordinary one.
+        run: |
+          python -m tfidf_stability.cli.main info
+          if python -m tfidf_stability.cli.main info --require-native >/dev/null 2>&1; then
+            echo "::error::TFIDF_BUILD_NATIVE=OFF still produced a loadable extension"
+            exit 1
+          fi
