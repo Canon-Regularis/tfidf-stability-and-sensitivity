@@ -23,6 +23,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
+from tfidf_stability.analysis.summarise import ExperimentResult  # noqa: E402
 from tfidf_stability.datasets.loaders import load_dataset  # noqa: E402
 from tfidf_stability.preprocessing.pipeline import (  # noqa: E402
     PreprocessingPipeline,
@@ -93,32 +94,45 @@ def main() -> int:
     terms.sort(key=lambda t: -t["weight"])
 
     norm = model.norms[index]
-    payload = {
-        "doc_id": doc_id,
-        "index": index,
-        "n_features": len(features[index]),
-        "n_terms_in_vocabulary": len(terms),
-        # `L`, the denominator of every `tf` above. Distinct from `n_features`,
-        # which counts the document's feature stream before the vocabulary is
-        # applied; without `L` no reader can check a count against its `tf`.
-        "in_vocabulary_length": length,
-        "norm": norm,
-        "norm_hex": float.hex(norm),
-        "is_zero_norm": norm == 0.0,
-        "model_digest": model.digest(),
-        "reduction": str(model.reduction),
-        "log_impl": str(model.idf.log_impl),
-        "terms": terms,
-    }
+    # The same envelope the other three reports carry. Without it this was the
+    # one published artefact with no identity at all: no result digest to check
+    # a republished number against, and no record of the build that produced it.
+    result = ExperimentResult(
+        experiment="intermediates",
+        parameters={
+            "dataset": args.dataset,
+            "doc_id": doc_id,
+            "model_digest": model.digest(),
+            "reduction": str(model.reduction),
+            "log_impl": str(model.idf.log_impl),
+        },
+        data_provenance=data.provenance,
+        payload={
+            "doc_id": doc_id,
+            "index": index,
+            "n_features": len(features[index]),
+            "n_terms_in_vocabulary": len(terms),
+            # `L`, the denominator of every `tf` above. Distinct from
+            # `n_features`, which counts the document's feature stream before the
+            # vocabulary is applied; without `L` no reader can check a count
+            # against its `tf`.
+            "in_vocabulary_length": length,
+            "norm": norm,
+            "norm_hex": float.hex(norm),
+            "is_zero_norm": norm == 0.0,
+            "terms": terms,
+        },
+    )
 
     args.output.mkdir(parents=True, exist_ok=True)
     destination = args.output / f"intermediates_{doc_id}.json"
-    write_json(destination, payload)
+    write_json(destination, result.as_dict())
 
     print(f"{doc_id}: {len(terms)} vocabulary terms, norm {norm!r} ({float.hex(norm)})")
     for t in terms[:10]:
         print(f"  {t['term']:<24} df={t['df']:<5} idf={t['idf']:.9f} w={t['weight']:.9f}")
     print(f"\nwritten {destination}")
+    print(f"result digest {result.digest()}")
     return 0
 
 

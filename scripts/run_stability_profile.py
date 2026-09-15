@@ -156,7 +156,10 @@ def _rank_trajectories(
     tracked = list(baseline[:n_tracked])
 
     ratios = [10 ** (-1.0 + 3.0 * i / (n_steps - 1)) for i in range(n_steps)]
-    positions: dict[str, list[int]] = {str(doc): [] for doc in tracked}
+    # Keyed by document id, as `tracked_documents` is and as every other report
+    # names a document. Keyed by candidate index, these could not be joined to
+    # `similarity.json`'s `doc_id` without the candidate list.
+    positions: dict[str, list[int]] = {table.doc_ids[doc]: [] for doc in tracked}
     realised: list[float] = []
     for ratio in ratios:
         eps = radius * ratio
@@ -166,16 +169,18 @@ def _rank_trajectories(
         order = rank_top_k(perturbed, table, k=len(perturbed)).order
         where = {doc: i for i, doc in enumerate(order)}
         for doc in tracked:
-            positions[str(doc)].append(where[doc] + 1)
+            positions[table.doc_ids[doc]].append(where[doc] + 1)
 
     return {
         "k": k,
         "certified_radius": radius,
         "m_k": margin.value,
-        "seed": seed,
+        # Its own name: `parameters.seed` is the run's seed, and this is that
+        # seed offset, so one key would have named two different numbers.
+        "trajectory_seed": seed,
         "ratios": ratios,
         "realised_ratios": realised,
-        "tracked_documents": [str(d) for d in tracked],
+        "tracked_documents": [table.doc_ids[d] for d in tracked],
         "ranks": positions,
         "n_candidates": len(scores),
     }
@@ -375,7 +380,11 @@ def main() -> int:
                 "band_invariance_recomputed": invariant,
             },
             "E1_margin_distributions": margin_dists,
-            "E1_excluded_degenerate": excluded_by_k,
+            # Undefined margins, not degenerate queries: the two are different
+            # exclusions, and `_margin_distributions` counts only the first. A
+            # feature-less profile never reaches it, because `evaluate` skips one
+            # and reports it as `n_degenerate_profiles`.
+            "E1_excluded_undefined": excluded_by_k,
             "E2_transition": {
                 "k": args.k,
                 "n_queries_used": n_used,

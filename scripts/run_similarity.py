@@ -92,7 +92,7 @@ def main() -> int:
                         "value": m.value,
                         "defined": m.defined,
                         "flip_radius": m.flip_radius,
-                        "exact_tie": m.is_exact_tie,
+                        "is_exact_tie": m.is_exact_tie,
                     }
                     for m in margin_profile(ranking.sorted_scores, ks)
                 },
@@ -101,7 +101,7 @@ def main() -> int:
         top = records[-1]["top"]
         margin = records[-1]["margins"].get("k1", {})
         if top:
-            tie = " EXACT TIE at rank 1" if margin.get("exact_tie") else ""
+            tie = " EXACT TIE at rank 1" if margin.get("is_exact_tie") else ""
             print(
                 f"q{i:<3} top={top[0]['doc_id']:<10} score={top[0]['score']:.6f}  "
                 f"m_1={margin.get('value', float('nan')):.3e}{tie}"

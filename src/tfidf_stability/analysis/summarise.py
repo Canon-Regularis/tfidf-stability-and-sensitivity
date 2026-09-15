@@ -116,6 +116,11 @@ class Distribution:
         return self.n_zero / self.n if self.n else math.nan
 
     def as_dict(self) -> dict[str, Any]:
+        """The record, under the names this class declares.
+
+        ``minimum`` and ``maximum`` rather than ``min``/``max``, so a reader
+        moving between this file and the JSON meets one set of names.
+        """
         return {
             "name": self.name,
             "n": self.n,
@@ -123,8 +128,8 @@ class Distribution:
             "n_infinite": self.n_infinite,
             "n_zero": self.n_zero,
             "share_zero": self.share_zero,
-            "min": self.minimum,
-            "max": self.maximum,
+            "minimum": self.minimum,
+            "maximum": self.maximum,
             "mean": self.mean,
             "percentiles": self.percentiles,
             "percentile_method": "nearest-rank (no interpolation)",
@@ -180,7 +185,11 @@ class ExperimentResult:
     """One experiment's output, with everything needed to reproduce it."""
 
     experiment: str
-    #: What the experiment measured. Must be JSON-serialisable.
+    #: What the experiment measured. Must be JSON-serialisable. One concept
+    #: carries one key across every report: a margin that is exactly zero is
+    #: ``is_exact_tie`` wherever it appears, never ``exact_tie`` in one file and
+    #: ``is_exact_tie`` in another. A band *value* is not a property of a thing,
+    #: so ``stratify.EXACT_TIE_BAND`` stays the string ``"exact_tie"``.
     payload: dict[str, Any]
     #: The dataset's provenance block, verbatim from :class:`LoadedDataset`.
     data_provenance: dict[str, Any] = field(default_factory=dict)

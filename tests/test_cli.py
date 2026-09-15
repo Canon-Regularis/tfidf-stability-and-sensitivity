@@ -1039,8 +1039,8 @@ def test_an_undocumented_log_level_is_refused_rather_than_defaulted() -> None:
 # the export dropped was precisely the one needing the care the library already
 # takes, in the only file this project publishes with raw bit patterns beside
 # the decimals.
-def _export(tmp_path: Path) -> dict[str, object]:
-    """Run the exporter into a temp directory and return its payload.
+def _export_record(tmp_path: Path) -> dict[str, object]:
+    """Run the exporter into a temp directory and return the whole record.
 
     Imported and called rather than shelled out, so a traceback survives.
     """
@@ -1066,9 +1066,40 @@ def _export(tmp_path: Path) -> dict[str, object]:
 
     written = list(tmp_path.glob("intermediates_*.json"))
     assert len(written) == 1, f"expected one export, got {[p.name for p in written]}"
-    payload = json.loads(written[0].read_text(encoding="utf-8"))
+    record = json.loads(written[0].read_text(encoding="utf-8"))
+    assert isinstance(record, dict)
+    return record
+
+
+def _export(tmp_path: Path) -> dict[str, object]:
+    """Just the measured quantities, which is what most of these tests are about."""
+    payload = _export_record(tmp_path)["payload"]
     assert isinstance(payload, dict)
     return payload
+
+
+def test_the_export_carries_the_envelope_every_other_report_carries(tmp_path: Path) -> None:
+    """Identity and provenance, as every other report carries them.
+
+    Without the envelope the record cannot be checked against a republished
+    number, and nothing states which build or dataset produced it.
+    """
+    record = _export_record(tmp_path)
+
+    assert sorted(record) == [
+        "data_provenance",
+        "environment",
+        "experiment",
+        "parameters",
+        "payload",
+        "result_digest",
+    ]
+    parameters = record["parameters"]
+    assert isinstance(parameters, dict)
+    assert parameters["dataset"] == "synthetic_tiny"
+    assert set(parameters) >= {"doc_id", "log_impl", "model_digest", "reduction"}, (
+        "what identifies the run belongs with the other parameters, not at the root"
+    )
 
 
 def test_the_export_carries_every_quantity_its_docstring_names(tmp_path: Path) -> None:
