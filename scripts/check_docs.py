@@ -114,7 +114,13 @@ def check_presets(documents: Sequence[Path]) -> tuple[list[str], int]:
 
     Hidden presets are excluded: they exist to be inherited from, and a reader
     cannot invoke one.
+
+    An absent file is reported rather than raised, as an absent ``docs/`` is:
+    this runs inside the mutation sandbox, and a traceback there names the
+    exception instead of the file, which is the harder thing to diagnose.
     """
+    if not PRESETS.exists():
+        return [f"{PRESETS.name} not found, so no preset could be checked"], 0
     presets = json.loads(PRESETS.read_text(encoding="utf-8"))
     configure = [p for p in presets["configurePresets"] if not p.get("hidden")]
     defined = {

@@ -216,6 +216,26 @@ def test_a_hidden_preset_need_not_be_documented(
     assert n_presets == 1, "and it is not counted as checked either"
 
 
+def test_an_absent_presets_file_is_reported_rather_than_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate runs inside the mutation sandbox, which copies a chosen list of
+    paths rather than the whole tree.
+
+    A file missing from that list would otherwise surface as a
+    `FileNotFoundError` from a nightly job, naming the exception rather than the
+    file. Reported as a finding, the message says which file to add.
+    """
+    checker = _checker()
+    monkeypatch.setattr(checker, "PRESETS", tmp_path / "CMakePresets.json")
+
+    problems, n_presets = checker.check_presets([_document(tmp_path, "Use `--preset ci`.\n")])
+
+    assert n_presets == 0
+    assert problems == ["CMakePresets.json not found, so no preset could be checked"]
+    assert checker.check() != [], "and the gate still fails, rather than passing vacuously"
+
+
 def test_a_preset_named_only_in_prose_does_not_count_as_documented(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
