@@ -16,6 +16,7 @@ ever prunes them, and the campaign goes green whatever the tests do.
 from __future__ import annotations
 
 import ast
+import re
 import shutil
 from pathlib import Path
 
@@ -95,6 +96,68 @@ def test_a_claim_resolves_to_its_reason() -> None:
 
     assert (155, "compare", "LtE", "Lt") in claims
     assert "transitive" in claims[(155, "compare", "LtE", "Lt")]
+
+
+# ---------------------------------------------------------------------------
+# The sandbox: what a campaign needs to be a working checkout
+# ---------------------------------------------------------------------------
+#: A top-level entry named as `REPO / "<something>"`. The captured name must look
+#: like a path: without that this pattern matches its own source, and the two
+#: fragments of itself are the only things it would report.
+_TOP_LEVEL_READ = re.compile(r'REPO / "([\w.@+-]+)"')
+
+#: Where a path reaches the suite from. `tests/` is the direct signal -- a test
+#: that opens a repository file needs it in the sandbox -- and the other two are
+#: there because a test runs a gate script, which opens files of its own.
+_SCANNED = ("tests", "scripts", "tooling")
+
+
+def _top_level_reads() -> dict[str, set[str]]:
+    """Every top-level repository entry the suite and its gates name, by file."""
+    found: dict[str, set[str]] = {}
+    for directory in _SCANNED:
+        for path in sorted((REPO / directory).glob("*.py")):
+            names = set(_TOP_LEVEL_READ.findall(path.read_text(encoding="utf-8")))
+            if names:
+                found[f"{directory}/{path.name}"] = names
+    return found
+
+
+def test_the_sandbox_holds_every_top_level_path_the_suite_names() -> None:
+    """A campaign runs against a copy, so a file only the real tree has is a
+    file the suite cannot open, and the baseline fails before any mutant.
+
+    Deliberately an over-approximation: a path a script only writes into is
+    copied too. One extra directory costs a single copy per campaign, and the
+    other way round costs a red nightly job a day later, reported as an exit
+    code with no reference to the file that went missing.
+    """
+    contents = set(runner._SANDBOX_CONTENTS)
+    missing = {
+        where: sorted(names - contents)
+        for where, names in _top_level_reads().items()
+        if names - contents
+    }
+
+    assert missing == {}, (
+        f"named from the repository root but never copied into the sandbox, so "
+        f"the baseline fails before any mutant: {missing}"
+    )
+
+
+def test_the_scan_finds_the_paths_it_is_meant_to_check() -> None:
+    """The premise. A pattern that matched nothing would make the check above
+    pass for the wrong reason, and it is the kind that silently stops matching.
+    """
+    reads = _top_level_reads()
+    named = {name for names in reads.values() for name in names}
+
+    assert len(reads) > 8, f"only {len(reads)} files name a top-level path"
+    assert "CMakePresets.json" in reads.get("scripts/check_docs.py", set())
+    assert ".github" in reads.get("tests/test_cpp_mutation_gate.py", set())
+    assert not any(not name.replace(".", "").replace("-", "").isalnum() for name in named), (
+        f"the pattern captured something that is not a path: {sorted(named)}"
+    )
 
 
 # ---------------------------------------------------------------------------

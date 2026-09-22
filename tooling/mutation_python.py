@@ -105,6 +105,17 @@ _SANDBOX_CONTENTS = (
     # `tests/test_repository_gates.py` runs it, so all four must be present or
     # the sandbox baseline fails before a single mutant is applied.
     "CMakeLists.txt",
+    # The same failure, one file along each time. `check_docs.py` checks that
+    # every preset is documented; `test_repository_gates.py` compares the two
+    # requirement files; `test_cpp_mutation_gate.py` reads the nightly's own
+    # matrix and the preset that job configures.
+    "CMakePresets.json",
+    "requirements-dev.txt",
+    ".github",
+    # `test_render_summary.py` reads the committed reports, and every driver
+    # defaults its output here. `test_mutation_gate.py` asserts this list covers
+    # every top-level path the suite names, which is what keeps it complete.
+    "reports",
 )
 
 #: Comparison flips. The pairs that matter are the boundary ones: `<=` against
