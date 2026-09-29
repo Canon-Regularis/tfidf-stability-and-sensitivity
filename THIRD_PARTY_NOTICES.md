@@ -62,11 +62,25 @@ FFI overhead that `pytest-benchmark` necessarily includes.
 
 ---
 
+## Linked into the distributed package
+
+### nanobind
+- **Location:** compiled into `_tfidf_native`, the extension module
+- **Upstream:** https://github.com/wjakob/nanobind
+- **Licence:** BSD-3-Clause
+- **Copyright:** Copyright (c) 2022 Wenzel Jakob
+
+Not vendored -- pip resolves it at build time -- but `cpp/CMakeLists.txt` calls
+`nanobind_add_module(... NB_STATIC ...)`, which links the nanobind runtime
+statically. Its compiled code is therefore inside the extension every wheel
+ships, and BSD-3-Clause requires the notice above to travel with it.
+
+---
+
 ## Build-time dependencies (not redistributed)
 
 | Project | Licence | Role |
 |---|---|---|
-| nanobind | BSD-3-Clause | Python bindings for the native backend |
 | scikit-build-core | Apache-2.0 | PEP 517 build backend |
 | numpy | BSD-3-Clause | Array interchange with the native backend |
 | PyYAML | MIT | Configuration loading |

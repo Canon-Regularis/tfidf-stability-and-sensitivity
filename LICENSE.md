@@ -15,8 +15,12 @@ code under a licence that is actually intended for code.
 | **Software** — `src/`, `cpp/`, `tests/`, `scripts/`, `examples/`, `notebooks/` (code cells), build and CI configuration | Apache License 2.0 | `Apache-2.0` |
 | **Exposition** — `README.md`, `docs/`, `reports/`, figures, and generated result documents | Creative Commons Attribution 4.0 International | `CC-BY-4.0` |
 
-Full texts are in [`LICENSES/`](LICENSES/). Individual files carry an
-`SPDX-License-Identifier:` header where the format permits one.
+Full texts are in [`LICENSES/`](LICENSES/). The same split is stated in
+machine-readable form in [`REUSE.toml`](REUSE.toml), which maps every path in
+the tree to an SPDX identifier; `reuse lint` runs in CI and fails if a file is
+left uncovered. Annotations rather than per-file headers, because a header
+cannot go in a JSON fixture and one added to a hashed asset would change the
+digest `scripts/check_vendored.py` verifies.
 
 ---
 

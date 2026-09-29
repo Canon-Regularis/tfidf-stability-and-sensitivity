@@ -1,0 +1,129 @@
+# Machine-readable licensing, per the REUSE specification.
+#
+# LICENSE.md states the split in prose and gives the SPDX identifiers in a
+# table; this says the same thing in a form a tool can resolve. Two things
+# follow from it that prose alone could not deliver: GitHub reports a licence
+# instead of `NOASSERTION`, and `reuse lint` can assert that every file in the
+# tree is covered rather than leaving that to a reader's inspection.
+#
+# Annotations rather than per-file headers. A header cannot go in a `.json` or
+# a `.jsonl` fixture at all, and one added to a hashed asset would change the
+# digest the vendored-code gate checks. The annotations below cover every file
+# without touching any byte that a digest is taken over.
+#
+# The first two `path` lists mirror the table in LICENSE.md. The override
+# blocks below them mirror THIRD_PARTY_NOTICES.md, which is the authority for
+# vendored material, and name files individually because each vendored
+# directory also holds first-party files. If one moves, move both.
+
+version = 1
+
+SPDX-PackageName = "tfidf-stability-and-sensitivity"
+SPDX-PackageSupplier = "Matthew Maksymilian Miezaniec <matthewmiezaniec1@gmail.com>"
+SPDX-PackageDownloadLocation = "https://github.com/Canon-Regularis/tfidf-stability-and-sensitivity"
+
+# --- Software -----------------------------------------------------------------
+# LICENSE.md: "src/, cpp/, tests/, scripts/, examples/, notebooks/ (code cells),
+# build and CI configuration".
+[[annotations]]
+path = [
+  "src/**",
+  "cpp/**",
+  "tests/**",
+  "scripts/**",
+  "tooling/**",
+  "examples/**",
+  "notebooks/**",
+  "configs/**",
+  ".github/**",
+  "CMakeLists.txt",
+  "CMakePresets.json",
+  "pyproject.toml",
+  "requirements.txt",
+  "requirements-dev.txt",
+  ".pre-commit-config.yaml",
+  ".clang-format",
+  ".editorconfig",
+  ".gitattributes",
+  ".gitignore",
+  "REUSE.toml",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Matthew Maksymilian Miezaniec"
+SPDX-License-Identifier = "Apache-2.0"
+
+# --- Exposition ---------------------------------------------------------------
+# LICENSE.md: "README.md, docs/, reports/, figures, and generated result
+# documents". CITATION.cff and the licence files themselves sit here because
+# they are metadata about the work rather than part of the software.
+[[annotations]]
+path = [
+  "README.md",
+  "CONTRIBUTING.md",
+  "SECURITY.md",
+  "LICENSE.md",
+  "THIRD_PARTY_NOTICES.md",
+  "CITATION.cff",
+  "CHANGELOG.md",
+  ".zenodo.json",
+  "docs/**",
+  "reports/**",
+  "data/README.md",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Matthew Maksymilian Miezaniec"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+# --- Vendored third-party -----------------------------------------------------
+# Recorded from THIRD_PARTY_NOTICES.md, which is the authority. Each is
+# hash-verified against its upstream by scripts/check_vendored.py, so the
+# annotation states a licence rather than granting one. Files are named
+# individually because each vendored directory also holds first-party files.
+[[annotations]]
+path = [
+  "src/tfidf_stability/preprocessing/_snowball/among.py",
+  "src/tfidf_stability/preprocessing/_snowball/basestemmer.py",
+  "src/tfidf_stability/preprocessing/_snowball/english_stemmer.py",
+]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "Copyright (c) 2001, Dr Martin Porter",
+  "Copyright (c) 2004, Richard Boulton",
+  "Copyright (c) 2013, Yoshiki Shibukawa",
+  "Copyright (c) 2006, 2007, 2009, 2010, 2011, 2014, Olly Betts",
+]
+SPDX-License-Identifier = "BSD-3-Clause"
+
+# The official test vectors, from snowballstem/snowball-data. `MANIFEST.sha256`
+# beside them is first-party and stays Apache-2.0 under `tests/**`.
+[[annotations]]
+path = ["tests/fixtures/snowball/voc.txt", "tests/fixtures/snowball/output.txt"]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "Copyright (c) 2001, Dr Martin Porter",
+  "Copyright (c) 2004, Richard Boulton",
+  "Copyright (c) 2013, Yoshiki Shibukawa",
+  "Copyright (c) 2006, 2007, 2009, 2010, 2011, 2014, Olly Betts",
+]
+SPDX-License-Identifier = "BSD-3-Clause"
+
+[[annotations]]
+path = ["cpp/third_party/doctest/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2016-2023 Viktor Kirilov"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["cpp/third_party/nanobench/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2019-2023 Martin Ankerl"
+SPDX-License-Identifier = "MIT"
+
+# --- Data ---------------------------------------------------------------------
+# The frozen stopword list and its manifest. Derived material rather than
+# software, and shipped inside the wheel.
+[[annotations]]
+path = ["data/assets/**", "data/lexicon/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Matthew Maksymilian Miezaniec"
+SPDX-License-Identifier = "CC-BY-4.0"
