@@ -15,9 +15,13 @@ recorded values live in `configs/pipeline_digest.txt` and in each
 
 ## [Unreleased]
 
-No tag has been cut yet, so everything below is the content of the first
-release. The declared version is 0.2.0, and `scripts/check_versions.py --tag
-v0.2.0` is what holds the tag and the four files that state it together.
+## [0.2.0] - 2026-09-29
+
+The first tagged release. Published to PyPI as `tfidf-stability` 0.2.0, with
+wheels for CPython 3.11 to 3.13 on Linux, macOS and Windows, and archived at
+[10.5281/zenodo.23047931](https://doi.org/10.5281/zenodo.23047931).
+`scripts/check_versions.py --tag v0.2.0` is what holds the tag and the four
+files that state the version together.
 
 ### Added
 
@@ -78,4 +82,5 @@ v0.2.0` is what holds the tag and the four files that state it together.
   `requirements-dev.txt` or `reports/`, so a suite that reads any of them failed
   the campaign baseline before a mutant was applied.
 
-[Unreleased]: https://github.com/Canon-Regularis/tfidf-stability-and-sensitivity/commits/main
+[Unreleased]: https://github.com/Canon-Regularis/tfidf-stability-and-sensitivity/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Canon-Regularis/tfidf-stability-and-sensitivity/releases/tag/v0.2.0
