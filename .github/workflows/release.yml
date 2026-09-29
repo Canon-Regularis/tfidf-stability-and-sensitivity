@@ -102,57 +102,22 @@ jobs:
         with:
           name: sdist
           path: dist/*.tar.gz
+          # `publish` downloads this in the same run, so the default 90 days
+          # keeps a build intermediate long after anything can read it.
+          retention-days: 7
 
   wheels:
-    name: wheels ${{ matrix.os }}
-    timeout-minutes: 60
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
-        with:
-          python-version: "3.12"
-      - name: Build wheels
-        uses: pypa/cibuildwheel@e090b81e30c4d855ea63bf4b6e59204c09a101ae  # v4.2
-        env:
-          # The extension is a real CPython module, so wheels are
-          # version-specific. 3.11 is the floor: the code uses `X | Y` unions and
-          # `itertools.pairwise` throughout.
-          CIBW_BUILD: "cp311-* cp312-* cp313-*"
-          CIBW_SKIP: "*-musllinux_i686 *_i686 *-win32"
-          CIBW_ARCHS_MACOS: "x86_64 arm64"
-          CIBW_BEFORE_BUILD: "pip install nanobind numpy cmake ninja"
-          # Show the compiler invocation and its diagnostics. Without this the
-          # only thing a failed build reports is "pip wheel ... failed with code
-          # 1", which was not enough to act on.
-          CIBW_BUILD_VERBOSITY: "1"
-          # manylinux2014 ships GCC 10. This is a C++20 core, and the default
-          # image is the usual reason a C++20 wheel builds everywhere except in
-          # the manylinux container. manylinux_2_28 has GCC 12.
-          CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
-          CIBW_MANYLINUX_AARCH64_IMAGE: "manylinux_2_28"
-          # libc++ needs 10.15 for the C++20 library surface; cibuildwheel
-          # otherwise targets 10.9 on x86_64, where the build fails in the
-          # standard headers rather than in this project's code.
-          MACOSX_DEPLOYMENT_TARGET: "10.15"
-          # Test the INSTALLED wheel rather than the checkout.
-          CIBW_TEST_REQUIRES: "pytest hypothesis scikit-learn"
-          # Asserted, not printed. A wheel whose extension built but could not
-          # load (a missing runtime DLL is the usual cause, and this matrix
-          # covers three platforms) would otherwise ship green, because every
-          # native test skips and pytest exits 0 having compared nothing.
-          CIBW_TEST_COMMAND: >
-            python -c "import tfidf_stability as t; print('version', t.__version__)" &&
-            python -m tfidf_stability.cli.main info --require-native &&
-            python -m pytest {project}/tests -q -x
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: wheels-${{ matrix.os }}
-          path: wheelhouse/*.whl
+    # The same reusable job `wheels.yml` runs nightly and on any build-system
+    # change, so the build a release performs has already been exercised.
+    #
+    # `needs: [sdist]` is what makes the version check above a gate. Without it
+    # the matrix started alongside `sdist` and ran to completion even when the
+    # tag named the wrong version -- which the comment on that check already
+    # claimed it prevented.
+    needs: [sdist]
+    uses: ./.github/workflows/build-wheels.yml
+    with:
+      cibw-build: "cp311-* cp312-* cp313-*"
 
   determinism-gate:
     name: the release must be reproducible
@@ -226,16 +191,79 @@ jobs:
         run: |
           python scripts/snapshot.py --verbose
           python scripts/snapshot.py --check
+      - name: Record what the wheel depends on
+        # Generated from the environment the wheel was installed into, so it
+        # describes the dependency closure a user actually resolves rather than
+        # the floors `pyproject.toml` declares.
+        #
+        # What it does not cover: the vendored C++ and the Snowball stemmer are
+        # compiled or copied into the wheel and are not Python distributions, so
+        # no environment scan can see them. THIRD_PARTY_NOTICES.md is the record
+        # for those, and `scripts/check_vendored.py` is what verifies it.
+        run: |
+          set -euo pipefail
+          # A clean environment holding the wheel and nothing else. Scanning this
+          # job's own environment would describe requirements-dev.txt -- pytest,
+          # ruff, mypy and their closure -- which is not what anyone installs.
+          python -m venv /tmp/sbom-env
+          # Re-derived: `$wheel` was set in an earlier step, and a shell variable
+          # does not survive one.
+          wheel=$(ls wheelhouse/*cp312*manylinux*x86_64*.whl | head -1)
+          /tmp/sbom-env/bin/python -m pip install --quiet --upgrade pip "$wheel"
+          python -m pip install --quiet cyclonedx-bom
+          # --output-reproducible drops the generation timestamp, so the same
+          # wheel yields the same SBOM bytes.
+          python -m cyclonedx_py environment /tmp/sbom-env/bin/python \
+            --of JSON --output-reproducible -o sbom.cyclonedx.json
+          python -c "import json; s=json.load(open('sbom.cyclonedx.json')); n=sorted(c['name'] for c in s['components']); print('CycloneDX', s['specVersion'], len(n), 'components:', ', '.join(n)); assert any(x.startswith('tfidf') for x in n), 'subject absent from its own SBOM'"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: sbom
+          path: sbom.cyclonedx.json
+          retention-days: 7
+
+  # A rehearsal on TestPyPI before the upload that cannot be undone. A PyPI
+  # filename is permanent: a wheel published with the wrong contents cannot be
+  # replaced, only yanked and superseded by a new version. This job uploads the
+  # same artefacts to an index where that does not matter, so a metadata or
+  # naming fault surfaces while the version number is still reusable.
+  #
+  # `skip-existing` because TestPyPI rejects a filename it already holds, and a
+  # re-run of a release must not fail on that alone. Every other failure here is
+  # a real one and blocks `publish`.
+  testpypi:
+    name: rehearse on TestPyPI
+    needs: [sdist, wheels, determinism-gate]
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      id-token: write
+    environment: testpypi
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          path: dist
+          pattern: "{sdist,wheels-*}"
+          merge-multiple: true
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+        with:
+          packages-dir: dist/
+          repository-url: https://test.pypi.org/legacy/
+          attestations: true
+          skip-existing: true
 
   publish:
     name: attach to the release
-    needs: [sdist, wheels, determinism-gate]
+    needs: [sdist, wheels, determinism-gate, testpypi]
     timeout-minutes: 20
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
       id-token: write               # trusted publishing, no long-lived token
+      attestations: write           # build provenance for the release assets
     environment: release            # requires a manual approval
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
@@ -243,13 +271,36 @@ jobs:
           path: dist
           pattern: "{sdist,wheels-*}"
           merge-multiple: true
-      - run: ls -la dist/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: sbom
+      - name: Record what is about to be published
+        # `ls` asserts nothing. These digests are what a reader compares against
+        # the ones PyPI shows and against the attestation below, so the artefact
+        # that was gated and the artefact that shipped can be tied together.
+        run: |
+          set -euo pipefail
+          ls -la dist/
+          sha256sum dist/* | tee dist-sha256.txt
+      - name: Attest the artefacts
+        # PyPI gets PEP 740 attestations from the publish step below. The files
+        # attached to the GitHub release get nothing without this, so the same
+        # bytes would be verifiable from one place and not the other.
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: "dist/*"
       - name: Attach to the GitHub release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3
         with:
-          files: dist/*
+          files: |
+            dist/*
+            dist-sha256.txt
+            sbom.cyclonedx.json
           generate_release_notes: true
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
         with:
           packages-dir: dist/
+          # Stated rather than left to the action's default, so a re-pin cannot
+          # switch PEP 740 attestations off without a change to this line.
+          attestations: true
