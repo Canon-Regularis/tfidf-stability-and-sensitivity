@@ -289,14 +289,6 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
           subject-path: "dist/*"
-      - name: Attach to the GitHub release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3
-        with:
-          files: |
-            dist/*
-            dist-sha256.txt
-            sbom.cyclonedx.json
-          generate_release_notes: true
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
         with:
@@ -304,3 +296,15 @@ jobs:
           # Stated rather than left to the action's default, so a re-pin cannot
           # switch PEP 740 attestations off without a change to this line.
           attestations: true
+      - name: Attach to the GitHub release
+        # Last of all. Publishing a release is what triggers the Zenodo webhook,
+        # and a minted DOI cannot be withdrawn, whereas a release can be deleted
+        # and a failed upload retried. Ordered this way, a DOI exists only for a
+        # version that reached PyPI.
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3
+        with:
+          files: |
+            dist/*
+            dist-sha256.txt
+            sbom.cyclonedx.json
+          generate_release_notes: true
