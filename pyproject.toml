@@ -14,7 +14,18 @@ requires-python = ">=3.11"
 # Code is Apache-2.0; prose and generated reports stay CC BY 4.0. LICENSE.md
 # sets out the split.
 license = "Apache-2.0"
-license-files = ["LICENSES/Apache-2.0.txt", "LICENSES/CC-BY-4.0.txt", "LICENSE.md"]
+# BSD-3-Clause because the wheel ships it: the Snowball stemmer is vendored
+# under `preprocessing/_snowball/`, and nanobind is linked into the extension.
+# THIRD_PARTY_NOTICES.md carries the copyright notices that licence requires
+# and its own text does not. MIT is absent: doctest and nanobench are build-
+# and test-only and reach no wheel.
+license-files = [
+  "LICENSES/Apache-2.0.txt",
+  "LICENSES/BSD-3-Clause.txt",
+  "LICENSES/CC-BY-4.0.txt",
+  "LICENSE.md",
+  "THIRD_PARTY_NOTICES.md",
+]
 authors = [{ name = "Matthew Maksymilian Miezaniec", email = "matthewmiezaniec1@gmail.com" }]
 keywords = [
   "tf-idf", "information-retrieval", "cosine-similarity", "numerical-stability",
@@ -53,6 +64,10 @@ dev = [
   # assert the vendored copy still matches upstream.
   "snowballstemmer>=3.0",
   "types-PyYAML",
+  # The repository ships `.pre-commit-config.yaml`; without this an install of
+  # `.[dev]` cannot run the hooks `ci.yml` now gates on.
+  "pre-commit>=4.0",
+  "reuse[charset-normalizer]>=6.0",
 ]
 viz = ["matplotlib>=3.8", "pandas>=2.0"]
 docs = ["mkdocs-material>=9.5", "mkdocstrings[python]>=0.25"]

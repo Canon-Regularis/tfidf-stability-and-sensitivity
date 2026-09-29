@@ -188,4 +188,3 @@ The ten heaviest terms:
 | `fig_ablation.png`          | `tie_break_ablations` | `c159225b26bac4a4` |
 | `fig_rho_discontinuity.png` | `tie_break_ablations` | `c159225b26bac4a4` |
 | `fig_stratified.png`        | `tie_break_ablations` | `c159225b26bac4a4` |
-

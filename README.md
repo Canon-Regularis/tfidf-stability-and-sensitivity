@@ -52,8 +52,8 @@ and similarity geometry can be related directly to similarity scores,
 neighbourhood structure and ranking behaviour under perturbation.
 
 The central question is one of stability:  
-**how sensitive are TF-IDF weights, cosine similarities, and induced rankings to small 
-changes in the underlying data?** 
+**how sensitive are TF-IDF weights, cosine similarities, and induced rankings to small
+changes in the underlying data?**
 Two aspects of it are addressed:
 (i) how score-separation margins govern the stability of similarity-based rankings
 under bounded perturbations, and
@@ -546,7 +546,7 @@ choice of deterministic tie-breaking rule alone.
 
 This motivates a notion of **tie-break sensitivity**, measurable for example by:
 
-- an indicator of whether the top-k set differs between π and π_score, and 
+- an indicator of whether the top-k set differs between π and π_score, and
 - a distance between orderings restricted to tie groups (e.g. inversion count or
   Kendall τ distance).
 
@@ -558,36 +558,36 @@ criteria.
 
 ## 5. Interpretation and Scope
 
-Several structural features of **TF-IDF-based similarity systems** become clear once the pipeline is expressed in 
+Several structural features of **TF-IDF-based similarity systems** become clear once the pipeline is expressed in
 **operator-level form**:
 
-- **IDF sensitivity is governed by explicit logarithmic dependence** on corpus size and document-frequency counts, as seen in 
-  Δidf(t) = log((1 + N′)/(1 + df′(t))) − log((1 + N)/(1 + df(t))). 
+- **IDF sensitivity is governed by explicit logarithmic dependence** on corpus size and document-frequency counts, as seen in
+  Δidf(t) = log((1 + N′)/(1 + df′(t))) − log((1 + N)/(1 + df(t))).
   IDF stability is thereby traceable to perturbations in corpus composition.
 
-- **TF-IDF perturbations admit an explicit decomposition** into *local* (TF), *global* (IDF), and *second-order interaction* terms, which shows transparently how 
+- **TF-IDF perturbations admit an explicit decomposition** into *local* (TF), *global* (IDF), and *second-order interaction* terms, which shows transparently how
   small edits propagate through the embedding.
 
-- **Cosine similarity admits a geometric interpretation** as the cosine of the angle between *sparse, non-negative vectors*. This framing clarifies how sparsity 
+- **Cosine similarity admits a geometric interpretation** as the cosine of the angle between *sparse, non-negative vectors*. This framing clarifies how sparsity
   patterns and IDF scaling influence angular distortion under perturbation.
 
-- **Ranking robustness can be characterised in terms of score-separation margins**, with explicit sufficient conditions ensuring invariance under bounded perturbations. Under 
+- **Ranking robustness can be characterised in terms of score-separation margins**, with explicit sufficient conditions ensuring invariance under bounded perturbations. Under
   **content-based k-nearest-neighbour recommendation**, such ranking stability is the stability of the induced neighbourhoods.
 
-- **Ranking stability is governed primarily by margin distributions, rather than by aggregate or average score changes alone.** 
-  Small score-separation margins near decision boundaries dominate stability behaviour even when aggregate similarity scores are 
+- **Ranking stability is governed primarily by margin distributions, rather than by aggregate or average score changes alone.**
+  Small score-separation margins near decision boundaries dominate stability behaviour even when aggregate similarity scores are
   numerically well-conditioned.
 
-- **A long tail of near-zero margins can imply rare but extreme fragility.** 
-  Most rankings may be stable under small perturbations, yet documents near top-k boundaries with vanishing margins can induce abrupt changes in neighbourhood 
+- **A long tail of near-zero margins can imply rare but extreme fragility.**
+  Most rankings may be stable under small perturbations, yet documents near top-k boundaries with vanishing margins can induce abrupt changes in neighbourhood
   structure under otherwise negligible score variation.
 
 - **Deterministic tie-breaking introduces non-perturbative discontinuities.**  
-  With no meaningful numerical perturbation at all (Δs ≈ 0), ranking outcomes may change through secondary ordering rules alone: stability of computed similarities 
+  With no meaningful numerical perturbation at all (Δs ≈ 0), ranking outcomes may change through secondary ordering rules alone: stability of computed similarities
   does not guarantee stability of downstream decisions.
 
-The emphasis throughout is on **derivational transparency** rather than algorithmic optimisation. No dimensionality reduction, latent-semantic modelling, or neural 
-embeddings are introduced. The aim is to expose the **algebraic and geometric structure** of the TF-IDF pipeline in a form suitable for 
+The emphasis throughout is on **derivational transparency** rather than algorithmic optimisation. No dimensionality reduction, latent-semantic modelling, or neural
+embeddings are introduced. The aim is to expose the **algebraic and geometric structure** of the TF-IDF pipeline in a form suitable for
 **perturbation analysis**, **stability reasoning**, and **controlled experimentation**.
 
 ---
@@ -818,31 +818,31 @@ These online resources provide accessible summaries of standard definitions and 
 Matthew Maksymilian Miezaniec  
 Email: matthewmiezaniec1@gmail.com  
 
-The implementation covers the full TF-IDF similarity pipeline, the explicit perturbation analysis tooling, **stability 
-profiling via score-separation margins**, and a **tie-break ablation framework** for isolating decision-level 
+The implementation covers the full TF-IDF similarity pipeline, the explicit perturbation analysis tooling, **stability
+profiling via score-separation margins**, and a **tie-break ablation framework** for isolating decision-level
 discontinuities in ranking outcomes.
 
 **Mathematical and theoretical foundations**  
-This work draws on **classical information retrieval methodology**, including TF-IDF weighting and vector-space models 
-(Salton; Manning et al.), and on established treatments of **numerical stability**, **conditioning**, and 
+This work draws on **classical information retrieval methodology**, including TF-IDF weighting and vector-space models
+(Salton; Manning et al.), and on established treatments of **numerical stability**, **conditioning**, and
 **perturbation behaviour** in high-dimensional vector spaces (Higham; Trefethen & Bau).
 
-Reading similarity scores as **content-based k-nearest-neighbour ranking and neighbourhood structure** 
+Reading similarity scores as **content-based k-nearest-neighbour ranking and neighbourhood structure**
 follows classical nearest-neighbour and similarity-search perspectives (Cover & Hart), with no learning-based methods introduced.
 
-Broader contextual connections to feature representations and similarity-based reasoning draw on standard statistical learning 
-references (Hastie, Tibshirani & Friedman; Shalev-Shwartz & Ben-David). Supplementary intuition and terminology come from 
+Broader contextual connections to feature representations and similarity-based reasoning draw on standard statistical learning
+references (Hastie, Tibshirani & Friedman; Shalev-Shwartz & Ben-David). Supplementary intuition and terminology come from
 widely used online references on **TF-IDF**, **cosine similarity**, and **vector-space models**.
 
 ---
 
 ## 10. Acknowledgements
 
-The author thanks colleagues and peers for informal discussions that helped clarify aspects of numerical stability, sparse 
-vector geometry, and similarity-based reasoning. The work also benefited from exposure to standard academic treatments of 
+The author thanks colleagues and peers for informal discussions that helped clarify aspects of numerical stability, sparse
+vector geometry, and similarity-based reasoning. The work also benefited from exposure to standard academic treatments of
 information retrieval and numerical linear algebra through coursework, independent study, and open-source documentation.
 
-Any remaining errors or omissions are the responsibility of the author alone. This acknowledgement does not imply endorsement 
+Any remaining errors or omissions are the responsibility of the author alone. This acknowledgement does not imply endorsement
 or direct contribution by any individual or institution.
 
 ---

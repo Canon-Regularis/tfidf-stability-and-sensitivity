@@ -33,6 +33,14 @@ snowballstemmer>=3.0
 # the new release found, not something a rebuild does silently.
 ruff==0.16.2
 mypy==2.3.0
+# The repository ships `.pre-commit-config.yaml`, and until this line the
+# documented dev environment could not run it. `ci.yml` now runs the same hooks,
+# so an unparseable config or a hook whose dependency moved fails there too.
+pre-commit>=4.0
+# `reuse lint` is the ninth repository gate. The charset extra is not optional
+# on Windows: without it the tool cannot detect file encodings and exits before
+# linting anything.
+reuse[charset-normalizer]>=6.0
 types-PyYAML
 
 # --- experiments and figures -------------------------------------------------

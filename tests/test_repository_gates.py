@@ -28,6 +28,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -254,6 +255,34 @@ def _vendored_gate(monkeypatch: pytest.MonkeyPatch, repo: Path) -> ModuleType:
 def test_the_vendored_gate_passes_on_this_repository() -> None:
     """The baseline. Every rejection below is vacuous if this fails."""
     assert _script("check_vendored").main() == 0
+
+
+def test_every_hashed_directory_is_named_by_both_hook_patterns() -> None:
+    """A directory holding a manifest must be excluded from the rewriters.
+
+    `check_vendored.py` finds manifests by globbing, so it covers a new
+    vendored directory the moment one appears. `.pre-commit-config.yaml` names
+    the same directories twice by hand, and a directory missing from either
+    list is rewritten by a hook and then fails the digest it was meant to keep.
+    """
+    config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    hooks = [hook for repo in config["repos"] for hook in repo["hooks"]]
+    excludes = {h["id"]: h["exclude"].strip() for h in hooks if "exclude" in h}
+    selector = next(h["files"].strip() for h in hooks if h["id"] == "vendored-digests")
+    assert excludes, "no hook carries an exclusion, so there is nothing to compare"
+
+    manifests = sorted(REPO.rglob("MANIFEST.sha256"))
+    assert manifests, "no MANIFEST.sha256 in the tree, so the premise is gone"
+
+    for manifest in manifests:
+        directory = manifest.parent.relative_to(REPO).as_posix() + "/"
+        for hook_id, pattern in excludes.items():
+            assert re.match(pattern, directory), (
+                f"{directory} is hash-verified, but {hook_id} may rewrite it"
+            )
+        assert re.match(selector, directory), (
+            f"{directory} holds a manifest that vendored-digests does not select"
+        )
 
 
 def test_a_changed_vendored_byte_is_reported(

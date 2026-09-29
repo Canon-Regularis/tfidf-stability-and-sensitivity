@@ -92,9 +92,10 @@ python -m ruff format --check src tests scripts examples tooling
 python -m mypy
 python scripts/snapshot.py --check  # the recorded reproducibility digest
 python -m tooling.renumber_allowlists --check   # after editing a covered module
+python -m pre_commit run --all-files            # the hooks, which ci.yml also runs
 ```
 
-The eight repository gates, which `ci.yml` runs and this list otherwise hides:
+The nine repository gates, which `ci.yml` runs and this list otherwise hides:
 
 ```bash
 python scripts/check_dependencies.py   # pyproject and requirements agree
@@ -105,6 +106,7 @@ python scripts/check_python_floor.py   # no stdlib API newer than requires-pytho
 python scripts/check_cpp_format.py     # C++ matches the shipped .clang-format
 python scripts/check_docs.py           # every documented link and reference resolves
 python scripts/check_test_vacuity.py   # no test passes without asserting anything
+python -m reuse lint                   # every file carries a licence
 ```
 
 `--preset ci` builds with whatever compiler the machine provides. `mingw`,

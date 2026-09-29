@@ -116,6 +116,9 @@ _SANDBOX_CONTENTS = (
     # defaults its output here. `test_mutation_gate.py` asserts this list covers
     # every top-level path the suite names, which is what keeps it complete.
     "reports",
+    # `test_repository_gates.py` compares the hook patterns against every
+    # directory holding a MANIFEST.sha256.
+    ".pre-commit-config.yaml",
 )
 
 #: Comparison flips. The pairs that matter are the boundary ones: `<=` against

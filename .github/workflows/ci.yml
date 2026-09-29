@@ -126,6 +126,41 @@ jobs:
         # count in determinism.yml) answer "did anything run". This answers "could
         # what ran have failed", which is the same question one level down.
         run: python scripts/check_test_vacuity.py
+      - name: Every allowlist entry must name the line its stamp describes
+        # `docs/index.md` lists this among the local gates. A stale entry fails
+        # the test suite rather than a check script, so running it here names
+        # the cause directly.
+        run: python -m tooling.renumber_allowlists --check
+      - name: Every file must state its copyright and licence
+        # LICENSE.md splits the tree between Apache-2.0 and CC-BY-4.0 in prose.
+        # REUSE.toml says the same thing in a form a tool resolves, and this is
+        # what stops the two drifting: a new top-level directory that neither
+        # annotation covers fails here rather than shipping unlicensed.
+        run: python -m reuse lint
+      - name: The hooks the repository ships must still run
+        # `.pre-commit-config.yaml` carries checks no workflow duplicates --
+        # trailing whitespace, YAML and TOML validity, and the LF normalisation
+        # that every recorded digest is taken over. Without this, all of them
+        # depend on each contributor having installed the hook.
+        run: python -m pre_commit run --all-files --show-diff-on-failure
+
+  # Only on a pull request: the action compares the base ref against the head
+  # ref, so on a push to main there is nothing to diff. It reads the dependency
+  # graph GitHub already builds for this repository.
+  dependency-review:
+    name: dependency review
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
+        with:
+          # A dependency carrying a known vulnerability at moderate or above
+          # fails the pull request. Licences are not checked here: this
+          # repository vendors and hash-verifies its third-party code, and
+          # THIRD_PARTY_NOTICES.md settles the licence question.
+          fail-on-severity: moderate
 
   reference:
     name: reference ${{ matrix.os }} py${{ matrix.python }}
@@ -279,7 +314,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-      - run: sudo apt-get update && sudo apt-get install -y cppcheck
+      - name: Install the analyser, and record which one
+        # The version is printed because it is not pinned and cannot easily be:
+        # cppcheck comes from the Ubuntu archive, so the verdict is a function of
+        # the archive on the day as much as of this tree. Recording it is what
+        # lets a finding that appears without a code change be attributed to the
+        # analyser rather than investigated as a regression.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cppcheck
+          cppcheck --version
       # --check-level=exhaustive is not a loosening: at the default level cppcheck
       # stops exploring branches and emits an informational note saying so, and that
       # note alone trips --error-exitcode=1. Doing what the note asks costs about 11s

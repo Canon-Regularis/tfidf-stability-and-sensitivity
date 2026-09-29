@@ -463,7 +463,10 @@ def render(reports: Path) -> str:
         if name in loaded:
             lines += section(loaded[name])
     lines += _figures(loaded)
-    return "\n".join(lines) + "\n"
+    # One trailing newline, not two. Every section ends with a blank line so the
+    # sections separate; on the last one that leaves a blank line at end of file,
+    # which `end-of-file-fixer` strips and the next render would restore.
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def main() -> int:

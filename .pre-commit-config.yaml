@@ -4,20 +4,31 @@
 # bypassed with --no-verify, and a bypassed hook is worse than no hook: it
 # trains the habit of skipping checks.
 
+# The three rewriting hooks share one exclusion, defined on the first of them
+# and referenced by the other two. Those files' bytes are the point:
+# `scripts/check_vendored.py` verifies each against a recorded SHA-256, so a
+# hook that rewrites one breaks the check that proves it is upstream code.
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^(cpp/third_party/|src/tfidf_stability/preprocessing/_snowball/|tests/fixtures/snowball/)
+        # Two trailing spaces are a hard line break in Markdown. Stripping them
+        # reflows every paragraph that used one, which in README.md alone would
+        # silently rewrite 136 lines of rendered output.
+        args: [--markdown-linebreak-ext=md]
+        exclude: &verified_bytes >-
+          ^(cpp/third_party/|src/tfidf_stability/preprocessing/_snowball/|data/assets/|tests/fixtures/snowball/)
       - id: end-of-file-fixer
-        exclude: ^(cpp/third_party/|src/tfidf_stability/preprocessing/_snowball/|tests/fixtures/snowball/)
+        exclude: *verified_bytes
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
         args: [--maxkb=512]
       - id: mixed-line-ending
         args: [--fix=lf]          # digests are taken over LF-normalised bytes
+        exclude: *verified_bytes
 
   # ruff runs from the environment, not from a mirror pinned here.
   #
@@ -36,15 +47,22 @@ repos:
     hooks:
       - id: ruff
         name: ruff (from requirements-dev.txt)
-        entry: python -m ruff check --fix
+        # `--force-exclude` is required, not optional. pre-commit passes explicit
+        # filenames, and ruff applies `extend-exclude` from pyproject.toml only
+        # to files it discovers itself -- so without this the hook lints and
+        # rewrites the vendored Snowball stemmer, breaking the SHA-256 that
+        # `scripts/check_vendored.py` verifies.
+        entry: python -m ruff check --force-exclude --fix
         language: system
         types_or: [python, pyi]
       - id: ruff-format
         name: ruff-format (from requirements-dev.txt)
-        entry: python -m ruff format
+        # `--check`, not a rewrite. `ci.yml` gates on `ruff format --check`,
+        # so reporting here names the file before it reaches CI without mixing
+        # formatting churn into the diff being committed.
+        entry: python -m ruff format --force-exclude --check
         language: system
         types_or: [python, pyi]
-        stages: [manual]          # opt-in: formatting churn obscures real diffs
 
   - repo: local
     hooks:
@@ -55,7 +73,11 @@ repos:
         entry: python scripts/check_vendored.py
         language: system
         pass_filenames: false
-        files: ^(cpp/third_party/|src/tfidf_stability/preprocessing/_snowball/|tests/fixtures/snowball/)
+        # Every directory holding a MANIFEST.sha256, which is what
+        # `check_vendored.py` discovers. `verified_bytes` above lists the same
+        # four, from the other side: these bytes are checked, so no hook may
+        # rewrite them.
+        files: ^(cpp/third_party/|src/tfidf_stability/preprocessing/_snowball/|data/assets/|tests/fixtures/snowball/)
 
       - id: test-vacuity
         name: no test passes without asserting anything
