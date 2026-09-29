@@ -1,0 +1,118 @@
+# The wheel build, in one place.
+#
+# Called by `release.yml`, which ships what this produces, and by `wheels.yml`,
+# which runs it on a schedule and on any change to the build system. Both call
+# the same job, so the build a release performs is the build that has already
+# been exercised rather than one that resembles it.
+
+name: build wheels
+
+on:
+  workflow_call:
+    inputs:
+      cibw-build:
+        description: >-
+          The CPython builds to produce, as a CIBW_BUILD selector. A release
+          takes every supported interpreter; a pull request takes one, because
+          a build-system change breaks all of them or none.
+        type: string
+        required: true
+      artifact-suffix:
+        description: >-
+          Appended to the artifact name, so a caller that runs this twice in one
+          workflow does not collide with itself.
+        type: string
+        default: ""
+      retention-days:
+        description: >-
+          How long to keep the wheels. `publish` sits behind an environment
+          approval, so this has to cover however long a release waits for it.
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+# Workflow-level `env` does not cross a `workflow_call` boundary, so the settings
+# the callers declare would be lost here. `CIBW_TEST_COMMAND` runs pytest, and
+# without the faulthandler settings a hung test inside cibuildwheel reports a
+# timeout and no traceback. See ci.yml for why these are `-o` settings and not
+# flags: pytest derives verbosity from count(-v) minus count(-q), and the test
+# command passes -q.
+env:
+  PYTEST_ADDOPTS: >-
+    -o verbosity_test_cases=1
+    -o faulthandler_timeout=300
+    -o faulthandler_exit_on_timeout=1
+    --durations=25
+
+jobs:
+  wheels:
+    name: wheels ${{ matrix.os }}
+    timeout-minutes: 60
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+        with:
+          python-version: "3.12"
+      - name: Build wheels
+        uses: pypa/cibuildwheel@e090b81e30c4d855ea63bf4b6e59204c09a101ae  # v4.2
+        env:
+          # The extension is a real CPython module, so wheels are
+          # version-specific. 3.11 is the floor: the code uses `X | Y` unions and
+          # `itertools.pairwise` throughout.
+          CIBW_BUILD: ${{ inputs.cibw-build }}
+          CIBW_SKIP: "*-musllinux_i686 *_i686 *-win32"
+          # Linux wheels build and test inside the manylinux container, which
+          # reads its environment from inside. A host variable reaches the test
+          # command only by being named here, so the faulthandler settings above
+          # would otherwise apply on macOS and Windows but not on Linux.
+          CIBW_ENVIRONMENT_PASS_LINUX: "PYTEST_ADDOPTS"
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          CIBW_BEFORE_BUILD: "pip install nanobind numpy cmake ninja"
+          # Show the compiler invocation and its diagnostics. Without this a
+          # failed build reports only `pip wheel ... failed with code 1`.
+          CIBW_BUILD_VERBOSITY: "1"
+          # manylinux2014 ships GCC 10. This is a C++20 core, and the default
+          # image is the usual reason a C++20 wheel builds everywhere except in
+          # the manylinux container. manylinux_2_28 has GCC 12.
+          CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
+          # x86_64 only on Linux. Building aarch64 on a hosted runner means QEMU
+          # emulation, which for a C++20 core of this size costs more runner time
+          # than the wheel is used.
+          CIBW_ARCHS_LINUX: "x86_64"
+          # libc++ needs 10.15 for the C++20 library surface; cibuildwheel
+          # otherwise targets 10.9 on x86_64, where the build fails in the
+          # standard headers rather than in this project's code.
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
+          # Test the INSTALLED wheel rather than the checkout.
+          #
+          # `snowballstemmer` is here and not in the runtime dependencies for the
+          # reason pyproject.toml gives: it is the upstream oracle the vendored
+          # Porter2 copy is checked against, so the suite needs it and the
+          # package does not.
+          CIBW_TEST_REQUIRES: "pytest hypothesis scikit-learn snowballstemmer"
+          # Asserted, not printed. A wheel whose extension built but could not
+          # load (a missing runtime DLL is the usual cause, and this matrix
+          # covers three platforms) would otherwise ship green, because every
+          # native test skips and pytest exits 0 having compared nothing.
+          #
+          # `test_repository_gates.py` tests the repository rather than the
+          # package: `check_python_floor.py` runs mypy, and this environment
+          # holds the runtime and test dependencies, not the dev toolchain.
+          # `ci.yml` is where those gates run.
+          CIBW_TEST_COMMAND: >
+            python -c "import tfidf_stability as t; print('version', t.__version__)" &&
+            python -m tfidf_stability.cli.main info --require-native &&
+            python -m pytest {project}/tests -q -x
+            --ignore={project}/tests/test_repository_gates.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: wheels-${{ matrix.os }}${{ inputs.artifact-suffix }}
+          path: wheelhouse/*.whl
+          retention-days: ${{ inputs.retention-days }}

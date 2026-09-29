@@ -1,0 +1,63 @@
+# Prove the wheel still builds, before a release depends on it.
+#
+# `release.yml` builds the artefact this project ships, and it runs on a tag
+# push, so evidence that the build works would otherwise arrive only at the
+# moment a release is wanted.
+#
+# This runs the same job, from the same reusable workflow, on a schedule and on
+# any change to the build system. A break is then found by the commit that
+# causes it, or by the next morning, rather than by a tag.
+#
+# The schedule is 02:00, ahead of sanitizers at 03:00 and nightly at 04:00, so
+# the three do not contend for runners.
+
+name: wheels
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  # Everything the wheel build reads. `pyproject.toml` carries the build backend
+  # and its configuration, `CMakeLists.txt` and `CMakePresets.json` the compile
+  # itself, and the two workflow files the build definition. A change to any of
+  # them can break the wheel while leaving every source test green.
+  #
+  # On `push` as well as `pull_request`: this repository's history is direct
+  # commits, so a pull-request trigger alone would leave most build-system
+  # changes unbuilt until the nightly run.
+  push:
+    branches: [main]
+    paths:
+      - "cpp/**"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "pyproject.toml"
+      - ".github/workflows/wheels.yml"
+      - ".github/workflows/build-wheels.yml"
+  pull_request:
+    paths:
+      - "cpp/**"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "pyproject.toml"
+      - ".github/workflows/wheels.yml"
+      - ".github/workflows/build-wheels.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # One interpreter on a push or a pull request, every supported one on the
+    # schedule and on dispatch. A build-system change breaks all of them or
+    # none, so paying for the full matrix on every commit buys nothing the
+    # single build does not already report.
+    uses: ./.github/workflows/build-wheels.yml
+    with:
+      cibw-build: ${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 'cp312-*' || 'cp311-* cp312-* cp313-* cp314-*' }}
+      artifact-suffix: -check
+      retention-days: 3
