@@ -32,4 +32,16 @@ license:
   - Apache-2.0
   - CC-BY-4.0
 version: 0.2.0
-date-released: '2026-03-01'
+# The date this version was released, not the date work began. It is checked
+# against nothing, so it is the one field here that can drift silently; the git
+# tag is the authority.
+date-released: '2026-09-29'
+# Filled in once Zenodo has minted one. Two DOIs exist: the concept DOI, which
+# always resolves to the newest version, and a version DOI per release. The
+# concept DOI belongs here, because a reader citing "this software" means the
+# work rather than one snapshot of it.
+#
+# identifiers:
+#   - type: doi
+#     value: 10.5281/zenodo.XXXXXXX
+#     description: The concept DOI, resolving to the latest version.
