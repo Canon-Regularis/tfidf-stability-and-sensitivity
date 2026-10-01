@@ -45,7 +45,7 @@ cpp/include/tfidf/core/reduction.hpp  228:27  < -> <=  # src=e41ae70b the descen
 cpp/include/tfidf/core/reduction.hpp  228:52  < -> <=  # src=e41ae70b add pushes a partial only when it is non-zero, so no partial is ever exactly 0.0 and <= cannot differ from <
 cpp/include/tfidf/core/reduction.hpp  229:27  > -> >=  # src=9d5e6008 the mirror of the lo comparison on the line above: lo is non-zero wherever this is reached
 cpp/include/tfidf/core/reduction.hpp  229:52  > -> >=  # src=9d5e6008 the mirror of the partial comparison on the line above: no partial is ever exactly 0.0
-cpp/include/tfidf/similarity/scoring.hpp  54:58  / -> *  # src=44f2eb01 reserve is a capacity hint; touched grows to whatever it needs either way and no scored result can depend on it
+cpp/include/tfidf/similarity/scoring.hpp  81:58  / -> *  # src=44f2eb01 reserve is a capacity hint; touched grows to whatever it needs either way and no scored result can depend on it
 cpp/include/tfidf/vectorisation/sparse.hpp  81:13  + -> -  # src=bb1ac0d7 indices are strictly ascending, so dropping this increment still gives the same sum: the next iteration compares the index that did not move against its successor and advances it through the a < b branch instead
 cpp/include/tfidf/vectorisation/sparse.hpp  81:14  + -> -  # src=bb1ac0d7 the second token of the same increment, equivalent for the reason above
 cpp/include/tfidf/vectorisation/sparse.hpp  82:13  + -> -  # src=08b428dd the mirror of the increment above, on the other list
