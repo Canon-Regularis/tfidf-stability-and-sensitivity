@@ -77,15 +77,15 @@ src/tfidf_stability/ranking/distances.py  258  compare  Lt -> LtE  # src=234423a
 src/tfidf_stability/ranking/sort_keys.py  155  compare  LtE -> Lt  # src=7c4df57a the self-check runs an extra size or one fewer; keys are tuples and therefore transitive, so neither finds a violation
 
 # --- utils/numerics.py -----------------------------------------------------
-src/tfidf_stability/utils/numerics.py  112  compare  GtE -> Gt  # src=2a87a12d at equal magnitude both Neumaier branches compute the same compensation; verified across sign combinations and at 1e300
-src/tfidf_stability/utils/numerics.py  273  constant  0.0 -> 1.0  # src=4ce04a9e marked `# pragma: no cover`; reachable only if ulp() returns zero
-src/tfidf_stability/utils/numerics.py  274  constant  0.0 -> 1.0  # src=8725d058 the same unreachable arm
-src/tfidf_stability/utils/numerics.py  326  binop  Div -> Mult  # src=aa0e3e69 the flush-to-zero probe: both forms report the same boolean on a machine that is not flushing, which is the only kind a test can run on
-src/tfidf_stability/utils/numerics.py  326  compare  Gt -> GtE  # src=aa0e3e69 same probe, same reason
-src/tfidf_stability/utils/numerics.py  342  binop  Add -> Sub  # src=a6a003b6 the constant-folding probe answers the same on a conforming interpreter
-src/tfidf_stability/utils/numerics.py  343  binop  Add -> Sub  # src=199a247b the reassociation probe, likewise
+src/tfidf_stability/utils/numerics.py  114  compare  GtE -> Gt  # src=2a87a12d at equal magnitude both Neumaier branches compute the same compensation; verified across sign combinations and at 1e300
+src/tfidf_stability/utils/numerics.py  275  constant  0.0 -> 1.0  # src=4ce04a9e marked `# pragma: no cover`; reachable only if ulp() returns zero
+src/tfidf_stability/utils/numerics.py  276  constant  0.0 -> 1.0  # src=8725d058 the same unreachable arm
+src/tfidf_stability/utils/numerics.py  328  binop  Div -> Mult  # src=aa0e3e69 the flush-to-zero probe: both forms report the same boolean on a machine that is not flushing, which is the only kind a test can run on
+src/tfidf_stability/utils/numerics.py  328  compare  Gt -> GtE  # src=aa0e3e69 same probe, same reason
+src/tfidf_stability/utils/numerics.py  344  binop  Add -> Sub  # src=a6a003b6 the constant-folding probe answers the same on a conforming interpreter
+src/tfidf_stability/utils/numerics.py  345  binop  Add -> Sub  # src=199a247b the reassociation probe, likewise
 
-src/tfidf_stability/utils/numerics.py  315  boolop  And -> Or  # src=b8983b47 the fourth probe of the family documented at 322, 338 and 339: all three conjuncts are true on any machine a test can run on, so `and` and `or` return the same boolean and only a directed rounding mode could separate them
+src/tfidf_stability/utils/numerics.py  317  boolop  And -> Or  # src=b8983b47 the fourth probe of the family documented at 322, 338 and 339: all three conjuncts are true on any machine a test can run on, so `and` and `or` return the same boolean and only a directed rounding mode could separate them
 
 # --- utils/io.py -----------------------------------------------------------
 src/tfidf_stability/utils/io.py  114  constant  True -> False  # src=d976dced the temp file always exists in the except arm, so missing_ok never fires
@@ -142,7 +142,7 @@ src/tfidf_stability/perturbation/vector_perturb.py  201  constant  0.0 -> 1.0  #
 
 # --- perturbation/experiments.py -------------------------------------------
 src/tfidf_stability/perturbation/experiments.py  92  compare  Lt -> LtE  # src=3487de65 separable only by a shift landing exactly on the certified radius
-src/tfidf_stability/perturbation/experiments.py  165  constant  True -> False  # src=af3b9798 doc ids and scores both come from the same model
+src/tfidf_stability/perturbation/experiments.py  166  constant  True -> False  # src=af3b9798 doc ids and scores both come from the same model
 
 # --- preprocessing/tokenise.py ---------------------------------------------
 src/tfidf_stability/preprocessing/tokenise.py  40  constant  1 -> 0  # src=3f11ea04 the pattern matches at least one character, so minimum lengths of 0 and 1 admit the same tokens
@@ -199,7 +199,7 @@ src/tfidf_stability/cli/main.py  109  constant  False -> True  # src=d898869c ar
 src/tfidf_stability/cli/main.py  115  constant  False -> True  # src=cef12337 likewise for version
 
 # --- cli/commands.py -------------------------------------------------------
-src/tfidf_stability/cli/commands.py  540  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
+src/tfidf_stability/cli/commands.py  538  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
 
 # --- datasets/synthetic.py -------------------------------------------------
 src/tfidf_stability/datasets/synthetic.py  136  constant  1 -> 0  # src=a05543f2 the quotient reaches zero only above a vocabulary of 2**40 terms

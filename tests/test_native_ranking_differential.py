@@ -33,7 +33,7 @@ import pytest
 from tfidf_stability._native import native_available, unavailable_reason
 from tfidf_stability.ranking.attributes import AttributeTable
 from tfidf_stability.ranking.margins import boundary_margin, min_adjacent_margin_top
-from tfidf_stability.ranking.ranker import rank, rank_top_k, sorted_scores_desc
+from tfidf_stability.ranking.ranker import Selection, rank, rank_top_k, sorted_scores_desc
 from tfidf_stability.ranking.sort_keys import SortKeySpec
 from tfidf_stability.ranking.tie_groups import (
     chain_inflation_ratio,
@@ -295,6 +295,37 @@ def test_a_selection_outside_the_enum_is_refused(selection: int) -> None:
     # than rejecting large values.
     for name, value in nat.SELECTION.items():
         assert len(ranker.rank(native, int(value))) == len(scores), name
+
+
+def test_the_exported_selection_names_are_the_ones_callers_index_by() -> None:
+    """The exported keys are a contract, indexed by literal name.
+
+    `benchmarks/tfidf_perf.py` indexes `SELECTION` by `"full_sort"` and
+    `"bounded_heap"`, where a rename would become a KeyError inside a benchmark
+    rather than a type error. The loop above iterates whatever keys exist.
+    """
+    assert set(nat.SELECTION) == {
+        "full_sort",
+        "stable_sort",
+        "partial_sort",
+        "nth_element",
+        "bounded_heap",
+    }
+
+
+def test_the_two_selection_enumerations_differ_on_purpose() -> None:
+    """C++ and Python name different strategies, which is the design.
+
+    The sort key is injective, so every strategy returns the same permutation
+    and the two sides are independent implementations rather than a mirror.
+    Pinned so the asymmetry is checked rather than only described in prose.
+    """
+    cpp = set(nat.SELECTION)
+    py = {s.value for s in Selection}
+
+    assert cpp & py == {"full_sort", "stable_sort"}
+    assert cpp - py == {"bounded_heap", "nth_element", "partial_sort"}
+    assert py - cpp == {"heap_all", "heap_top_k", "insertion"}
 
 
 def test_the_tie_group_binding_guards_refuse_what_the_reference_refuses() -> None:
