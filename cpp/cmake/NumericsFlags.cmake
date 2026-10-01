@@ -81,10 +81,10 @@ else()
 endif()
 
 # -----------------------------------------------------------------------------
-# A violation on purpose, used only to prove the runtime guards fire.
-# `cpp/tests/test_fp_guard.cpp` expects a fast-math build to FAIL to compile;
-# CI additionally builds a shared library this way and asserts the runtime
-# self-test rejects it.
+# A violation on purpose, used only to prove the compile-time guard fires.
+# `cpp/tests/test_fp_guard.cpp` expects a fast-math build to FAIL to compile,
+# and `determinism.yml` asserts that failure. Layer 1 refuses first, so the
+# runtime reassociation and constant-folding bits are unreached in CI.
 # -----------------------------------------------------------------------------
 if(TFIDF_FAST_MATH)
   message(WARNING "tfidf: TFIDF_FAST_MATH=ON, results from this build are NOT trustworthy.")
