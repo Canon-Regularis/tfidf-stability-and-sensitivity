@@ -32,6 +32,7 @@ from typing import Final
 __all__ = [
     "DECIMAL_LOG_PRECISION",
     "Reduction",
+    "assert_sane_float_environment",
     "bits_of",
     "correctly_rounded_log_ratio",
     "exact_sum",
@@ -39,6 +40,7 @@ __all__ = [
     "naive_sum",
     "neumaier_sum",
     "pairwise_sum",
+    "platform_log_ratio",
     "reduce_sum",
     "same_bits",
     "sqrt",
