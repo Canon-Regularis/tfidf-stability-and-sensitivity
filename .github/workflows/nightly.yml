@@ -175,7 +175,7 @@ jobs:
         # file accretes into a blanket suppression.
         run: |
           python -m tooling.mutation_cpp "${{ matrix.header }}"                  --build build/mutation --test-timeout 60 --json "mutants.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         if: always()
         with:
           name: cpp-mutants-${{ strategy.job-index }}
@@ -218,7 +218,7 @@ jobs:
         # Hypothesis records counterexamples in .hypothesis/; losing one means
         # re-searching for hours to reproduce a failure already found.
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: hypothesis-database
           path: .hypothesis/
@@ -262,7 +262,7 @@ jobs:
           # right for a contributor without a compiler and wrong here: it would
           # report a green benchmark job for a build that never happened.
           python -c "import json; r=json.load(open('bench.json')); c=r['comparisons']; assert c, 'the report contains no measurements'; assert r['native'], 'degraded to reference-only: ' + str(r.get('native_reason')); bad=[x['name'] for x in c if not x['verified']]; assert not bad, 'ratios reported without bit-identity: ' + str(bad); print(len(c), 'comparisons, every one bit-identity verified')"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: benchmarks
           path: bench.json
