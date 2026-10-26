@@ -57,11 +57,11 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
       - name: Build wheels
-        uses: pypa/cibuildwheel@e090b81e30c4d855ea63bf4b6e59204c09a101ae  # v4.2
+        uses: pypa/cibuildwheel@b9e566a2b284570af229f6c2a33673410d0389a3  # v4.3.4
         env:
           # The extension is a real CPython module, so wheels are
           # version-specific. 3.11 is the floor: the code uses `X | Y` unions and
@@ -111,7 +111,7 @@ jobs:
             python -m tfidf_stability.cli.main info --require-native &&
             python -m pytest {project}/tests -q -x
             --ignore={project}/tests/test_repository_gates.py
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: wheels-${{ matrix.os }}${{ inputs.artifact-suffix }}
           path: wheelhouse/*.whl
