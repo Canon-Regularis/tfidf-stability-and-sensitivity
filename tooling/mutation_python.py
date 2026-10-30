@@ -49,12 +49,11 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from tooling.allowlist import claims_python, parse_python, without_stamp
+from tooling.allowlist import claims_python, parse_python, verdict, without_stamp
 
 __all__ = ["without_stamp"]
 
@@ -119,6 +118,10 @@ _SANDBOX_CONTENTS = (
     # `test_repository_gates.py` compares the hook patterns against every
     # directory holding a MANIFEST.sha256.
     ".pre-commit-config.yaml",
+    # Write-only, and absent unless a C++ campaign was interrupted. Listed
+    # because the sandbox check is a deliberate over-approximation, and
+    # `copy2` is skipped for a path that does not exist.
+    ".mutation-cpp-interrupted.json",
 )
 
 #: Comparison flips. The pairs that matter are the boundary ones: `<=` against
@@ -473,20 +476,18 @@ def _verdict(relative: Path, survivors: Sequence[Mutant], *, partial: bool = Fal
     if not claims:
         return 1 if survivors else 0
 
-    # Counted, not just collected: two mutable sites on one line can produce the
-    # same key -- `@dataclass(frozen=True, slots=True)` gives two identical
-    # `constant True -> False` mutants -- and reporting "1 documented" against
-    # two survivors would read as though one were still unaccounted for.
-    counts = Counter((m.line, m.kind, m.before, m.after) for m in survivors)
-    unexplained = [key for key in counts if key not in claims]
-    stale = [key for key in claims if key not in counts]
-    covered = sum(n for key, n in counts.items() if key in claims)
+    # `allowlist.verdict` counts rather than collects, because two mutable sites
+    # on one line can produce the same key -- `@dataclass(frozen=True,
+    # slots=True)` gives two identical `constant True -> False` mutants -- and
+    # reporting "1 documented" against two survivors would read as a gap.
+    split = verdict([(m.line, m.kind, m.before, m.after) for m in survivors], claims)
+    unexplained, stale = split.unclaimed, split.stale
 
-    print(f"\n{covered} of {len(survivors)} survivor(s) documented as equivalent")
+    print(f"\n{split.covered} of {len(survivors)} survivor(s) documented as equivalent")
 
     if unexplained:
         print(f"\nUndocumented survivors in {relative}:", file=sys.stderr)
-        for line, kind, before, after in sorted(unexplained):
+        for line, kind, before, after in unexplained:
             print(f"  {relative}:{line}: {kind} {before} -> {after}", file=sys.stderr)
 
     if partial and stale:
@@ -499,7 +500,7 @@ def _verdict(relative: Path, survivors: Sequence[Mutant], *, partial: bool = Fal
         )
     elif stale:
         print(f"\nStale entries in {_EQUIVALENTS.name}:", file=sys.stderr)
-        for line, kind, before, after in sorted(stale):
+        for line, kind, before, after in stale:
             print(
                 f"  {relative}:{line}: {kind} {before} -> {after} no longer survives",
                 file=sys.stderr,
