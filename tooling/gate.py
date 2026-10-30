@@ -1,12 +1,16 @@
 """How a repository gate reports what it found.
 
-Three gates spelled the same seven lines: a headline on stderr, one indented
-line per problem, exit 1. They are one thing, so they live here.
+A headline on stderr, one indented line per problem, exit 1. Called by
+`check_docs.py`, `check_vendored.py`, `check_versions.py` and
+`render_summary.py`, each of which already puts the repository root on
+`sys.path` in order to import this.
 
-`check_layout.py`, `check_python_floor.py`, `check_cpp_format.py` and
-`check_test_vacuity.py` are deliberately left out. They report findings rather
-than problem strings, and two of them take arguments; bending them to this shape
-costs more than the four lines it saves.
+The other gates print their own. `check_layout.py` reports one formatted
+problem rather than a list; `check_python_floor.py`, `check_cpp_format.py` and
+`check_test_vacuity.py` each also print a success line naming what was scanned.
+`check_dependencies.py` is the one whose shape matches exactly, and it reaches
+nothing else under `tooling`, so importing this would add the `sys.path` line
+the four callers above need and save five.
 """
 
 from __future__ import annotations
