@@ -10,19 +10,24 @@ and the parse are one thing, held here rather than in each campaign.
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Generic, TypeVar
 
 __all__ = [
     "STAMP_PREFIX",
     "CppKey",
     "Entry",
     "PythonKey",
+    "Verdict",
     "claims_cpp",
     "claims_python",
     "fingerprint",
     "parse_cpp",
     "parse_python",
+    "verdict",
     "without_stamp",
 ]
 
@@ -37,6 +42,37 @@ CppKey = tuple[int, int, str, str]
 
 STAMP_PREFIX = "src="
 _STAMP_WIDTH = len(STAMP_PREFIX) + 8
+
+_Key = TypeVar("_Key", PythonKey, CppKey)
+
+
+@dataclass(frozen=True, slots=True)
+class Verdict(Generic[_Key]):
+    """Survivors carrying no claim, and claims matching no survivor.
+
+    Both directions fail a campaign: an unexplained survivor is the gap a
+    campaign exists to find, and a claim nobody re-reads is how an allowlist
+    turns into a blanket suppression.
+    """
+
+    unclaimed: tuple[_Key, ...]
+    stale: tuple[_Key, ...]
+    covered: int
+
+
+def verdict(survivors: Sequence[_Key], claims: Mapping[_Key, str]) -> Verdict[_Key]:
+    """Split survivors and claims against each other.
+
+    Counted rather than collected: two mutable sites on one line can share a
+    key, and reporting one claim against two survivors would read as though
+    one were unaccounted for.
+    """
+    counts = Counter(survivors)
+    return Verdict(
+        unclaimed=tuple(sorted(key for key in counts if key not in claims)),
+        stale=tuple(sorted(key for key in claims if key not in counts)),
+        covered=sum(n for key, n in counts.items() if key in claims),
+    )
 
 
 def fingerprint(line: str) -> str:

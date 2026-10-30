@@ -1356,12 +1356,12 @@ def test_a_command_checks_the_float_environment_before_producing_numbers(
 def test_the_reference_backend_is_not_turned_into_an_error_by_the_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The probe is skipped outright when no extension is present.
+    """The native probe is not attempted when no extension is present.
 
     `check_float_environment` goes through `require_native`, which raises
-    `NativeBackendUnavailableError` without an extension. Calling it
-    unconditionally would turn the pure-Python reference backend, a supported
-    configuration, into a crash on every CLI invocation.
+    without an extension, so calling it unconditionally would turn the
+    supported reference backend into a crash. That path runs
+    `assert_sane_float_environment` instead.
     """
     from tfidf_stability import _native
 

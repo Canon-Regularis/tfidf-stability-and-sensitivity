@@ -11,6 +11,10 @@ venv/
 env/
 .python-version
 
+# Holds the pristine header while a C++ mutation campaign runs, so a run killed
+# before its restore can be repaired by the next one. Present only mid-campaign.
+.mutation-cpp-interrupted.json
+
 # --- Test / type / lint caches ----------------------------------------------
 .pytest_cache/
 .hypothesis/

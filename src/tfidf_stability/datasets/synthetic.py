@@ -44,7 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from tfidf_stability.utils.hashing import hash_text
-from tfidf_stability.utils.io import write_json, write_jsonl
+from tfidf_stability.utils.io import atomic_write_text, write_json, write_jsonl
 
 __all__ = [
     "NearTie",
@@ -365,10 +365,9 @@ def write_corpus(corpus: SyntheticCorpus, directory: Path | str) -> dict[str, st
         p.name: hash_text(p.read_text(encoding="utf-8"))
         for p in (corpus_path, interactions_path, spec_path)
     }
-    (out / "MANIFEST.sha256").write_text(
+    atomic_write_text(
+        out / "MANIFEST.sha256",
         "".join(f"{d}  {n}\n" for n, d in sorted(digests.items())),
-        encoding="utf-8",
-        newline="\n",
     )
     return digests
 

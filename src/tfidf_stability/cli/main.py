@@ -130,12 +130,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     #
     # After the dispatch guard, so `--version` and `--help` do not pay for it,
     # and before the command runs, so the repair precedes any number produced.
-    # Guarded on availability because it goes through `require_native`, which
-    # raises when there is no extension; the reference backend is supported.
+    #
+    # Both backends are checked. The native probe repairs the environment; the
+    # reference backend cannot clear MXCSR from Python, so it refuses instead.
     from tfidf_stability._native import check_float_environment, native_available
+    from tfidf_stability.utils.numerics import assert_sane_float_environment
 
     if native_available():
         check_float_environment()
+    else:
+        assert_sane_float_environment()
 
     return int(args.func(args))
 

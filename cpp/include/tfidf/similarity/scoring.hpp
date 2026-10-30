@@ -37,10 +37,37 @@
 #include <algorithm>
 #include <cstddef>
 #include <span>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
 namespace tfidf {
+
+namespace detail {
+
+/// Preconditions shared by both scoring kernels.
+///
+/// The spans carry their sizes and nothing else reads them, so a caller passing
+/// a short `out` or `doc_norms` would index past the end. The Python reference
+/// refuses the same three mismatches at `similarity/scoring.py:293-295`.
+inline void check_scoring_shapes(TermId query_dim,
+                                 TermId n_cols,
+                                 DocId n_rows,
+                                 std::span<const Real> doc_norms,
+                                 std::span<Real> out) {
+    if (query_dim != n_cols) {
+        throw std::invalid_argument("dimension mismatch: query and corpus vocabularies differ");
+    }
+    const auto n = static_cast<std::size_t>(n_rows);
+    if (doc_norms.size() != n) {
+        throw std::invalid_argument("one norm per document is required");
+    }
+    if (out.size() != n) {
+        throw std::invalid_argument("one output slot per document is required");
+    }
+}
+
+}  // namespace detail
 
 /// Reusable scratch for TAAT. Allocated once and reused across queries, so the
 /// hot loop allocates nothing.
@@ -75,6 +102,7 @@ void score_taat_with(const SparseView& query,
                      Real query_norm,
                      std::span<Real> out,
                      ScoringScratch& scratch) {
+    detail::check_scoring_shapes(query.dim, index.n_cols, index.n_rows, doc_norms, out);
     const auto n_docs = static_cast<std::size_t>(index.n_rows);
     std::fill(out.begin(), out.end(), 0.0);
     if (query_norm == 0.0 || query.empty()) {
@@ -164,6 +192,10 @@ inline void score_taat(const SparseView& query,
             score_taat_with<reduce::Exact>(query, index, doc_norms, query_norm, out, scratch);
             return;
     }
+    // No `default:`, so `-Wswitch` still makes a new enumerator a compile error.
+    // Reached only for a value outside the enumeration, which would otherwise
+    // return leaving `out` unwritten, since the fill is inside the kernel.
+    throw std::invalid_argument("unknown reduction policy");
 }
 
 /// Document-at-a-time scoring: an independent merge per document.
@@ -177,6 +209,7 @@ inline void score_daat(const SparseView& query,
                        Real query_norm,
                        std::span<Real> out,
                        Reduction policy) {
+    detail::check_scoring_shapes(query.dim, corpus.n_cols, corpus.n_rows, doc_norms, out);
     if (query_norm == 0.0 || query.empty()) {
         std::fill(out.begin(), out.end(), 0.0);
         return;

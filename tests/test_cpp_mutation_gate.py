@@ -12,6 +12,7 @@ failure modes: an unlisted survivor, and an entry matching no survivor.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -211,6 +212,42 @@ def test_a_green_baseline_starts_the_campaign_and_is_judged_unmutated() -> None:
     harness.verify_baseline("build-tests", "tfidf_tests", 60)
 
     assert calls == [("build-tests", "tfidf_tests", 60)]
+
+
+def test_a_header_left_mutated_by_an_interrupted_run_is_repaired(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The restore runs in a `finally`, which SIGKILL does not reach.
+
+    The marker carries the pristine text, so the next run repairs the header
+    before the baseline, which would otherwise fail for an unrelated reason.
+    """
+    pristine = "a <= b\n"
+    header = tmp_path / "cpp" / "include" / "x.hpp"
+    header.parent.mkdir(parents=True)
+    marker = tmp_path / ".mutation-cpp-interrupted.json"
+    marker.write_text(
+        json.dumps({"original": pristine, "path": "cpp/include/x.hpp"}, sort_keys=True),
+        encoding="utf-8",
+        newline="",
+    )
+    header.write_text("a < b\n", encoding="utf-8", newline="")
+
+    monkeypatch.setattr(harness, "REPO", tmp_path)
+    monkeypatch.setattr(harness, "INTERRUPTED", marker)
+
+    assert harness.restore_interrupted() == "cpp/include/x.hpp"
+    assert header.read_text(encoding="utf-8") == pristine, "the mutant must be gone"
+    assert not marker.exists(), "the marker must not survive the repair it describes"
+
+
+def test_a_run_with_no_marker_repairs_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ordinary case: no interrupted run, so nothing is touched."""
+    monkeypatch.setattr(harness, "INTERRUPTED", tmp_path / "absent.json")
+
+    assert harness.restore_interrupted() is None
 
 
 #: Headers whose campaign has not been triaged, so they cannot join the nightly

@@ -167,6 +167,19 @@ def test_the_inputs_really_do_exercise_every_fks_case() -> None:
     assert all(count > 20 for count in seen.values()), seen
 
 
+def test_the_penalty_default_crosses_the_boundary_as_one_value() -> None:
+    """`kFksPenalty` and `FKS_PENALTY` are two literals for one constant.
+
+    Every other test passes the penalty explicitly, so the C++ default is
+    compared nowhere else; the binding exports it for this check.
+    """
+    assert same_bits(nat.FKS_PENALTY, FKS_PENALTY)
+    # An omitted argument resolves through `nb::arg(...) = kFksPenalty`, so this
+    # pins the binding's wiring as well as the exported value.
+    for k in (1, 4, 17):
+        assert same_bits(nat.fks_max(k), fks_max(k))
+
+
 def test_fks_max_is_bit_exact_including_the_k_equals_one_trap() -> None:
     for k in range(0, 200):
         for penalty in (0.0, FKS_PENALTY, 1.0, *ROUNDING_PENALTIES):

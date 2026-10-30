@@ -135,16 +135,17 @@ def run_perturbation(
     after = TfidfVectoriser().fit(list(perturbed[1]), list(perturbed[0]))
 
     shared_ids = sorted(set(before.doc_ids) & set(after.doc_ids))
+    score_before = _score(before, query_features)
+    # Every `k` certifies against the same descending scores, so the scoring and
+    # the sort are hoisted rather than repeated per rank.
+    sorted_before = sorted_scores_desc(list(score_before.values()))
     return PerturbationReport(
         edit=edit,
         idf_shift=analyse_idf_shift(before, after),
         vector_shifts=tuple(analyse_vector_shift(before, after, doc_id) for doc_id in shared_ids),
-        score_before=_score(before, query_features),
+        score_before=score_before,
         score_after=_score(after, query_features),
-        certificates_before=tuple(
-            certified_radius(sorted_scores_desc(list(_score(before, query_features).values())), k)
-            for k in ks
-        ),
+        certificates_before=tuple(certified_radius(sorted_before, k) for k in ks),
     )
 
 

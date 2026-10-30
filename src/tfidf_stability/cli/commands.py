@@ -55,8 +55,6 @@ _LOG = get_logger(__name__)
 
 _E = TypeVar("_E", bound=Enum)
 
-_REPO = Path(__file__).resolve().parents[3]
-
 
 def _resolve_default_config(module: Path) -> Path:
     """The normative configuration, installed or in-tree.

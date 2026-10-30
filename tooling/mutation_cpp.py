@@ -51,13 +51,26 @@ import time
 from pathlib import Path
 from typing import TypedDict
 
-from tooling.allowlist import claims_cpp, fingerprint, parse_cpp, without_stamp
+from tooling.allowlist import (
+    claims_cpp,
+    fingerprint,
+    parse_cpp,
+    without_stamp,
+)
+from tooling.allowlist import verdict as claim_verdict
 
 __all__ = ["fingerprint", "without_stamp"]
 
 REPO = Path(__file__).resolve().parents[1]
 
 EQUIVALENTS = REPO / "configs" / "equivalent_mutants_cpp.txt"
+
+#: Holds the pristine header while a campaign is running. The restore below runs
+#: in a `finally`, which covers an exception and Ctrl-C but not SIGKILL or a lost
+#: machine, so a run that dies leaves this file and the next run repairs from it.
+#: The text is stored here rather than beside the header so a single unlink ends
+#: the recovery state.
+INTERRUPTED = REPO / ".mutation-cpp-interrupted.json"
 
 #: Ordered longest-first, so `<=` is matched before `<`.
 OPERATORS: list[tuple[str, str]] = [
@@ -235,6 +248,33 @@ def build_and_test(build: str, target: str, test_timeout: int) -> str:
     return "killed" if tested.returncode != 0 else "survived"
 
 
+def write_canonical_json(path: Path, payload: object) -> None:
+    """Write JSON with sorted keys, LF endings and a trailing newline.
+
+    `tooling` does not import `tfidf_stability.utils.io`, where the library's
+    `canonical_json` lives, so the same form is spelled once here instead.
+    """
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline=""
+    )
+
+
+def restore_interrupted() -> str | None:
+    """Repair a header a previous run left mutated, returning its path.
+
+    Runs before the baseline: a leftover mutant fails that check for a reason
+    that reads as unrelated, which is why the failure text used to tell a reader
+    to inspect `git status` by hand.
+    """
+    if not INTERRUPTED.exists():
+        return None
+    saved = json.loads(INTERRUPTED.read_text(encoding="utf-8"))
+    relative = str(saved["path"])
+    (REPO / relative).write_text(saved["original"], encoding="utf-8", newline="")
+    INTERRUPTED.unlink()
+    return relative
+
+
 def verify_baseline(build: str, target: str, test_timeout: int) -> None:
     """Refuse to score anything against a tree whose tests already fail.
 
@@ -247,7 +287,8 @@ def verify_baseline(build: str, target: str, test_timeout: int) -> None:
         raise SystemExit(
             f"baseline is not green: unmutated, {build} reports '{verdict}', so every "
             f"mutant would score as killed and the campaign would report a clean sweep.\n"
-            f"Check `git status` for a header left mutated by an interrupted campaign."
+            f"A header left mutated by an interrupted run is repaired before this check, "
+            f"so the cause is in the tree or the build rather than a stale mutant."
         )
 
 
@@ -297,6 +338,10 @@ class Record(TypedDict):
 def campaign(
     relative: str, build: str, target: str, limit: int | None, test_timeout: int
 ) -> Record:
+    repaired = restore_interrupted()
+    if repaired is not None:
+        print(f"repaired {repaired}, left mutated by an interrupted run", flush=True)
+
     verify_baseline(build, target, test_timeout)
     path = REPO / relative
     with path.open(encoding="utf-8", newline="") as handle:
@@ -329,6 +374,7 @@ def campaign(
     started = time.monotonic()
 
     print(f"{relative}: {len(candidates)} candidates", flush=True)
+    write_canonical_json(INTERRUPTED, {"original": original, "path": relative})
     try:
         for k, (offset, before, after) in enumerate(candidates, 1):
             path.write_text(
@@ -363,6 +409,7 @@ def campaign(
                 print(f"  {k}/{len(candidates)}  {counts}", flush=True)
     finally:
         path.write_text(original, encoding="utf-8", newline="")
+        INTERRUPTED.unlink(missing_ok=True)
         subprocess.run(
             ["cmake", "--build", build, "--target", target],
             cwd=REPO,
@@ -372,6 +419,11 @@ def campaign(
         )
 
     tried = counts["killed"] + counts["survived"]
+    # Shared with the Python campaign, which decides the same two directions.
+    # The scan this replaced compared four fields per claim per survivor.
+    split = claim_verdict(
+        [(s["line"], s["column"], s["before"], s["after"]) for s in survivors], claimed
+    )
     return {
         # A truncated run has not seen every candidate, so a claim it did not
         # reach is unmatched rather than stale. Reporting those would fail a
@@ -384,14 +436,7 @@ def campaign(
         "unclaimed": [s for s in survivors if not s["claimed"]],
         "stale": [
             {"line": line, "column": column, "before": before, "after": after}
-            for (line, column, before, after) in claimed
-            if not any(
-                s["line"] == line
-                and s["column"] == column
-                and s["before"] == before
-                and s["after"] == after
-                for s in survivors
-            )
+            for line, column, before, after in split.stale
         ],
         "seconds": round(time.monotonic() - started, 1),
     }
@@ -431,7 +476,7 @@ def main(argv: list[str] | None = None) -> int:
 
     record = campaign(args.header, args.build, args.target, args.limit, args.test_timeout)
     if args.json:
-        args.json.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        write_canonical_json(args.json, record)
 
     counts = record["counts"]
     print(
