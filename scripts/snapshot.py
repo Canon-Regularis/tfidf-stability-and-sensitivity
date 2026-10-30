@@ -30,7 +30,6 @@ against a recorded value, so it passes there too.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -48,7 +47,7 @@ from tfidf_stability.ranking.margins import margin_profile  # noqa: E402
 from tfidf_stability.ranking.ranker import rank_all_operators  # noqa: E402
 from tfidf_stability.similarity.cosine import cosine_against_corpus  # noqa: E402
 from tfidf_stability.utils.hashing import hash_bytes, hash_floats, hash_text  # noqa: E402
-from tfidf_stability.utils.io import read_jsonl  # noqa: E402
+from tfidf_stability.utils.io import canonical_json, read_jsonl  # noqa: E402
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser  # noqa: E402
 
 CORPUS = REPO / "tests" / "fixtures" / "mini_corpus.jsonl"
@@ -206,13 +205,12 @@ def main() -> int:
 
     stages = compute()
     if args.json:
+        # `canonical_json` rather than a local `json.dumps`: one canonical
+        # form for every file this project writes, and it carries the trailing
+        # newline, so `print` is told not to add a second.
         print(
-            json.dumps(
-                {"stages": stages, "environment": environment_block()},
-                sort_keys=True,
-                indent=2,
-                default=str,
-            )
+            canonical_json({"stages": stages, "environment": environment_block()}),
+            end="",
         )
     elif args.verbose:
         for name, digest in sorted(stages.items()):
