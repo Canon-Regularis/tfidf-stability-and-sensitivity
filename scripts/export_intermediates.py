@@ -1,17 +1,9 @@
 #!/usr/bin/env python3
 """Export every intermediate quantity for one document (section 1.2).
 
-Term counts, term frequencies, document frequencies, IDF, the tf-idf weights and
-the norm, for a single document, each with its raw bit pattern beside the decimal.
-
-The hex is what makes this evidence. A decimal rendering of a binary64 is a lossy
-summary at whatever precision the formatter chose, so two values one ulp apart,
-the difference this study is about, can print identically. ``float.hex``
-round-trips.
-
-Usage::
-
-    python scripts/export_intermediates.py --dataset synthetic_tiny --doc d000000
+Term counts, term frequencies, document frequencies, IDF, tf-idf weights and
+the norm, each with its ``float.hex`` bit pattern beside the decimal, because
+a decimal rendering can print two values one ulp apart identically.
 """
 
 from __future__ import annotations
@@ -34,7 +26,7 @@ from tfidf_stability.vectorisation.tfidf import TfidfVectoriser  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dataset", default="synthetic_tiny")
     parser.add_argument("--archive", type=Path, default=None)
     parser.add_argument("--doc", default=None, help="document id (default: the first)")
@@ -52,21 +44,10 @@ def main() -> int:
         return 1
     index = data.doc_ids.index(doc_id)
 
-    # Through `TfidfModel.intermediates`, not by zipping the CSR row directly.
-    # The row carries the weight; `tf` and the integer count behind it are not in
-    # it and have to be recovered, and `w / idf` does not recover them -- two
-    # roundings do not cancel, and that round trip misses by an ulp in 9.01% of a
-    # sweep over 184,080 realistic cases. `_exact_tf` recovers the count instead
-    # and divides once. Building the record here by hand bypassed all of that and
-    # simply dropped both fields, so this export -- the one file in the project
-    # that carries raw bit patterns -- omitted the two quantities its own
-    # docstring names first, and `reports/intermediates_d000000.json` shipped
-    # without them.
-    #
-    # The keys stay as they were (`term`, `column`) rather than adopting
-    # `intermediates`' own (`token`, `term_id`), because the shipped artefact and
-    # the `tfidf inspect` payload are read by different consumers and renaming
-    # fields here would break the former to match the latter.
+    # Read through `TfidfModel.intermediates`, not the CSR row: the row holds only
+    # the weight, and `w / idf` does not recover `tf` exactly. The output keys
+    # (`term`, `column`) differ from the method's (`token`, `term_id`).
+    # Rationale: docs/engineering_notes.md#intermediates-export-source
     detail = model.intermediates(index)
     length = int(detail["in_vocabulary_length"])
     terms = []
@@ -79,8 +60,8 @@ def main() -> int:
             {
                 "term": term,
                 "column": int(entry["term_id"]),
-                # The integer numerator of `tf = count / L`, recovered the way
-                # `_exact_tf` recovers it rather than by dividing the weight.
+                # Integer numerator of `tf = count / L`, recovered as `_exact_tf`
+                # does rather than by dividing the weight by the IDF.
                 "count": round(tf * length) if length else 0,
                 "tf": tf,
                 "tf_hex": float.hex(tf),
@@ -94,9 +75,8 @@ def main() -> int:
     terms.sort(key=lambda t: -t["weight"])
 
     norm = model.norms[index]
-    # The same envelope the other three reports carry. Without it this was the
-    # one published artefact with no identity at all: no result digest to check
-    # a republished number against, and no record of the build that produced it.
+    # The same envelope the other reports carry: a result digest to check a
+    # republished number against and a record of the build that produced it.
     result = ExperimentResult(
         experiment="intermediates",
         parameters={
@@ -114,8 +94,7 @@ def main() -> int:
             "n_terms_in_vocabulary": len(terms),
             # `L`, the denominator of every `tf` above. Distinct from
             # `n_features`, which counts the document's feature stream before the
-            # vocabulary is applied; without `L` no reader can check a count
-            # against its `tf`.
+            # vocabulary is applied. `L` lets a reader check a count against its `tf`.
             "in_vocabulary_length": length,
             "norm": norm,
             "norm_hex": float.hex(norm),

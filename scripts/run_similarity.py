@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
 """Score a query set and write the ranked results, with a manifest.
 
-The plainest runner: no perturbation, no ablation, sections 2 and 3 end to end.
-Answers "what does this system return", and gives the other runners a baseline.
-
-Reports the margin at every ``k`` beside each ranking. Two rankings that look
-identical can be one ulp and one tie-break apart, so a top-k list on its own is
-the artefact this study argues is misleading.
-
-Usage::
-
-    python scripts/run_similarity.py --dataset synthetic_tiny -o reports/
+Runs the pipeline without perturbation or ablation and gives the other
+runners a baseline. Reports the margin at every ``k`` beside each ranking,
+since two rankings with the same order can differ by one ulp at a tie-break.
 """
 
 from __future__ import annotations
@@ -39,7 +32,7 @@ DEFAULT_KS = (1, 5, 10, 20, 50)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dataset", default="synthetic_tiny")
     parser.add_argument("--archive", type=Path, default=None)
     parser.add_argument("-o", "--output", type=Path, default=REPO / "reports")

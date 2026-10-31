@@ -1,16 +1,8 @@
-"""How a repository gate reports what it found.
+"""Report a gate's problems on stderr and return its exit code.
 
-A headline on stderr, one indented line per problem, exit 1. Called by
-`check_docs.py`, `check_vendored.py`, `check_versions.py` and
-`render_summary.py`, each of which already puts the repository root on
-`sys.path` in order to import this.
-
-The other gates print their own. `check_layout.py` reports one formatted
-problem rather than a list; `check_python_floor.py`, `check_cpp_format.py` and
-`check_test_vacuity.py` each also print a success line naming what was scanned.
-`check_dependencies.py` is the one whose shape matches exactly, and it reaches
-nothing else under `tooling`, so importing this would add the `sys.path` line
-the four callers above need and save five.
+Called by `check_docs.py`, `check_vendored.py`, `check_versions.py` and
+`render_summary.py`. `check_dependencies.py` matches the shape but stays out:
+importing this would add a `sys.path` line it does not otherwise need.
 """
 
 from __future__ import annotations

@@ -1,27 +1,9 @@
 #!/usr/bin/env python3
-"""Verify that the two places this project declares dependencies agree.
+"""Check that pyproject.toml and requirements*.txt declare the same packages.
 
-Every package is named twice: once in `pyproject.toml`, which is what an install
-of the distribution resolves, and once in `requirements*.txt`, which is what CI
-installs. Nothing compared them, and they had drifted in both directions --
-`snowballstemmer` was pinned only in the requirements file, and the `docs` extra
-only in `pyproject.toml`, so the two commands gave different environments.
-
-`docs` is deliberately outside the comparison: no CI job builds the
-documentation, so requiring `mkdocs-material` in a development install would
-make every contributor pay for a job that does not exist. Add it to
-`_DEV_GROUPS` in the same change that adds a documentation job.
-
-The linters are checked more strictly than the rest. A floor on a linter is not
-a constraint but a promise that every future release agrees with this one, and
-that promise fails: both files therefore pin an exact version, and the two pins
-must be equal or CI runs a different linter from the one a contributor installs.
-
-Usage::
-
-    python scripts/check_dependencies.py
-
-Exits non-zero on any disagreement, so it can gate CI beside check_versions.py.
+Runtime dependencies are compared with requirements.txt, and the extras in
+_DEV_GROUPS plus build requires with requirements-dev.txt. Packages in _EXACT
+must carry an exact pin in both files. Exits non-zero on any disagreement.
 """
 
 from __future__ import annotations
@@ -33,25 +15,30 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-#: Extras a development install is expected to carry. `docs` is excluded; the
-#: module docstring says why.
+#: Extras a development install carries. `docs` is excluded because no CI
+#: job builds the documentation.
+#: Rationale: docs/engineering_notes.md#docs-extra-outside-dependency-check
 _DEV_GROUPS = ("dev", "viz", "nb")
 
-#: Packages whose version must be exact rather than floored, in both files.
+#: Packages whose version must be an exact pin, not a floor, in both files.
+#: Rationale: docs/engineering_notes.md#linters-pinned-exactly
 _EXACT = ("ruff", "mypy")
 
 _REQUIREMENT = re.compile(r"^\s*([A-Za-z0-9._-]+(?:\[[^\]]+\])?)\s*(.*)$")
 
 
 def _normalise(name: str) -> str:
-    """PEP 503 name, with any extras marker kept, so `a_b` and `A-B` compare."""
+    """Return the PEP 503 normalised name so that `a_b` and `A-B` compare equal.
+
+    Any extras marker is kept.
+    """
     base, _, extras = name.partition("[")
     canonical = re.sub(r"[-_.]+", "-", base).lower()
     return f"{canonical}[{extras}" if extras else canonical
 
 
 def _split(requirement: str) -> tuple[str, str]:
-    """A requirement as ``(normalised name, specifier)``."""
+    """Split a requirement into ``(normalised name, specifier)``."""
     match = _REQUIREMENT.match(requirement.strip())
     if match is None:
         return _normalise(requirement.strip()), ""
@@ -59,7 +46,7 @@ def _split(requirement: str) -> tuple[str, str]:
 
 
 def _from_file(path: Path, seen: set[Path] | None = None) -> dict[str, str]:
-    """Requirements stated by one file, following any ``-r`` it includes."""
+    """Return the requirements one file states, following any ``-r`` include."""
     seen = seen if seen is not None else set()
     if path in seen or not path.exists():
         return {}
@@ -78,7 +65,7 @@ def _from_file(path: Path, seen: set[Path] | None = None) -> dict[str, str]:
 
 
 def _from_project(data: dict[str, object], groups: tuple[str, ...]) -> dict[str, str]:
-    """Requirements stated by `pyproject.toml` for the given extras."""
+    """Return pyproject.toml's dependencies, build requires and the given extras."""
     project = data.get("project", {})
     assert isinstance(project, dict)
     stated: list[str] = list(project.get("dependencies", []))
@@ -93,7 +80,7 @@ def _from_project(data: dict[str, object], groups: tuple[str, ...]) -> dict[str,
 
 
 def _compare(what: str, declared: dict[str, str], installed: dict[str, str]) -> list[str]:
-    """Report every package one side names and the other does not, or pins differently."""
+    """Report packages named on one side only or pinned differently on each."""
     problems: list[str] = []
     for name in sorted(set(installed) - set(declared)):
         problems.append(f"{what}: {name} is in the requirements file but in no pyproject group")
@@ -109,7 +96,7 @@ def _compare(what: str, declared: dict[str, str], installed: dict[str, str]) -> 
 
 
 def check(repo: Path = REPO) -> list[str]:
-    """Every disagreement between the two declarations."""
+    """Return every disagreement between the two dependency declarations."""
     pyproject = repo / "pyproject.toml"
     if not pyproject.exists():
         return ["pyproject.toml: not found"]

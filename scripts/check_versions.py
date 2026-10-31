@@ -1,29 +1,9 @@
 #!/usr/bin/env python3
 """Verify that every place this project states a version agrees.
 
-Four files name it, and nothing made them agree: `pyproject.toml` and
-`src/tfidf_stability/__init__.py` said 0.2.0 while `CITATION.cff` still said
-0.1.0. A citation carrying the wrong version is worse than an unversioned one --
-it is a claim about which code produced a published number, and this project's
-whole argument is that a result is a function of the repository's contents.
-
-The binding ABI is a second, independent claim, named by
-`cpp/bindings/module.cpp` and `src/tfidf_stability/_native/__init__.py`. It sits
-on its own axis: a release can leave the binding surface untouched, and a new
-binding can land inside one release. A disagreement there makes every process
-fall back to the reference backend, and the differential suite then skips rather
-than fails, so the run stays green while testing nothing.
-
-On a tag build the tag joins the set. `release.yml` triggers on `v*` and hands
-the tag to nothing that checks it, so `git tag v0.3.0` on a tree declaring 0.2.0
-would build, test, gate and publish 0.2.0 under a 0.3.0 release. Pass the tag as
-an argument (CI: ``--tag "${{ github.ref_name }}"``) to include it.
-
-Usage::
-
-    python scripts/check_versions.py [--tag vX.Y.Z]
-
-Exits non-zero on any disagreement, so it can gate CI beside check_docs.py.
+Four files name it, listed in `_SOURCES`. The binding ABI is a second claim,
+named by `cpp/bindings/module.cpp` and `src/tfidf_stability/_native/__init__.py`;
+``--tag vX.Y.Z`` adds a release tag to the version set.
 """
 
 from __future__ import annotations
@@ -49,12 +29,10 @@ _SOURCES: dict[str, tuple[str, str]] = {
         "what the package reports at runtime",
     ),
     "CITATION.cff": (r"^version:\s*[\"']?([^\"'\s]+)", "what a citation of this work names"),
-    # The fourth. CMakeLists.txt's `VERSION` becomes `PROJECT_VERSION`, then
-    # `kVersion` in build_config.hpp, then the native module's `__version__`
-    # and `build_info()["version"]`, which is hashed into every RunManifest.
-    #
-    # Anchored on the stripped line, so `cmake_minimum_required(VERSION 3.20)`
-    # cannot match: that line begins with the command name, not with VERSION.
+    # CMakeLists.txt's `VERSION` becomes `PROJECT_VERSION`, then `kVersion` in
+    # build_config.hpp, then the native module's `__version__`, which is hashed
+    # into every RunManifest. The pattern anchors on the stripped line, so
+    # `cmake_minimum_required(VERSION 3.20)` cannot match.
     "CMakeLists.txt": (
         r"^VERSION\s+([0-9][^\s)]*)",
         "what the native extension reports and the run manifest hashes",
@@ -62,9 +40,10 @@ _SOURCES: dict[str, tuple[str, str]] = {
 }
 
 
-#: The ABI is a second version, on its own axis: a release can leave the binding
-#: surface untouched, and a new binding can land inside one release. Two files
-#: state it and nothing compared them.
+#: file -> (regex capturing the binding ABI, human description of the line).
+#: The ABI is versioned on its own axis: a release can leave the binding
+#: surface untouched, and a new binding can land inside one release.
+#: Rationale: docs/engineering_notes.md#binding-abi-checked-separately
 _ABI_SOURCES: dict[str, tuple[str, str]] = {
     "cpp/bindings/module.cpp": (
         r'^constexpr\s+const\s+char\*\s+kAbi\s*=\s*"([^"]+)"',
@@ -76,9 +55,8 @@ _ABI_SOURCES: dict[str, tuple[str, str]] = {
     ),
 }
 
-#: The line that carries `kAbi` to Python. Without it the two literals could
-#: agree while the extension exported something else, and the check above would
-#: pass while saying nothing.
+#: The line that carries `kAbi` to Python. Without it the two literals can
+#: agree while the extension exports no ABI, so the check requires it.
 _ABI_EXPORT = 'm.attr("__abi__") = kAbi;'
 
 
@@ -96,9 +74,8 @@ def _stated(relative: str, pattern: str, repo: Path = REPO) -> str | None:
 def check_abi(repo: Path = REPO) -> list[str]:
     """Whether the two statements of the binding ABI agree.
 
-    Textual, so it holds on a checkout with nothing built: the reference CI legs
-    never compile the extension, and a mismatch there degrades every process to
-    the reference backend without saying so.
+    The check is textual, so it holds on a checkout with nothing built; the
+    reference CI legs never compile the extension.
     """
     problems: list[str] = []
     found: dict[str, str] = {}
@@ -152,7 +129,7 @@ def check(tag: str | None = None) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--tag",
         default=None,

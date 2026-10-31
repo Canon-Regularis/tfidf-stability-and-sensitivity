@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """Verify every vendored file against its recorded digest.
 
-Three vendored trees, each depending on the bytes being what upstream published:
-the Snowball stemmer (Python and C++ backends run implementations generated from
-one source), the doctest and nanobench headers (hermetic offline build), and the
-Snowball test vectors (ground truth for the stemmer). ``THIRD_PARTY_NOTICES.md``
-asserts all three.
-
-Also checks the reverse direction, which is the failure that actually happens: a
-file added to a vendored directory but never added to its manifest. A digest
-check alone passes, since nothing points at the new file.
+Each ``MANIFEST.sha256`` lists the SHA-256 digest of every file in its
+directory. The check also reports a file present in a vendored directory but
+absent from its manifest. ``THIRD_PARTY_NOTICES.md`` asserts the vendored sets.
 """
 
 from __future__ import annotations
@@ -33,13 +27,9 @@ _EXEMPT = {"MANIFEST.sha256", "__init__.py", "__pycache__"}
 def _unlisted(manifest: Path, manifests: list[Path], listed: set[str]) -> list[str]:
     """Files under a manifest's directory that the manifest does not name.
 
-    An unlisted file is invisible to the digest comparison, so it ships
-    unverified. Compared on the path relative to the manifest rather than on the
-    bare name, because that is the form the manifest uses:
-    ``cpp/third_party/MANIFEST.sha256`` lists ``doctest/doctest.h``.
-
-    Walked recursively, because every file ``cpp/third_party`` vendors lives one
-    level down, in ``doctest/`` and ``nanobench/``.
+    Paths are compared relative to the manifest directory, the form the
+    manifest uses. The walk is recursive because vendored files live in
+    subdirectories such as ``doctest/`` and ``nanobench/``.
     """
     problems: list[str] = []
     for path in sorted(manifest.parent.rglob("*")):

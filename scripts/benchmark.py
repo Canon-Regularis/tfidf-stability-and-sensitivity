@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
-"""Time the native backend against the normative reference, and prove they agree.
+"""Time the native backend against the reference and check they agree.
 
-The C++20 core is required to be bit-identical, so speed is its only available
-justification. No ratio is printed until the two backends have been checked to
-agree to the last bit.
-
-Without a compiled backend it degrades to reference-only timings, the supported
-configuration for a contributor with no compiler. ``--reference-only`` forces
-that path on a machine that does have one.
-
-Usage::
-
-    python scripts/benchmark.py
-    python scripts/benchmark.py --docs 4000 --queries 40 --repeats 9
-    python scripts/benchmark.py --reference-only --json reports/benchmark.json
+The C++20 core must be bit-identical to the reference, so no speed ratio
+is printed until both backends agree to the last bit. Without a compiled
+backend, or with ``--reference-only``, only reference timings are reported.
 """
 
 from __future__ import annotations
@@ -40,7 +30,7 @@ DEFAULTS = Workload()
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--docs", type=int, default=DEFAULTS.n_docs)
     parser.add_argument("--vocab", type=int, default=DEFAULTS.vocab_size)
     parser.add_argument("--queries", type=int, default=DEFAULTS.n_queries)

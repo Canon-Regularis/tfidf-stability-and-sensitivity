@@ -1,42 +1,7 @@
-"""Change the code on purpose and see whether the suite notices.
+"""Mutate one module in a sandbox copy and report mutants the suite misses.
 
-`check_test_vacuity.py` proves a test *can* fail. It cannot prove a test fails
-for the right reason: an assertion that compares a value against itself, or one
-whose tolerance swallows the effect it claims to measure, passes that check and
-tests nothing. Mutation is the only mechanical answer. Break the source, rerun
-the tests, and any mutant that survives marks behaviour nothing asserts.
-
-Why this rather than mutmut. The operators below are chosen for what this project
-actually gets wrong, which is not the generic set. Its bugs live in comparison
-boundaries (`tie_cliques` turns on `<=` against `<`, and `tie_chains` on `>`),
-in constants that are exactly 0, 1 or 2, and in the direction of a subtraction
-that is asserted bit-for-bit. A generic run spends most of its budget on string
-and container mutations that nothing here depends on. Being narrow also makes it
-fast enough to finish, which a whole-suite campaign is not: the full suite is
-three minutes, so a single-module run scoped to that module's own test file is
-the difference between twenty minutes and a week.
-
-The working tree is never modified. An earlier version edited the module in
-place, because `tests/conftest.py` puts `src/` on `sys.path` and the tests have
-to import the mutant. It guarded that with a backup and a `finally`, which is not
-enough: `finally` does not run when the process is killed, and on Windows
-`terminate()` maps to `TerminateProcess`, so neither a SIGTERM handler nor an
-`atexit` hook fires either. Measured, not assumed: killing a live campaign left
-the module mutated and the backup behind. One such run was then committed, taking
-340 lines of source down to `ast.unparse` output with a binary search bound
-flipped the wrong way, which turned a 1.4-second test file into a hang.
-
-So the campaign runs against a copy instead. `conftest.py` computes `src/`
-relative to its own location, so a tree containing `src/` and `tests/` is
-self-contained: point pytest at the copy and the copy's modules are what get
-imported. Killing the run now loses a temporary directory and nothing else.
-
-Usage::
-
-    python -m tooling.mutation_python src/tfidf_stability/ranking/tie_groups.py \\
-        --tests tests/test_tie_groups_tau.py
-
-Exits non-zero if any mutant survives.
+Operators flip comparisons, swap arithmetic and boolean operators and perturb
+constants. The run mutates a temporary copy, and exits non-zero on a survivor.
 """
 
 from __future__ import annotations
@@ -59,32 +24,10 @@ __all__ = ["without_stamp"]
 
 REPO = Path(__file__).resolve().parents[1]
 
-#: What a run needs to be a working checkout: the package, the suite that
-#: imports it, the pytest configuration that declares markers and turns warnings
-#: into errors, and the assets the package loads from the repository root.
-#: `data/` is not optional: preprocessing resolves the frozen stopword list as
-#: `parents[3] / "data" / "assets"`, so leaving it out fails the fixture that
-#: builds the normative pipeline and errors the suite before a mutant runs.
-#:
-#: `cpp/` is here for the same reason one level along. test_public_api_surface.py
-#: checks `types.py`'s aliases against `cpp/include/tfidf/core/types.hpp`, so a
-#: sandbox without the headers fails that file outright -- and it is the file
-#: worth adding to a scoped campaign, because the contracts it asserts are the
-#: package-wide ones (frozen dataclasses, enum serialisation) that no single
-#: module's own test file covers.
-#:
-#: `scripts/` for the third instance of it: test_benchmark_smoke.py runs
-#: scripts/benchmark.py as a subprocess, so without it that file errors and
-#: the campaign exits before mutating anything -- which reads as a broken
-#: runner rather than a missing directory.
-#:
-#: `docs/`, `CITATION.cff` and `README.md` are here because two test files read
-#: repository metadata rather than the package: test_doc_references.py checks
-#: cross-references in `docs/`, and test_repository_gates.py runs
-#: check_versions.py, which compares the version in `CITATION.cff`. `examples/`
-#: joins them because `docs/index.md` links into it. Without all five, those two
-#: files fail in the sandbox and a campaign scoped to either dies at the
-#: baseline. With them, 36 of the suite's 36 files run here.
+#: Paths copied into the sandbox so the suite runs there as a working checkout.
+#: Every top-level path a test file reads must be listed, or the sandbox
+#: baseline fails before a mutant is applied.
+#: Rationale: docs/engineering_notes.md#sandbox-contents
 _SANDBOX_CONTENTS = (
     "src",
     "tests",
@@ -104,10 +47,10 @@ _SANDBOX_CONTENTS = (
     # `tests/test_repository_gates.py` runs it, so all four must be present or
     # the sandbox baseline fails before a single mutant is applied.
     "CMakeLists.txt",
-    # The same failure, one file along each time. `check_docs.py` checks that
-    # every preset is documented; `test_repository_gates.py` compares the two
-    # requirement files; `test_cpp_mutation_gate.py` reads the nightly's own
-    # matrix and the preset that job configures.
+    # `check_docs.py` checks that every preset is documented;
+    # `test_repository_gates.py` compares the two requirement files; and
+    # `test_cpp_mutation_gate.py` reads the nightly's own matrix and the preset
+    # that job configures.
     "CMakePresets.json",
     "requirements-dev.txt",
     ".github",
@@ -118,15 +61,15 @@ _SANDBOX_CONTENTS = (
     # `test_repository_gates.py` compares the hook patterns against every
     # directory holding a MANIFEST.sha256.
     ".pre-commit-config.yaml",
-    # Write-only, and absent unless a C++ campaign was interrupted. Listed
-    # because the sandbox check is a deliberate over-approximation, and
-    # `copy2` is skipped for a path that does not exist.
+    # Write-only, and absent unless a C++ campaign was interrupted. The sandbox
+    # check over-approximates, and `copy2` is skipped for a path that does not
+    # exist.
     ".mutation-cpp-interrupted.json",
 )
 
-#: Comparison flips. The pairs that matter are the boundary ones: `<=` against
-#: `<` decides whether a score exactly `tau` away joins a clique, which is the
-#: only place tie groups are interesting.
+#: Comparison flips. The boundary pairs matter most: `<=` against `<` decides
+#: whether a score exactly `tau` away joins a clique.
+#: Rationale: docs/engineering_notes.md#mutation-operator-set
 _COMPARE = {
     ast.Lt: ast.LtE,
     ast.LtE: ast.Lt,
@@ -137,7 +80,7 @@ _COMPARE = {
 }
 
 #: Arithmetic swaps. Addition against subtraction catches an off-by-one in an
-#: index and a sign error in a margin, both of which this code does by hand.
+#: index and a sign error in a margin, both computed by hand in the package.
 _BINOP = {
     ast.Add: ast.Sub,
     ast.Sub: ast.Add,
@@ -145,10 +88,10 @@ _BINOP = {
     ast.Div: ast.Mult,
 }
 
-#: Constants worth perturbing. Anything else (a digest length, a display width)
-#: is not load-bearing, and mutating it produces a survivor that means nothing.
-#: Keyed by (type, value): 0 and 0.0 are equal and hash alike, so a plain dict
-#: would silently collapse the int and float entries into one.
+#: Constants to perturb. Other values (a digest length, a display width) are
+#: not load-bearing, and mutating them produces survivors that mean nothing.
+#: Keyed by (type, value): 0 and 0.0 are equal and hash alike, so a dict keyed
+#: by value alone collapses the int and float entries into one.
 _CONSTANTS: dict[tuple[type, object], int | float] = {
     (int, 0): 1,
     (int, 1): 0,
@@ -241,11 +184,15 @@ def _apply(source: str, index: int) -> tuple[str, Mutant] | None:
 
 
 def _make_sandbox() -> Path:
-    """A throwaway checkout holding the package, the suite and the pytest config."""
+    """Create a throwaway checkout of the paths in ``_SANDBOX_CONTENTS``.
+
+    The campaign mutates the copy, never the working tree.
+    Rationale: docs/engineering_notes.md#mutation-sandbox-copy
+    """
     sandbox = Path(tempfile.mkdtemp(prefix="tfidf-mutation-"))
-    # The compiled extension is copied with everything else. Excluding it made
-    # native_available() false in the sandbox, which turned the differential
-    # tests into a collection error and the baseline run into a failure.
+    # The compiled extension is copied with everything else. Without it,
+    # native_available() is false in the sandbox, the differential tests fail
+    # to collect and the baseline run fails.
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".hypothesis")
     for name in _SANDBOX_CONTENTS:
         source = REPO / name
@@ -254,39 +201,10 @@ def _make_sandbox() -> Path:
         elif source.exists():
             shutil.copy2(source, sandbox / name)
 
-    # Copying the tree is not enough on its own. This project is installed
-    # editable, and scikit-build-core's `.pth` does two separate things:
-    #
-    #   import _editable_skbc_tfidf_stability      <- a sys.meta_path finder
-    #   C:/.../tfidf-stability-and-sensitivity/src <- a plain sys.path entry
-    #
-    # Both point at the real working tree, and each is enough on its own to make
-    # every mutant survive. Removing only the first was the bug this campaign
-    # shipped with: `sitecustomize` dropped the finder, the second line still put
-    # the real `src/` on `sys.path` during site initialisation, and
-    # `tests/conftest.py` adds the sandbox only `if find_spec("tfidf_stability")
-    # is None` -- which by then it is not. So conftest inserted nothing, every
-    # test imported the working tree, and the mutated copy was never executed.
-    #
-    # Measured on a tree with the guard in place: `margins.py` and `stratify.py`
-    # both scored 0 killed of every mutant tried, including flips their own test
-    # files demonstrably catch when run by hand. A campaign in that state cannot
-    # fail: every mutant is a survivor, and a survivor is a normal result.
-    #
-    # Scope, checked rather than assumed: this bites a *developer* checkout, not
-    # the nightly. `requirements-dev.txt` does not install this package, so in CI
-    # `find_spec` returns None, and the conftest that runs is the sandbox's own
-    # copy -- `parents[1] / "src"` from there is the sandbox. The editable
-    # install is what supplies a competing answer, so the campaign was sound in
-    # CI and silently vacuous for anyone running it locally. Undoing both `.pth`
-    # lines here makes the two agree, and is a no-op where nothing installed the
-    # package.
-    #
-    # sitecustomize is imported during interpreter startup, before pytest and
-    # before conftest, so it is the one place early enough to undo both lines.
-    # It prepends the sandbox's own `src/` as well, rather than relying on
-    # conftest's guard, so the campaign does not depend on what that guard
-    # decides.
+    # The editable install's `.pth` puts the real `src/` on `sys.path` and adds
+    # an import finder for it. This sitecustomize removes both at interpreter
+    # startup and prepends the sandbox's own `src/`, so the mutated copy is what
+    # the tests import. Rationale: docs/engineering_notes.md#sandbox-sitecustomize
     (sandbox / "sitecustomize.py").write_text(
         chr(10).join(
             (
@@ -300,12 +218,10 @@ def _make_sandbox() -> Path:
                 "import os",
                 f"_real = {str(REPO / 'src')!r}",
                 f"_mine = {str(sandbox / 'src')!r}",
-                # normcase because the `.pth` entry and this string are written
-                # by different tools, and on Windows they can differ in drive
-                # case or separator while naming one directory. The insert below
-                # would win anyway; this keeps the real tree off the path
-                # entirely rather than merely behind, so a later prepend by
-                # something else cannot reorder them.
+                # normcase: the `.pth` entry and this string come from different
+                # tools, and on Windows they can differ in drive case or separator
+                # while naming one directory. Removing the real tree, rather than
+                # placing it behind, means a later prepend cannot reorder them.
                 "_key = lambda p: os.path.normcase(os.path.abspath(p))",
                 "sys.path[:] = [p for p in sys.path if _key(p) != _key(_real)]",
                 "sys.path.insert(0, _mine)",
@@ -374,8 +290,8 @@ def _campaign(
 
 
 #: Claims that a surviving mutant is behaviourally indistinguishable, with the
-#: reason. The file's own header carries the format and says why an entry that
-#: matches nothing is a failure rather than a shrug.
+#: reason. The file's own header carries the format and states why an entry
+#: that matches nothing is a failure.
 _EQUIVALENTS = REPO / "configs" / "equivalent_mutants.txt"
 
 _Key = tuple[int, str, str, str]
@@ -393,7 +309,7 @@ def _load_equivalents(module: Path) -> dict[_Key, str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("source", type=Path, help="module to mutate, relative to the repository")
     parser.add_argument(
         "--tests", nargs="+", default=None, help="pytest targets (default: whole suite)"
@@ -436,12 +352,9 @@ def main() -> int:
     print(f"\n{killed} killed, {len(survivors)} survived, {skipped} skipped in {elapsed:.0f}s")
 
     if scored == 0:
-        # `100.0% (0 killed, 0 survived)` is what a campaign prints when it
-        # mutated nothing: a module with no mutable sites, a `--max-mutants 0`
-        # typo, or every mutant timing out and being skipped. The old expression
-        # was `score = ... if scored else 100.0`, so the emptiest possible run
-        # reported the best possible score and exited 0. A gate that reports
-        # perfection for having done nothing is worse than one that fails.
+        # A campaign that mutated nothing (a module with no mutable sites, or
+        # every mutant skipped) must not report a perfect score and exit 0, so
+        # it fails instead.
         print(
             f"::error::no mutant was scored for {relative}: {skipped} skipped. "
             f"This gate proved nothing.",
@@ -460,17 +373,10 @@ def main() -> int:
 
 
 def _verdict(relative: Path, survivors: Sequence[Mutant], *, partial: bool = False) -> int:
-    """Exit code, once documented equivalents are accounted for.
+    """Exit code once documented equivalents are accounted for.
 
-    Two ways to fail, both deliberate. A survivor nobody has explained is the
-    gap this tool exists to find. An explanation that matches no survivor is
-    just as bad in the other direction: the mutant is killed now, or the line
-    moved, and an argument nobody re-reads is how an equivalents file turns into
-    a blanket suppression.
-
-    ``partial`` reports a run stopped by ``--max-mutants``. A claim that run
-    did not reach is unmatched rather than stale, so the second failure is
-    withheld.
+    An unexplained survivor fails; so does a claim matching no survivor, since a
+    stale claim is a blanket suppression. A ``partial`` run withholds the second failure.
     """
     claims = _load_equivalents(relative)
     if not claims:

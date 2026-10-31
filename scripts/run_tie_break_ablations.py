@@ -1,27 +1,9 @@
 #!/usr/bin/env python3
-"""E3/E4 (A2): tie-breaking causes discontinuities independent of numerical error.
+"""E3/E4 (A2): tie-breaking discontinuities independent of numerical error.
 
-E3, the ablation. Rank every query under pi, pi_score and pi_alt and measure how
-far the orderings differ. ``rank_all_operators`` shares one ``sorted_scores``
-object across the three, so no arithmetic between them can differ and a
-disagreement has one available cause. The harness checks the sharing rather than
-assuming it.
-
-E4, the section 7.4 case study. Identify the closest-scoring pair the corpus
-contains and show what the operators do with it.
-
-Degenerate queries are included here, unlike E2: G3 excludes them from margin
-distributions but keeps them in ablations, since a zero-score query is ranked
-purely by the tie-break and is therefore the most informative case for A2.
-
-Usage::
-
-    python scripts/run_tie_break_ablations.py --dataset synthetic_tiny \
-        --tau 4.8e-13 -o reports/
-
-``--tau`` has no default and the run refuses to start without it: section 7.1
-makes every tie-break result conditional on it, so it is passed in from the
-derivation in E0 rather than picked up from a default here.
+E3 ranks every query (degenerate ones included, per G3) under pi, pi_score and
+pi_alt and measures how far the orderings differ; E4 reports the closest pair.
+``--tau`` is required: section 7.1 conditions every result on the E0 value.
 """
 
 from __future__ import annotations
@@ -63,26 +45,11 @@ DEFAULT_KS = (1, 5, 10, 20, 50)
 
 
 def _rho_sweep(scores: list[float]) -> dict:
-    """rho(tau) as an exact step function, evaluated wherever it can move.
+    """Evaluate rho(tau) as an exact step function at every tau where it can move.
 
-    ``rho = |largest chain| / |largest clique|``, and the numerator and the
-    denominator move at different places. A chain is single-linkage, so its size
-    changes only when tau crosses an adjacent gap. A clique is complete-linkage:
-    the largest one reaches size ``m + 1`` exactly when some window of ``m + 1``
-    consecutive scores has diameter at most tau, which happens at
-
-        c_m = min over a of (S[a] - S[a + m]),
-
-    a span between scores ``m`` apart rather than between neighbours. Sweeping the
-    adjacent gaps therefore locates the chain steps and misses most of the clique
-    steps, and a log grid laid over them lands between breakpoints and holds a
-    level that is already stale.
-
-    The union of the two sets is every tau at which rho can change and nothing
-    else, so the recorded curve is exact rather than sampled. It is also the cheap
-    way to get there: at most ``2N - 2`` values, against the ``N(N-1)/2`` distinct
-    pairwise differences that enumerating every span would evaluate for the same
-    answer. Building the ``c_m`` costs ``O(N^2)`` comparisons and ``O(N)`` space.
+    The chain term steps at adjacent gaps; the clique term steps at the minimum
+    span between scores ``m`` apart, for each ``m``. The union of both sets is
+    every breakpoint. Rationale: docs/engineering_notes.md#rho-sweep-breakpoints
     """
     sorted_scores = sorted(scores, reverse=True)
     n = len(sorted_scores)
@@ -121,15 +88,13 @@ def _rho_sweep(scores: list[float]) -> dict:
         "rho": rho,
         "n_chains": n_chains,
         "n_cliques": n_cliques,
-        # Kept apart so the mechanism stays checkable: a step in the curve that
-        # sits on a clique span and not on a chain gap is the case the previous
-        # sweep could not represent.
+        # Recorded separately so a step that sits on a clique span and not on a
+        # chain gap can be identified from the output.
         "chain_breakpoints": sorted(chain_gaps),
         "clique_breakpoints": sorted(clique_spans),
         "rho_breakpoints": [t for i, t in enumerate(taus) if i and rho[i] != rho[i - 1]],
-        # Below the smallest span nothing is related but the exact ties, so this
-        # is rho for every tau under the swept range, including the tau the
-        # experiments actually use. Recorded rather than left to be inferred.
+        # Below the smallest span only exact ties are related, so this is rho for
+        # every tau under the swept range, including the tau the experiments use.
         "rho_below_range": chain_inflation_ratio(sorted_scores, 0.0),
     }
 
@@ -141,20 +106,11 @@ def _pair_geometry(
     case: dict,
     tau: float,
 ) -> dict:
-    """Exact 2-D coordinates for the section 7.4 pair, in the plane they span.
+    """Exact 2-D coordinates for the section 7.4 pair in the plane the pair spans.
 
-    A query ranks A above B iff ``q . d > 0`` for ``d = w_A/||w_A|| -
-    w_B/||w_B||``. ``d`` lies in the plane spanned by the two document
-    directions, so q's out-of-plane component is orthogonal to ``d`` and
-    contributes zero: the projection preserves the ranking decision exactly,
-    unlike a t-SNE or PCA scatter where apparent distance is an artefact.
-
-    The projection loses q's magnitude, so the drawn angles from q to each
-    document are wrong. Scores are therefore taken from the record, and the share
-    of ``||q||`` lying in the plane is reported.
-
-    Presentation only, hence ``fsum`` throughout; the quoted scores come from the
-    run's own reduction policy.
+    ``d = w_A/||w_A|| - w_B/||w_B||`` lies in that plane, so the projection
+    preserves the sign of ``q . d`` and the ranking decision. Scores are taken
+    from the record. Rationale: docs/engineering_notes.md#pair-geometry-projection
     """
     pair = case.get("pair") or {}
     if not pair:
@@ -202,9 +158,8 @@ def _pair_geometry(
     direction = [unit_a[i] - unit_b[i] for i in range(width)]
     decision_full = inner(q, direction)
     decision_plane = q_plane[0] * (point_a[0] - point_b[0]) + q_plane[1] * (point_a[1] - point_b[1])
-    # Scaled by ||q||. The first version divided by the statistic itself, which
-    # for an exact tie is 0.0, so a discrepancy of 1e-17 came out as a relative
-    # error of 1.0. The statistic is q . d, so q . d over ||q|| is the score gap.
+    # The error is reported relative to ||q||, not to the statistic itself,
+    # which is 0.0 for an exact tie. q . d over ||q|| is the score gap.
     residual_error = abs(decision_full - decision_plane)
 
     return {
@@ -215,7 +170,7 @@ def _pair_geometry(
         "q_in_plane": list(q_plane),
         "q_norm": q_norm,
         "q_in_plane_norm": math.hypot(*q_plane),
-        # How much of the query is not drawn. 1.0 means it lies wholly in the plane.
+        # Share of the query that lies in the plane; 1.0 means all of it is drawn.
         "q_share_in_plane": math.hypot(*q_plane) / q_norm,
         "angle_between_documents_rad": math.acos(max(-1.0, min(1.0, overlap))),
         "documents_coincident": coincident,
@@ -238,11 +193,9 @@ def _pair_geometry(
 def _case_study(scores: list[float], table: AttributeTable, tau: float, doc_ids: list[str]) -> dict:
     """E4: identify the closest pair and show what the tie-break does with it.
 
-    Section 7.4 says two documents are "identified such that |s_A - s_B| <= tau",
-    and G22 forces "identified" to be read literally: ``tf = count / L`` makes a
-    single-token edit a ``1/L`` relative perturbation, so a near-tie at 1e-9 needs
-    a billion-token document. The pair is searched for, and whatever separation
-    the corpus offers is reported.
+    Section 7.4 identifies a pair with ``|s_A - s_B| <= tau``; G22 reads this
+    literally, so the pair is searched for, not constructed, and the separation
+    found is reported. Rationale: docs/engineering_notes.md#case-study-pair-search
     """
     sorted_scores = sorted(scores, reverse=True)
     rankings = rank_all_operators(scores, table)
@@ -252,9 +205,7 @@ def _case_study(scores: list[float], table: AttributeTable, tau: float, doc_ids:
 
     chains = tie_chains(sorted_scores, tau)
     cliques = tie_cliques(sorted_scores, tau)
-    # Intervals are half-open [start, stop), so the size is `stop - start`. A
-    # `+ 1` here overcounts every group and skews rho whenever the chain and
-    # clique sizes differ.
+    # Intervals are half-open [start, stop), so the group size is `stop - start`.
     largest_chain = max((b - a for a, b in chains), default=0)
     largest_clique = max((b - a for a, b in cliques), default=0)
 
@@ -326,7 +277,7 @@ def _print_case_study(case: dict) -> None:
 
 def _parser() -> argparse.ArgumentParser:
     """The command line, kept out of main() so the experiment reads as one."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dataset", default="synthetic_tiny")
     parser.add_argument("--archive", type=Path, default=None)
     parser.add_argument("-o", "--output", type=Path, default=REPO / "reports")
@@ -384,26 +335,10 @@ def main() -> int:
     tables = [q.table for q in grid.queries]
     print(f"section 7.1 grid: {len(grid)} {args.query_mode} queries")
 
-    # A2's premise, checked here: the three operators consume the same scores,
-    # so any disagreement comes from the tie-break.
-    #
-    # `is`, not `same_bits`. `rank_all_operators` computes `sorted_scores_desc`
-    # once and hands the same tuple to every operator, so the three
-    # `sorted_scores` attributes are one object -- and the previous check,
-    # `same_bits` elementwise against `rankings["pi"].sorted_scores`, compared
-    # that object with itself. `same_bits(x, x)` is True for every double
-    # including NaN, so the predicate was a tautology and the abort below was
-    # unreachable, on every input.
-    #
-    # It would not have caught the regression it exists for either. Remove the
-    # sharing and each operator recomputes `sorted_scores_desc` from the same
-    # score vector, giving three distinct but bit-identical tuples: measured,
-    # three separate objects and the old check still passed. Identity is the
-    # property that makes a disagreement attributable, because two equal arrays
-    # computed twice leave a second explanation --
-    # `tests/test_ranking_tie_breaks.py::test_every_operator_sees_one_and_the_same_score_array`
-    # says exactly that and asserts `id()`. This is the harness applying the
-    # standard its own unit test already sets.
+    # A2's premise: the three operators consume one `sorted_scores` object, so
+    # any disagreement comes from the tie-break. Identity (`is`) is checked, not
+    # bitwise equality, because equal arrays computed twice leave a second cause.
+    # Rationale: docs/engineering_notes.md#operator-score-array-identity
     for scores, active in zip(scores_by_query, tables, strict=True):
         rankings = rank_all_operators(scores, active)
         reference = rankings["pi"].sorted_scores

@@ -1,43 +1,7 @@
-"""Mutation testing for the C++ core.
+"""Lexical mutation testing for the C++ core, scored by ctest.
 
-``mutation_python.py`` parses Python with ``ast``. The C++ half of this
-project -- the half asserted to be bit-identical to the reference -- had never
-been asked whether its assertions can fail, and when it was, the answer was that
-several could not. The pairwise summation tree was pinned only by "error no
-worse than naive", which any tree satisfies; ``is_canonical`` was probed at an
-index far enough out of range that an off-by-one bound still rejected it; and
-the whole attribute-rank loop could be deleted from ``build_keys`` with the
-entire native suite still passing.
-
-There is no C++ AST available here, so mutation is lexical. A scanner walks the
-file tracking whether it is inside a line comment, a block comment, a string or
-a character literal, and skips preprocessor lines, so operators inside those are
-never touched. Every candidate is a single-token replacement.
-
-A mutant that fails to compile is ``stillborn`` and counted neither way: that is
-a defect of lexical mutation, not evidence about the tests. A mutant that
-compiles and still passes ctest is a ``survivor``, and every survivor must be
-argued in ``configs/equivalent_mutants_cpp.txt`` or this exits non-zero.
-
-Usage::
-
-    python -m tooling.mutation_cpp cpp/include/tfidf/core/reduction.hpp
-    python -m tooling.mutation_cpp <header> --build build-tests --json out.json
-
-The build directory must already be configured and its baseline must be green:
-a tree whose tests already fail would score every mutant as killed.
-
-What the score does NOT include: the verdict is `ctest`, which runs the native
-doctest suite alone. This project's strongest guarantee -- that the C++ agrees
-with the normative Python bit for bit -- lives in pytest, in
-``tests/test_native_*_differential.py``, and those need the extension rebuilt
-per mutant, which is minutes rather than seconds. So a survivor here means "the
-native suite cannot see it", not "nothing can": a mutation in a function the
-bindings export may still be caught differentially. A mutation in one they do
-NOT export has no other net at all, and three of the functions this campaign
-found holes in are in that class: ``is_exact_tie``, ``adjacent_gaps`` and
-``partition_is_valid`` appear nowhere in ``cpp/bindings/module.cpp``, so the
-native suite is their only coverage in either language.
+Candidates are single-token replacements outside comments, literals and
+preprocessor lines. Rationale: docs/engineering_notes.md#cpp-mutation-score-scope
 """
 
 from __future__ import annotations
@@ -65,11 +29,10 @@ REPO = Path(__file__).resolve().parents[1]
 
 EQUIVALENTS = REPO / "configs" / "equivalent_mutants_cpp.txt"
 
-#: Holds the pristine header while a campaign is running. The restore below runs
-#: in a `finally`, which covers an exception and Ctrl-C but not SIGKILL or a lost
-#: machine, so a run that dies leaves this file and the next run repairs from it.
-#: The text is stored here rather than beside the header so a single unlink ends
-#: the recovery state.
+#: Holds the pristine header while a campaign runs. The restore in `campaign`
+#: runs in a `finally`, which covers an exception and Ctrl-C but not SIGKILL,
+#: so a run that dies leaves this file and the next run repairs from it. One
+#: unlink ends the recovery state.
 INTERRUPTED = REPO / ".mutation-cpp-interrupted.json"
 
 #: Ordered longest-first, so `<=` is matched before `<`.
@@ -175,10 +138,10 @@ def scan(text: str) -> list[tuple[int, str, str]]:
 
 
 def load_equivalents(module: Path) -> dict[tuple[int, int, str, str], str]:
-    """Argued equivalences for one header, keyed by ``(line, column, before, after)``.
+    """Argued equivalences for one header, keyed by position and token pair.
 
-    Reads ``EQUIVALENTS`` at call time, so a test pointing the module at another
-    file gets that file. The format itself lives in ``tooling.allowlist``.
+    ``EQUIVALENTS`` is read at call time, so a test that points the module at
+    another file gets that file. The format lives in ``tooling.allowlist``.
     """
     if not EQUIVALENTS.exists():
         return {}
@@ -186,25 +149,10 @@ def load_equivalents(module: Path) -> dict[tuple[int, int, str, str], str]:
 
 
 def build_and_test(build: str, target: str, test_timeout: int) -> str:
-    """``killed`` | ``survived`` | ``stillborn``.
+    """Build the target, run ctest, and return killed, survived or stillborn.
 
-    A mutant can make the suite loop forever -- dropping the increment that ends
-    a merge, or relaxing a bound the loop counts against -- and three campaigns
-    died on exactly that before this handled it. Letting ctest kill the test is
-    both the right verdict -- a suite that does not terminate has not passed --
-    and the only way to avoid leaving the test binary running, holding a lock on
-    the file the next build needs to relink.
-
-    Which bound actually fires: cpp/tests/CMakeLists.txt sets a TIMEOUT property
-    of 300s on `cpp.unit`, and CMake documents `--timeout` as not applying to a
-    test that carries one. So the inner bound is that 300s whatever is passed
-    here, and `--test-timeout` only scales the outer backstop below, which is
-    kept above 300 on purpose: ctest kills the test cleanly, whereas Python
-    killing ctest can orphan the binary. The flag still matters for a tree that
-    does not set the property.
-
-    A build that times out is `stillborn` instead: nothing was learned about the
-    tests, and treating it as a kill would inflate the score with infrastructure.
+    A build failure or timeout is ``stillborn``; a ctest that does not return
+    within the backstop is ``killed``. Rationale: docs/engineering_notes.md#ctest-timeout-bounds
     """
     try:
         built = subprocess.run(
@@ -237,8 +185,8 @@ def build_and_test(build: str, target: str, test_timeout: int) -> str:
             text=True,
             encoding="utf-8",
             errors="replace",
-            # Above the project's 300s ctest property on purpose, so ctest
-            # does the killing and no orphaned binary holds the exe lock.
+            # Above the project's 300s ctest property, so ctest does the
+            # killing and no orphaned binary holds the exe lock.
             timeout=max(test_timeout, 300) * 2,
             check=False,
         )
@@ -262,9 +210,8 @@ def write_canonical_json(path: Path, payload: object) -> None:
 def restore_interrupted() -> str | None:
     """Repair a header a previous run left mutated, returning its path.
 
-    Runs before the baseline: a leftover mutant fails that check for a reason
-    that reads as unrelated, which is why the failure text used to tell a reader
-    to inspect `git status` by hand.
+    Runs before the baseline check, because a leftover mutant fails that check
+    for a reason that reads as unrelated to the mutation.
     """
     if not INTERRUPTED.exists():
         return None
@@ -279,8 +226,7 @@ def verify_baseline(build: str, target: str, test_timeout: int) -> None:
     """Refuse to score anything against a tree whose tests already fail.
 
     A red baseline scores every mutant as killed, because `killed` means only
-    that ctest returned non-zero. `build_and_test` judges from the mutant's
-    side, so an unmutated tree that passes is `survived`.
+    that ctest returned non-zero; an unmutated tree that passes is `survived`.
     """
     verdict = build_and_test(build, target, test_timeout)
     if verdict != "survived":
@@ -420,14 +366,13 @@ def campaign(
 
     tried = counts["killed"] + counts["survived"]
     # Shared with the Python campaign, which decides the same two directions.
-    # The scan this replaced compared four fields per claim per survivor.
     split = claim_verdict(
         [(s["line"], s["column"], s["before"], s["after"]) for s in survivors], claimed
     )
     return {
         # A truncated run has not seen every candidate, so a claim it did not
         # reach is unmatched rather than stale. Reporting those would fail a
-        # smoke run for entries that are perfectly good.
+        # smoke run for valid entries.
         "partial": limit is not None,
         "file": relative,
         "counts": counts,
@@ -443,12 +388,10 @@ def campaign(
 
 
 def suggested_entry(relative: str, survivor: Survivor) -> str:
-    """The allowlist line a reader should paste, if the survivor is equivalent.
+    """The allowlist line to paste if the survivor is equivalent.
 
-    Built here rather than inlined into the message so a test can paste it back
-    through :func:`load_equivalents`. The first version of this diagnostic
-    omitted the column, and an entry without one is ignored, so following the
-    hint produced a claim that did nothing and the next run failed identically.
+    Built here so a test can paste it back through :func:`load_equivalents`.
+    The column is required: an entry without one is ignored.
     """
     return (
         f"{relative}  {survivor['line']}:{survivor['column']}  "
@@ -458,7 +401,7 @@ def suggested_entry(relative: str, survivor: Survivor) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("header", help="path relative to the repository root")
     parser.add_argument("--build", default="build-tests", help="configured build directory")
     parser.add_argument("--target", default="tfidf_tests", help="test target to rebuild")
@@ -494,9 +437,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         failed = True
-    # An entry that matched no survivor is the other failure mode: the mutant is
-    # killed now, or the line moved, and either way the claim needs re-reading
-    # rather than leaving to rot. Only meaningful over a complete run.
+    # An entry that matched no survivor is the other failure mode: the mutant
+    # is killed now, or the line moved, and either way the claim needs
+    # re-reading. Only meaningful over a complete run.
     if record["partial"]:
         print(
             f"--limit was set, so {len(record['stale'])} unmatched claims are not "
