@@ -183,9 +183,10 @@ def _pair_geometry(
         "decision_statistic_in_plane": decision_plane,
         "projection_error_absolute": residual_error,
         "projection_error_over_q_norm": residual_error / q_norm,
-        # A drawn angle below ~2e-3 rad is under one pixel at 200 dpi, so this
-        # says whether a geometric rendering of the pair shows anything at all.
-        # For an exact tie it shows nothing and invents structure.
+        # The cut is 0.05 degrees (about 8.7e-4 rad), which moves the end of a
+        # 5-inch line by under one pixel at 200 dpi, so this says whether a
+        # geometric rendering of the pair shows anything at all. For an exact
+        # tie it shows nothing and invents structure.
         "angle_is_renderable": math.degrees(math.acos(max(-1.0, min(1.0, overlap)))) > 0.05,
     }
 

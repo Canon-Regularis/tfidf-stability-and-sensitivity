@@ -191,8 +191,8 @@ def _make_sandbox() -> Path:
     """
     sandbox = Path(tempfile.mkdtemp(prefix="tfidf-mutation-"))
     # The compiled extension is copied with everything else. Without it,
-    # native_available() is false in the sandbox, the differential tests fail
-    # to collect and the baseline run fails.
+    # native_available() is false in the sandbox and every native and
+    # differential test skips, so none of them would run against a mutant.
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".hypothesis")
     for name in _SANDBOX_CONTENTS:
         source = REPO / name

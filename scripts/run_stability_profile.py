@@ -281,7 +281,7 @@ def main() -> int:
     )
     # `--trials` is not forwarded here. The audit runs at `_AUDIT_TRIALS` and the
     # parameters block records that count under `audit_trials`, so the published
-    # audit figures (section 7.2, docs/ranking_stability.md) stay fixed.
+    # audit figures (reports/summary.md, docs/ranking_stability.md) stay fixed.
     # Rationale: docs/engineering_notes.md#audit-trials-not-forwarded
     audit_trials = _AUDIT_TRIALS
     audit = certificate_audit(
