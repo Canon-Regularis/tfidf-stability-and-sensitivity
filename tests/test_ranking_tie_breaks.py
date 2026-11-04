@@ -229,7 +229,7 @@ def test_keys_are_injective_even_when_every_attribute_collides() -> None:
 
 def test_priority_may_not_name_the_identifier() -> None:
     table = table_of(2, popularity=[1, 2])
-    with pytest.raises(ValueError, match="non-total"):
+    with pytest.raises(ValueError, match="named last it only repeats itself"):
         build_keys([1.0, 2.0], table, SortKeySpec("bad", ("identifier",)))
 
 
@@ -1226,8 +1226,8 @@ def test_a_score_count_that_disagrees_with_the_table_names_both_counts(
 def test_the_identifier_may_not_be_named_in_a_priority(name: str) -> None:
     """Neither spelling of the identifier may be named in a priority.
 
-    It terminates every key implicitly, so naming it would duplicate or move it,
-    and moving it makes the ordering non-total.
+    It already ends every key: named last it only repeats itself, and named
+    earlier it leaves every attribute after it unconsulted.
     """
     table = _two_document_table()
     spec = SortKeySpec(name="broken", priority=("popularity", name))

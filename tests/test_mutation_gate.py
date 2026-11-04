@@ -93,8 +93,8 @@ def test_a_claim_resolves_to_its_reason() -> None:
     """
     claims = runner._load_equivalents(Path("src/tfidf_stability/ranking/sort_keys.py"))
 
-    assert (122, "compare", "LtE", "Lt") in claims
-    assert "transitive" in claims[(122, "compare", "LtE", "Lt")]
+    assert (123, "compare", "LtE", "Lt") in claims
+    assert "transitive" in claims[(123, "compare", "LtE", "Lt")]
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@ def test_a_documented_survivor_does_not_fail_the_campaign() -> None:
     Every module has equivalents, so without this the nightly fails every night.
     """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
-    survivors = [_mutant(122, "compare", "LtE", "Lt")]
+    survivors = [_mutant(123, "compare", "LtE", "Lt")]
 
     assert runner._verdict(module, survivors) == 0
 
@@ -176,7 +176,7 @@ def test_an_undocumented_survivor_fails_the_campaign() -> None:
     """A survivor with no allowlist claim fails the campaign."""
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
     survivors = [
-        _mutant(122, "compare", "LtE", "Lt"),
+        _mutant(123, "compare", "LtE", "Lt"),
         _mutant(42, "constant", "1", "0"),
     ]
 
@@ -212,16 +212,16 @@ def test_a_module_with_no_claims_still_fails_on_any_survivor(
     monkeypatch.setattr(runner, "_EQUIVALENTS", empty)
 
     assert runner._load_equivalents(module) == {}, "and now, by construction, it is not"
-    assert runner._verdict(module, [_mutant(122, "compare", "LtE", "Lt")]) == 1
+    assert runner._verdict(module, [_mutant(123, "compare", "LtE", "Lt")]) == 1
     assert runner._verdict(module, []) == 0
 
 
 @pytest.mark.parametrize(
     ("line", "kind", "before", "after"),
     [
-        (122, "compare", "LtE", "GtE"),
-        (122, "constant", "LtE", "Lt"),
-        (123, "compare", "LtE", "Lt"),
+        (123, "compare", "LtE", "GtE"),
+        (123, "constant", "LtE", "Lt"),
+        (124, "compare", "LtE", "Lt"),
     ],
 )
 def test_a_near_miss_is_not_covered_by_the_claim(
@@ -246,8 +246,8 @@ def test_one_claim_covers_every_mutant_sharing_its_key() -> None:
     """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
     twins = [
-        _mutant(122, "compare", "LtE", "Lt"),
-        _mutant(122, "compare", "LtE", "Lt"),
+        _mutant(123, "compare", "LtE", "Lt"),
+        _mutant(123, "compare", "LtE", "Lt"),
     ]
 
     assert runner._verdict(module, twins) == 0
@@ -261,9 +261,9 @@ def test_a_claim_does_not_cover_the_same_mutation_one_line_over() -> None:
     Rationale: docs/engineering_notes.md#line-keyed-allowlist
     """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
-    moved = [_mutant(123, "compare", "LtE", "Lt")]
+    moved = [_mutant(124, "compare", "LtE", "Lt")]
 
-    assert runner._verdict(module, moved) == 1, "the claim at 122 must not cover 123"
+    assert runner._verdict(module, moved) == 1, "the claim at 123 must not cover 124"
 
 
 # ---------------------------------------------------------------------------

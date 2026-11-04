@@ -164,9 +164,10 @@ ignore = [
   # on each makes the serialised form part of the visible contract rather than
   # an inherited behaviour.
   "UP042",
-  # Function-level imports. Used in exactly two situations here, both
-  # intentional: breaking an import cycle (geometry <-> cosine, numerics <->
-  # validation) and deferring an optional dev-only dependency (hypothesis).
+  # Function-level imports. In src/ they keep numpy and the compiled extension off
+  # the stdlib-only reference path and keep CLI start-up from loading what a command
+  # does not use. In scripts/ and tests/ they sit beside the code that needs them,
+  # and keep matplotlib in make_figures.py and hypothesis in conftest.py optional.
   "PLC0415",
 ]
 

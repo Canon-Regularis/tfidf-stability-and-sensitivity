@@ -25,6 +25,7 @@ from tfidf_stability.perturbation.score_bounds import (
 from tfidf_stability.ranking.attributes import AttributeSpec, AttributeTable
 from tfidf_stability.ranking.margins import (
     Margin,
+    MarginKind,
     adjacent_gaps,
     boundary_margin,
     margin_profile,
@@ -700,6 +701,29 @@ def test_the_flip_radius_of_a_negative_zero_margin_keeps_its_sign() -> None:
     bits differ and this project compares bits.
     """
     assert same_bits(Margin("boundary", 1, 1, -0.0, True).flip_radius, -0.0)
+
+
+# ---------------------------------------------------------------------------
+# kind: a spelling is normalised to its member
+# ---------------------------------------------------------------------------
+def test_a_margin_holds_its_kind_as_a_member_whichever_form_was_passed() -> None:
+    """`kind` is stored as a `MarginKind`, and `str()` of it is the value."""
+    for spelling, member in (
+        ("boundary", MarginKind.BOUNDARY),
+        ("min_adjacent_top", MarginKind.MIN_ADJACENT_TOP),
+    ):
+        assert Margin(spelling, 2, 2, 1.0, True).kind is member
+        assert Margin(member, 2, 2, 1.0, True).kind is member
+        assert str(Margin(spelling, 2, 2, 1.0, True).kind) == spelling
+
+    assert boundary_margin((1.0, 0.5), 1).kind is MarginKind.BOUNDARY
+    assert min_adjacent_margin_top((1.0, 0.5, 0.25), 2).kind is MarginKind.MIN_ADJACENT_TOP
+
+
+def test_an_unknown_margin_kind_is_refused_at_construction() -> None:
+    """A misspelt kind fails when the margin is built, not when it is reported."""
+    with pytest.raises(ValueError, match="is not a valid MarginKind"):
+        Margin("boundry", 1, 1, 1.0, True)
 
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,10 @@ import warnings
 from typing import TYPE_CHECKING, Any
 
 from tfidf_stability.utils.logging import EventKind, get_logger, log_event
+from tfidf_stability.utils.validation import (
+    AbiVersionMismatchError,
+    NativeBackendUnavailableError,
+)
 
 __all__ = [
     "REQUIRED_ABI",
@@ -98,11 +102,6 @@ def unavailable_reason() -> str | None:
 def require_native() -> Any:
     """Return the compiled module, raising a helpful error if it is missing."""
     if _MODULE is None:
-        from tfidf_stability.utils.validation import (
-            AbiVersionMismatchError,
-            NativeBackendUnavailableError,
-        )
-
         # A stale .pyd and a missing one need different fixes: rebuild against the
         # current contract, or build at all. AbiVersionMismatchError subclasses
         # NativeBackendUnavailableError, so callers that do not care are unaffected.

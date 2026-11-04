@@ -15,6 +15,8 @@ from decimal import Decimal, getcontext, localcontext
 from enum import Enum
 from typing import Final
 
+from tfidf_stability.utils.validation import NumericEnvironmentError
+
 __all__ = [
     "DECIMAL_LOG_PRECISION",
     "Reduction",
@@ -318,8 +320,6 @@ def assert_sane_float_environment() -> None:
     if sys.float_info.mant_dig != 53:
         problems.append(f"mantissa has {sys.float_info.mant_dig} bits, expected 53")
     if problems:
-        from tfidf_stability.utils.validation import NumericEnvironmentError
-
         raise NumericEnvironmentError(
             "the floating-point environment is not trustworthy: " + "; ".join(problems)
         )

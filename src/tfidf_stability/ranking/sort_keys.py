@@ -86,7 +86,8 @@ def build_keys(
     if "identifier" in spec.priority or "doc_id" in spec.priority:
         raise ValueError(
             "the identifier terminates every key implicitly and must not appear in "
-            "a priority: moving it would make the ordering non-total"
+            "a priority: named last it only repeats itself, and named earlier it "
+            "leaves every attribute after it unconsulted"
         )
 
     rank_rows = table.rank_matrix(spec.priority)

@@ -517,10 +517,10 @@ orderings, so it is the choice that best exposes the sensitivity §4.5 studies.
 The full six-way sweep is available as an ablation in `configs/ablations.yaml`.
 
 The identifier is **not** part of the permutable priority. It terminates every
-key implicitly, and moving it would stop the ordering being total, which would
-invalidate the uniqueness of the sorted permutation and with it every
-reproducibility claim in the ranking layer. `ranking/sort_keys.py` rejects a
-priority that names it.
+key implicitly, which is what makes the ordering total. Being unique, it decides
+every comparison it reaches: named last in a priority it only repeats itself, and
+named ahead of an attribute it leaves that attribute unconsulted.
+`ranking/sort_keys.py` rejects a priority that names it.
 
 ---
 

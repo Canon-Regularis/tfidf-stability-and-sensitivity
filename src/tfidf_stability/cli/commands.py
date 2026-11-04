@@ -32,6 +32,7 @@ from tfidf_stability.utils.hashing import hash_bytes, hash_file, short
 from tfidf_stability.utils.io import canonical_json, read_jsonl, write_json
 from tfidf_stability.utils.logging import EventKind, get_logger, log_event
 from tfidf_stability.utils.numerics import Reduction
+from tfidf_stability.utils.paths import resolve_packaged_path
 from tfidf_stability.utils.validation import ConfigError
 from tfidf_stability.vectorisation.idf import LogImpl
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
@@ -57,14 +58,9 @@ _E = TypeVar("_E", bound=Enum)
 def _resolve_default_config(module: Path) -> Path:
     """Return the normative configuration path, installed or in-tree.
 
-    Uses the same two layouts as the stopword asset. ``parents[3]`` alone reaches
-    the repository from a checkout but the directory above ``site-packages`` from a
-    wheel, so the packaged copy is tried first.
+    The same two layouts as the stopword asset; see :func:`resolve_packaged_path`.
     """
-    packaged = module.resolve().parents[1] / "configs" / "default.yaml"
-    if packaged.is_file():
-        return packaged
-    return module.resolve().parents[3] / "configs" / "default.yaml"
+    return resolve_packaged_path(module, "configs", "default.yaml", present=Path.is_file)
 
 
 _DEFAULT_CONFIG = _resolve_default_config(Path(__file__))

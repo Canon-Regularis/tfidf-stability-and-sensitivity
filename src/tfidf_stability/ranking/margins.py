@@ -10,12 +10,14 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 from itertools import islice, pairwise
 
 from tfidf_stability.utils.validation import StrictMode, resolve_k
 
 __all__ = [
     "Margin",
+    "MarginKind",
     "MarginSummary",
     "adjacent_gaps",
     "boundary_margin",
@@ -25,21 +27,37 @@ __all__ = [
 ]
 
 
+class MarginKind(str, Enum):
+    """Which margin a :class:`Margin` holds (README section 2.3.2)."""
+
+    BOUNDARY = "boundary"
+    MIN_ADJACENT_TOP = "min_adjacent_top"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 @dataclass(frozen=True, slots=True)
 class Margin:
     """One margin, with the validity flag G3 requires.
 
-    ``kind`` is ``"boundary"`` or ``"min_adjacent_top"``; ``k_effective`` is ``k`` after lenient
-    clamping. When ``defined`` is false, ``value`` is ``NaN`` and ``reason`` (else empty) says why;
+    ``kind`` is a :class:`MarginKind`; ``k_effective`` is ``k`` after lenient clamping. When
+    ``defined`` is false, ``value`` is ``NaN`` and ``reason`` (else empty) says why;
     ``n_undefined`` counts it outside percentiles. Reporting: ``analysis/stability_profile.py``.
     """
 
+    #: Coerced to a :class:`MarginKind`, and annotated with its base, ``str``, so a
+    #: caller may pass the bare value.
     kind: str
     k: int
     k_effective: int
     value: float
     defined: bool
     reason: str = ""
+
+    def __post_init__(self) -> None:
+        """Normalise ``kind`` to its member, refusing an unknown value."""
+        object.__setattr__(self, "kind", MarginKind(self.kind))
 
     @property
     def flip_radius(self) -> float:

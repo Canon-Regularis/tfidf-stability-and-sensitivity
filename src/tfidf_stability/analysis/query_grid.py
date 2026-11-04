@@ -18,7 +18,11 @@ from tfidf_stability.profiles.query_modes import (
     leave_one_out_queries,
     user_profile_queries,
 )
-from tfidf_stability.profiles.user_profile import Interaction, group_interactions
+from tfidf_stability.profiles.user_profile import (
+    Interaction,
+    ProfileAggregation,
+    group_interactions,
+)
 from tfidf_stability.ranking.attributes import AttributeTable
 from tfidf_stability.similarity.cosine import cosine_against_corpus
 from tfidf_stability.vectorisation.tfidf import TfidfModel, TfidfVectoriser
@@ -31,7 +35,7 @@ class EvaluatedQuery:
     """One query, scored against its own candidate set."""
 
     query_id: str
-    mode: str
+    mode: QueryMode
     scores: tuple[float, ...]
     #: Attribute table restricted to this query's candidates, so the tie-break
     #: only ranks documents the query was allowed to retrieve.
@@ -39,6 +43,10 @@ class EvaluatedQuery:
     candidate_ids: tuple[str, ...]
     target: str | None
     n_excluded: int
+
+    def __post_init__(self) -> None:
+        """Normalise ``mode`` to its member, refusing an unknown value."""
+        object.__setattr__(self, "mode", QueryMode(self.mode))
 
     @property
     def n_candidates(self) -> int:
@@ -60,13 +68,18 @@ class QueryGrid:
     """The evaluated grid, with the protocol that produced it."""
 
     queries: tuple[EvaluatedQuery, ...]
-    mode: str
-    aggregation: str
+    mode: QueryMode
+    aggregation: ProfileAggregation
     min_interactions: int
     exclude_profile_items: bool
     n_users: int
     n_degenerate: int
     n_zero_vector: int
+
+    def __post_init__(self) -> None:
+        """Normalise both enums to their members, refusing unknown values."""
+        object.__setattr__(self, "mode", QueryMode(self.mode))
+        object.__setattr__(self, "aggregation", ProfileAggregation(self.aggregation))
 
     def __len__(self) -> int:
         return len(self.queries)
@@ -77,8 +90,8 @@ class QueryGrid:
     def provenance(self) -> dict[str, Any]:
         """The protocol block for the run manifest."""
         return {
-            "query_mode": self.mode,
-            "aggregation": self.aggregation,
+            "query_mode": str(self.mode),
+            "aggregation": str(self.aggregation),
             "min_interactions": self.min_interactions,
             "exclude_profile_items": self.exclude_profile_items,
             "n_users": self.n_users,
@@ -177,7 +190,7 @@ def _score_one(
 
     return EvaluatedQuery(
         query_id=query.query_id,
-        mode=str(query.mode),
+        mode=query.mode,
         scores=tuple(scores),
         table=table,
         candidate_ids=tuple(doc_ids[i] for i in candidates),
@@ -206,8 +219,8 @@ def evaluate(
 
     return QueryGrid(
         queries=tuple(evaluated),
-        mode=str(query_set.mode),
-        aggregation=str(query_set.aggregation),
+        mode=query_set.mode,
+        aggregation=query_set.aggregation,
         min_interactions=query_set.min_interactions,
         exclude_profile_items=query_set.exclude_profile_items,
         n_users=query_set.n_users,

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from tfidf_stability.ranking.margins import adjacent_gaps
+from tfidf_stability.ranking.tie_groups import tie_chains
 from tfidf_stability.similarity.cosine import cosine_against_corpus
 from tfidf_stability.utils.numerics import Reduction, bits_of, ulps_between
 from tfidf_stability.vectorisation.sparse import SparseVector
@@ -243,8 +244,6 @@ def verify_band_invariance(
     """
     if not band.is_valid:
         return False
-
-    from tfidf_stability.ranking.tie_groups import tie_chains
 
     # Log spacing needs a positive finite band. `tau_floor` is 0 when every policy is
     # correctly rounded, and `log10(0)` raises; `g_min` is inf when no strictly-positive

@@ -11,6 +11,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from tfidf_stability.similarity.cosine import cosine
 from tfidf_stability.utils.numerics import Reduction, reduce_sum, sqrt
 from tfidf_stability.vectorisation.sparse import SparseVector, l2_norm
 
@@ -101,8 +102,6 @@ def lipschitz_constant(
             "the Lipschitz bound requires four non-zero vectors with a defined norm, "
             f"got {(nu, nv, nup, nvp)}"
         )
-
-    from tfidf_stability.similarity.cosine import cosine
 
     observed = abs(
         cosine(u_prime, v_prime, policy, u_norm=nup, v_norm=nvp)

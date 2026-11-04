@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Final
 
 from tfidf_stability.preprocessing.tokenise import GAP
+from tfidf_stability.utils.paths import resolve_packaged_path
 from tfidf_stability.utils.validation import DataIntegrityError
 
 __all__ = ["StopwordSet", "load_stopwords", "remove_stopwords"]
@@ -26,10 +27,7 @@ def _resolve_asset_dir(module: Path) -> Path:
     ``data/README.md`` states their licence; ``scripts/check_vendored.py`` verifies their digests.
     Rationale: docs/engineering_notes.md#stopword-asset-layout
     """
-    packaged = module.resolve().parents[1] / "data" / "assets"
-    if packaged.is_dir():
-        return packaged
-    return module.resolve().parents[3] / "data" / "assets"
+    return resolve_packaged_path(module, "data", "assets", present=Path.is_dir)
 
 
 _ASSET_DIR: Final = _resolve_asset_dir(Path(__file__))

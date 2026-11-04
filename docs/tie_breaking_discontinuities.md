@@ -43,8 +43,9 @@ operator disagreement is then attributable to ties alone.
 ```
 
 `π_score` runs π's code path with an empty priority list. The identifier is
-appended implicitly to all three and is never permutable; if it moved, the order
-would stop being total.
+appended implicitly to all three and is never permutable: being unique, it decides
+every comparison it reaches, so named ahead of an attribute it would leave that
+attribute unconsulted.
 
 §4.5 never says *which* reordering π_alt uses. It is pinned to the **reversal**
 of π's priority (the antipode, maximising distance from π), with the full 3!

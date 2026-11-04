@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
+from tfidf_stability.preprocessing.tokenise import GAP
 from tfidf_stability.utils.numerics import Reduction, reduce_sum, sqrt
 from tfidf_stability.vectorisation.sparse import SparseVector
 from tfidf_stability.vectorisation.tfidf import TfidfModel, TfidfVectoriser
@@ -154,8 +155,6 @@ def build_profile(
     features: tuple[str, ...] = ()
     if aggregation is ProfileAggregation.TEXT_CONCAT:
         if separate_items:
-            from tfidf_stability.preprocessing.tokenise import GAP
-
             parts: list[str] = []
             for i, doc_id in enumerate(item_ids):
                 if i:

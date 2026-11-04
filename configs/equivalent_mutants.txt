@@ -64,8 +64,8 @@ src/tfidf_stability/ranking/tie_groups.py  143  boolop  Or -> And  # src=28312cd
 src/tfidf_stability/ranking/tie_groups.py  247  boolop  Or -> And  # src=5f0336ee the same pair on the cached property
 
 # --- ranking/margins.py ----------------------------------------------------
-src/tfidf_stability/ranking/margins.py  116  constant  2 -> 1  # src=8f629c39 marked `# pragma: no cover - defensive`; n < 2 is refused before this point
-src/tfidf_stability/ranking/margins.py  117  constant  False -> True  # src=c19c3ab9 the same unreachable defensive return
+src/tfidf_stability/ranking/margins.py  134  constant  2 -> 1  # src=8f629c39 marked `# pragma: no cover - defensive`; n < 2 is refused before this point
+src/tfidf_stability/ranking/margins.py  135  constant  False -> True  # src=c19c3ab9 the same unreachable defensive return
 
 # --- ranking/distances.py --------------------------------------------------
 src/tfidf_stability/ranking/distances.py  49  constant  0 -> 1  # src=df18baa6 a merge scratch buffer, every entry overwritten before it is read
@@ -74,18 +74,18 @@ src/tfidf_stability/ranking/distances.py  161  compare  Lt -> LtE  # src=75c13ec
 src/tfidf_stability/ranking/distances.py  169  compare  Lt -> LtE  # src=234423a3 likewise, within each of the two lists
 
 # --- ranking/sort_keys.py --------------------------------------------------
-src/tfidf_stability/ranking/sort_keys.py  122  compare  LtE -> Lt  # src=7c4df57a the self-check runs an extra size or one fewer; keys are tuples and therefore transitive, so neither finds a violation
+src/tfidf_stability/ranking/sort_keys.py  123  compare  LtE -> Lt  # src=7c4df57a the self-check runs an extra size or one fewer; keys are tuples and therefore transitive, so neither finds a violation
 
 # --- utils/numerics.py -----------------------------------------------------
-src/tfidf_stability/utils/numerics.py  98  compare  GtE -> Gt  # src=2a87a12d at equal magnitude both Neumaier branches compute the same compensation; verified across sign combinations and at 1e300
-src/tfidf_stability/utils/numerics.py  237  constant  0.0 -> 1.0  # src=4ce04a9e marked `# pragma: no cover`; reachable only if ulp() returns zero
-src/tfidf_stability/utils/numerics.py  238  constant  0.0 -> 1.0  # src=8725d058 the same unreachable arm
-src/tfidf_stability/utils/numerics.py  277  binop  Div -> Mult  # src=aa0e3e69 the flush-to-zero probe: both forms report the same boolean on a machine that is not flushing, which is the only kind a test can run on
-src/tfidf_stability/utils/numerics.py  277  compare  Gt -> GtE  # src=aa0e3e69 same probe, same reason
-src/tfidf_stability/utils/numerics.py  293  binop  Add -> Sub  # src=a6a003b6 the constant-folding probe answers the same on a conforming interpreter
-src/tfidf_stability/utils/numerics.py  294  binop  Add -> Sub  # src=199a247b the reassociation probe, likewise
+src/tfidf_stability/utils/numerics.py  100  compare  GtE -> Gt  # src=2a87a12d at equal magnitude both Neumaier branches compute the same compensation; verified across sign combinations and at 1e300
+src/tfidf_stability/utils/numerics.py  239  constant  0.0 -> 1.0  # src=4ce04a9e marked `# pragma: no cover`; reachable only if ulp() returns zero
+src/tfidf_stability/utils/numerics.py  240  constant  0.0 -> 1.0  # src=8725d058 the same unreachable arm
+src/tfidf_stability/utils/numerics.py  279  binop  Div -> Mult  # src=aa0e3e69 the flush-to-zero probe: both forms report the same boolean on a machine that is not flushing, which is the only kind a test can run on
+src/tfidf_stability/utils/numerics.py  279  compare  Gt -> GtE  # src=aa0e3e69 same probe, same reason
+src/tfidf_stability/utils/numerics.py  295  binop  Add -> Sub  # src=a6a003b6 the constant-folding probe answers the same on a conforming interpreter
+src/tfidf_stability/utils/numerics.py  296  binop  Add -> Sub  # src=199a247b the reassociation probe, likewise
 
-src/tfidf_stability/utils/numerics.py  266  boolop  And -> Or  # src=b8983b47 the fourth probe of the family documented at 322, 338 and 339: all three conjuncts are true on any machine a test can run on, so `and` and `or` return the same boolean and only a directed rounding mode could separate them
+src/tfidf_stability/utils/numerics.py  268  boolop  And -> Or  # src=b8983b47 the fourth probe of the family above (the flush-to-zero, constant-folding and reassociation probes): all three conjuncts are true on any machine a test can run on, so `and` and `or` return the same boolean and only a directed rounding mode could separate them
 
 # --- utils/io.py -----------------------------------------------------------
 src/tfidf_stability/utils/io.py  90  constant  True -> False  # src=d976dced the temp file always exists in the except arm, so missing_ok never fires
@@ -123,9 +123,9 @@ src/tfidf_stability/similarity/cosine.py  61  constant  True -> False  # src=eea
 src/tfidf_stability/similarity/cosine.py  77  constant  0.0 -> 1.0  # src=c9255256 the pairwise matrix is filled in full before it is read
 
 # --- similarity/geometry.py ------------------------------------------------
-src/tfidf_stability/similarity/geometry.py  44  constant  True -> False  # src=4c5015c3 strict zip behind SparseVector.__post_init__
-src/tfidf_stability/similarity/geometry.py  45  constant  True -> False  # src=38362abe likewise, for the second vector
-src/tfidf_stability/similarity/geometry.py  143  compare  Gt -> GtE  # src=ca763863 admitting zeros cannot change a maximum over non-negative counts
+src/tfidf_stability/similarity/geometry.py  45  constant  True -> False  # src=4c5015c3 strict zip behind SparseVector.__post_init__
+src/tfidf_stability/similarity/geometry.py  46  constant  True -> False  # src=38362abe likewise, for the second vector
+src/tfidf_stability/similarity/geometry.py  142  compare  Gt -> GtE  # src=ca763863 admitting zeros cannot change a maximum over non-negative counts
 
 # --- perturbation/idf_perturb.py -------------------------------------------
 src/tfidf_stability/perturbation/idf_perturb.py  74  constant  True -> False  # src=1d204769 SparseVector.__post_init__ already refuses a length mismatch
@@ -148,7 +148,7 @@ src/tfidf_stability/perturbation/experiments.py  125  constant  True -> False  #
 src/tfidf_stability/preprocessing/tokenise.py  38  constant  1 -> 0  # src=3f11ea04 the pattern matches at least one character, so minimum lengths of 0 and 1 admit the same tokens
 
 # --- preprocessing/stopwords.py --------------------------------------------
-src/tfidf_stability/preprocessing/stopwords.py  47  boolop  Or -> And  # src=586815b3 a blank or comment line that is not skipped still fails the `name == asset` test two lines later
+src/tfidf_stability/preprocessing/stopwords.py  45  boolop  Or -> And  # src=586815b3 a blank or comment line that is not skipped still fails the `name == asset` test two lines later
 
 # --- preprocessing/ngrams.py -----------------------------------------------
 src/tfidf_stability/preprocessing/ngrams.py  54  constant  1 -> 0  # src=3822bf73 the unigram fast path and the general path produce identical output at n = 1
@@ -157,7 +157,7 @@ src/tfidf_stability/preprocessing/ngrams.py  54  constant  1 -> 0  # src=3822bf7
 src/tfidf_stability/profiles/query_modes.py  173  constant  2 -> 1  # src=69347c47 the clamp sits behind `if min_interactions >= 2`, which makes it dead
 
 # --- profiles/user_profile.py ----------------------------------------------
-src/tfidf_stability/profiles/user_profile.py  199  constant  True -> False  # src=2181b96d strict zip behind SparseVector.__post_init__
+src/tfidf_stability/profiles/user_profile.py  198  constant  True -> False  # src=2181b96d strict zip behind SparseVector.__post_init__
 
 # --- analysis/stratify.py --------------------------------------------------
 src/tfidf_stability/analysis/stratify.py  83  compare  Lt -> LtE  # src=a8d4f837 the bands are contiguous, so a value equal to a lower bound already matched the band before it
@@ -167,18 +167,18 @@ src/tfidf_stability/analysis/summarise.py  50  compare  LtE -> Lt  # src=440ee8e
 src/tfidf_stability/analysis/summarise.py  52  compare  GtE -> Gt  # src=81dabb68 at p = 100 the general path computes rank n, the same element the shortcut returns
 
 # --- analysis/query_grid.py ------------------------------------------------
-src/tfidf_stability/analysis/query_grid.py  147  compare  Gt -> GtE  # src=ae54178c truncating a set to exactly its own length is a no-op
+src/tfidf_stability/analysis/query_grid.py  160  compare  Gt -> GtE  # src=ae54178c truncating a set to exactly its own length is a no-op
 
 # --- analysis/noise_floor.py -----------------------------------------------
-src/tfidf_stability/analysis/noise_floor.py  74  constant  0.0 -> 1.0  # src=b6ab684f the default fires only if _INSTRUMENTS is empty, which it never is
-src/tfidf_stability/analysis/noise_floor.py  182  constant  True -> False  # src=8b24378d both score vectors come from cosine_against_corpus over the same documents
-src/tfidf_stability/analysis/noise_floor.py  222  compare  LtE -> Lt  # src=07f65c1e n_in_band is zero by the band's definition, as the comment beside it states
-src/tfidf_stability/analysis/noise_floor.py  222  constant  1 -> 0  # src=07f65c1e counting zero of them either way
-src/tfidf_stability/analysis/noise_floor.py  253  constant  0.0 -> 1.0  # src=f092c723 every probe stays inside the band, and the tie structure is constant across it
-src/tfidf_stability/analysis/noise_floor.py  266  binop  Sub -> Add  # src=4d99f0f5 the top probe is pinned to the band edge on the line below, so the spacing cannot move it out
-src/tfidf_stability/analysis/noise_floor.py  266  constant  1 -> 0  # src=4d99f0f5 likewise
-src/tfidf_stability/analysis/noise_floor.py  274  compare  LtE -> Lt  # src=d76e72af no positive gap lies below tau_floor, so tau = 0 gives the same chains as any tau inside the band
-src/tfidf_stability/analysis/noise_floor.py  274  constant  0.0 -> 1.0  # src=d76e72af likewise
+src/tfidf_stability/analysis/noise_floor.py  75  constant  0.0 -> 1.0  # src=b6ab684f the default fires only if _INSTRUMENTS is empty, which it never is
+src/tfidf_stability/analysis/noise_floor.py  183  constant  True -> False  # src=8b24378d both score vectors come from cosine_against_corpus over the same documents
+src/tfidf_stability/analysis/noise_floor.py  223  compare  LtE -> Lt  # src=07f65c1e n_in_band is zero by the band's definition, as the comment beside it states
+src/tfidf_stability/analysis/noise_floor.py  223  constant  1 -> 0  # src=07f65c1e counting zero of them either way
+src/tfidf_stability/analysis/noise_floor.py  252  constant  0.0 -> 1.0  # src=f092c723 every probe stays inside the band, and the tie structure is constant across it
+src/tfidf_stability/analysis/noise_floor.py  265  binop  Sub -> Add  # src=4d99f0f5 the top probe is pinned to the band edge after the sweep is built, so the spacing cannot move it out
+src/tfidf_stability/analysis/noise_floor.py  265  constant  1 -> 0  # src=4d99f0f5 likewise
+src/tfidf_stability/analysis/noise_floor.py  273  compare  LtE -> Lt  # src=d76e72af no positive gap lies below tau_floor, so tau = 0 gives the same chains as any tau inside the band
+src/tfidf_stability/analysis/noise_floor.py  273  constant  0.0 -> 1.0  # src=d76e72af likewise
 
 # --- analysis/stability_profile.py -----------------------------------------
 src/tfidf_stability/analysis/stability_profile.py  149  compare  GtE -> Gt  # src=13ab22bd at k == n the margin is undefined, so both paths exclude the query
@@ -199,7 +199,7 @@ src/tfidf_stability/cli/main.py  105  constant  False -> True  # src=d898869c ar
 src/tfidf_stability/cli/main.py  111  constant  False -> True  # src=cef12337 likewise for version
 
 # --- cli/commands.py -------------------------------------------------------
-src/tfidf_stability/cli/commands.py  521  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
+src/tfidf_stability/cli/commands.py  517  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
 
 # --- datasets/synthetic.py -------------------------------------------------
 src/tfidf_stability/datasets/synthetic.py  107  constant  1 -> 0  # src=a05543f2 the quotient reaches zero only above a vocabulary of 2**40 terms
@@ -214,4 +214,4 @@ src/tfidf_stability/datasets/synthetic.py  272  constant  1 -> 0  # src=41434a9a
 src/tfidf_stability/persistence/save_load.py  412  constant  True -> False  # src=97e31d7a df and cf are unpacked two lines apart with the same count=head.n_terms, and neither is rebound before the zip, so their lengths cannot differ; the bookkeeping still runs, it is the ValueError that is unreachable
 
 # --- _native/__init__.py ---------------------------------------------------
-src/tfidf_stability/_native/__init__.py  60  constant  True -> False  # src=9d3aa03f inside the ABI mismatch arm, which needs a stale build on disk and is marked `# pragma: no cover`; selection happens once at import and a process that has imported this module cannot replay it against a differently-versioned extension
+src/tfidf_stability/_native/__init__.py  64  constant  True -> False  # src=9d3aa03f inside the ABI mismatch arm, which needs a stale build on disk and is marked `# pragma: no cover`; selection happens once at import and a process that has imported this module cannot replay it against a differently-versioned extension

@@ -16,6 +16,7 @@ from tfidf_stability.analysis.query_grid import (
     evaluate,
 )
 from tfidf_stability.profiles.query_modes import QueryMode
+from tfidf_stability.profiles.user_profile import ProfileAggregation
 from tfidf_stability.ranking.attributes import AttributeTable
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
 
@@ -259,6 +260,34 @@ def test_provenance_over_an_empty_grid_reports_zero_rather_than_raising() -> Non
     assert block["n_queries"] == 0
     assert len(grid) == 0
     assert grid.score_vectors() == []
+
+
+def test_a_spelling_of_either_enum_is_stored_as_its_member() -> None:
+    """A grid built from spellings holds members and reports the same values.
+
+    `provenance()` prints `str(member)`, which the enforced `__str__` makes the
+    value, so the manifest is unchanged whichever form the caller passed.
+    """
+    table = AttributeTable.from_records(records()[:1])
+    query = EvaluatedQuery("q", "leave_one_out", (), table, (), None, 0)
+    grid = QueryGrid((query,), "leave_one_out", "vector_mean", 5, True, 1, 0, 0)
+
+    assert query.mode is QueryMode.LEAVE_ONE_OUT
+    assert grid.mode is QueryMode.LEAVE_ONE_OUT
+    assert grid.aggregation is ProfileAggregation.VECTOR_MEAN
+    assert grid.provenance()["query_mode"] == "leave_one_out"
+    assert grid.provenance()["aggregation"] == "vector_mean"
+
+
+def test_an_unknown_mode_or_aggregation_is_refused_at_construction() -> None:
+    """An unknown spelling fails when the record is built, not in the manifest."""
+    table = AttributeTable.from_records(records()[:1])
+    with pytest.raises(ValueError, match="is not a valid QueryMode"):
+        EvaluatedQuery("q", "leave-one-out", (), table, (), None, 0)
+    with pytest.raises(ValueError, match="is not a valid QueryMode"):
+        QueryGrid((), "leave-one-out", "text_concat", 5, True, 0, 0, 0)
+    with pytest.raises(ValueError, match="is not a valid ProfileAggregation"):
+        QueryGrid((), "leave_one_out", "mean", 5, True, 0, 0, 0)
 
 
 def test_provenance_reports_the_candidate_count_as_a_range_not_a_single_n() -> None:
