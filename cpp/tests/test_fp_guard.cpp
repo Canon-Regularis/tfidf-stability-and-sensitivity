@@ -1,7 +1,7 @@
 // Tests for the floating-point environment guard.
 //
-// These run first. If any fails, the compiler or a loaded library has changed
-// the arithmetic underneath us and no other number here can be trusted.
+// These run first. A failure means the compiler or a loaded library has changed
+// the arithmetic, and no other result in the suite can be trusted.
 #include <tfidf/core/build_config.hpp>
 #include <tfidf/core/fp_guard.hpp>
 
@@ -60,17 +60,10 @@ TEST_CASE("fp: subnormals survive (FTZ/DAZ clear)") {
     CHECK((tfidf::fp::selftest() & tfidf::fp::kDenormalsAreZero) == 0u);
 }
 
-// The portable probe, exercised under the modes it exists to catch.
-//
-// `subnormals_survive()` is the ONLY flush detection on targets without MXCSR
-// (aarch64, shipped as a macOS wheel). Those targets cannot set the modes from
-// a test, so the probe went unexercised there and was wrong: it asked only
-// whether a subnormal RESULT collapses, guarded by whether a subnormal INPUT
-// survives, so a mode zeroing both short-circuited to "clean".
-//
-// x86 can set FTZ and DAZ independently, so the aarch64-only code path is
-// tested here, on the one architecture able to produce every combination.
-// AArch64's FPCR.FZ is the FTZ+DAZ row.
+// The portable probe `subnormals_survive()`, run under every flushing mode.
+// It is the only flush detection without MXCSR (aarch64). x86 sets FTZ and DAZ
+// independently, so it produces every combination; AArch64 FPCR.FZ is FTZ+DAZ.
+// Rationale: docs/engineering_notes.md#fp-guard-portable-flush-probe
 #if TFIDF_HAS_MXCSR
 TEST_CASE("fp: the portable probe detects every flushing mode") {
     const unsigned int original = _mm_getcsr();
@@ -157,12 +150,10 @@ TEST_CASE("build: reproducibility flag reflects the actual knobs") {
 }
 
 TEST_CASE("fp: every failure flag is its own single bit") {
-    // The flags are shift expressions, and nothing checked the shift amounts.
-    // Changing any one of them makes two flags equal: `kConstantFolding` at
-    // `1u << 1` collides with `kReassociation`, and `selftest()` then reports a
-    // failure under the wrong name while `f & kConstantFolding` becomes true
-    // for a build that only reassociates. Three such mutations survived the
-    // suite.
+    // The flags are shift expressions; two equal shift amounts make two flags
+    // equal. With `kConstantFolding` at `1u << 1` it collides with
+    // `kReassociation`: `selftest()` reports a failure under the wrong name and
+    // `f & kConstantFolding` is true for a build that only reassociates.
     const std::pair<const char*, std::uint32_t> flags[] = {
         {"kConstantFolding", tfidf::fp::kConstantFolding},
         {"kReassociation", tfidf::fp::kReassociation},
@@ -190,10 +181,9 @@ TEST_CASE("fp: every failure flag is its own single bit") {
 }
 
 TEST_CASE("fp: describe names the failure it was handed") {
-    // `describe` is what an operator reads when a build is refused, and it was
-    // untested. Its first arm is `f == kOk`; inverted, every broken environment
-    // is described as "ok" and the only failure path in the shipped binary
-    // reports success.
+    // `describe` is what an operator reads when a build is refused. Its first
+    // arm is `f == kOk`; inverted, every broken environment is described as
+    // "ok" and the only failure path in the shipped binary reports success.
     CHECK(std::string(tfidf::fp::describe(tfidf::fp::kOk)) == "ok");
 
     const std::uint32_t flags[] = {

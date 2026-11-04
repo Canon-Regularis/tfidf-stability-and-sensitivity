@@ -1,10 +1,8 @@
 // Sparse structures and query scoring.
 //
-// The centrepiece is `taat == daat` bit-for-bit. The two share no data
-// structure and no loop nesting: TAAT walks postings lists out of an inverted
-// index into a dense accumulator, DAAT merges each document's row against the
-// query independently. Identical binary64 from both says more than either one
-// matching a recorded expectation.
+// TAAT (postings into a dense accumulator) and DAAT (per-row merge) share no
+// data structure or loop nesting, so bitwise agreement cross-checks both.
+// Rationale: docs/engineering_notes.md#test-scoring-taat-daat-cross-check
 #include <tfidf/core/reduction.hpp>
 #include <tfidf/similarity/scoring.hpp>
 #include <tfidf/vectorisation/sparse.hpp>
@@ -40,9 +38,11 @@ struct Corpus {
 };
 
 
-/// The first row with any terms in it. A random corpus contains empty rows, and
-/// an empty query takes a shortcut that skips the code most of these tests are
-/// about.
+/// Return the first row with at least two terms, or row 0 if there is none.
+///
+/// A random corpus contains empty rows, and an empty query takes a shortcut
+/// that bypasses the scoring loops under test. Two terms let one document
+/// be reached by more than one posting of the query.
 SparseView first_non_empty_row(const CsrView& csr) {
     for (DocId d = 0; d < csr.n_rows; ++d) {
         if (csr.row(d).nnz() >= 2) {
@@ -115,21 +115,16 @@ TEST_CASE("sparse: canonical-form detection") {
 }
 
 TEST_CASE("sparse: a decreasing indptr is not canonical") {
-    // The normative Python rejects this: `_check_csr` in
-    // persistence/save_load.py raises "indptr decreases at row {i}". This
-    // mirror did not, and the two disagreed on exactly these arrays.
-    //
-    // `front == 0` and `back == nnz` both hold, so the arms `is_canonical()`
-    // already had could not see it. `row(1)` then computes `hi - lo` as
-    // `2 - 3` on `std::size_t`, which wraps to `std::dynamic_extent`, and
-    // `subspan` reads that as "to the end" -- so row 1 silently spanned the
-    // rest of the arrays and overlapped row 2 instead of being refused.
+    // Like `_check_csr` in persistence/save_load.py, `is_canonical()` rejects a decreasing indptr.
+    // `front == 0` and `back == nnz` both hold, so only the monotonicity arm rejects
+    // this input; without it, `row(1)` wraps `2 - 3` to `std::dynamic_extent`.
+    // Rationale: docs/engineering_notes.md#test-scoring-csr-indptr-monotonicity
     const std::vector<Offset> backwards{0, 3, 2, 4};
     const std::vector<TermId> indices{0, 1, 2, 3};
     const std::vector<Real> values{1.0, 2.0, 3.0, 4.0};
 
     const CsrView csr{backwards, indices, values, 3, 4};
-    CHECK(csr.indptr.front() == 0);              // the arms that did exist
+    CHECK(csr.indptr.front() == 0);              // the endpoint arms
     CHECK(csr.indptr.back() == csr.nnz());       // both pass on this input
     CHECK_FALSE(csr.is_canonical());
 }
@@ -272,14 +267,10 @@ TEST_CASE("scoring: the zero-vector convention of section 2.3") {
     std::vector<Real> out(static_cast<std::size_t>(csr.n_rows));
     ScoringScratch scratch;
 
-    // A zero query scores 0 against everything and must not produce NaN.
-    //
-    // Poisoned first, and compared on bits. `std::vector<Real> out(n)` value-
-    // initialises to 0.0, so the previous form also passed when score_taat wrote
-    // nothing at all: it could not tell "wrote zeros" from "never ran". And
-    // `s == 0.0` is true of -0.0, which this repository treats as a distinct
-    // value everywhere else (ranking/margins.py reasons that -0.0 cannot occur,
-    // and every score comparison elsewhere is bitwise).
+    // A zero query scores +0.0 against everything, never NaN or -0.0.
+    // `out` is filled with NaN first so a kernel that writes nothing fails, and
+    // the sign is checked because `s == 0.0` also holds for -0.0.
+    // Rationale: docs/engineering_notes.md#test-scoring-zero-query-poisoned-output
     std::fill(out.begin(), out.end(), std::numeric_limits<Real>::quiet_NaN());
     const SparseView zero{{}, {}, csr.n_cols};
     score_taat(zero, csc, norms, 0.0, out, scratch, Reduction::Naive);
@@ -361,12 +352,10 @@ TEST_CASE("scoring: TAAT agrees with DAAT under every reduction policy") {
 }
 
 TEST_CASE("sparse: the vector guards are pinned at their boundaries, not past them") {
-    // The case above uses index 99 against dim 8, which is out of range by so
-    // much that relaxing the bound to `> dim` still rejects it; and it puts its
-    // first offending pair at position 2, so restricting the ascent check to
-    // `i > 1` still rejects that too. Both relaxations are real defects -- one
-    // admits an index one past the end, the other stops reading the first pair
-    // -- so each bound is stated here at the value that separates it.
+    // Each bound is tested at the value that separates it from a relaxed bound:
+    // an index equal to dim, and a bad first pair. The canonical-form case above
+    // (index 99, bad pair at position 2) is still rejected under `> dim` or `i > 1`.
+    // Rationale: docs/engineering_notes.md#test-scoring-sparse-guard-boundaries
     const std::vector<Real> v{1.0, 1.0};
 
     SUBCASE("an index equal to dim is out of range") {
@@ -399,11 +388,10 @@ TEST_CASE("sparse: the vector guards are pinned at their boundaries, not past th
 }
 
 TEST_CASE("sparse: each CSR envelope guard rejects on its own") {
-    // The envelope is four separate conditions and a malformed matrix usually
-    // breaks one of them. Written as one test with everything wrong at once,
-    // three of the four could be deleted and it would still pass -- and the
-    // front/back pair is a single `||`, so an input that violates both cannot
-    // tell it from `&&`. One violation per subcase is what distinguishes them.
+    // Each subcase breaks one envelope condition; an input that breaks front and
+    // back at once cannot distinguish their `||` from `&&`. A short `values` also
+    // moves `nnz()`, so the length subcase trips the back arm too; the next case isolates it.
+    // Rationale: docs/engineering_notes.md#test-scoring-csr-envelope-guards
     const std::vector<TermId> indices{0, 1, 2, 3};
     const std::vector<Real> values{1.0, 2.0, 3.0, 4.0};
 
@@ -509,10 +497,9 @@ TEST_CASE("sparse: df is a column length and row_norms starts at row zero") {
 }
 
 TEST_CASE("sparse: a default constructed view is empty rather than one wide") {
-    // The member initialisers. Every test builds these by aggregate
-    // initialisation, which overwrites all of them, so nothing else states what
-    // a default costs: a `dim` of 1 makes an empty vector claim a coordinate it
-    // has no value for, and an `n_rows` of 1 makes an empty matrix claim a row
+    // Pins the member initialisers, which aggregate initialisation elsewhere
+    // always overwrites. A default `dim` of 1 gives an empty vector a coordinate
+    // with no value; a default `n_rows` of 1 makes an empty matrix claim a row
     // whose `indptr` entries do not exist.
     const SparseView vector{};
     CHECK(vector.dim == 0);
@@ -530,12 +517,9 @@ TEST_CASE("sparse: a default constructed view is empty rather than one wide") {
 }
 
 TEST_CASE("score: a query with terms but no weight scores zero rather than NaN") {
-    // The guard is `query_norm == 0.0 || query.empty()`, and every existing
-    // case that reaches it is empty, so the norm arm is never the one that
-    // fires. A query with indices and all-zero values is not empty and has a
-    // zero norm: without the norm arm it reaches the divide, where the
-    // accumulated 0.0 over a query norm of 0.0 is NaN, and section 2.3's
-    // convention says the similarity is zero.
+    // Indices with all-zero values make a query that is not empty but has zero
+    // norm, so only the `query_norm == 0.0` arm of the guard stops 0.0 / 0.0 = NaN.
+    // Section 2.3 defines the similarity as zero. Every other zero query here is empty.
     const Corpus c = random_corpus(30, 20, 6, 4242);
     const CsrView csr = c.view();
     const Csc index = transpose(csr);
@@ -564,11 +548,9 @@ TEST_CASE("score: a query with terms but no weight scores zero rather than NaN")
 }
 
 TEST_CASE("score: nothing is written past the end of the output span") {
-    // `out` is sized by the caller to exactly n_rows, so a loop bound one too
-    // large writes into whatever follows it. The corruption is silent: the
-    // scores themselves stay correct, and only a build with a sanitiser would
-    // otherwise notice. A sentinel immediately after the span makes it visible
-    // in an ordinary build.
+    // `out` is exactly n_rows long, so a loop bound one too large corrupts the
+    // memory after it while the scores stay correct. A sentinel after the span
+    // makes the overrun visible without a sanitiser.
     const Corpus c = random_corpus(25, 15, 5, 606);
     const CsrView csr = c.view();
     const Csc index = transpose(csr);
@@ -589,11 +571,9 @@ TEST_CASE("score: nothing is written past the end of the output span") {
 }
 
 TEST_CASE("score: the algorithm asked for is the algorithm that runs") {
-    // TAAT and DAAT must return identical bits, which is what makes the pair a
-    // check on each other -- and also what makes the dispatch invisible to
-    // every test that only reads `out`. The two differ in what they touch:
-    // TAAT walks the inverted index through the scratch, DAAT merges each row
-    // and never uses it. So the scratch is the evidence of which one ran.
+    // TAAT and DAAT return identical bits, so `out` cannot show which one ran.
+    // TAAT fills the scratch's touched list and DAAT never uses it, so the
+    // scratch identifies the algorithm.
     const Corpus c = random_corpus(30, 12, 6, 31337);
     const CsrView csr = c.view();
     const Csc index = transpose(csr);
@@ -628,13 +608,9 @@ TEST_CASE("score: the algorithm asked for is the algorithm that runs") {
 }
 
 TEST_CASE("score: a document enters the touched list once however many terms hit it") {
-    // The comment at the accumulator says a double push "would only rewrite the
-    // same quotient" and is "asserted in the test suite". It was not. The
-    // compensated path tracks this with a separate `seen` array, and a document
-    // carrying several query terms is pushed once per posting without it.
-    //
-    // The scores stay right either way, so only the list itself shows it, and
-    // `clear_touched` walks that list on every subsequent query.
+    // Each document enters the touched list once, however many query terms hit
+    // it. The compensated policies track this with a separate `seen` array.
+    // Duplicates leave the scores unchanged but lengthen the next `clear_touched`.
     const Corpus c = random_corpus(40, 10, 8, 8080);
     const CsrView csr = c.view();
     const Csc index = transpose(csr);

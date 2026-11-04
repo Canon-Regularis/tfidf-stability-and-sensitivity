@@ -1,20 +1,8 @@
 // Reduction policies: how a sum of binary64 values is accumulated.
 //
-// Summation order is part of this project's specification. `(a + b) + c` and
-// `a + (b + c)` are different computations in binary64, and README section 2
-// writes its sums without bracketing, so the normative reading is a plain
-// left-to-right fold. `Naive` is that fold, and every published result uses it.
-//
-// The other three are instruments. Their spread measures the floating-point
-// noise floor, from which the near-tie tolerance tau of section 7.1 is derived
-// rather than asserted; `Exact` is correctly rounded, so the spread against it
-// is an absolute error.
-//
-// Policy classes rather than std::function or virtual calls: each kernel is a
-// template on the accumulator type, instantiated once per policy, so the
-// accumulator stays in registers and the inner loop holds no dispatch.
-// Selection happens once per call, at the boundary, via a switch over
-// `Reduction`.
+// `Naive` is the normative left-to-right fold of README section 2. The other three measure
+// the floating-point noise floor from which the tolerance tau of section 7.1 is derived.
+// Rationale: docs/engineering_notes.md#reduction-policies
 #pragma once
 
 #include <tfidf/core/types.hpp>
@@ -31,9 +19,10 @@ namespace tfidf::reduce {
 // Policies
 // -----------------------------------------------------------------------------
 
-/// Plain left-to-right accumulation. The normative policy, and the least
-/// accurate of the four: improving on the paper's arithmetic would publish
-/// numbers its stated mathematics does not produce.
+/// Plain left-to-right accumulation, the normative policy.
+///
+/// The least accurate of the four. A more accurate sum would publish numbers that the
+/// stated mathematics does not produce.
 struct Naive {
     Real sum = 0.0;
 
@@ -41,28 +30,19 @@ struct Naive {
     [[nodiscard]] constexpr Real value() const noexcept { return sum; }
 };
 
-/// ``|x|``, usable in a constant expression on every supported compiler.
+/// Absolute value usable in a constant expression on every supported compiler.
 ///
-/// `std::abs` is `constexpr` in libstdc++ (C++23's P0533) and not in MSVC's
-/// STL, which rejects it with C3615, "cannot result in a constant expression".
-/// CI hit the split: the C++ tests are built by a hand-rolled CMake invocation
-/// that picks MinGW GCC, while scikit-build-core builds the Python extension
-/// with MSVC, so the same header compiled in one job and broke the other, on
-/// Windows only.
-///
-/// The sole behavioural difference is -0.0, returned here where `std::abs`
-/// gives +0.0. The one call site is a magnitude comparison, where the two
-/// compare equal. NaN and the infinities are unaffected.
+/// `std::abs` is not `constexpr` in MSVC's STL. Returns -0.0 for -0.0, which compares
+/// equal to +0.0 at the one call site.
+/// Rationale: docs/engineering_notes.md#reduction-constexpr-magnitude
 [[nodiscard]] constexpr Real magnitude(Real x) noexcept {
     return x < Real(0) ? -x : x;
 }
 
 /// Kahan-Babuska-Neumaier compensated summation.
 ///
-/// Tracks the rounding error lost at each step in a second accumulator and adds
-/// it back once at the end. Unlike plain Kahan, correct when the running total
-/// is smaller in magnitude than the addend, the common case when a large term
-/// arrives late.
+/// Tracks the rounding error of each step in a second accumulator and adds it back at the end.
+/// Unlike plain Kahan, it stays correct when an addend exceeds the running total in magnitude.
 struct Neumaier {
     Real sum = 0.0;
     Real compensation = 0.0;
@@ -82,20 +62,11 @@ struct Neumaier {
     [[nodiscard]] constexpr Real value() const noexcept { return sum + compensation; }
 };
 
-/// Recursive pairwise summation; error grows as O(log n) rather than O(n).
+/// Pairwise summation; error grows as O(log n) rather than O(n).
 ///
-/// Iterative, with a small stack of partial sums, one per level, so it
-/// allocates nothing and matches the recursive formulation.
-///
-/// The base case is `kPairwiseBlock`, numpy's block size, which does not make
-/// the two agree: numpy unrolls its base case into eight independent
-/// accumulators, so its order diverges from a straight fold well before the
-/// block boundary. Against `np.sum` over 262 sizes the two differ at 208 of
-/// them, first at n = 8.
-///
-/// The contract is with this repository's Python reference: bit-identical
-/// across 305 sizes from n = 1 to 10,000, including the 2^k and 2^k+1
-/// boundaries where a block-size or recursion-cutoff mismatch would first show.
+/// Streaming, with a stack of one partial sum per level, so it allocates nothing. Bit-identical
+/// to the repository's Python reference, not to `np.sum`, despite the shared block size.
+/// Rationale: docs/engineering_notes.md#pairwise-reduction-order
 struct Pairwise {
     // 64 levels is enough for 2^64 * kPairwiseBlock elements.
     std::array<Real, 64> partials{};
@@ -114,8 +85,8 @@ struct Pairwise {
     }
 
     [[nodiscard]] constexpr Real value() const noexcept {
-        // Fold the completed levels from the deepest (largest) upward, which is
-        // the order the recursive formulation produces.
+        // Fold the completed levels from the top of the stack (smallest) down to the largest,
+        // then the trailing block, in the order the Python reference uses.
         Real total = 0.0;
         for (std::size_t i = levels; i-- > 0;) {
             total += partials[i];
@@ -125,12 +96,9 @@ struct Pairwise {
 
   private:
     constexpr void push(Real v, std::size_t weight) noexcept {
-        // Merge equal-weight partials, mirroring the recursive split.
-        //
-        // The weight is only ever compared for equality, so what it has to do is
-        // give equal-size subtrees equal counts -- not record the size. Tripling
-        // it below instead of doubling merges at exactly the same points and
-        // produces the same tree, so that constant is not observable.
+        // Merge equal-weight partials, as a binary counter carries. The weight is only
+        // compared for equality, so a growth factor of 3 builds the same tree as 2 does.
+        // Rationale: docs/engineering_notes.md#pairwise-weight-equivalence
         while (levels > 0 && counts[levels - 1] == weight) {
             --levels;
             v = partials[levels] + v;
@@ -146,24 +114,9 @@ struct Pairwise {
 
 /// Correctly-rounded summation via Shewchuk's expansion algorithm.
 ///
-/// Keeps non-overlapping partial sums whose exact total is the exact sum of the
-/// inputs, then rounds once. Same algorithm as Python's `math.fsum`, so the two
-/// agree bit-for-bit on finite inputs, which gives the noise-floor study one
-/// ground truth across both languages.
-///
-/// Finite inputs only. CPython's `math_fsum` tracks infinities and intermediate
-/// overflow separately and raises: `fsum([inf, -inf])` is a ValueError and
-/// `fsum([1e308, 1e308])` an OverflowError. This has no such machinery and
-/// returns NaN for those two and for `[inf, 1.0]`, where `math.fsum` returns
-/// inf. The other three policies agree with the reference on those inputs, so
-/// the gap is specific to `Exact`.
-///
-/// Unreachable from the published pipeline. `l2_norm` squares before it sums,
-/// so finite inputs can create an infinite addend: over `[1e200, 1e200]` it
-/// gives nan where the reference gives inf. A TF-IDF weight is at most
-/// `ln(1 + N)`, so squaring one overflows only for a corpus of about e^(1e154)
-/// documents. Reachable through the `reduce_sum` and `l2_norm` bindings, which
-/// take arbitrary values.
+/// Same algorithm as Python's `math.fsum`, bit-for-bit on finite inputs, which it requires: an
+/// infinite addend or intermediate overflow can give NaN where `math.fsum` raises or returns inf.
+/// Rationale: docs/engineering_notes.md#exact-reduction-non-finite
 struct Exact {
     std::vector<Real> partials;
 
@@ -183,14 +136,9 @@ struct Exact {
             x = hi;
         }
         partials.resize(out);
-        // Conditional, as CPython's `math_fsum` is: it appends the running total
-        // only `if (x != 0.0)`. Pushing unconditionally preserves the value of
-        // the expansion but can flip its sign: over nothing but negative zeros
-        // `x` is -0.0, so `value()` returned -0.0 where `math.fsum` returns
-        // +0.0. Measured through the shipped extension, reduce_sum([-0.0],
-        // exact) gave bits 8000000000000000 against the reference's
-        // 0000000000000000. Since -0.0 == 0.0, no tolerance or equality check
-        // sees it.
+        // Append the running total only when nonzero, as CPython's `math_fsum` does, so that a
+        // sum of negative zeros gives +0.0.
+        // Rationale: docs/engineering_notes.md#exact-reduction-signed-zero
         if (x != 0.0) {
             partials.push_back(x);
         }
@@ -198,16 +146,9 @@ struct Exact {
 
     /// Round the expansion to a single correctly-rounded binary64.
     ///
-    /// The expansion is exact, but a plain fold over the partials can still
-    /// collapse it one ulp off, which makes the result depend on the order the
-    /// inputs arrived in. `Exact` is the ground truth the other policies' error
-    /// is measured against and must match `math.fsum` bit-for-bit, so this
-    /// reproduces CPython's algorithm including its half-even correction.
-    ///
-    /// Sum from the largest partial downward until the running total becomes
-    /// inexact, then apply the correction that makes the result independent of
-    /// input order (CPython's comment: "so that sum([1e-16, 1, 1e16]) will
-    /// round up the last digit to two instead of down to zero").
+    /// Reproduces CPython's `math_fsum` rounding, including its half-even correction, so
+    /// the result is independent of input order and matches `math.fsum` bit-for-bit.
+    /// Rationale: docs/engineering_notes.md#exact-reduction-rounding
     [[nodiscard]] Real value() const noexcept {
         std::size_t n = partials.size();
         if (n == 0) {

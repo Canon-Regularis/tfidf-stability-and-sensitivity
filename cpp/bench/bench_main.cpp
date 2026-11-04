@@ -1,11 +1,8 @@
-// Native microbenchmarks. Kernel-level costs, free of FFI overhead.
+// Native microbenchmarks of the kernels, without FFI overhead.
 //
-// The question these answer is what the reduction policy costs. The Python
-// benchmarks time the whole call, so marshalling dominates and the four
-// policies look alike; here they do not share anything but the data.
-//
-// Timings are comparable only within one run of one binary: the bench preset
-// enables arch tuning, so a number from one machine says nothing about another.
+// They measure the cost of each reduction policy. Timings compare only within one run of
+// one binary, because the bench preset enables arch tuning.
+// Rationale: docs/engineering_notes.md#native-bench-scope
 #define ANKERL_NANOBENCH_IMPLEMENT
 #include <tfidf/core/build_config.hpp>
 #include <tfidf/core/fp_guard.hpp>
@@ -40,9 +37,10 @@ struct Corpus {
     }
 };
 
-/// A deterministic corpus: `per_doc` distinct ascending terms per row, weights
-/// spread over several orders of magnitude so compensation has something to
-/// recover rather than summing exactly.
+/// Builds a deterministic CSR corpus with `per_doc` sampled terms per row.
+///
+/// Terms are sorted and deduplicated. Weights span several orders of magnitude, so
+/// compensated summation has rounding error to recover.
 Corpus make_corpus(DocId docs, TermId vocab, std::size_t per_doc, std::uint64_t seed) {
     std::mt19937_64 rng(seed);
     std::uniform_int_distribution<std::int32_t> term(0, vocab - 1);
@@ -88,13 +86,15 @@ const char* policy_name(Reduction p) {
 constexpr Reduction kPolicies[] = {Reduction::Naive, Reduction::Neumaier, Reduction::Pairwise,
                                    Reduction::Exact};
 
-/// Long enough that the millisecond-scale kernels get more than one iteration
-/// per epoch. Without it nanobench reports them as unstable and the numbers
-/// move by tens of percent between runs, which is useless for a nightly.
+/// Minimum epoch time for every benchmark.
+///
+/// Millisecond-scale kernels need more than one iteration per epoch; with fewer,
+/// nanobench reports them as unstable and results vary by tens of percent between runs.
 constexpr auto kEpoch = std::chrono::milliseconds(20);
 
-/// Discarded iterations before timing starts, so a cold cache and the first
-/// allocation of a scratch vector are not counted as the kernel's cost.
+/// Untimed iterations run before measurement starts.
+///
+/// They keep cold caches and the first scratch allocation out of the kernel's cost.
 constexpr std::size_t kWarmup = 10;
 
 }  // namespace
@@ -168,8 +168,8 @@ int main() {
     }
 
     // ------------------------------------------------------------------
-    // Scoring. TAAT and DAAT must return identical bits, so any difference
-    // here is cost and nothing else.
+    // Scoring. TAAT and DAAT return identical bits, so any difference in
+    // these timings is cost alone.
     // ------------------------------------------------------------------
     {
         const Csc index = transpose(csr);
