@@ -13,6 +13,7 @@ import importlib.util
 import io
 import json
 import random as random_module
+import re
 import sys
 import zipfile
 from itertools import pairwise
@@ -370,13 +371,52 @@ def test_the_corpus_digest_is_over_documents_not_provenance() -> None:
 
 
 def test_an_unknown_dataset_name_lists_the_valid_ones() -> None:
-    with pytest.raises(DataIntegrityError, match="synthetic_small"):
+    expected = (
+        "unknown dataset 'no_such_dataset'; expected one of "
+        "('synthetic_small', 'synthetic_tiny', 'movielens_small') or 'jsonl:<path>'"
+    )
+    with pytest.raises(DataIntegrityError, match=f"^{re.escape(expected)}$"):
         load_dataset("no_such_dataset")
 
 
 def test_movielens_without_an_archive_says_how_to_get_one() -> None:
-    with pytest.raises(DataIntegrityError, match=r"fetch_data\.py"):
+    expected = (
+        "movielens_small needs an archive path. MovieLens may not be redistributed, so it is "
+        "not in the repository -- run 'python scripts/fetch_data.py' first, then pass its path."
+    )
+    with pytest.raises(DataIntegrityError, match=f"^{re.escape(expected)}$"):
         load_dataset("movielens_small")
+
+
+def test_the_movielens_provenance_block_is_exactly_these_keys(tmp_path, monkeypatch) -> None:
+    """MovieLens records its provenance key for key, and ignores ``spec``."""
+    data = _archive()
+    path = tmp_path / "ml-latest-small.zip"
+    path.write_bytes(data)
+    monkeypatch.setattr(
+        movielens.load,
+        "__kwdefaults__",
+        {**movielens.load.__kwdefaults__, "expect_sha256": hash_bytes(data)},
+    )
+    expected = {
+        "kind": "movielens",
+        "variant": "ml-latest-small",
+        "archive_sha256": hash_bytes(data),
+        "n_documents": 5,
+        "n_ratings": 6,
+        "n_users": 3,
+        "n_unrated_documents": 1,
+        "interaction_min_weight": 4.0,
+        "redistributable": False,
+    }
+    custom = synthetic.SyntheticSpec(
+        n_docs=30, vocab_size=60, n_users=3, n_exact_duplicates=2, n_twin_pairs=2
+    )
+
+    assert load_dataset("movielens_small", archive=path).provenance == expected
+    assert load_dataset("movielens_small", archive=path, spec=custom) == load_dataset(
+        "movielens_small", archive=path
+    ), "a spec changes nothing a MovieLens load returns"
 
 
 def test_a_jsonl_corpus_round_trips(tmp_path) -> None:
@@ -998,6 +1038,75 @@ def test_an_explicit_spec_overrides_the_registered_one() -> None:
 _TINY_CORPUS_DIGEST = "bc098582b26cc92840efb7cf8ca97a56ff9d81cfa79ce74d05e07bdf17be75c2"
 _TINY_SPEC_DIGEST = "f760dab267bfac16066245fc0aae8fdb3c5859fac7d798f1d7dd4d044e274e8a"
 _TINY_INTERACTIONS_DIGEST = "7dae269fb86344965a833f583305947e9121188bc0d6fcb13026f478b80b4e00"
+
+#: Each synthetic dataset's provenance block. Only `synthetic_tiny`'s digest is
+#: pinned; `synthetic_small` is checked against the default spec's own digest.
+_SYNTHETIC_PROVENANCE = {
+    "synthetic_small": {
+        "kind": "synthetic",
+        "spec": {
+            "seed": 20260811,
+            "n_docs": 2000,
+            "vocab_size": 4000,
+            "zipf_exponent": 1.0,
+            "len_min": 3,
+            "len_max": 40,
+            "n_users": 200,
+            "max_interactions_per_user": 12,
+            "n_exact_duplicates": 20,
+            "n_twin_pairs": 40,
+            "twin_extra_token_df": [1, 2, 4, 8, 16, 32, 64, 128],
+        },
+        "spec_digest": synthetic.SyntheticSpec().digest(),
+        "n_documents": 2000,
+        "n_twin_pairs": 40,
+        "n_exact_duplicate_pairs": 20,
+        "redistributable": True,
+    },
+    "synthetic_tiny": {
+        "kind": "synthetic",
+        "spec": {
+            "seed": 20260811,
+            "n_docs": 120,
+            "vocab_size": 300,
+            "zipf_exponent": 1.0,
+            "len_min": 3,
+            "len_max": 40,
+            "n_users": 20,
+            "max_interactions_per_user": 12,
+            "n_exact_duplicates": 4,
+            "n_twin_pairs": 6,
+            "twin_extra_token_df": [1, 2, 4, 8, 16, 32, 64, 128],
+        },
+        "spec_digest": _TINY_SPEC_DIGEST,
+        "n_documents": 120,
+        "n_twin_pairs": 6,
+        "n_exact_duplicate_pairs": 4,
+        "redistributable": True,
+    },
+}
+
+
+@pytest.mark.parametrize("name", list(_SYNTHETIC_PROVENANCE))
+def test_each_synthetic_dataset_records_exactly_its_provenance(name: str) -> None:
+    """Each synthetic name records its own provenance, key for key.
+
+    The block reaches every report as ``data_provenance``, which no result
+    digest covers, so a dropped key or a swapped spec would go unnoticed.
+    """
+    data = load_dataset(name)
+
+    assert data.name == name
+    assert data.provenance == _SYNTHETIC_PROVENANCE[name]
+    assert data.provenance["redistributable"] is True, "a bool, not merely equal to one"
+
+
+def test_an_archive_given_for_a_synthetic_dataset_is_ignored() -> None:
+    """A synthetic load ignores ``archive``, even a path that does not exist."""
+    data = load_dataset("synthetic_tiny", archive="no/such/archive.zip")
+
+    assert data.digest() == _TINY_CORPUS_DIGEST
+    assert data == load_dataset("synthetic_tiny"), "an archive changes nothing a load returns"
 
 
 def test_the_tiny_corpus_is_byte_for_byte_what_it_has_always_been() -> None:

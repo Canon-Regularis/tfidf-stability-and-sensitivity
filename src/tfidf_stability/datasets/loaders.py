@@ -1,15 +1,16 @@
 """Load every dataset by name and record where each one came from.
 
-:data:`DATASET_NAMES` is the registry; ``configs/datasets.yaml`` mirrors it and nothing loads it.
+:data:`DATASET_NAMES` names the loaders; ``configs/datasets.yaml`` mirrors it and nothing loads it.
 :func:`load_dataset` returns a :class:`LoadedDataset` whose :attr:`~LoadedDataset.provenance` goes
 into the manifest. See ``data/README.md``. Rationale: docs/engineering_notes.md#dataset-provenance
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from tfidf_stability.datasets import movielens, synthetic
 from tfidf_stability.utils.hashing import hash_text
@@ -22,11 +23,6 @@ __all__ = [
     "load_dataset",
     "load_jsonl_corpus",
 ]
-
-#: Registered names. ``jsonl:<path>`` is also accepted, for a corpus already on
-#: disk, which is how a MovieLens-derived corpus is consumed once
-#: ``scripts/build_corpus.py`` has written it out.
-DATASET_NAMES = ("synthetic_small", "synthetic_tiny", "movielens_small")
 
 #: Smaller synthetic spec for tests and notebooks, where a 2000-document corpus
 #: would dominate the runtime.
@@ -94,24 +90,24 @@ def load_jsonl_corpus(path: Path | str) -> LoadedDataset:
     )
 
 
-def load_dataset(
-    name: str,
-    *,
-    archive: Path | str | None = None,
-    spec: synthetic.SyntheticSpec | None = None,
-) -> LoadedDataset:
-    """Load a registered dataset by name.
+#: A registered loader: called with the name, ``archive`` and ``spec`` as given to
+#: :func:`load_dataset`, and ignoring whichever of the two its source does not use.
+_Loader = Callable[[str, Path | str | None, synthetic.SyntheticSpec | None], LoadedDataset]
 
-    ``name`` is one of :data:`DATASET_NAMES` or ``jsonl:<path>``; ``archive``, the zip path, is
-    required for ``movielens_small`` and ignored otherwise; ``spec`` overrides the synthetic
-    generator. Raises DataIntegrityError for an unknown name or a missing or invalid corpus.
+
+@dataclass(frozen=True, slots=True)
+class _Synthetic:
+    """Generate a synthetic dataset from ``default``, or from ``spec`` when given.
+
+    ``archive`` is ignored.
     """
-    if name.startswith("jsonl:"):
-        return load_jsonl_corpus(name[len("jsonl:") :])
 
-    if name in ("synthetic_small", "synthetic_tiny"):
-        resolved = spec or (_TINY if name == "synthetic_tiny" else synthetic.SyntheticSpec())
-        corpus = synthetic.generate(resolved)
+    default: synthetic.SyntheticSpec
+
+    def __call__(
+        self, name: str, archive: Path | str | None, spec: synthetic.SyntheticSpec | None
+    ) -> LoadedDataset:
+        corpus = synthetic.generate(spec or self.default)
         return LoadedDataset(
             name=name,
             records=corpus.records(),
@@ -134,36 +130,72 @@ def load_dataset(
             },
         )
 
-    if name == "movielens_small":
-        if archive is None:
-            raise DataIntegrityError(
-                "movielens_small needs an archive path. MovieLens may not be "
-                "redistributed, so it is not in the repository -- run "
-                "'python scripts/fetch_data.py' first, then pass its path."
-            )
-        films = movielens.load(archive)
-        return LoadedDataset(
-            name=name,
-            records=films.records(),
-            interactions=list(films.interactions),
-            provenance={
-                "kind": "movielens",
-                "variant": "ml-latest-small",
-                "archive_sha256": films.archive_sha256,
-                "n_documents": films.n_documents,
-                "n_ratings": films.n_ratings,
-                "n_users": films.n_users,
-                "n_unrated_documents": films.n_unrated,
-                # The threshold that decides which ratings become positive
-                # interactions. Changing it moves every profile built from this
-                # dataset, so the manifest records it.
-                "interaction_min_weight": films.min_weight,
-                # Recorded so the manifest shows at a glance that this result
-                # cannot be reproduced from the repository alone.
-                "redistributable": False,
-            },
-        )
 
-    raise DataIntegrityError(
-        f"unknown dataset {name!r}; expected one of {DATASET_NAMES} or 'jsonl:<path>'"
+def _load_movielens(
+    name: str, archive: Path | str | None, spec: synthetic.SyntheticSpec | None
+) -> LoadedDataset:
+    """Parse ``ml-latest-small`` from the zip at ``archive``; ``spec`` is ignored."""
+    if archive is None:
+        raise DataIntegrityError(
+            "movielens_small needs an archive path. MovieLens may not be "
+            "redistributed, so it is not in the repository -- run "
+            "'python scripts/fetch_data.py' first, then pass its path."
+        )
+    films = movielens.load(archive)
+    return LoadedDataset(
+        name=name,
+        records=films.records(),
+        interactions=list(films.interactions),
+        provenance={
+            "kind": "movielens",
+            "variant": "ml-latest-small",
+            "archive_sha256": films.archive_sha256,
+            "n_documents": films.n_documents,
+            "n_ratings": films.n_ratings,
+            "n_users": films.n_users,
+            "n_unrated_documents": films.n_unrated,
+            # The threshold that decides which ratings become positive
+            # interactions. Changing it moves every profile built from this
+            # dataset, so the manifest records it.
+            "interaction_min_weight": films.min_weight,
+            # Recorded so the manifest shows at a glance that this result
+            # cannot be reproduced from the repository alone.
+            "redistributable": False,
+        },
     )
+
+
+#: Each registered name and its loader; :data:`DATASET_NAMES` is the keys, in this order.
+_REGISTRY: Final[dict[str, _Loader]] = {
+    "synthetic_small": _Synthetic(synthetic.SyntheticSpec()),
+    "synthetic_tiny": _Synthetic(_TINY),
+    "movielens_small": _load_movielens,
+}
+
+#: Registered names. ``jsonl:<path>`` is also accepted, for a corpus already on
+#: disk, which is how a MovieLens-derived corpus is consumed once
+#: ``scripts/build_corpus.py`` has written it out.
+DATASET_NAMES: Final[tuple[str, ...]] = tuple(_REGISTRY)
+
+
+def load_dataset(
+    name: str,
+    *,
+    archive: Path | str | None = None,
+    spec: synthetic.SyntheticSpec | None = None,
+) -> LoadedDataset:
+    """Load a registered dataset by name.
+
+    ``name`` is one of :data:`DATASET_NAMES` or ``jsonl:<path>``; ``archive``, the zip path, is
+    required for ``movielens_small`` and ignored otherwise; ``spec`` overrides the synthetic
+    generator. Raises DataIntegrityError for an unknown name or a missing or invalid corpus.
+    """
+    if name.startswith("jsonl:"):
+        return load_jsonl_corpus(name[len("jsonl:") :])
+
+    loader = _REGISTRY.get(name)
+    if loader is None:
+        raise DataIntegrityError(
+            f"unknown dataset {name!r}; expected one of {DATASET_NAMES} or 'jsonl:<path>'"
+        )
+    return loader(name, archive, spec)
