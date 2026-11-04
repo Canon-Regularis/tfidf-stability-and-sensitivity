@@ -237,11 +237,13 @@ jobs:
         run: |
           cmake --preset fastmath-guard-check
           # Both streams: ninja re-emits compiler output on stdout, so a log of
-          # stderr alone is empty and the grep below cannot match.
+          # stderr alone is empty and the grep below cannot match. The grep names
+          # the guard's message: ninja prints each failed command in full, and the
+          # bare -ffast-math would match the command of any failed tfidf compile.
           if cmake --build --preset fastmath-guard-check >build.log 2>&1; then
             echo "::error::a fast-math build compiled; the fp_guard.hpp guard is not working"
             exit 1
           fi
-          grep -q "ffast-math" build.log \
+          grep -q "tfidf: built with -ffast-math" build.log \
             || { echo "::error::the build failed for the wrong reason"; cat build.log; exit 1; }
           echo "The compile-time guard rejected the build, as intended."

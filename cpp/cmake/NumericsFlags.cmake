@@ -67,6 +67,7 @@ endif()
 # The `fastmath-guard-check` preset sets it, and `determinism.yml` asserts that
 # the build fails at the fp_guard.hpp #error (Layer 1). The runtime self-test
 # checks for reassociation and constant folding are therefore not reached in CI.
+# -ffast-math comes after the strict flags, or GCC leaves __FAST_MATH__ unset.
 if(TFIDF_FAST_MATH)
   message(WARNING "tfidf: TFIDF_FAST_MATH=ON, results from this build are NOT trustworthy.")
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

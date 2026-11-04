@@ -21,9 +21,10 @@
 // -----------------------------------------------------------------------------
 // Layer 1: compile time
 // -----------------------------------------------------------------------------
+// determinism.yml greps a refused build's log for this message's opening words.
 #if defined(__FAST_MATH__) && !defined(TFIDF_ALLOW_FAST_MATH)
 #  error "tfidf: built with -ffast-math. Numerical results would not be trustworthy. \
-Define TFIDF_ALLOW_FAST_MATH only in the CI job that deliberately proves this guard fires."
+TFIDF_ALLOW_FAST_MATH disables this check; no build in this repository defines it."
 #endif
 
 #if defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ && !defined(TFIDF_ALLOW_FAST_MATH)
