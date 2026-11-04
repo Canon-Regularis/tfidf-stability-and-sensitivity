@@ -1,40 +1,9 @@
 #!/usr/bin/env python3
 """Section 4.4's certificate, and the two ways it is misread (A1).
 
-Section 4.4 states one implication: ``|ds_i| <= eps`` for every document and
-``eps < m_k / 2`` together guarantee the top-k set is invariant. Being merely
-sufficient, it gets read as two stronger claims, in opposite directions by
-different readers, from the same sentence.
-
-Read as a prediction, "not certified" becomes "will break" and the certificate
-turns into a false alarm: perturbations of many times the radius usually leave
-the top-k where it was, since a flip needs a direction that scattered noise
-almost never takes. Read as a safety margin, "sufficient" becomes "conservative"
-and someone shaves the radius; but ``m_k / 2`` is exact, and the perturbation
-that breaks it at ``m_k / 2 + delta`` can be written down.
-
-Section 7.2 reports certified radii as "empirical certificates of stability",
-and the transition curve in ``analysis/stability_profile.py`` only becomes
-interpretable once worst case and average case have been separated. So all three
-cases are exhibited on one hand-built ranking:
-
-    1. below the radius, in the worst possible direction: unchanged, provably;
-    2. four times the radius, scattered: unchanged anyway, so the converse of
-       the theorem is false;
-    3. a hair above the radius, adversarially aimed: flipped, so the bound is
-       tight.
-
-Every score, perturbation and intermediate value is an integer multiple of
-2^-20 with magnitude below 2, so each occupies at most 21 significant bits of a
-53-bit binary64 significand. Nothing here rounds; a demonstration about the
-decision boundary carrying its own floating-point story leaves a reader unable to
-tell the two effects apart. Same dyadic construction as
-``tests/test_margins_and_flip_radii.py``, and the terms in which
-``docs/spec_addenda.md`` states its tightness note.
-
-Run::
-
-    python examples/stability_certificate_demo.py
+One dyadic ranking shows the radius ``m_k / 2`` is sufficient, not necessary, and tight.
+Run with ``python examples/stability_certificate_demo.py``.
+Rationale: docs/engineering_notes.md#stability-certificate-demo
 """
 
 from __future__ import annotations
@@ -123,8 +92,8 @@ def _report(
     deltas = [p - s for s, p in zip(SCORES, perturbed, strict=True)]
     _require(_is_exact(deltas) and _is_exact(perturbed), f"{title}: left the dyadic grid")
 
-    # Section 4.4 bounds the movement that happened; the eps someone intended to
-    # apply never enters.
+    # Section 4.4 bounds the movement actually applied, so eps is measured from the
+    # deltas, not taken from the intended value.
     eps = max(abs(d) for d in deltas)
     radius = certified_radius(sorted_scores_desc(SCORES), K).set_radius
     certified = is_top_k_stable(sorted_scores_desc(SCORES), K, eps)

@@ -1,8 +1,6 @@
-# The ablation grid.
-#
-# Each entry varies one pinned decision and holds everything else fixed, so a
-# difference in the result is attributable to that decision alone. Every run
-# writes its own manifest, and the manifests differ only in the varied field.
+# The ablation grid. Each entry varies one pinned decision and holds everything
+# else fixed, so a difference in the result is attributable to that decision
+# alone. Every run writes its own manifest; manifests differ only in that field.
 
 tie_break_priority:            # G15: section 4.5 does not say which reordering
   description: The five orderings other than pi_priority itself, which every run

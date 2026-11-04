@@ -1,23 +1,8 @@
-"""IDF perturbation and union-vocabulary alignment (section 4.1, ``spec_addenda.md#g5``).
+"""IDF perturbation and union-vocabulary alignment (section 4.1, G5).
 
-Section 4.1 gives
-
-    delta_idf(t) = log((1 + N') / (1 + df'(t))) - log((1 + N) / (1 + df(t)))
-
-and observes that it "makes explicit the competing effects of changes in corpus
-size and document-frequency distribution".
-
-That expression, and the section 4.2 bound built on it, presuppose that ``idf``
-and ``idf'`` are vectors over a common index set. Under a real corpus
-perturbation the vocabulary itself moves: tokens appear, and tokens fall below
-``min_df`` and vanish. The paper never says what ``delta_idf`` means then.
-
-G5 aligns everything on the union vocabulary ``V u V'``, with coordinates zero
-outside the respective vocabulary. For ``t`` in ``V' \\ V`` this makes
-``delta_idf(t) = idf'(t)``, which is large, so the section 4.2 bound stays valid
-and loose. :class:`Alignment` exposes the exact Pythagorean split, so a caller
-can see how much of the movement is genuine coordinate change and how much is
-vocabulary churn.
+Section 4.1: ``delta_idf(t) = log((1 + N') / (1 + df'(t))) - log((1 + N) / (1 + df(t)))``.
+G5 (``spec_addenda.md#g5``) defines it on ``V u V'``, zero outside each vocabulary, so
+``delta_idf(t) = idf'(t)`` on ``V' \\ V``; :class:`Alignment` gives the Pythagorean split.
 """
 
 from __future__ import annotations
@@ -35,9 +20,9 @@ __all__ = ["Alignment", "IdfPerturbation", "align_models", "analyse_idf_shift"]
 class Alignment:
     """Two models expressed over their union vocabulary.
 
-    Every array here is indexed by position in :attr:`tokens`, the union in
-    ascending UTF-8 byte order, which is the vocabulary's own ordering rule, so
-    alignment introduces no new convention.
+    Arrays are indexed by position in :attr:`tokens`, the union in ascending
+    UTF-8 byte order, which is the vocabulary's own ordering rule.
+    Rationale: docs/engineering_notes.md#idf-union-vocabulary
     """
 
     tokens: tuple[str, ...]
@@ -152,10 +137,9 @@ class IdfPerturbation:
 def analyse_idf_shift(before: TfidfModel, after: TfidfModel) -> IdfPerturbation:
     """Measure the IDF movement between two models (section 4.1).
 
-    Section 4.1 notes that "tokens with low document frequency remain sensitive
-    to corpus perturbations even under smoothing", which shows up here: the
-    worst-moving token is almost always a rare one, since ``idf`` is logarithmic
-    in ``df`` and steepest where ``df`` is small.
+    Section 4.1 notes that low-``df`` tokens stay sensitive even under
+    smoothing, so the worst-moving token is usually a rare one: ``idf`` is
+    logarithmic in ``df`` and steepest where ``df`` is small.
     """
     alignment = align_models(before, after)
     deltas = alignment.delta_idf()

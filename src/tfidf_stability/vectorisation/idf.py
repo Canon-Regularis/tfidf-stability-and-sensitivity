@@ -1,24 +1,8 @@
 """Smoothed inverse document frequency (README section 2.1).
 
-    idf(t) = log((1 + N) / (1 + df(t))) + 1
-
-Two properties are used throughout and asserted in tests: idf decays
-monotonically in ``df``, and the additive constant keeps it strictly positive,
-with ``idf(t) >= 1`` for every ``t`` with ``df(t) <= N``, which makes the
-corpus-level Lipschitz bound of ``spec_addenda.md#g4`` computable.
-
-The logarithm is computed exactly. IEEE-754 mandates correct rounding for
-``+ - * / sqrt`` but not for ``log``, and platform libms disagree: on this
-project's reference machine ``math.log`` differs from the correctly-rounded value
-in 15.16% of idf entries (44.5% of the raw logarithms before the ``+1``). Left
-alone, idf and therefore every weight, norm and score would differ by ~1 ulp
-across operating systems.
-
-idf is ``O(|V|)`` values computed once and never in a hot loop, so it is
-evaluated in :class:`~decimal.Decimal` and rounded once. That also removes the
-only transcendental from the native pipeline: the C++ core receives idf as data,
-so it computes with correctly-rounded operations alone. See
-``docs/spec_addenda.md#g13``.
+``idf(t) = log((1 + N) / (1 + df(t))) + 1`` decreases in ``df``, and ``idf >= 1`` for ``df <= N``
+makes the ``spec_addenda.md#g4`` bound computable. Its log uses :class:`~decimal.Decimal`, rounded
+once (``docs/spec_addenda.md#g13``). Rationale: docs/engineering_notes.md#idf-correctly-rounded-log
 """
 
 from __future__ import annotations
@@ -47,19 +31,11 @@ class LogImpl(str, Enum):
 
 
 def smoothed_idf_one(df: int, n_documents: int, impl: LogImpl = LogImpl.CORRECTLY_ROUNDED) -> float:
-    """``idf`` for a single token.
+    """Return ``log((1 + N) / (1 + df)) + 1`` for one token, ``0 <= df <= N``.
 
-    Divide before taking the logarithm, as section 2.1 writes it: ``log(a/b)``
-    and ``log(a) - log(b)`` give different binary64 results in 94.5% of the
-    ratios arising at ``N = 9742``.
-
-    Args:
-        df: Document frequency of the token. Must satisfy ``0 <= df <= N``.
-        n_documents: Corpus size ``N``.
-        impl: Which logarithm implementation to use.
-
-    Returns:
-        ``log((1 + N) / (1 + df)) + 1``.
+    ``n_documents`` is ``N`` and ``impl`` selects the logarithm. The ratio is divided first,
+    as section 2.1 writes it: ``log(a/b)`` and ``log(a) - log(b)`` give different binary64
+    results in 94.5% of the ratios arising at ``N = 9742``.
     """
     if df < 0:
         raise ValueError(f"df must be non-negative, got {df}")
@@ -86,10 +62,9 @@ class IdfVector:
     def __post_init__(self) -> None:
         """Normalise ``log_impl`` to the member, refusing an unknown value.
 
-        ``LogImpl`` is a ``str`` enum, so ``"platform"`` equals the member
-        without being it. ``persistence/save_load.py`` selects the container
-        flag on ``is``, so an uncoerced ``"correctly_rounded"`` records
-        ``PLATFORM`` and alters the round-tripped digest.
+        ``LogImpl`` is a ``str`` enum, so ``"platform"`` equals the member without being it.
+        ``persistence/save_load.py`` selects the container flag on ``is``, so an uncoerced
+        ``"correctly_rounded"`` records ``PLATFORM`` and alters the round-tripped digest.
         """
         object.__setattr__(self, "log_impl", LogImpl(self.log_impl))
 
@@ -121,13 +96,8 @@ def smoothed_idf(
 ) -> IdfVector:
     """Compute the IDF vector for a whole vocabulary.
 
-    Args:
-        df: Document frequency per term identifier.
-        n_documents: Corpus size ``N``.
-        impl: Which logarithm implementation to use.
-
-    Returns:
-        The :class:`IdfVector`, in term-identifier order.
+    ``df`` is the document frequency per term identifier, ``n_documents`` is ``N`` and
+    ``impl`` selects the logarithm. Returns the :class:`IdfVector`, in term-identifier order.
     """
     return IdfVector(
         values=tuple(smoothed_idf_one(d, n_documents, impl) for d in df),
@@ -150,15 +120,11 @@ def delta_idf(
     n_after: int,
     impl: LogImpl = LogImpl.CORRECTLY_ROUNDED,
 ) -> float:
-    """The IDF change induced by a corpus perturbation (section 4.1).
+    """Return the IDF change induced by a corpus perturbation (section 4.1).
 
-        delta_idf(t) = log((1 + N') / (1 + df'(t))) - log((1 + N) / (1 + df(t)))
-
-    Section 4.1 uses this to separate a change in corpus size from a change in
-    the document-frequency distribution; low-frequency tokens stay sensitive
-    under smoothing. Computed as a difference of two exact logarithms rather than
-    one ``log`` of a ratio of ratios, matching the expression as written. The
-    ``+1`` in ``idf`` cancels in the difference, so it does not appear here.
+    ``delta_idf(t) = log((1 + N') / (1 + df'(t))) - log((1 + N) / (1 + df(t)))``; the ``+1``
+    cancels. Section 4.1 uses it to separate ``N`` from the df distribution; low-frequency tokens
+    stay sensitive under smoothing. Two logs are subtracted, not one log of a ratio of ratios.
     """
     log = (
         platform_log_ratio

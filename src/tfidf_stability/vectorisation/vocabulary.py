@@ -1,26 +1,8 @@
 """Vocabulary construction (README section 2.1).
 
-This module carries the project's determinism guarantee; a bug here silently
-invalidates every published number:
-
-    The vocabulary, the identifier assignment, and therefore every document
-    frequency, IDF value, weight, norm, score and ranking are pure functions of
-    the *multiset* of preprocessed documents. They are invariant to document
-    presentation order, to hash seeds, to dictionary iteration order, to
-    ``PYTHONHASHSEED``, and to thread count.
-
-Two phases give that. During accumulation any hash map will do, since nothing
-about its iteration order escapes. At freeze time the surviving tokens are sorted
-into UTF-8 byte order and identifiers assigned by position, so token to
-identifier depends only on the token set.
-
-Byte order in preference to locale collation or Unicode collation, whose
-tailorings vary by ICU version and platform. Tokens are NFKC-normalised upstream,
-so byte order is well defined on a canonical form and reproducible in C++ via
-``memcmp``.
-
-The paper leaves the ``max_features`` truncation rule unspecified; see
-``docs/spec_addenda.md#g6`` for the total order adopted here (``TFIDF-SPEC-01``).
+Identifiers follow the UTF-8 byte order of the surviving tokens, so every number downstream
+depends only on the document multiset. ``max_features`` follows ``docs/spec_addenda.md#g6``
+(``TFIDF-SPEC-01``). Rationale: docs/engineering_notes.md#vocabulary-byte-order
 """
 
 from __future__ import annotations
@@ -63,14 +45,9 @@ class MaxFeaturesPolicy(str, Enum):
 class VocabularyConfig:
     """Vocabulary filtering options.
 
-    Attributes:
-        min_df: Minimum document frequency. Integer counts are absolute; a float
-            in (0, 1] is a proportion of the corpus. Section 2.1's "minimum
-            document-frequency threshold".
-        max_df: Maximum document frequency, same convention. ``None`` disables.
-            Absent from the paper; standard, and inert when unset.
-        max_features: Retain at most this many tokens. ``None`` disables.
-        max_features_policy: Which total order decides the cut (see G6).
+    ``min_df`` (section 2.1) and ``max_df`` are absolute counts as integers and corpus
+    proportions in (0, 1] as floats. ``max_features`` caps the vocabulary size. ``None``
+    disables ``max_df`` or ``max_features``. ``max_features_policy`` orders the cut (G6).
     """
 
     min_df: int | float = 1
@@ -79,12 +56,11 @@ class VocabularyConfig:
     max_features_policy: MaxFeaturesPolicy = MaxFeaturesPolicy.DF_DESC
 
     def __post_init__(self) -> None:
-        """Normalise the policy to the member, refusing an unknown value.
+        """Normalise the policy to the enum member, refusing an unknown value.
 
-        ``MaxFeaturesPolicy`` is a ``str`` enum, so ``"cf_desc"`` equals the
-        member without being it. ``build_vocabulary`` selects the ranking order
-        on ``is``, so an uncoerced string ranks by ``DF_DESC``, changing which
-        tokens survive the cut while the config records the policy requested.
+        ``build_vocabulary`` selects the ranking order with ``is``, and ``"cf_desc"``
+        equals the ``str`` enum member without being it, so an uncoerced string ranks by
+        ``DF_DESC`` and changes the survivors while the config records the policy requested.
         """
         object.__setattr__(self, "max_features_policy", MaxFeaturesPolicy(self.max_features_policy))
 
@@ -94,25 +70,9 @@ def _resolve_threshold(
 ) -> int:
     """Turn an absolute-or-proportional threshold into an absolute document count.
 
-    Proportions are resolved exactly: this threshold decides vocabulary
-    membership, and membership decides every number downstream.
-
-    ``limit_denominator`` does that work. ``Fraction(0.1)`` is the exact binary64
-    value ``3602879701896397/36028797018963968``, a shade above one tenth, so
-    ``Fraction(0.1) * 30`` exceeds 3 and ceils to 4, a stricter filter than the
-    ``0.1`` the caller wrote. Snapping to ``1/10`` first gives 3. Drop the
-    ``limit_denominator`` and ``min_df=0.1`` silently changes the vocabulary.
-
-    (An earlier version of this note justified the Fraction by claiming
-    ``0.3 * 10`` is ``2.9999999999999996`` and ``0.1 * 30`` is
-    ``3.0000000000000004``. Both are ``3.0`` in binary64, so that hazard does not
-    exist and the real one went unrecorded.)
-
-    Rounding direction is a parameter because the two ends differ. ``min_df``
-    keeps ``df >= p*n`` and rounds up; ``max_df`` keeps ``df <= p*n`` and must
-    round down. Rounding an upper bound up admits what the caller asked to
-    exclude: at ``p=0.5, n=3`` it keeps a token present in 2 of 3 documents
-    (66.7%), and at ``p=0.95, n=7`` it resolves to 7 and filters nothing.
+    Proportions snap to a ``limit_denominator`` fraction, so ``min_df=0.1`` over 30
+    documents resolves to 3, not 4. ``bound="lower"`` ceils (``df >= p*n``) and
+    ``"upper"`` floors (``df <= p*n``). Rationale: docs/engineering_notes.md#threshold-rounding
     """
     if isinstance(value, float):
         if not 0.0 < value <= 1.0:
@@ -179,10 +139,10 @@ class Vocabulary:
         return h.hexdigest()
 
     def is_sorted(self) -> bool:
-        """Whether identifiers really are in ascending UTF-8 byte order.
+        """Whether identifiers are in ascending UTF-8 byte order.
 
-        The determinism guarantee rests on this, so it is asserted at
-        construction and re-checked by the reproducibility tests.
+        The determinism guarantee rests on this. ``build_vocabulary`` and
+        ``load_model`` raise when it is false, and the tests re-check it.
         """
         encoded = [t.encode("utf-8") for t in self.tokens]
         return all(a < b for a, b in pairwise(encoded))
@@ -202,20 +162,11 @@ def build_vocabulary(
     documents: Iterable[Sequence[str]],
     config: VocabularyConfig | None = None,
 ) -> Vocabulary:
-    """Build a frozen vocabulary from preprocessed feature streams.
+    """Build a frozen :class:`Vocabulary` from preprocessed feature streams.
 
-    Args:
-        documents: One feature (n-gram) sequence per document, as produced by
-            :class:`~tfidf_stability.preprocessing.pipeline.PreprocessingPipeline`.
-        config: Filtering options; permissive defaults if omitted.
-
-    Returns:
-        The frozen :class:`Vocabulary`.
-
-    Raises:
-        EmptyVocabularyError: If filtering removes every token. Treated as a
-            configuration error: it almost always means ``min_df`` is too high
-            for the corpus size.
+    ``documents`` holds one n-gram sequence per document, as produced by
+    :class:`~tfidf_stability.preprocessing.pipeline.PreprocessingPipeline`. Raises
+    ``EmptyVocabularyError`` for an empty corpus or when filtering removes every token.
     """
     cfg = config or VocabularyConfig()
 
@@ -235,10 +186,9 @@ def build_vocabulary(
 
     n_seen = len(df_counter)
 
-    # ``survivors[:-1]`` is a legal slice, so ``max_features=-1`` quietly dropped
-    # the lowest-ranked token instead of raising. ``-1`` is the plausible typo
-    # for "unlimited", which this codebase spells ``null``. ``max_features=0``
-    # already failed via ``EmptyVocabularyError``.
+    # ``survivors[:-1]`` is a legal slice, so a negative ``max_features`` would drop the
+    # lowest-ranked tokens silently. ``-1`` is a plausible typo for "unlimited", which this
+    # codebase spells ``null``; ``max_features=0`` fails via ``EmptyVocabularyError``.
     if cfg.max_features is not None and cfg.max_features < 0:
         raise ValueError(f"max_features must be non-negative or None, got {cfg.max_features}")
 
@@ -288,12 +238,9 @@ def build_vocabulary(
         n_discarded=n_seen - len(tokens),
         _index=index,
     )
-    # O(|V|), and it is the invariant everything downstream assumes: the binary
-    # searches in tf.py and the merge in align_models are only correct on a sorted
-    # vocabulary. Raised rather than asserted because `python -O` deletes an
-    # assert, and this is the one check standing between a mis-sorted vocabulary
-    # and silently wrong weights. Same reasoning as BitIdentityError in
-    # benchmarks/tfidf_perf.py: a finding about correctness must survive -O.
+    # O(|V|) check of the strict UTF-8 byte order that the identifiers, the digest and
+    # `load_model` assume. Raised rather than asserted because `python -O` deletes an
+    # assert, as with BitIdentityError in tfidf_stability.benchmarks.tfidf_perf.
     if not vocab.is_sorted():
         raise TfidfStabilityError("vocabulary identifiers are not in UTF-8 byte order")
     return vocab

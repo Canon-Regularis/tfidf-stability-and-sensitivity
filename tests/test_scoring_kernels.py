@@ -1,16 +1,8 @@
 """The two Python scoring kernels, and their agreement with the cosine reference.
 
-``TAAT == DAAT == cosine_against_corpus`` on raw bit patterns. The three share
-no loop nesting and no data structure: TAAT walks postings lists out of an
-inverted index into a dense accumulator, DAAT merges each row against the query
-independently, and ``cosine_against_corpus`` merges against a materialised
-sequence of document vectors. Identical binary64 from all three leaves an
-indexing or accumulation bug nowhere to hide, and says more than any of them
-matching a recorded expectation.
-
-No tolerances. ``pytest.approx`` compares numbers that are close; the property
-under test is bit identity, and a tolerance would pass while permitting the
-divergence this project exists to detect.
+``TAAT == DAAT == cosine_against_corpus`` on raw bit patterns, with no
+tolerance: the property under test is bit identity.
+Rationale: docs/engineering_notes.md#scoring-kernels-three-way-bit-identity
 """
 
 from __future__ import annotations
@@ -112,9 +104,8 @@ def test_single_term_postings_are_handled(mini_model: TfidfModel) -> None:
     """A term occurring in one document: the shortest non-empty postings list.
 
     Length one is where an off-by-one in the column bounds shows first. The
-    random fixture corpus has no such term (its smallest df is 5), so the
-    hand-written mini corpus is used, where 10 of its 26 vocabulary entries
-    occur in a single document.
+    random fixture corpus has no such term (its smallest df is 5); in the mini
+    corpus 10 of the 26 vocabulary entries occur in a single document.
     """
     idx = InvertedIndex.from_csr(mini_model.matrix)
     docs = list(mini_model.matrix.rows())
@@ -205,15 +196,11 @@ def test_score_dispatches_to_both_kernels(
 def test_anything_that_is_not_the_daat_member_runs_taat(
     model: TfidfModel, index: InvertedIndex, corpus: list[list[str]]
 ) -> None:
-    """The dispatch tests `is ScoringAlgorithm.DAAT` and falls through, so a
-    value that is not that member -- the bare string "daat" included, since a
-    str enum's value is equal to it but is not it -- runs TAAT rather than
-    raising.
+    """Any value that is not the ``ScoringAlgorithm.DAAT`` member runs TAAT.
 
-    Pinned rather than repaired. The two traversals are required to agree to the
-    last bit, so a wrong branch costs time and never an answer, and the C++
-    mirror falls through the same way; raising on one side alone would create
-    the divergence the differential suite exists to rule out.
+    The dispatch tests `is ScoringAlgorithm.DAAT`, so the bare string "daat",
+    equal to the member's value but not the member, runs TAAT without raising.
+    Rationale: docs/engineering_notes.md#score-dispatch-fallthrough
     """
     q = queries(model, corpus, 1, seed=11)[0]
     taat = score(q, model.matrix, index, model.norms, algorithm=ScoringAlgorithm.TAAT)
@@ -236,10 +223,9 @@ def test_score_runs_the_kernel_it_was_asked_for(
 ) -> None:
     """Which kernel ran, rather than whether the two agree.
 
-    The kernels are required to be bit-identical, so comparing their output
-    cannot show which one executed: a dispatch that always chose TAAT satisfies
-    that comparison. The call is recorded instead, and both real kernels still
-    run so the returned scores stay meaningful.
+    The kernels are bit-identical, so their output cannot show which one ran: a
+    dispatch that always chose TAAT would pass. The call is recorded instead,
+    and both real kernels still run so the returned scores stay meaningful.
     """
     from tfidf_stability.similarity import scoring as scoring_module
 
@@ -354,10 +340,9 @@ def test_query_with_no_matching_term_scores_zero() -> None:
 def test_zero_norm_document_scores_zero_rather_than_dividing(policy: Reduction) -> None:
     """``cos := 0`` for a zero-norm document (section 2.3) in place of ``0/0``.
 
-    Zero-norm documents are common in short-text corpora and stay rankable at
-    score 0, so the result must be a real zero: a NaN in a sort key is undefined
-    behaviour, and these documents form the large exact-tie block the section
-    4.5 tie-break analysis is about.
+    Zero-norm documents are common in short-text corpora and rank at score 0. A
+    NaN in a sort key is undefined behaviour, and these documents form the large
+    exact-tie block the section 4.5 tie-break analysis covers.
     """
     dim = 6
     docs = [sv({0: 1.0, 2: 2.0}, dim), SparseVector.zero(dim), sv({0: 3.0}, dim)]
@@ -433,10 +418,11 @@ def test_mini_corpus_agrees_across_all_three_paths(mini_model: TfidfModel) -> No
 # ---------------------------------------------------------------------------
 # What `is_canonical` is for
 # ---------------------------------------------------------------------------
-# The scoring loops read postings lists without re-establishing their invariants,
-# on the strength of this check. It is only worth that if it actually rejects,
-# so each rejection arm gets a specimen. The mirror of `save_load._check_csr`,
-# one transpose along.
+
+
+# The scoring loops read postings lists without re-checking their invariants,
+# relying on this check, so each rejection arm has a specimen. It mirrors
+# `save_load._check_csr` for the transpose.
 def _index(colptr, rowidx, values, n_rows=3, n_cols=2) -> InvertedIndex:
     return InvertedIndex(
         colptr=tuple(colptr),
@@ -468,43 +454,61 @@ def test_a_canonical_index_passes_every_arm() -> None:
 def test_a_malformed_index_is_rejected_before_its_postings_are_read(
     case: str, colptr: list[int], rowidx: list[int], values: list[float]
 ) -> None:
-    """These four are settled from the array lengths alone, so they are checked
-    once rather than per column: a colptr that disagrees with its own arrays
-    makes every subsequent postings slice meaningless."""
+    """An index whose colptr disagrees with its own arrays is rejected.
+
+    These cases are settled from colptr's endpoints and the array lengths, once
+    rather than per column: a colptr that disagrees with its own arrays makes
+    every postings slice meaningless.
+    """
     assert not _index(colptr, rowidx, values).is_canonical(), case
 
 
 def test_a_postings_list_that_repeats_a_document_is_rejected() -> None:
-    """Strict increase makes a postings list a set. A repeat double-counts one
-    document's contribution to that term in every score TAAT computes."""
+    """A postings list that repeats a document is rejected.
+
+    Strict increase makes a postings list a set. A repeat double-counts one
+    document's contribution to that term in every score TAAT computes.
+    """
     assert not _index([0, 2, 3], [1, 1, 2], [1.0, 2.0, 3.0]).is_canonical()
 
 
 def test_a_postings_list_in_descending_order_is_rejected() -> None:
-    """Ascending order is what makes the DAAT merge and the accumulator agree;
-    the same documents in the other order is not the same index."""
+    """A postings list in descending document order is rejected.
+
+    Ascending order is what makes the DAAT merge and the accumulator agree; the
+    same documents in the other order do not form the same index.
+    """
     assert not _index([0, 2, 3], [2, 0, 1], [1.0, 2.0, 3.0]).is_canonical()
 
 
 def test_a_posting_naming_a_document_outside_the_corpus_is_rejected() -> None:
-    """It would index past the accumulator, and a negative one would silently
-    wrap round to a real document at the other end."""
+    """A posting naming a document outside the corpus is rejected.
+
+    It would index past the accumulator, and a negative one would silently wrap
+    round to a real document at the other end.
+    """
     assert not _index([0, 2, 3], [0, 7, 1], [1.0, 2.0, 3.0]).is_canonical()
     assert not _index([0, 2, 3], [-1, 2, 1], [1.0, 2.0, 3.0]).is_canonical()
 
 
 def test_a_term_with_no_postings_leaves_the_index_canonical() -> None:
-    """An empty column is `lo == hi`, not an error. The check rejects a colptr
-    that *decreases*; treating equality as a decrease would condemn any index
-    holding a term that survived the vocabulary but appears in no document."""
+    """An empty column, `lo == hi`, leaves the index canonical.
+
+    The check rejects a colptr that *decreases*; treating equality as a decrease
+    would condemn any index holding a term that survived the vocabulary but
+    appears in no document.
+    """
     empty_middle = _index([0, 1, 1, 2], [0, 2], [1.0, 2.0], n_rows=3, n_cols=3)
     assert empty_middle.is_canonical()
     assert empty_middle.df(1) == 0, "the middle term really has no postings"
 
 
 def test_a_posting_one_past_the_last_document_is_out_of_range() -> None:
-    """Documents are 0-based, so `n_rows` itself is the first invalid index and
-    the one an off-by-one produces. It would read past the score accumulator."""
+    """A posting at `n_rows`, one past the last document, is out of range.
+
+    Documents are 0-based, so `n_rows` itself is the first invalid index and the
+    one an off-by-one produces. It would read past the score accumulator.
+    """
     assert not _index([0, 1, 2], [0, 3], [1.0, 2.0], n_rows=3, n_cols=2).is_canonical()
     assert _index([0, 1, 2], [0, 2], [1.0, 2.0], n_rows=3, n_cols=2).is_canonical()
 
@@ -512,10 +516,11 @@ def test_a_posting_one_past_the_last_document_is_out_of_range() -> None:
 def test_a_query_of_explicit_zeros_scores_zero_everywhere(
     model: TfidfModel, index: InvertedIndex
 ) -> None:
-    """A vector can carry stored entries whose values are all 0.0 -- a query
-    built from tokens that are all in the vocabulary but weightless. Its norm is
-    zero while its nnz is not, so the degenerate check has to catch either
-    condition. Requiring both divides by zero (spec_addenda G3).
+    """A query whose stored entries are all 0.0 scores zero everywhere.
+
+    Such a query comes from tokens in the vocabulary that carry no weight. Its
+    norm is zero while its nnz is not, so the degenerate check catches either
+    condition; requiring both divides by zero (spec_addenda G3).
     """
     zero_valued = SparseVector(indices=(0, 2), values=(0.0, 0.0), dim=len(model.vocabulary))
     assert zero_valued.nnz == 2, "the premise: stored entries, no magnitude"
@@ -528,10 +533,12 @@ def test_a_query_of_explicit_zeros_scores_zero_everywhere(
 def test_the_scratch_records_each_touched_document_once(
     model: TfidfModel, index: InvertedIndex, corpus: list[list[str]]
 ) -> None:
-    """`touched` is the reset list: everything the accumulator wrote, cleared
-    before the next query. A document appended once per matching term instead of
-    once per query still produces the right scores, and grows without bound as
-    the scratch is reused."""
+    """The scratch records each touched document once per query.
+
+    `touched` lists every document the accumulator wrote, for reset before the
+    next query. One entry per matching term still gives the right scores, but
+    the list grows without bound as the scratch is reused.
+    """
     query = TfidfVectoriser.transform_query(corpus[0], model)
 
     # Every policy: the naive path accumulates into a dense array and the
@@ -550,8 +557,11 @@ def test_the_scratch_records_each_touched_document_once(
 # InvertedIndex accessors: the postings-list arithmetic
 # ---------------------------------------------------------------------------
 def test_the_document_frequency_of_a_term_is_the_length_of_its_postings_list() -> None:
-    """`colptr[t+1] - colptr[t]`. The transpose is what the TAAT loop walks, so
-    a df computed any other way would disagree with the postings it iterates."""
+    """A term's document frequency is the length of its postings list.
+
+    It is `colptr[t+1] - colptr[t]`. The TAAT loop walks the transpose, so a df
+    computed any other way would disagree with the postings it iterates.
+    """
     index = _index([0, 2, 3], [0, 2, 1], [1.0, 2.0, 3.0], n_rows=3, n_cols=2)
 
     assert index.df(0) == 2
@@ -560,9 +570,12 @@ def test_the_document_frequency_of_a_term_is_the_length_of_its_postings_list() -
 
 
 def test_a_term_with_no_postings_has_a_frequency_of_zero() -> None:
-    """`lo == hi`, which is a legitimate column rather than a malformed one --
-    a term can survive the vocabulary and appear in no document of a *subset*
-    the query protocol selected."""
+    """A term with no postings has a document frequency of zero.
+
+    `lo == hi` is a legitimate column rather than a malformed one: a term can
+    survive the vocabulary and appear in no document of a *subset* the query
+    protocol selected.
+    """
     index = _index([0, 1, 1, 2], [0, 2], [1.0, 2.0], n_rows=3, n_cols=3)
 
     assert index.df(1) == 0
@@ -571,9 +584,11 @@ def test_a_term_with_no_postings_has_a_frequency_of_zero() -> None:
 
 
 def test_the_postings_bounds_are_the_slice_the_loop_takes() -> None:
-    """Stated as the pair rather than separately, because the scoring loop uses
-    them together and an off-by-one in either would read a neighbour's
-    postings."""
+    """The postings bounds are the slice the scoring loop takes.
+
+    They are checked as a pair because the loop uses them together, and an
+    off-by-one in either would read a neighbour's postings.
+    """
     index = _index([0, 2, 3], [0, 2, 1], [1.0, 2.0, 3.0], n_rows=3, n_cols=2)
 
     assert (index.postings_begin(0), index.postings_end(0)) == (0, 2)
@@ -581,8 +596,11 @@ def test_the_postings_bounds_are_the_slice_the_loop_takes() -> None:
 
 
 def test_the_transpose_preserves_every_stored_entry(model: TfidfModel) -> None:
-    """`from_csr` is a counting sort, and the invariant that makes it safe to
-    skip re-checking is that nothing is lost or duplicated."""
+    """The transpose preserves every stored entry.
+
+    `from_csr` is a counting sort, and the invariant that makes it safe to skip
+    re-checking is that nothing is lost or duplicated.
+    """
     index = InvertedIndex.from_csr(model.matrix)
 
     assert index.nnz == model.matrix.nnz
@@ -591,9 +609,12 @@ def test_the_transpose_preserves_every_stored_entry(model: TfidfModel) -> None:
 
 
 def test_an_empty_corpus_transposes_to_an_index_of_all_empty_columns() -> None:
-    """Every term has an empty postings list rather than the index having no
+    """An empty corpus transposes to an index of all-empty columns.
+
+    Every term has an empty postings list rather than the index having no
     columns: the column count comes from the vocabulary, which outlives any
-    particular document subset."""
+    particular document subset.
+    """
     empty = CsrMatrix.from_rows([], n_cols=3)
     index = InvertedIndex.from_csr(empty)
 

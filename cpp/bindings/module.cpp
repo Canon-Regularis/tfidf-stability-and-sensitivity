@@ -1,14 +1,8 @@
-// =============================================================================
-// module.cpp: the nanobind surface of the native backend.
+// The nanobind surface of the native backend: marshalling and input validation.
 //
-// Argument marshalling and nothing else. No arithmetic lives here, so the
-// mathematics in cpp/include/tfidf/ stays testable from C++ alone and the
-// binding technology stays swappable.
-//
-// The Python side owns every input buffer. `NativeIndex` copies what it needs
-// into owned storage at construction, so no C++ object holds a borrowed pointer
-// into a numpy array that Python might collect.
-// =============================================================================
+// No arithmetic lives here. `NativeIndex` and `NativeRanker` copy their inputs into owned
+// storage, so no C++ object borrows a pointer into a numpy array Python might collect.
+// Rationale: docs/engineering_notes.md#native-binding-scope
 #include <tfidf/core/build_config.hpp>
 #include <tfidf/core/fp_guard.hpp>
 #include <tfidf/core/reduction.hpp>
@@ -24,14 +18,14 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
-#include <nanobind/stl/string.h>
-#include <nanobind/stl/vector.h>
 
 #include <cmath>
-#include <cstring>
+#include <cstddef>
+#include <cstdint>
 #include <span>
-#include <string>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace nb = nanobind;
@@ -80,10 +74,9 @@ Reduction checked_policy(std::int32_t policy) {
 
 /// Reject non-finite scores before they reach a comparator.
 ///
-/// G3 requires this boundary re-check. A NaN makes `<` false in both
-/// directions, destroying the strict weak ordering `std::sort` and
-/// `std::min_element` need. An infinity would make `min_adjacent_margin_top`
-/// return `inf`, not the reference's `nan`.
+/// G3 requires this boundary re-check. A NaN makes `<` false both ways, which
+/// breaks the strict weak ordering `std::sort` and `std::min_element` need. An
+/// infinity would make `min_adjacent_margin_top` return `inf`, not the reference's `nan`.
 std::span<const double> checked_scores(const F64Array& scores) {
     const std::span<const double> span{scores.data(), scores.shape(0)};
     for (const double value : span) {
@@ -96,10 +89,9 @@ std::span<const double> checked_scores(const F64Array& scores) {
 
 /// Reject a tolerance that is negative or NaN.
 ///
-/// `!(tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
-/// so the second form admits NaN. Mirrors `ranking::checked_tau` at all four
-/// tie-group entry points. Absent any guard, a negative tau leaves every chain
-/// and clique one wide, so `chain_inflation_ratio` returns 1.0, its minimum.
+/// `!(tau >= 0.0)` rejects NaN, which `tau < 0.0` admits. Mirrors `ranking::checked_tau` at
+/// all four tie-group entry points. Unguarded, a negative tau leaves every chain and clique
+/// one wide, so `chain_inflation_ratio` returns 1.0, its minimum.
 double checked_tau(double tau) {
     if (!(tau >= 0.0)) {
         throw std::invalid_argument("tau must be non-negative");
@@ -109,11 +101,9 @@ double checked_tau(double tau) {
 
 /// Reject a selection strategy outside the enum.
 ///
-/// The sort key is injective, so every strategy gives the same permutation.
-/// Without this guard the `default:` arm would rank an out-of-range value
-/// correctly, but the run manifest would name a strategy that did not run.
-/// `checked_policy` closes the same hole for the reduction policy. The bounds
-/// name `FullSort` and `BoundedHeap`, the first and last enumerators.
+/// The sort key is injective, so the `default:` arm would rank an out-of-range value
+/// correctly, but the run manifest would name a strategy that did not run. `checked_policy`
+/// guards the reduction policy alike. The bounds are the first and last enumerators.
 ranking::Selection checked_selection(std::int32_t selection) {
     if (selection < static_cast<std::int32_t>(ranking::Selection::FullSort) ||
         selection > static_cast<std::int32_t>(ranking::Selection::BoundedHeap)) {
@@ -124,10 +114,9 @@ ranking::Selection checked_selection(std::int32_t selection) {
 
 /// Reject a scoring algorithm outside the enum.
 ///
-/// `score` tests `algorithm == Daat` and falls to TAAT otherwise. Without this
-/// guard an out-of-range value would run TAAT under a manifest naming the
-/// requested algorithm. TAAT and DAAT agree bit for bit, so the argument is
-/// provenance, as in `checked_selection`.
+/// `score` runs TAAT for any value other than `Daat`. TAAT and DAAT agree bit
+/// for bit, so the guard keeps the manifest from naming an algorithm that did
+/// not run, as in `checked_selection`.
 ScoringAlgorithm checked_algorithm(std::int32_t algorithm) {
     if (algorithm < static_cast<std::int32_t>(ScoringAlgorithm::Taat) ||
         algorithm > static_cast<std::int32_t>(ScoringAlgorithm::Daat)) {
@@ -138,11 +127,9 @@ ScoringAlgorithm checked_algorithm(std::int32_t algorithm) {
 
 /// Reject a k the normative reference would refuse.
 ///
-/// `resolve_k` raises `KOutOfRangeError` for k <= 0 in both strict and lenient
-/// mode, so a reference Margin never carries a negative `k_effective`. The
-/// margin entry points return that field to Python. `compare_top_k` must admit
-/// k == 0 and carries its own guard for a negative k; `fks_max` returns 0.0 for
-/// k < 1, as the reference does. `NativeRanker::top_k` checks `m` in place.
+/// `resolve_k` raises `KOutOfRangeError` for k <= 0 in strict and lenient mode,
+/// so a reference Margin never carries a negative `k_effective`.
+/// Rationale: docs/engineering_notes.md#native-k-bounds
 std::int32_t checked_k(std::int32_t k) {
     if (k <= 0) {
         throw std::invalid_argument("k must be positive");
@@ -150,20 +137,19 @@ std::int32_t checked_k(std::int32_t k) {
     return k;
 }
 
-/// Shape of this binding surface, checked against
-/// `tfidf_stability._native.REQUIRED_ABI` on import.
+/// Version of this binding surface, checked against `REQUIRED_ABI` on import.
 ///
-/// Distinct from the project version. A release can leave the surface untouched
-/// and a new binding can land inside one release, so tying the two would make
-/// the staleness check fire needlessly, or fail to fire when a rebuilt .pyd is
-/// required, which is the dangerous direction.
+/// The Python constant is `tfidf_stability._native.REQUIRED_ABI`. The value is
+/// independent of the project version.
+/// Rationale: docs/engineering_notes.md#native-abi-version
 constexpr const char* kAbi = "0.4.0";
 
 /// Return an owning numpy array built from a vector, without copying twice.
-nb::ndarray<nb::numpy, double> to_numpy(std::vector<double>&& v) {
-    auto* held = new std::vector<double>(std::move(v));
-    nb::capsule owner(held, [](void* p) noexcept { delete static_cast<std::vector<double>*>(p); });
-    return nb::ndarray<nb::numpy, double>(held->data(), {held->size()}, owner);
+template <class T>
+nb::ndarray<nb::numpy, T> to_numpy(std::vector<T>&& v) {
+    auto* held = new std::vector<T>(std::move(v));
+    nb::capsule owner(held, [](void* p) noexcept { delete static_cast<std::vector<T>*>(p); });
+    return nb::ndarray<nb::numpy, T>(held->data(), {held->size()}, owner);
 }
 
 /// An immutable, fitted corpus index: CSR, its transpose, and the row norms.
@@ -266,20 +252,11 @@ class NativeIndex {
     ScoringScratch scratch_;
 };
 
-/// Return an owning numpy int32 array built from a vector.
-nb::ndarray<nb::numpy, std::int32_t> to_numpy_i32(std::vector<std::int32_t>&& v) {
-    auto* held = new std::vector<std::int32_t>(std::move(v));
-    nb::capsule owner(held,
-                      [](void* p) noexcept { delete static_cast<std::vector<std::int32_t>*>(p); });
-    return nb::ndarray<nb::numpy, std::int32_t>(held->data(), {held->size()}, owner);
-}
-
 /// A corpus's tie-break ranks plus one operator's attribute priority.
 ///
-/// The rank matrix is built in Python, in exact unbounded-precision integer
-/// arithmetic, and crosses the boundary as data. Nothing here re-derives it, so
-/// the cross-language check is integer equality rather than a question about
-/// two rational-comparison implementations agreeing.
+/// Python builds the rank matrix in exact unbounded-precision integer arithmetic and passes
+/// it as data. Nothing here re-derives it, so the cross-language check is integer equality,
+/// not agreement between two rational-comparison implementations.
 class NativeRanker {
   public:
     NativeRanker(const I32Array& ranks,
@@ -287,11 +264,10 @@ class NativeRanker {
                  const I32Array& priority,
                  std::int32_t n_attrs) {
         const auto n_docs = static_cast<std::int32_t>(id_ranks.shape(0));
-        // G17 makes ranking an empty corpus an error, and `rank`/`rank_top_k`
-        // raise `EmptyCorpusError`. Without this guard the sort returns an
-        // empty permutation, and `id_ranks_are_a_bijection` is vacuously true,
-        // so nothing else refuses it. `NativeIndex` admits n_docs == 0:
-        // scoring an empty corpus is defined.
+        // G17: ranking an empty corpus raises `EmptyCorpusError` in `rank` and
+        // `rank_top_k`. The sort would return an empty permutation and
+        // `id_ranks_are_a_bijection` holds vacuously, so only this guard refuses it.
+        // `NativeIndex` admits n_docs == 0: scoring an empty corpus is defined.
         if (n_docs == 0) {
             throw std::invalid_argument("cannot rank an empty corpus");
         }
@@ -334,7 +310,7 @@ class NativeRanker {
         prepare(scores);
         std::vector<DocId> out(static_cast<std::size_t>(table_.n_docs));
         ranking::rank_full(keys_, out, checked_selection(selection));
-        return to_numpy_i32(std::vector<std::int32_t>(out.begin(), out.end()));
+        return to_numpy(std::move(out));
     }
 
     nb::ndarray<nb::numpy, std::int32_t> top_k(const F64Array& scores,
@@ -353,7 +329,7 @@ class NativeRanker {
         const auto take = static_cast<std::size_t>(m);
         std::vector<DocId> out(take);
         ranking::select_top(keys_, take, out, checked_selection(selection));
-        return to_numpy_i32(std::vector<std::int32_t>(out.begin(), out.end()));
+        return to_numpy(std::move(out));
     }
 
   private:
@@ -363,8 +339,8 @@ class NativeRanker {
         }
         const std::span<const Real> s(scores.data(), scores.shape(0));
         // G3 requires this re-check at the boundary: a NaN in a sort key is
-        // undefined behaviour in std::sort, a real out-of-bounds write, and
-        // this is the last line of defence against an arbitrary caller.
+        // undefined behaviour in std::sort and can write out of bounds. This is the
+        // last check between an arbitrary caller and the sort.
         if (!ranking::all_finite(s)) {
             throw std::invalid_argument("scores must all be finite");
         }
@@ -547,7 +523,7 @@ NB_MODULE(_tfidf_native, m) {
                 flat.push_back(lo);
                 flat.push_back(hi);
             }
-            return to_numpy_i32(std::move(flat));
+            return to_numpy(std::move(flat));
         },
         nb::arg("sorted_scores"), nb::arg("tau"), nb::rv_policy::move,
         "Flattened [lo, hi) pairs.");
@@ -561,7 +537,7 @@ NB_MODULE(_tfidf_native, m) {
                 flat.push_back(lo);
                 flat.push_back(hi);
             }
-            return to_numpy_i32(std::move(flat));
+            return to_numpy(std::move(flat));
         },
         nb::arg("sorted_scores"), nb::arg("tau"), nb::rv_policy::move);
 

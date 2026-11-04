@@ -1,28 +1,8 @@
-// Ordering distances (README sections 4.5 and 7.3, `spec_addenda.md#g2`).
+// Ordering distances between rankings: Kendall tau and the FKS `K^(p)`.
 //
-// The paper asks for "a distance between orderings" in two places, and they are
-// different problems:
-//
-//   restricted to a tie group   both orderings rank the same elements, since a
-//                               tie group is defined on the score vector, so
-//                               plain normalised Kendall tau applies;
-//   restricted to top-k         they need not, and "the number of discordant
-//                               pairs" then has no meaning.
-//
-// The second is resolved by the Fagin-Kumar-Sivakumar generalised Kendall
-// distance `K^(p)` at `p = 1/2`. `K^(p)` is a NEAR-METRIC: the triangle
-// inequality fails, at every penalty, and G2 records the witness. The tests pin
-// that failure, so a later "fix" cannot move every published number while
-// looking like a bug fix.
-//
-// Mirrors `ranking/distances.py`, which is NORMATIVE, operation by operation
-// rather than result by result. Two choices carry that: the union is walked in
-// first-appearance order, so pairs are enumerated in the sequence
-// `itertools.combinations` produces and the penalties accumulate through the
-// same additions; and every division sits where the reference puts one, so the
-// roundings coincide rather than agreeing to within an ulp. At `p = 1/2` the
-// addends are dyadic and the sums exact anyway, but nothing here depends on
-// that, which is what keeps a non-default penalty bit-exact too.
+// README sections 4.5 and 7.3, `spec_addenda.md#g2`. `K^(p)` is a near-metric (G2).
+// Mirrors the normative `ranking/distances.py` operation by operation, bit-exact.
+// Rationale: docs/engineering_notes.md#ordering-distances-scope-and-bit-exactness
 #pragma once
 
 #include <tfidf/core/types.hpp>
@@ -42,11 +22,8 @@ namespace tfidf::ranking {
 
 /// The FKS penalty for a pair one list ranks and the other does not witness.
 ///
-/// `1/2` is the unbiased contribution (no metric is preserved at any p):
-/// knowing nothing about the relative order of two elements absent from a list,
-/// they disagree with probability one half. `p = 0` assumes the unseen pair
-/// agrees and biases every measurement downwards, the wrong direction for a
-/// study of instability; `p = 1` biases it upwards.
+/// `p = 1/2` is unbiased; `p = 0` biases distances down and `p = 1` biases them up.
+/// Rationale: docs/engineering_notes.md#fks-penalty-one-half
 inline constexpr Real kFksPenalty = 0.5;
 
 namespace detail {
@@ -93,10 +70,8 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 
 /// `item -> index`, last occurrence winning.
 ///
-/// Last-wins is what the reference's dict comprehension does. A ranking never
-/// repeats a document, so the case is unreachable through the pipeline; an
-/// unreachable case the two implementations resolve differently is the kind of
-/// divergence a differential suite exists to rule out.
+/// Last-wins matches the reference's dict comprehension on a repeated item.
+/// Rationale: docs/engineering_notes.md#distances-positions-last-wins
 [[nodiscard]] inline std::unordered_map<DocId, std::int32_t> positions(
     std::span<const DocId> items) {
     std::unordered_map<DocId, std::int32_t> pos;
@@ -112,6 +87,7 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 // ---------------------------------------------------------------------------
 // Same-set Kendall tau
 // ---------------------------------------------------------------------------
+
 /// Pairs `i < j` with `sequence[i] > sequence[j]`, by merge sort in O(n log n).
 ///
 /// O(n^2) would do for a top-k list of 50, but tie groups are not bounded by k:
@@ -130,12 +106,9 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 /// would be a wrong answer rather than a missing one.
 [[nodiscard]] inline Real kendall_tau_distance(std::span<const DocId> a,
                                                std::span<const DocId> b) {
-    // Sorted copies, not sets: a set is blind to multiplicity, so {1, 1, 2}
-    // and {1, 2, 1} against {1, 2, 2} passed both halves -- same size, same
-    // set -- and `positions` then kept only the last index of each repeat, so
-    // the inversion count ran over a mapping that had lost a document and
-    // returned 0.0 for two lists that are not orderings of the same multiset.
-    // The normative Python compares Counters for the same reason.
+    // Sorted copies, not sets: a set ignores multiplicity, so {1, 1, 2} against
+    // {1, 2, 2} would pass and return 0.0. The reference compares Counters.
+    // Rationale: docs/engineering_notes.md#kendall-tau-multiset-check
     std::vector<DocId> sa(a.begin(), a.end());
     std::vector<DocId> sb(b.begin(), b.end());
     std::sort(sa.begin(), sa.end());
@@ -169,12 +142,11 @@ inline std::int64_t inversion_sort_count(std::vector<std::int32_t>& work,
 // ---------------------------------------------------------------------------
 // Fagin-Kumar-Sivakumar generalised Kendall distance
 // ---------------------------------------------------------------------------
+
 /// Reject a case-4 penalty outside the `[0, 1]` domain G2 fixes.
 ///
-/// `penalty < 0.0 || penalty > 1.0` would admit NaN, since every comparison
-/// with NaN is false. Left unchecked, a NaN or sufficiently negative penalty
-/// makes `fks_max` NaN or non-positive, `ceiling > 0.0` fails, and disjoint
-/// lists yield 0.0.
+/// The negated test also rejects NaN, for which every comparison is false.
+/// Rationale: docs/engineering_notes.md#fks-penalty-domain-check
 inline void checked_penalty(Real penalty) {
     if (!(penalty >= 0.0 && penalty <= 1.0)) {
         throw std::invalid_argument("the case-4 penalty must lie in [0, 1]");
@@ -183,16 +155,9 @@ inline void checked_penalty(Real penalty) {
 
 /// The maximum of `K^(p)` over two top-k lists, attained when they are disjoint.
 ///
-/// Disjoint lists put every pair of the 2k-element union into case 3 (k^2 pairs,
-/// one each) or case 4 (2 * C(k, 2) pairs, `p` each), giving
-/// `k^2 + p * k * (k - 1)`.
-///
-/// `k = 1` is not degenerate: two disjoint singletons still contribute one
-/// case-3 pair, so the maximum is 1. An early guard of the form `if k < 2:
-/// return 0` normalised two entirely disjoint lists to distance zero.
-///
-/// Not `noexcept`: `checked_penalty` throws for a penalty outside `[0, 1]`,
-/// where the reference raises `ValueError`.
+/// Equals `k^2 + p * k * (k - 1)`; `k = 1` gives 1, not 0. Not `noexcept`: a
+/// penalty outside `[0, 1]` throws where the reference raises `ValueError`.
+/// Rationale: docs/engineering_notes.md#fks-maximum
 [[nodiscard]] inline Real fks_max(std::int32_t k, Real penalty = kFksPenalty) {
     checked_penalty(penalty);
     if (k < 1) {
@@ -204,20 +169,9 @@ inline void checked_penalty(Real penalty) {
 
 /// Generalised Kendall distance between two top-k lists, best first (G2b).
 ///
-/// Each unordered pair of the union contributes by how it is witnessed:
-///
-///   case 1  in both lists                     1 if oppositely ordered, else 0
-///   case 2  both in one, exactly one in other 1 if the list holding both ranks
-///                                             the absent element first, else 0
-///   case 3  one element in each list alone    1
-///   case 4  both in one, neither in the other `p`
-///
-/// Cases 2 and 3 are the generalisation. Both read an element present in a list
-/// as ranked above one absent from it, so case 3 is an unavoidable disagreement
-/// and case 2 is one when the list holding both puts the absent element first.
-///
-/// Direct O(k^2) enumeration: at k <= 50 that is at most 4950 pairs, so being
-/// checkable by inspection is worth more here than the asymptotics.
+/// Pair cost: case 1 (in both) 1 if opposed; case 2 (both in one, one in the other)
+/// 1 if the holder ranks the missing one first; case 3 (one in each) 1; case 4 `p`.
+/// Rationale: docs/engineering_notes.md#fks-generalised-kendall-cases
 [[nodiscard]] inline Real kendall_fks(std::span<const DocId> a,
                                       std::span<const DocId> b,
                                       Real penalty = kFksPenalty,
@@ -288,6 +242,7 @@ inline void checked_penalty(Real penalty) {
 // ---------------------------------------------------------------------------
 // Set-level measures
 // ---------------------------------------------------------------------------
+
 /// Whether the two top-k *sets* differ; section 7.3's headline indicator.
 ///
 /// A pure reordering within an unchanged set is a different phenomenon, and
@@ -318,10 +273,8 @@ inline void checked_penalty(Real penalty) {
 
 /// Every ordering measure for one pair of top-k lists at one `k`.
 ///
-/// Carried together because each is blind to something the others see:
-/// `kendall_intersection` restricts to the shared elements and so cannot detect
-/// the membership change section 7.3 measures, which is why `intersection_size`
-/// always travels beside it.
+/// `kendall_intersection` cannot see the membership change section 7.3 measures,
+/// so `intersection_size` always travels beside it.
 struct TopKComparison {
     std::int32_t k = 0;
     /// 1[topk(a) != topk(b)].
@@ -329,16 +282,16 @@ struct TopKComparison {
     /// Normalised FKS `K^(1/2)` in [0, 1].
     Real fks = 0.0;
     /// Kendall tau on the intersection, NaN when fewer than two are shared.
-    /// The NaN means undefined and is never a value: 0 would read as "no
-    /// reordering", which asserts something rather than withholding it.
+    ///
+    /// NaN means undefined: 0 would assert "no reordering" rather than withhold a value.
     Real kendall_intersection = std::numeric_limits<Real>::quiet_NaN();
     std::int32_t intersection_size = 0;
     Real jaccard = 0.0;
-    /// The larger of the two one-way differences: documents that left the
-    /// top-k, or documents that entered it. On equal-length prefixes the two
-    /// are equal and the count is the number of swaps. On unequal lengths half
-    /// their sum rounds a one-document difference down to 0 while `sets_differ`
-    /// reports true.
+    /// The larger of the counts of documents that left and entered the top-k.
+    ///
+    /// On equal-length prefixes the two are equal and give the number of swaps.
+    /// On unequal lengths half their sum rounds a one-document difference to 0
+    /// while `sets_differ` reports true.
     std::int32_t swapped = 0;
 };
 

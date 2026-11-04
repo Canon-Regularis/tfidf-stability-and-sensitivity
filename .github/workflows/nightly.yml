@@ -13,16 +13,14 @@ on:
 permissions:
   contents: read
 
-# One run per ref at a time. Without this every push to a branch leaves its
-# predecessor running to completion against code nobody will merge. Scheduled
-# runs are keyed by workflow rather than ref so a nightly cannot cancel a push.
+# One run per ref at a time. `cancel-in-progress: false` queues a second run
+# behind the first, so a long mutation or property search is not cut short.
 concurrency:
   group: nightly-${{ github.ref }}
   cancel-in-progress: false
 
-# See ci.yml for why these are `-o` settings and not flags. The cap is an hour
-# rather than five minutes. At 100,000 examples a single property test runs for
-# many minutes, and a five-minute cap would kill it mid-search.
+# See ci.yml for why these are `-o` settings and not flags. The cap is an hour,
+# because one property test at 100,000 examples runs for many minutes.
 env:
   PYTEST_ADDOPTS: >-
     -o verbosity_test_cases=1
@@ -37,34 +35,10 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      # One job per module, each scoped to that module's own test file plus the
-      # package surface suite. Mutation cost is (sites x suite time), so pointing
-      # every module at the whole suite would turn a twenty-minute run into days.
-      #
-      # Scoping a module to every test that can transitively reach it reports
-      # no false survivor. Such a scope does not fit this job's 90-minute cap.
-      # utils/numerics.py is reachable from 27 test files, 62 sites at 210s a
-      # run, so 217 minutes; vectorisation/sparse.py is 20 files, 182 minutes.
-      #
-      # Interpreter startup and collection take 7 to 9 seconds of every run, so
-      # a narrow scope saves less than the test count suggests.
-      #
-      # Widening a module's scope kills mutants recorded as survivors under a
-      # narrower one, and configs/equivalent_mutants.txt then fails on an entry
-      # that matches no survivor. Adding a module here means running its
-      # campaign and reconciling its entries first.
-      #
-      # tests/test_mutation_gate.py tracks the consequence: 61 of the 105
-      # allowlist entries belong to the 22 modules no job here re-runs, so
-      # nothing falsifies them. Its _NOT_YET_SCHEDULED set names those 22.
-      #
-      # Splitting also means a survivor names the module it came from without any
-      # further digging.
-      #
-      # test_public_api_surface.py is in every entry. It pins invariants every
-      # module participates in: frozen, slots, `__all__`. Without it a mutated
-      # `@dataclass(frozen=True)` would survive in each module at once, and
-      # sort_keys.py would leave two decorator mutants surviving.
+      # One job per module, scoped to its own test files plus
+      # test_public_api_surface.py, so a survivor names its module and the job
+      # fits the 90-minute cap. A new module needs its allowlist reconciled first.
+      # Rationale: docs/engineering_notes.md#nightly-python-mutation-scope
       matrix:
         include:
           - module: src/tfidf_stability/ranking/tie_groups.py
@@ -73,16 +47,12 @@ jobs:
             tests: tests/test_margins_and_flip_radii.py tests/test_public_api_surface.py
           - module: src/tfidf_stability/ranking/sort_keys.py
             tests: tests/test_ranking_tie_breaks.py tests/test_public_api_surface.py
-          # 63 sites in 346s: 54 killed, 9 survivors, all in the allowlist.
           - module: src/tfidf_stability/analysis/noise_floor.py
             tests: tests/test_analysis_harness.py tests/test_public_api_surface.py
-          # 72 sites: 65 killed, 7 survivors, all in the allowlist.
           - module: src/tfidf_stability/analysis/stability_profile.py
             tests: >-
               tests/test_analysis_harness.py tests/test_doc_references.py
               tests/test_public_api_surface.py
-          # 51 sites: 46 killed, 5 survivors, all in the allowlist, and no
-          # entry left unmatched.
           - module: src/tfidf_stability/perturbation/vector_perturb.py
             tests: >-
               tests/test_perturbation_bounds.py tests/test_perturbation_experiments.py
@@ -107,6 +77,8 @@ jobs:
             tests: >-
               tests/test_profiles_and_loo.py tests/test_query_grid_protocol.py
               tests/test_public_api_surface.py
+          - module: src/tfidf_stability/utils/validation.py
+            tests: tests/test_validation_contracts.py tests/test_public_api_surface.py
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
@@ -130,19 +102,10 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      # One job per header, as the Python matrix has one per module. Cost is
-      # (sites x suite time), and a survivor names its own header. The C++ suite
-      # is a single ctest target, so every mutant is judged by the whole native
-      # suite.
-      #
-      # Every header listed here has had its campaign triaged: each mutant that
-      # scores as `survived` is argued in configs/equivalent_mutants_cpp.txt. A
-      # header whose campaign has not been triaged would fail here every night
-      # regardless of the state of the tests.
-      #
-      # tests/test_cpp_mutation_gate.py fails if a header is neither listed here
-      # nor deferred in its `_NOT_YET_RECONCILED` map with a reason. That map is
-      # empty: all 11 headers are scheduled.
+      # One job per header, so a survivor names its header. The whole native
+      # suite judges every mutant. Each listed header has a triaged campaign in
+      # configs/equivalent_mutants_cpp.txt.
+      # Rationale: docs/engineering_notes.md#nightly-cpp-mutation-scope
       matrix:
         header:
           - cpp/include/tfidf/core/reduction.hpp
@@ -197,13 +160,10 @@ jobs:
             requirements-dev.txt
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: Hunt for a counterexample to any section 4 bound
-        # --hypothesis-show-statistics reports, per test, how many examples were
-        # generated and how many `assume()` rejected. That distinguishes the two
-        # ways this step can fail (a real falsifying example, or a health check
-        # such as filter_too_much) which the bare exit code does not. It is a
-        # diagnostic only: nothing is suppressed, so a genuine counterexample
-        # still fails the build.
-        # No -q: it suppresses the statistics section entirely.
+        # --hypothesis-show-statistics reports generated and `assume()`-rejected
+        # examples per test, which separates a falsifying example from a health
+        # check such as filter_too_much. It suppresses no failure. No -q: that
+        # flag hides the statistics section.
         run: >
           python -m pytest tests/test_perturbation_bounds.py
           tests/test_cosine_edge_cases.py --hypothesis-show-statistics
@@ -246,21 +206,17 @@ jobs:
         # results. The binary prints its own reproducible-build flag.
         run: ./build/bench/cpp/bench/tfidf_bench
       - name: Native against the reference, with bit-identity proved first
-        # No test in this repository uses a pytest-benchmark fixture, so
-        # `pytest --benchmark-only` would collect nothing. scripts/benchmark.py
-        # does the measuring, and checks the two backends agree to the last bit
-        # before printing a ratio.
-        #
-        # Build isolation ON, as in ci.yml and determinism.yml:
-        # --no-build-isolation could not find the build backend on Windows.
+        # No test uses a pytest-benchmark fixture, so scripts/benchmark.py does
+        # the measuring and checks the two backends are bit-identical before it
+        # prints a ratio. Build isolation is on, as in ci.yml and determinism.yml:
+        # --no-build-isolation does not find the build backend on Windows.
         run: |
           set -euo pipefail
           python -m pip install -e .
           python scripts/benchmark.py --docs 4000 --queries 40 --repeats 9 --json bench.json
-          # A ratio is only evidence if the native backend was actually there.
-          # The harness degrades to reference-only rather than failing, which is
-          # right for a contributor without a compiler and wrong here: it would
-          # report a green benchmark job for a build that never happened.
+          # The harness falls back to reference-only when the native backend is
+          # missing. That suits a contributor without a compiler; here it would
+          # report a green benchmark job for a native build that did not exist.
           python -c "import json; r=json.load(open('bench.json')); c=r['comparisons']; assert c, 'the report contains no measurements'; assert r['native'], 'degraded to reference-only: ' + str(r.get('native_reason')); bad=[x['name'] for x in c if not x['verified']]; assert not bad, 'ratios reported without bit-identity: ' + str(bad); print(len(c), 'comparisons, every one bit-identity verified')"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:

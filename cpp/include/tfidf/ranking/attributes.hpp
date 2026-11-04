@@ -1,20 +1,14 @@
-// Tie-break attributes, as they cross the language boundary.
+// Tie-break attributes as they cross the language boundary.
 //
-// The native side never builds a rank encoding and never compares a rational.
-// Python does that once per corpus in unbounded-precision integer arithmetic
-// and hands over `int32` ranks as data, the same move `spec_addenda.md#g13`
-// makes for `idf`.
-//
-// So the cross-language question is `py_ranks == cpp_ranks`, an integer
-// equality, rather than whether two rational-comparison implementations agree
-// semantically. No multiplication happens on the hot path, so nothing there can
-// overflow.
+// Python builds the rank encoding once per corpus in exact integer arithmetic and passes
+// `int32` ranks as data, as `spec_addenda.md#g13` does for `idf`; comparing them cannot overflow.
+// Rationale: docs/engineering_notes.md#tie-break-ranks-cross-the-boundary
 #pragma once
 
 #include <tfidf/core/types.hpp>
 
+#include <cstddef>
 #include <cstdint>
-#include <span>
 #include <vector>
 
 namespace tfidf::ranking {
@@ -26,12 +20,11 @@ namespace tfidf::ranking {
 /// slot spare.
 inline constexpr std::size_t kMaxAttributes = 4;
 
-/// Dense integer ranks for one corpus: `n_attrs` rows of `n_docs` entries,
-/// stored row-major so a whole attribute is contiguous.
+/// Dense integer ranks for one corpus, stored row-major by attribute.
 ///
-/// Smaller means earlier in the final order. Direction and missing-value
-/// placement are already folded in by the Python side, so nothing here needs to
-/// know about either.
+/// `ranks` holds `n_attrs` rows of `n_docs` entries, so each attribute is contiguous.
+/// A smaller rank sorts earlier. The Python side folds in direction and missing-value
+/// placement.
 struct RankTable {
     std::vector<std::int32_t> ranks;     ///< n_attrs * n_docs, row-major
     std::vector<std::int32_t> id_ranks;  ///< n_docs; a bijection onto 0..n-1
@@ -60,15 +53,11 @@ struct RankTable {
     }
 };
 
-/// Exact rational comparison, for the C++-only tests and benchmarks.
+/// Exact rational comparison by cross-multiplication, for C++-only tests.
 ///
-/// The published path never calls this; Python has already reduced ratios to
-/// ranks. It lets the native suite check that the two languages agree on the
-/// rule rather than only on the pre-computed answer.
-///
-/// Uses a 128-bit intermediate where the compiler provides one. The Python side
-/// separately guarantees the products fit in 64 bits, so this is belt and
-/// braces on a cold path.
+/// Tests `a_num * b_den < b_num * a_den`; both denominators must be positive. Products use
+/// 128 bits where `__int128` exists; Python guarantees they fit in 64 bits.
+/// Rationale: docs/engineering_notes.md#ratio-less-native-cross-check
 [[nodiscard]] inline bool ratio_less(std::int64_t a_num,
                                      std::int64_t a_den,
                                      std::int64_t b_num,

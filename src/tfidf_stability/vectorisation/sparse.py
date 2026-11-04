@@ -1,17 +1,8 @@
-"""Sparse vector and matrix primitives.
+"""Sparse vector and matrix primitives with a fixed accumulation order.
 
-Index order and reduction policy together are what make the reference and native
-backends bit-identical.
-
-*Index order.* A :class:`SparseVector` stores its indices strictly ascending,
-which fixes the order terms accumulate in a dot product; floating-point addition
-is not associative, so a different order is a different number. The native
-backend's term-at-a-time scoring loop also visits terms in ascending identifier
-order, so it matches :func:`dot` bit for bit.
-
-*Reduction policy.* Every sum takes an explicit
-:class:`~tfidf_stability.utils.numerics.Reduction`. The default ``NAIVE`` is the
-plain left-to-right fold section 2.3 specifies.
+:class:`SparseVector` indices are strictly ascending, so the native backend matches
+:func:`dot` bit for bit. Each sum takes a :class:`~tfidf_stability.utils.numerics.Reduction`;
+``NAIVE`` is the section 2.3 fold. Rationale: docs/engineering_notes.md#sparse-index-order
 """
 
 from __future__ import annotations
@@ -29,11 +20,8 @@ __all__ = ["CsrMatrix", "SparseVector", "cosine_of", "dot", "l2_norm"]
 class SparseVector:
     """A sparse vector with strictly ascending indices.
 
-    Attributes:
-        indices: Term identifiers, strictly ascending.
-        values: Parallel values.
-        dim: Ambient dimension (``|V|``), retained so operations can check
-            compatibility instead of silently producing nonsense.
+    ``indices`` holds term identifiers, ``values`` the parallel values, and ``dim``
+    the ambient dimension ``|V|``, which operations check for compatibility.
     """
 
     indices: tuple[int, ...]
@@ -78,9 +66,8 @@ class SparseVector:
     def from_mapping(cls, mapping: Mapping[int, float], dim: int) -> SparseVector:
         """Build from ``{term_id: value}``, sorting indices ascending.
 
-        The sort gives canonical order whatever the mapping's iteration order:
-        the point at which dictionary ordering stops being able to influence any
-        downstream number.
+        The sort gives canonical order whatever the mapping's iteration order, so
+        dictionary ordering cannot influence any downstream number.
         """
         items = sorted(mapping.items())
         return cls(
@@ -142,13 +129,9 @@ def cosine_of(
 ) -> float:
     """Cosine similarity, with the zero-vector convention of section 2.3.
 
-    Precomputed norms may be supplied: same value, same policy, so nothing
-    changes numerically, and scoring a whole corpus becomes ``O(nnz)`` instead of
-    ``O(nnz * queries)``.
-
-    The expression is pinned as ``dot / (nu * nv)``. ``(dot / nu) / nv`` and
-    ``dot * (1 / (nu * nv))`` are algebraically equal and numerically different;
-    the native backend matches this form.
+    Precomputed norms from the same policy give the same result and make corpus
+    scoring ``O(nnz)``, not ``O(nnz * queries)``. The form ``dot / (nu * nv)`` matches
+    the native backend; ``(dot / nu) / nv`` and ``dot * (1 / (nu * nv))`` differ numerically.
     """
     nu = l2_norm(u, policy) if u_norm is None else u_norm
     nv = l2_norm(v, policy) if v_norm is None else v_norm
@@ -179,10 +162,7 @@ class CsrMatrix:
         """Row ``i`` as a :class:`SparseVector`.
 
         Raises:
-            IndexError: If ``i`` is outside ``[0, n_rows)``. Unguarded,
-                ``i = -1`` indexes ``indptr`` from the end, giving ``lo = nnz``,
-                ``hi = 0`` and an empty row; a more negative ``i`` returns
-                another row.
+            IndexError: If ``i`` is outside ``[0, n_rows)``; negative ``i`` never wraps ``indptr``.
         """
         if not 0 <= i < self.n_rows:
             raise IndexError(f"row {i} is outside a {self.n_rows}-row matrix")

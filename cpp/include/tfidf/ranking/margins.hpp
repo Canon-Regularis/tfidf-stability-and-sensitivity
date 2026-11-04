@@ -1,19 +1,14 @@
 // Score-separation margins (README sections 2.3.2 and 4.4).
 //
-//   m_k        = score(r_k) - score(r_{k+1})
-//   m_min^top  = min over 1 <= j < k of (score(r_j) - score(r_{j+1}))
-//   eps_k^flip = m_k / 2
-//
-// Everything here takes a sorted score array and never a ranking. So m_k depends
-// only on the score multiset and is identical under every tie-break operator,
-// which is what makes research questions A1 (margins) and A2 (tie-breaking)
-// independent. Structural, given the dependency direction, rather than asserted.
+// m_k = score(r_k) - score(r_{k+1}); eps_k^flip = m_k / 2;
+// m_min^top = min over 1 <= j < k of (score(r_j) - score(r_{j+1})).
+// Inputs are sorted scores only. Rationale: docs/engineering_notes.md#margins-sorted-input
 #pragma once
 
 #include <tfidf/core/types.hpp>
 
 #include <algorithm>
-#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -32,11 +27,12 @@ struct Margin {
     Real value = std::numeric_limits<Real>::quiet_NaN();
     bool defined = false;
 
-    /// eps_k^flip. Exact: dividing by two only shifts the exponent.
+    /// eps_k^flip, exact unless the result is subnormal: halving shifts the exponent.
     [[nodiscard]] Real flip_radius() const noexcept { return value / 2.0; }
 
-    /// A defined margin of exactly zero: top-k membership then rests entirely
-    /// on the tie-break.
+    /// True for a defined margin of exactly zero.
+    ///
+    /// Top-k membership then rests entirely on the tie-break.
     [[nodiscard]] bool is_exact_tie() const noexcept { return defined && value == 0.0; }
 };
 

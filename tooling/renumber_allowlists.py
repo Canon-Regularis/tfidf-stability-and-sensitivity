@@ -1,22 +1,8 @@
 """Move allowlist entries onto the lines their stamps name.
 
-Editing a covered file shifts the lines below the edit, and both mutation gates
-then fail because an entry names a line that no longer holds what it describes.
-The stamp records the source line the argument was written about, so relocating
-an entry is a search for that fingerprint rather than a guess at the nearest
-line, which is what the gates refuse.
-
-An entry whose stamp matches no line is left alone and reported: the expression
-it argues about has changed, and only a reader can say whether the argument
-still holds. An entry whose stamp matches two lines is reported the same way.
-There is no mode that rewrites a stamp; that would re-bless an argument nobody
-has re-read.
-
-Usage::
-
-    python -m tooling.renumber_allowlists --check
-    python -m tooling.renumber_allowlists --write
-    python -m tooling.renumber_allowlists --write --only src/tfidf_stability/x.py
+An edit shifts the lines below it, so an entry's line number stops matching the
+source it describes. The stamp fingerprints that source line, so relocation is a
+search for the fingerprint. A stamp matching no line or two lines is refused.
 """
 
 from __future__ import annotations

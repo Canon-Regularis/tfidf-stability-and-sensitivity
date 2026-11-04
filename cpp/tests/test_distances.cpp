@@ -1,21 +1,18 @@
-// Ordering distances: inversion counting, Kendall tau, FKS, and the top-k set
-// measures.
+// Tests for the ordering distances: inversions, Kendall tau, FKS, set measures.
 //
-// Two cases guard against a plausible "improvement" rather than against a typo:
-//
-//   * the FKS triangle-inequality violation is asserted, with G2's witness and
-//     its values. K^(p) is a near-metric; a patch that "repairs" it would move
-//     every published disagreement number.
-//   * fks_max(1) == 1.0. Two disjoint singletons contribute one case-3 pair, so
-//     the maximum is 1; an early `if k < 2: return 0` guard normalised two
-//     entirely disjoint lists to distance zero.
+// K^(p) is a near-metric (G2's witness), and fks_max(1) == 1.0 because two
+// disjoint singletons form one case-3 pair. Both are asserted as specified.
+// Rationale: docs/engineering_notes.md#fks-near-metric-and-singleton-maximum
 #include <tfidf/ranking/distances.hpp>
 
 #include <doctest.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <stdexcept>
@@ -40,7 +37,7 @@ std::int64_t brute_force_inversions(const std::vector<std::int32_t>& v) {
     return total;
 }
 
-/// `kendall_fks` is symmetric in its arguments; every call site here says so.
+/// Returns the unnormalised FKS distance and checks that it is symmetric.
 Real fks_raw(const std::vector<DocId>& a, const std::vector<DocId>& b, Real p = kFksPenalty) {
     const Real forward = kendall_fks(a, b, p, false);
     CHECK(same_bits(kendall_fks(b, a, p, false), forward));
@@ -118,10 +115,9 @@ TEST_CASE("kendall tau: differing sets are refused, not approximated") {
     CHECK_THROWS_AS(attempt({1, 2}, {1}), std::invalid_argument);
 
     // The guard is `a.size() != b.size() || sa != sb` over sorted copies.
-    // Without it {1, 2} against {1, 2, 2} answers rather than fails.
-    // `positions` keeps the last index of a repeat, so the mapping would be
-    // [0, 2], and zero inversions over the one pair of a.size() = 2 would
-    // give 0.0.
+    // Without it {1, 2} against {1, 2, 2} maps to [0, 2], since `positions`
+    // keeps the last index of a repeat, and zero inversions over the one pair
+    // of a.size() = 2 give 0.0 instead of a refusal.
     CHECK_THROWS_AS(attempt({1, 2}, {1, 2, 2}), std::invalid_argument);
 }
 
@@ -192,7 +188,7 @@ TEST_CASE("fks: fks_max matches the closed form k(3k-1)/2 at p = 1/2") {
 }
 
 TEST_CASE("fks: two disjoint singletons are maximally distant, not identical") {
-    // The k = 1 trap. One case-3 pair exists, so the ceiling is 1.
+    // At k = 1 one case-3 pair exists, so the ceiling is 1.
     CHECK(fks_max(1) == 1.0);
     CHECK(kendall_fks(std::vector<DocId>{1}, std::vector<DocId>{2}) == 1.0);
     CHECK(kendall_fks(std::vector<DocId>{1}, std::vector<DocId>{1}) == 0.0);
@@ -201,7 +197,7 @@ TEST_CASE("fks: two disjoint singletons are maximally distant, not identical") {
 TEST_CASE("fks: is a near-metric, not a metric -- G2's witness") {
     // A and C are disjoint, so their distance is maximal, while B shares one
     // element with each. The triangle inequality then fails by a wide margin,
-    // which is intended behaviour and must not be "fixed".
+    // which G2 specifies.
     const std::vector<DocId> a{3, 1, 0};
     const std::vector<DocId> b{5, 3, 4};
     const std::vector<DocId> c{5, 4, 2};
@@ -386,15 +382,10 @@ TEST_CASE("compare_top_k: k beyond the lists, and k = 0") {
 }
 
 TEST_CASE("fks: the union is walked in first-appearance order, not sorted") {
-    // Every penalty this suite uses elsewhere is dyadic -- kFksPenalty is 0.5,
-    // and the sweeps use 0, 0.25, 0.5, 1 -- so every partial sum is exact and
-    // any enumeration order reproduces the same double. Sorting the union, or
-    // walking the `seen` set instead of the `uni` vector, is invisible there.
-    //
-    // A penalty of 1/3 is not dyadic, so the order of the additions decides the
-    // last bit. These two lists are disjoint, so every pair falls in case 3 or
-    // case 4 and the addend sequence depends only on the union order. The value
-    // below is what the normative Python returns, which sums with `+`.
+    // At a dyadic penalty every partial sum is exact, so the union order is
+    // invisible. At p = 1/3 the addition order decides the last bit; the lists
+    // are disjoint, so the addends depend only on the union order.
+    // Rationale: docs/engineering_notes.md#fks-union-first-appearance-order
     const std::vector<DocId> a{5, 3, 1};
     const std::vector<DocId> b{4, 2, 0};
 
@@ -406,14 +397,10 @@ TEST_CASE("fks: the union is walked in first-appearance order, not sorted") {
 }
 
 TEST_CASE("compare_top_k: a negative k is an empty prefix here, unlike in Python") {
-    // Latent rather than live, and pinned so it stays that way. `prefix` takes
-    // `std::max(k, 0)`, so a negative k compares nothing and every field
-    // reports "no evidence" while `k` carries the negative value through.
-    //
-    // Both Python entry points refuse a negative k: `compare_top_k` raises
-    // `ValueError`, and the binding raises before the header is reached
-    // (cpp/bindings/module.cpp, "k must be non-negative"). Relaxing either
-    // throw, or adding a second C++ caller, makes the divergence live.
+    // `prefix` takes `std::max(k, 0)`, so a negative k compares nothing and
+    // `k` carries the negative value through. Both Python entry points refuse
+    // a negative k, so the divergence is unreachable from Python.
+    // Rationale: docs/engineering_notes.md#compare-top-k-negative-k
     const std::vector<DocId> a{1, 2, 3};
     const std::vector<DocId> b{3, 2, 1};
     const std::vector<DocId> empty{};
@@ -424,9 +411,8 @@ TEST_CASE("compare_top_k: a negative k is an empty prefix here, unlike in Python
     CHECK(c.intersection_size == 0);
     CHECK(c.swapped == 0);
     CHECK(std::isnan(c.kendall_intersection));
-    // Stated as "identical to an empty prefix" rather than as constants, which
-    // is the actual contract and does not go stale if the empty case is defined
-    // differently later.
+    // Stated as "identical to an empty prefix" rather than as constants: that
+    // is the contract, and it holds whatever value the empty case defines.
     CHECK(same_bits(c.fks, kendall_fks(empty, empty)));
     CHECK(same_bits(c.jaccard, jaccard_distance(empty, empty)));
 
@@ -438,13 +424,10 @@ TEST_CASE("compare_top_k: a negative k is an empty prefix here, unlike in Python
 }
 
 TEST_CASE("fks: the normaliser is zero for every k below one, not just at zero") {
-    // `fks_max` guards with `k < 1`, and the guard is not observable at all:
-    // relaxing it to `k < 0` differs only at k == 0, where the fall-through
-    // computes 0*0 + p*0*(0-1) = 0.0 + (-0.0) = +0.0, the same double the guard
-    // returns. configs/equivalent_mutants_cpp.txt argues that equivalence.
-    //
-    // What is pinned here is the stated domain: the normaliser is zero wherever
-    // there is no pair to disagree about.
+    // The normaliser is zero wherever no pair exists. Relaxing `k < 1` to `k < 0`
+    // differs only at k == 0, where 0*0 + p*0*(0-1) = 0.0 + (-0.0) = +0.0, the
+    // guard's own value. configs/equivalent_mutants_cpp.txt records that mutant.
+    // Rationale: docs/engineering_notes.md#fks-max-guard-equivalence
     CHECK(fks_max(0) == 0.0);
     CHECK(fks_max(-1) == 0.0);
     CHECK(fks_max(-2) == 0.0);
@@ -456,31 +439,26 @@ TEST_CASE("fks: the normaliser is zero for every k below one, not just at zero")
 }
 
 TEST_CASE("kendall tau: the same set with different multiplicities is refused") {
-    // An `unordered_set` comparison would be blind to multiplicity: {1, 1, 2}
-    // and {1, 2, 2} share a set and a size. `positions` keeps only the last
-    // index of each repeat, so the inversion count would run over a mapping
-    // missing a document and report 0.0. Sorted copies compare multisets.
-    //
-    // The normative Python compares Counters, so both sides refuse this input.
+    // {1, 1, 2} and {1, 2, 2} share a set and a size, and `positions` keeps
+    // only the last index of a repeat, so a set test would report 0.0. Sorted
+    // copies compare multisets; the normative Python compares Counters, so
+    // both sides refuse this input.
     const auto attempt = [](const std::vector<DocId>& a, const std::vector<DocId>& b) {
         static_cast<void>(kendall_tau_distance(a, b));
     };
     CHECK_THROWS_AS(attempt({1, 1, 2}, {1, 2, 2}), std::invalid_argument);
 
-    // The same multiset is still accepted, which is the limit of the repair and
-    // is unreachable from a ranking: every caller passes a permutation.
+    // The same multiset is accepted, which is the limit of the check; no ranking
+    // repeats a document, because every caller passes a permutation.
     CHECK(kendall_tau_distance(std::vector<DocId>{1, 1, 2},
                                std::vector<DocId>{1, 1, 2}) == 0.0);
 }
 
 TEST_CASE("fks: a penalty outside [0, 1] is refused by both entry points") {
-    // G2 fixes the case-4 penalty in [0, 1] on bias grounds. Without the guard
-    // a NaN penalty would make `fks_max` NaN and a negative one would make it
-    // negative; `ceiling > 0.0` would then fail and `kendall_fks` would fall to
-    // the 0.0 reserved for k = 0, reporting two disjoint lists as in agreement.
-    //
-    // Void-returning, since both functions are [[nodiscard]] and doctest's
-    // macro does not itself discard the value.
+    // G2 fixes the case-4 penalty in [0, 1]. Unguarded, a NaN penalty, or one negative enough
+    // to make `fks_max` non-positive, fails `ceiling > 0.0`, and `kendall_fks` returns the 0.0
+    // reserved for k = 0. The lambdas return void because both functions are [[nodiscard]].
+    // Rationale: docs/engineering_notes.md#fks-penalty-domain-guard
     const auto max_attempt = [](Real p) { (void)fks_max(3, p); };
     const auto fks_attempt = [](Real p) {
         (void)kendall_fks(std::vector<DocId>{1, 2, 3}, std::vector<DocId>{4, 5, 6}, p, true);

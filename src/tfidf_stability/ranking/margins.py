@@ -1,25 +1,8 @@
 """Score-separation margins and flip radii (README sections 2.3.2 and 4.4).
 
-    m_k         = score(r_k) - score(r_{k+1})
-    m_min^top   = min over 1 <= j < k of (score(r_j) - score(r_{j+1}))
-    eps_k^flip  = m_k / 2
-
-Every function here takes a sorted score array rather than a ``Ranking``, which
-makes the following structural:
-
-    m_k depends only on the score multiset. The non-increasing rearrangement of
-    a multiset is unique, and all three ranking operators use score-descending as
-    their primary key, so pi, pi_score and pi_alt have identical score sequences
-    with differing document sequences.
-
-Research questions A1 (margins) and A2 (tie-breaking) are therefore
-independent. The paper never states it; proposed as a note under section 2.3.2.
-
-Undefined margins follow ``spec_addenda.md#g3``: ``NaN`` plus an explicit
-validity flag, never coerced to 0 or infinity, and counted rather than silently
-dropped. Whether a degenerate query then enters a reported distribution is a
-policy question for ``analysis/stability_profile.py``; this module reports the
-truth so the raw margins stay auditable.
+``m_k = score(r_k) - score(r_{k+1})``, ``eps_k^flip = m_k / 2``, and ``m_min^top`` is the
+minimum of ``score(r_j) - score(r_{j+1})`` over ``1 <= j < k``. Undefined margins are ``NaN``
+plus a validity flag (``spec_addenda.md#g3``). Rationale: docs/engineering_notes.md#margins
 """
 
 from __future__ import annotations
@@ -27,12 +10,14 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from itertools import pairwise
+from enum import Enum
+from itertools import islice, pairwise
 
 from tfidf_stability.utils.validation import StrictMode, resolve_k
 
 __all__ = [
     "Margin",
+    "MarginKind",
     "MarginSummary",
     "adjacent_gaps",
     "boundary_margin",
@@ -42,21 +27,27 @@ __all__ = [
 ]
 
 
+class MarginKind(str, Enum):
+    """Which margin a :class:`Margin` holds (README section 2.3.2)."""
+
+    BOUNDARY = "boundary"
+    MIN_ADJACENT_TOP = "min_adjacent_top"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 @dataclass(frozen=True, slots=True)
 class Margin:
     """One margin, with the validity flag G3 requires.
 
-    Attributes:
-        kind: ``"boundary"`` or ``"min_adjacent_top"``.
-        k: The requested ``k``.
-        k_effective: After lenient clamping; equal to ``k`` in strict mode.
-        value: The margin, or ``NaN`` when undefined.
-        defined: Whether ``value`` is meaningful. An undefined margin is excluded
-            from distributions but counted in ``n_undefined``; coercing it to 0
-            would look like an exact tie, and to infinity like perfect stability.
-        reason: Why it is undefined; empty when defined.
+    ``kind`` is a :class:`MarginKind`; ``k_effective`` is ``k`` after lenient clamping. When
+    ``defined`` is false, ``value`` is ``NaN`` and ``reason`` (else empty) says why;
+    ``n_undefined`` counts it outside percentiles. Reporting: ``analysis/stability_profile.py``.
     """
 
+    #: Coerced to a :class:`MarginKind`, and annotated with its base, ``str``, so a
+    #: caller may pass the bare value.
     kind: str
     k: int
     k_effective: int
@@ -64,15 +55,17 @@ class Margin:
     defined: bool
     reason: str = ""
 
+    def __post_init__(self) -> None:
+        """Normalise ``kind`` to its member, refusing an unknown value."""
+        object.__setattr__(self, "kind", MarginKind(self.kind))
+
     @property
     def flip_radius(self) -> float:
         """``eps_k^flip = m_k / 2`` (section 2.3.2).
 
-        Halving shifts the exponent, so ``2 * flip_radius`` recovers ``value``
-        bit for bit for every normal margin. Subnormals have no exponent left to
-        shift: an odd multiple ``m`` of ``5e-324`` rounds to the nearest even
-        multiple, down for ``m`` congruent to 1 mod 4 and up for 3 mod 4, and
-        ``5e-324`` itself halves to zero.
+        Halving is exact for every margin of at least ``2**-1021``, so ``2 * flip_radius ==
+        value`` there. Below it, the half of an odd multiple ``m`` of ``5e-324`` rounds to the
+        nearest even multiple: down if ``m % 4 == 1``, up if ``m % 4 == 3``, zero for ``m == 1``.
         """
         return self.value / 2.0
 
@@ -80,9 +73,8 @@ class Margin:
     def is_exact_tie(self) -> bool:
         """A defined margin of exactly zero.
 
-        The interesting case: top-k membership is then decided purely by the
-        tie-break, the subject of section 4.5, and ``P(m_k = 0)`` is a headline
-        statistic.
+        Top-k membership is then decided by the tie-break alone (section 4.5), and
+        ``P(m_k = 0)`` is a headline statistic.
         """
         return self.defined and self.value == 0.0
 
@@ -104,17 +96,9 @@ def boundary_margin(
 ) -> Margin:
     """``m_k = score(r_k) - score(r_{k+1})``, governing top-k membership.
 
-    Args:
-        sorted_scores: Scores in non-increasing order.
-        k: The 1-indexed boundary rank.
-        mode: Strict raises when ``k > N``; lenient clamps and records it.
-
-    Returns:
-        The :class:`Margin`. Undefined when ``k >= N``, since ``r_{k+1}`` does
-        not exist.
-
-    Raises:
-        KOutOfRangeError: In strict mode when ``k > N`` (or ``k <= 0`` in either).
+    ``sorted_scores`` is non-increasing; ``k`` is the 1-indexed boundary rank. Returns a
+    :class:`Margin`, undefined when ``k >= N`` since ``r_{k+1}`` does not exist. Raises
+    ``KOutOfRangeError`` for ``k <= 0``, and for ``k > N`` in strict ``mode``; lenient clamps to N.
     """
     n = len(sorted_scores)
     k_eff = resolve_k(k, n, mode)
@@ -146,11 +130,11 @@ def min_adjacent_margin_top(
     # Unreachable while `resolve_k` either returns k (having checked k <= n) or
     # clamps to n, both of which put n at or above k_eff: the guard above has
     # already returned for every corpus of fewer than two documents. Kept
-    # because the loop below indexes a second element on the strength of it.
+    # because `min` below needs a gap, and fewer than two scores give none.
     if n < 2:  # pragma: no cover - defensive
         return Margin("min_adjacent_top", k, k_eff, math.nan, False, "N == 1: no adjacent pair")
 
-    gaps = [sorted_scores[j] - sorted_scores[j + 1] for j in range(k_eff - 1)]
+    gaps = adjacent_gaps(tuple(islice(sorted_scores, k_eff)))
     return Margin("min_adjacent_top", k, k_eff, min(gaps), True)
 
 
@@ -184,7 +168,7 @@ class MarginSummary:
 
         G3 calls this a headline statistic. On short-text corpora it is large:
         documents with no in-vocabulary tokens all score exactly 0 and form one
-        enormous exact-tie block.
+        large exact-tie block.
         """
         return self.n_exact_tie / self.n_defined if self.n_defined else math.nan
 

@@ -18,14 +18,13 @@ Each runner writes an `ExperimentResult` envelope:
 }
 ```
 
-`result_digest` is taken over the payload and parameters **with volatile fields
-stripped**, so two runs on the same data produce the same string even though
-their timestamps differ. A published number is then checked by rerunning and
-comparing one hex value rather than by eyeballing a table. CI asserts it.
+`result_digest` is computed over the payload and parameters **with volatile fields
+stripped**, so two runs on the same data produce the same digest although
+their timestamps differ. A published number is checked by rerunning the
+experiment and comparing one hex value. CI asserts this.
 
-`data_provenance` records `"redistributable": false` for MovieLens, so a reader
-can see immediately that a given result cannot be reproduced from the repository
-alone.
+`data_provenance` records `"redistributable": false` for MovieLens. This marks
+a result that cannot be reproduced from the repository alone.
 
 ## The runners
 
@@ -48,7 +47,7 @@ python scripts/make_figures.py --reports reports/
 
 `run_stability_profile.py` **exits non-zero** if any perturbation inside §4.4's
 certified radius flipped the top-k set. The theorem is therefore checked against
-data on every push rather than asserted in a docstring.
+data on every push.
 
 Scale up with `--dataset synthetic_small --queries 200`. For MovieLens, fetch it
 first (see [`data/README.md`](../data/README.md)) and pass `--archive`.
@@ -86,14 +85,13 @@ separable there. The code says so and refuses to invent a value.
 ## E1. Margin distributions
 
 `m_k` across queries at each `k`, summarised with **nearest-rank** percentiles,
-so every reported value is an observation that actually occurred. Interpolation
-would invent a margin no query produced, one that could not be looked up in the
-raw data or compared with `same_bits`.
+so every reported value is a margin that some query produced. An interpolated
+percentile can be a margin that no query produced, which cannot be looked up in
+the raw data or compared with `same_bits`.
 
-Degenerate queries are excluded per G3, and the exclusion count is reported
-rather than silently applied. The **exact-tie share** is broken out separately:
-it is G3's headline statistic and vanishes into the percentiles once it exceeds
-50%.
+Degenerate queries are excluded per G3, and the exclusion count is reported.
+The **exact-tie share** is reported separately: it is G3's headline statistic,
+and the percentiles hide it once it exceeds 50%.
 
 ## E2. The A1 transition
 
@@ -105,9 +103,9 @@ See [tie_breaking_discontinuities.md](tie_breaking_discontinuities.md).
 
 ## Figures, and how each one could falsify its hypothesis
 
-Figures are rendered from the recorded JSON, never recomputed; a figure that
-recomputed its own data could silently disagree with the numbers in the text. Each
-carries the digest of the result it was built from.
+Figures are rendered from the recorded JSON and never recompute their data. A
+figure that recomputed its data could silently disagree with the numbers in the text.
+Each figure carries the digest of the result it was built from.
 
 | figure | falsified if |
 | --- | --- |
@@ -120,13 +118,13 @@ normative pipeline never imports it.
 
 ## Notebooks
 
-`notebooks/` mirrors these experiments interactively. They are exploratory
-companions; every published number comes from a runner plus its JSON.
+`notebooks/` mirrors these experiments interactively. The notebooks are
+exploratory. Every published number comes from a runner and its JSON file.
 
 ## Datasets
 
-`synthetic_tiny` (120 documents) for tests and CI, `synthetic_small` (2000) for
-the full run, `movielens_small` for external validity. The synthetic generator is
-seeded and byte-reproducible; CI regenerates it twice and requires the files to
-be identical, which would catch a regression reintroducing a non-version-stable
-PRNG call.
+`synthetic_tiny` (120 documents) serves tests and CI, `synthetic_small` (2000)
+serves the full run, and `movielens_small` serves external validity. The
+synthetic generator is seeded and byte-reproducible. CI generates the data twice
+and requires the files to be identical. The check is there to catch a change that
+reintroduces a PRNG call whose output is not stable across versions.

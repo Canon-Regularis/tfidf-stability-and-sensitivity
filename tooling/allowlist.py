@@ -1,28 +1,30 @@
-"""Argued equivalences: the format both mutation campaigns record them in.
+"""Argued equivalences in the format both mutation campaigns record them in.
 
-An entry names the site a mutation applies to, stamps the source line it was
-written about, and gives the argument for why the mutant cannot be observed. The
-two keys differ -- the Python one carries the operator kind, the C++ one a
-column -- but the stamp, the rule that an entry without an argument is ignored,
-and the parse are one thing, held here rather than in each campaign.
+An entry names a mutation site, stamps the source line it describes, and argues
+why the mutant cannot be observed. Stamp, parse and the unargued-entry rule live here.
 """
 
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Generic, TypeVar
 
 __all__ = [
     "STAMP_PREFIX",
     "CppKey",
     "Entry",
     "PythonKey",
+    "Verdict",
     "claims_cpp",
     "claims_python",
     "fingerprint",
     "parse_cpp",
     "parse_python",
+    "verdict",
     "without_stamp",
 ]
 
@@ -37,6 +39,35 @@ CppKey = tuple[int, int, str, str]
 
 STAMP_PREFIX = "src="
 _STAMP_WIDTH = len(STAMP_PREFIX) + 8
+
+_Key = TypeVar("_Key", PythonKey, CppKey)
+
+
+@dataclass(frozen=True, slots=True)
+class Verdict(Generic[_Key]):
+    """Survivors carrying no claim, and claims matching no survivor.
+
+    Both directions fail a campaign: an unclaimed survivor is an unexplained
+    gap, and a stale claim is an argument no mutant exercises.
+    """
+
+    unclaimed: tuple[_Key, ...]
+    stale: tuple[_Key, ...]
+    covered: int
+
+
+def verdict(survivors: Sequence[_Key], claims: Mapping[_Key, str]) -> Verdict[_Key]:
+    """Split survivors and claims against each other.
+
+    Survivors are counted, not collected: two mutable sites on one line can
+    share a key, and ``covered`` counts every survivor a claim explains.
+    """
+    counts = Counter(survivors)
+    return Verdict(
+        unclaimed=tuple(sorted(key for key in counts if key not in claims)),
+        stale=tuple(sorted(key for key in claims if key not in counts)),
+        covered=sum(n for key, n in counts.items() if key in claims),
+    )
 
 
 def fingerprint(line: str) -> str:
@@ -61,9 +92,8 @@ def without_stamp(reason: str) -> str:
 class Entry:
     """One allowlist line, parsed, with what a rewrite needs to put it back.
 
-    ``index`` is the entry's position in the file and ``raw`` its original text,
-    so changing the line number rewrites one field and leaves every other byte
-    of the file alone.
+    ``index`` is the entry's position in the file and ``raw`` its original
+    text, so a line-number change rewrites one field and leaves the rest alone.
     """
 
     path: str

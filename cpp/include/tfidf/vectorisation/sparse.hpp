@@ -1,15 +1,8 @@
-// Sparse vector and matrix structures.
+// Sparse vector and matrix structures, inner product, norm and transpose.
 //
-// Two invariants make the native backend bit-identical to the Python reference,
-// and both are checked rather than assumed:
-//
-//   1. Indices are strictly ascending within every vector and every row, which
-//      fixes the order products are accumulated in. binary64 addition is not
-//      associative, so a different order is a different number.
-//
-//   2. Structure-of-arrays layout. A packed {int32, double} would be 16 bytes
-//      with padding (25% waste) and would engage one prefetch stream instead of
-//      two.
+// Indices are strictly ascending within every vector and row, which fixes the
+// accumulation order; storage is structure-of-arrays.
+// Rationale: docs/engineering_notes.md#sparse-layout-invariants
 #pragma once
 
 #include <tfidf/core/reduction.hpp>
@@ -72,12 +65,9 @@ template <class Policy>
         const TermId b = v.indices[j];
         if (a == b) {
             acc.add(u.values[i] * v.values[j]);
-            // Both advance, though the sum does not need both to. Indices are
-            // strictly ascending, so dropping either increment still gives the
-            // same result: the next iteration compares the index that did not
-            // move against its successor, falls into the branch below, and
-            // advances it there. Disabling one is undetectable from outside,
-            // which is why no test asserts it.
+            // Both indices advance. Dropping either increment gives the same
+            // sum, because the next iteration advances that index in a branch below.
+            // Rationale: docs/engineering_notes.md#sparse-dot-merge-advance
             ++i;
             ++j;
         } else if (a < b) {  // never reached for a == b, so `<=` would read the same
@@ -105,13 +95,9 @@ template <class Policy>
 
 /// Euclidean norm: sqrt of the sum of squares, in that order.
 ///
-/// No hypot-style rescaling. It would be more robust to overflow and would
-/// produce different digits, and README section 6 forbids stabilising
-/// transformations.
-///
-/// IEEE-754 mandates that `sqrt` be correctly rounded, unlike `log`, which is
-/// why idf is computed on the Python side and passed in as data
-/// (spec_addenda G13).
+/// No hypot-style rescaling: README section 6 forbids stabilising transforms.
+/// IEEE-754 requires a correctly rounded `sqrt` but not `log` (spec_addenda G13).
+/// Rationale: docs/engineering_notes.md#sparse-l2-norm-no-rescaling
 template <class Policy>
 [[nodiscard]] Real l2_norm_with(const SparseView& v) noexcept {
     Policy acc{};
@@ -165,22 +151,10 @@ struct CsrView {
         if (indices.size() != values.size()) {
             return false;
         }
-        // Monotonicity, and it must come BEFORE the row loop below.
-        //
-        // `row(i)` computes `hi - lo` on `std::size_t`. A decreasing segment
-        // makes that wrap: at `hi == lo - 1` it wraps to exactly
-        // `std::dynamic_extent`, which `subspan` reads as "to the end", so the
-        // row silently spans the rest of the arrays and overlaps its successors.
-        // Larger jumps give a count past the end, which is undefined.
-        //
-        // The normative Python checks this explicitly -- `_check_csr` in
-        // persistence/save_load.py raises "indptr decreases at row {i}" -- and
-        // this mirror did not, so the two disagreed on the same input:
-        // `indptr = [0, 3, 2, 4]` over four non-zeros was rejected there and
-        // accepted here, since `front == 0` and `back == nnz` both hold and
-        // nothing looked between them. Checked here rather than in `row()`
-        // because canonical is what `row()` is allowed to assume; that is the
-        // contract the Python states and this restores.
+        // indptr must be non-decreasing, checked before the row loop: `row(i)`
+        // computes `hi - lo` on `std::size_t`, and a decreasing segment wraps it.
+        // Matches `_check_csr` in persistence/save_load.py.
+        // Rationale: docs/engineering_notes.md#csr-indptr-monotonicity
         for (std::size_t i = 0; i + 1 < indptr.size(); ++i) {
             if (indptr[i + 1] < indptr[i]) {
                 return false;
@@ -220,10 +194,9 @@ struct Csc {
 
 /// Transpose CSR to CSC by counting sort: O(nnz + n_cols), deterministic.
 ///
-/// Source rows are visited in ascending document order and each column's
-/// entries are appended in that order, so every postings list comes out
-/// ascending in document id with no sort, and no dependence on a sort's
-/// tie-breaking.
+/// Rows are visited in ascending document order and each column's entries are
+/// appended in that order, so every postings list is ascending in document id
+/// with no sort and no dependence on a sort's tie-breaking.
 [[nodiscard]] inline Csc transpose(const CsrView& csr) {
     Csc out;
     out.n_rows = csr.n_rows;

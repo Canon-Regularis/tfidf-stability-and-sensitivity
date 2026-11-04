@@ -1,9 +1,8 @@
 """The serialisable model schema.
 
 :mod:`~tfidf_stability.persistence.save_load` owns the byte layout; this module
-holds what a saved model must contain and what it means. Split so the layout can
-gain a field without touching the schema, and the schema can be printed without
-reading struct format strings.
+holds what a saved model must contain and what it means. The layout can gain a
+field without a schema change, and the schema prints without struct format strings.
 """
 
 from __future__ import annotations
@@ -63,11 +62,9 @@ HEADER_FIELDS: Final[tuple[HeaderField, ...]] = (
 #: that assumes the two blocks abut misparses every container.
 BLOCK_SEPARATOR: Final[bytes] = b"\n"
 
-#: What a `.tfsx` container carries, in file order.
-#:
-#: `df` and `cf` are recomputable from the corpus but stored anyway: a saved
-#: model has to be usable without it, and the vocabulary digest every manifest
-#: records is taken over them.
+#: What a `.tfsx` container carries, in file order. `df` and `cf` are
+#: recomputable from the corpus but stored anyway: a saved model is usable
+#: without the corpus, and every manifest's vocabulary digest covers them.
 MODEL_FIELDS: Final[tuple[ModelField, ...]] = (
     ModelField("indptr", "int64", "n_docs + 1", "CSR row boundaries"),
     ModelField("indices", "int32", "nnz", "term ids, ascending within a row"),

@@ -1,36 +1,9 @@
 #!/usr/bin/env python3
 """A2 in miniature: a ranking discontinuity with provably zero numerical error.
 
-Research question A2 asks whether deterministic tie-breaking induces
-decision-level discontinuities independent of numerical error. Every
-corpus-scale measurement of it (section 7.3's disagreement rates, section 7.4's
-case study) is a rate over thousands of queries, and a rate always invites the
-objection that some of it is arithmetic noise leaking in. This removes the
-objection once, small enough to read in full.
-
-Six documents, three of which carry one bit pattern between them. Under that
-exact tie the three ranking operators of section 4.5 produce three different
-answers, and the file checks that all three consumed byte-identical scores. No
-arithmetic runs between the operators, so numerical error here is zero and the
-disagreement has one available cause.
-
-Two kinds of discontinuity appear, and they are separate phenomena. At k = 3 the
-tie straddles the boundary and the three operators return three different top-k
-sets; at k = 4 the boundary margin is 0.25 and all three return the same set in
-three different orders. The note under section 4.4 in ``docs/spec_addenda.md``
-gives the reason neither bounds the other: ``m_k`` constrains the boundary,
-``m_min^top`` the interior, and the gap index sets are disjoint.
-
-The second half turns to G1. Section 2.3.3's tie group is a ball and the paper
-calls its members "indistinguishable", but the relation is intransitive, so the
-implementation carries three separately named objects. The dyadic ladder
-``s_i = i * 2^-20`` at ``tau = 2^-20`` is the standard witness: every score, gap
-and comparison in it is exact in binary64, so nothing observed can be blamed on
-rounding.
-
-Run with::
-
-    python examples/tie_break_discontinuity_demo.py
+Three operators disagree on bit-identical scores, and a dyadic ladder separates G1's
+ball, chain and clique. Run with ``python examples/tie_break_discontinuity_demo.py``.
+Rationale: docs/engineering_notes.md#tie-break-discontinuity-demo
 """
 
 from __future__ import annotations
@@ -56,17 +29,10 @@ from tfidf_stability.utils.numerics import bits_of, same_bits  # noqa: E402
 
 WIDTH: Final[int] = 78
 
-#: ``(doc_id, score, popularity, rating_sum2, rating_count, engagement)``.
-#:
-#: Dyadic scores, so each is exact in binary64 and the three at 0.5 are one bit
-#: pattern rather than three nearby ones. Written down rather than scored from
-#: text because of G22: ``tf = count / L`` makes the finest text edit a ``1/L``
-#: relative perturbation, so no corpus can be authored onto a chosen separation.
-#:
-#: Each operator orders the three tied documents differently: popularity puts
-#: charlie first (pi), identifier byte order alpha first (pi_score), engagement
-#: charlie first and bravo second (pi_alt). Rating never fires; it sits second in
-#: both priorities and the leading attribute has already decided.
+#: ``(doc_id, score, popularity, rating_sum2, rating_count, engagement)``. Dyadic scores
+#: make the three at 0.5 one bit pattern; G22 rules out authoring them from text. On the
+#: tie, popularity leads with charlie (pi), identifier with alpha (pi_score), engagement
+#: with charlie then bravo (pi_alt). Rating, second in pi and pi_alt, never decides.
 CORPUS: Final[tuple[tuple[str, float, int, int, int, int], ...]] = (
     ("doc-zulu", 0.75, 2, 12, 2, 2),
     ("doc-alpha", 0.5, 5, 18, 2, 1),
@@ -95,7 +61,7 @@ def _hex_bits(x: float) -> str:
     """The binary64 payload as a hex word.
 
     "Bit-identical" is a claim about these sixteen digits, and two floats that
-    print the same at repr precision can still differ in the last place.
+    print the same at a short decimal precision can still differ in the last place.
     """
     return f"0x{int.from_bytes(bits_of(x), 'little'):016x}"
 
@@ -117,15 +83,9 @@ def _records() -> list[dict[str, Any]]:
 def _require_bit_identical_scores(rankings: dict[str, Ranking]) -> int:
     """Verify A2's premise and return the number of comparisons that verified it.
 
-    The premise is that the operators differ in their tie-break and in nothing
-    else. It holds structurally (``rank_all_operators`` builds one sorted score
-    array and hands the same object to each operator), but a refactor can remove
-    that silently, so it is checked against the bit patterns themselves.
-
-    Raises:
-        AssertionError: If any operator saw a score differing from ``pi``'s in a
-            single bit, at which point every disagreement printed by this file
-            would be uninterpretable and the run must stop.
+    ``rank_all_operators`` hands every operator one sorted score array; the bits are
+    still checked, so a refactor cannot break the premise silently. Raises
+    AssertionError if any score differs from ``pi``'s in any bit, which voids every result.
     """
     reference = rankings["pi"]
     checked = 0

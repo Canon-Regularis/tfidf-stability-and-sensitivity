@@ -1,22 +1,8 @@
 """Reduction policies, exact logarithms and floating-point environment probes.
 
-The Python half of the bit-exactness contract: every function here has a
-counterpart in ``cpp/include/tfidf/core/`` that must produce byte-identical
-results, and the differential suite asserts that.
-
-Summation order is part of the specification: ``(a + b) + c`` and ``a + (b + c)``
-are different computations in binary64, and README section 2 writes sums without
-bracketing, so the normative reading is a left-to-right fold
-(:data:`Reduction.NAIVE`, used for every published result). The other policies
-are instruments; the spread between them measures the floating-point noise floor
-the near-tie tolerance tau of section 7.1 is derived from. See
-``docs/spec_addenda.md#g13``.
-
-IEEE-754 mandates correct rounding for ``+ - * / sqrt`` but not for ``log``, so
-platform libms disagree: 15.16% of idf entries on this project's reference
-machine differ from the correctly-rounded value. idf is computed once over the
-vocabulary and never in a hot loop, so :func:`correctly_rounded_log_ratio` buys
-cross-platform bit-reproducibility for a few microseconds.
+Functions match ``cpp/include/tfidf/core/`` bit for bit. Published sums use :data:`Reduction.NAIVE`
+(section 2); policy spread sets tau (section 7.1); idf uses :func:`correctly_rounded_log_ratio`.
+Specified in ``docs/spec_addenda.md#g13``. Rationale: docs/engineering_notes.md#bit-exactness
 """
 
 from __future__ import annotations
@@ -29,9 +15,12 @@ from decimal import Decimal, getcontext, localcontext
 from enum import Enum
 from typing import Final
 
+from tfidf_stability.utils.validation import NumericEnvironmentError
+
 __all__ = [
     "DECIMAL_LOG_PRECISION",
     "Reduction",
+    "assert_sane_float_environment",
     "bits_of",
     "correctly_rounded_log_ratio",
     "exact_sum",
@@ -39,6 +28,7 @@ __all__ = [
     "naive_sum",
     "neumaier_sum",
     "pairwise_sum",
+    "platform_log_ratio",
     "reduce_sum",
     "same_bits",
     "sqrt",
@@ -51,11 +41,9 @@ __all__ = [
 #: evaluation on every ratio this project produces.
 DECIMAL_LOG_PRECISION: Final[int] = 60
 
-#: Block size for :func:`pairwise_sum`, matching numpy's. Equal block sizes do
-#: not make the two agree: numpy unrolls its base case into eight accumulators,
-#: so its order departs from a straight fold well below the boundary, and the
-#: results differ at 208 of 262 sizes tried, first at n = 8. The contract is
-#: agreement with the C++ core, which holds bit for bit from n = 1 to 10,000.
+#: Block size for :func:`pairwise_sum`, equal to numpy's. numpy unrolls its base case into
+#: eight accumulators, so numpy's sum and this one differ at 208 of 262 tested lengths, first
+#: at n = 8. The contract is agreement with the C++ core, bit for bit from n = 1 to 10,000.
 _PAIRWISE_BLOCK: Final[int] = 128
 
 
@@ -120,16 +108,9 @@ def neumaier_sum(values: Iterable[float]) -> float:
 def pairwise_sum(values: Iterable[float]) -> float:
     """Pairwise summation; error grows as O(log n) rather than O(n).
 
-    Streaming form: values accumulate into blocks of :data:`_PAIRWISE_BLOCK`, and
-    completed blocks merge through a binary-counter stack combining equal-weight
-    partials, giving a balanced tree without knowing the length in advance. The
-    dot-product kernel consumes products one at a time and cannot see the
-    intersection size up front, and the C++ core that must match this bit for bit
-    has the same constraint, so ``split at n // 2 and recurse`` is unavailable.
-
-    The two formulations build different trees for any length that is not a power
-    of two times the block size, first disagreeing at n = 129. Both are
-    legitimate pairwise schemes; this one is the pinned specification.
+    Values fill blocks of :data:`_PAIRWISE_BLOCK`; full blocks merge through a binary-counter
+    stack, a balanced tree built in one streaming pass. The result first differs from
+    split-at-n // 2 recursion at n = 129. Rationale: docs/engineering_notes.md#streaming-pairwise
     """
     partials: list[float] = []
     weights: list[int] = []
@@ -140,7 +121,7 @@ def pairwise_sum(values: Iterable[float]) -> float:
         block += v
         in_block += 1
         if in_block == _PAIRWISE_BLOCK:
-            # Merge with any completed partial of equal weight, doubling as we go.
+            # Merge with each completed partial of equal weight, doubling the weight each time.
             carry, weight = block, 1
             while partials and weights[-1] == weight:
                 weights.pop()
@@ -199,24 +180,9 @@ def sqrt(x: float) -> float:
 def correctly_rounded_log_ratio(numerator: int, denominator: int) -> float:
     """Return ``ln(numerator / denominator)``, correctly rounded to binary64.
 
-    ``math.log`` delegates to the platform libm, which IEEE-754 does not require
-    to be correctly rounded. Over ``N`` in {100, 610, 9742, 20000, 50000} and all
-    valid ``df``, the platform result differs from the correctly rounded one in
-    15.16% of cases, leaving idf and every weight, norm and score below it
-    platform-dependent at the 1-ulp level. Evaluating the ratio in
-    :class:`~decimal.Decimal` at :data:`DECIMAL_LOG_PRECISION` digits and
-    rounding once costs a few microseconds per vocabulary entry.
-
-    The division happens before the logarithm, matching section 2.1:
-    ``log(a/b)`` and ``log(a) - log(b)`` differ in 94.53% of the ratios arising
-    at ``N = 9742``.
-
-    Args:
-        numerator: Exact integer numerator (``1 + N`` in section 2.1).
-        denominator: Exact integer denominator (``1 + df(t)``). Must be positive.
-
-    Returns:
-        The correctly-rounded natural logarithm of the exact rational ratio.
+    ``numerator`` (``1 + N``) and ``denominator`` (``1 + df(t)``, section 2.1) must be positive,
+    else ``ValueError``. The ratio is evaluated at :data:`DECIMAL_LOG_PRECISION` digits in
+    :class:`~decimal.Decimal` and rounded once. Rationale: docs/engineering_notes.md#exact-log
     """
     if denominator <= 0:
         raise ValueError(f"denominator must be positive, got {denominator}")
@@ -285,30 +251,17 @@ def ulps_between(a: float, b: float) -> float:
 def _rounding_is_to_nearest() -> bool:
     """Whether the process is rounding to nearest, ties to even, right now.
 
-    Three probes, each a directed mode's disagreement with to-nearest-even. All
-    operands are variables so CPython cannot constant-fold them at compile time
-    and answer under the compiler's mode instead of this process's:
-
-    * ``1 + ulp/2`` is an exact tie between ``1`` and ``1 + ulp``; nearest-even
-      picks ``1``, upward picks ``1 + ulp``.
-    * the same one magnitude down catches downward.
-    * ``1 + 1.5 ulp`` is a tie between ``1 + ulp`` and ``1 + 2 ulp``; nearest-even
-      picks ``1 + 2 ulp`` (even), toward-zero and downward truncate to
-      ``1 + ulp``.
-
-    Python cannot itself change the mode. A C extension can, and a BLAS doing so
-    on load is exactly the hazard this module guards against, so the question is
-    worth asking of the live process rather than of the build.
+    Three exact-tie probes on variables, which CPython cannot constant-fold, detect the
+    upward, downward and toward-zero modes. A C extension such as a BLAS can change the
+    mode on load. Rationale: docs/engineering_notes.md#live-rounding-probe
     """
     one = 1.0
     ulp = 2.0**-52
     half = 2.0**-53
 
-    # One expression rather than three early returns: each probe must run for
-    # the answer to mean anything, and a chain of `if ... return False` leaves
-    # two arcs that only a machine in the wrong rounding mode could take, so
-    # they could never be covered and the 100% gate would have to be waived for
-    # a guard whose whole point is that it can fire.
+    # One expression rather than three early returns: every probe runs, and a chain of
+    # `if ... return False` adds two arcs that only a machine in a directed rounding mode
+    # can take, so no test run covers them and the 100% coverage gate fails.
     no_upward = (one + half) == one
     no_downward = (-one - half) == -one
     no_toward_zero = (one + (ulp + half)) == (one + 2.0 * ulp)
@@ -354,12 +307,9 @@ def assert_sane_float_environment() -> None:
     """
     env = float_environment()
     problems = []
-    # `rounds_live`, not `rounds`. `sys.float_info.rounds` is FLT_ROUNDS captured
-    # when the interpreter was built, so it is the same value whatever the
-    # process later does to the rounding mode -- this arm could not fire, on any
-    # input, which is the failure mode it exists to catch. The C++ half of this
-    # guard reads `std::fegetround()` and always did; only the Python half was
-    # asking a build-time constant a run-time question.
+    # `rounds_live`, not `rounds`: `sys.float_info.rounds` is FLT_ROUNDS captured when the
+    # interpreter was built, so it keeps its value whatever the process later does to the
+    # rounding mode. The C++ half of this guard reads `std::fegetround()` at run time.
     if not env["rounds_live"]:
         problems.append(
             f"the live rounding mode is not round-to-nearest-even "
@@ -370,8 +320,6 @@ def assert_sane_float_environment() -> None:
     if sys.float_info.mant_dig != 53:
         problems.append(f"mantissa has {sys.float_info.mant_dig} bits, expected 53")
     if problems:
-        from tfidf_stability.utils.validation import NumericEnvironmentError
-
         raise NumericEnvironmentError(
             "the floating-point environment is not trustworthy: " + "; ".join(problems)
         )

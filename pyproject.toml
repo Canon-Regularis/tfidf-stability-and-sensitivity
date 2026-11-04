@@ -14,11 +14,10 @@ requires-python = ">=3.11"
 # Code is Apache-2.0; prose and generated reports stay CC BY 4.0. LICENSE.md
 # sets out the split.
 license = "Apache-2.0"
-# BSD-3-Clause because the wheel ships it: the Snowball stemmer is vendored
-# under `preprocessing/_snowball/`, and nanobind is linked into the extension.
-# THIRD_PARTY_NOTICES.md carries the copyright notices that licence requires
-# and its own text does not. MIT is absent: doctest and nanobench are build-
-# and test-only and reach no wheel.
+# BSD-3-Clause because the wheel ships it: the vendored Snowball stemmer
+# (`preprocessing/_snowball/`) and nanobind, linked into the extension.
+# THIRD_PARTY_NOTICES.md holds the copyright notices that licence requires. MIT
+# is absent because doctest and nanobench are build- and test-only.
 license-files = [
   "LICENSES/Apache-2.0.txt",
   "LICENSES/BSD-3-Clause.txt",
@@ -50,13 +49,12 @@ dependencies = ["numpy>=1.24", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0", "pytest-cov>=5.0",
+  "pytest>=9.1", "pytest-cov>=6.2",  # floors: see requirements-dev.txt
   "hypothesis>=6.100",
-  # Exact, matching requirements-dev.txt, which argues why: a linter floor
-  # promises that every future release agrees with this one, and ruff 0.16
-  # stabilising PLR0917 was enough to fail the lint job on a commit that
-  # changed no Python. A floor here would hand a contributor installing
-  # `.[dev]` a different linter from the one CI runs.
+  # Exact, matching requirements-dev.txt: with a floor, `.[dev]` can install a
+  # newer linter than CI runs, and a release that stabilises a rule can fail the
+  # lint job on a commit that changes no Python.
+  # Rationale: docs/engineering_notes.md#linters-pinned-exactly
   "ruff==0.16.2", "mypy==2.3.0",
   "scikit-learn>=1.4",          # external oracle for the differential tests
   # A test-time oracle only, never a runtime dependency: the generated stemmer
@@ -64,8 +62,8 @@ dev = [
   # assert the vendored copy still matches upstream.
   "snowballstemmer>=3.0",
   "types-PyYAML",
-  # The repository ships `.pre-commit-config.yaml`; without this an install of
-  # `.[dev]` cannot run the hooks `ci.yml` now gates on.
+  # Runs the hooks in `.pre-commit-config.yaml`, which `ci.yml` also gates on;
+  # without it an install of `.[dev]` cannot run them.
   "pre-commit>=4.0",
   "reuse[charset-normalizer]>=6.0",
 ]
@@ -88,22 +86,10 @@ minimum-version = "0.10"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["src/tfidf_stability"]
 
-# The two data files the package cannot run without live outside the package
-# directory, so `wheel.packages` alone did not ship them: `pip install
-# tfidf-stability` produced a distribution that could not load its own
-# hash-verified stopword list -- the asset that fixes the vocabulary and
-# therefore every number this project publishes -- nor its normative config.
-#
-# Verified by building a wheel and listing it: before this, neither
-# `stopwords_en_v1.txt` nor `default.yaml` was present.
-#
-# They stay at the repository root rather than moving under src/, because
-# `data/README.md` states the licence position beside them, and
-# `scripts/check_vendored.py`, `data/assets/MANIFEST.sha256` and the docs all
-# address them by that path. `force-include` copies them into the wheel at the
-# location the loaders look for first; see `_resolve_asset_dir` in
-# preprocessing/stopwords.py and `_resolve_default_config` in cli/commands.py,
-# which try the packaged location and fall back to the checkout.
+# The stopword asset and the normative config sit at the repository root, outside
+# the package directory, so `wheel.packages` alone does not ship them.
+# `force-include` copies them to the packaged location the loaders try first.
+# Rationale: docs/engineering_notes.md#wheel-force-include-assets
 wheel.force-include = { "data/assets" = "tfidf_stability/data/assets", "configs" = "tfidf_stability/configs" }
 cmake.version = ">=3.20"
 cmake.build-type = "Release"
@@ -119,7 +105,7 @@ TFIDF_BUILD_TESTS = "OFF"
 # Tooling
 # -----------------------------------------------------------------------------
 [tool.pytest.ini_options]
-minversion = "8.0"
+minversion = "9.1"
 testpaths = ["tests"]
 # The repository root, so `tooling` imports. Not `src`: `tests/conftest.py`
 # adds that only when the package cannot already be imported, which is what
@@ -130,13 +116,11 @@ markers = [
   # Deselected from the coverage job, so a slow test can never be the only cover
   # for a line: if it were, the 100% gate goes red and asks for a fast sibling.
   # Stress tests widen the input domain; they never introduce coverage.
-  "slow: long-running; deselected from the PR coverage run, full in nightly",
+  "slow: long-running; deselected from the coverage job, run by the reference and native jobs",
   "native: requires the compiled native backend",
   "sklearn: requires scikit-learn as an external oracle",
-  # Applied to every @given test and kept that way by check_test_vacuity.py,
-  # which reports an unmarked one. The marker is the selector nightly should
-  # use in place of naming files by hand, a list that drifts the moment a
-  # @given lands in a file nobody remembered to add.
+  # Applied to every @given test; check_test_vacuity.py reports an unmarked one.
+  # The marker selects every property test without a hand-kept list of files.
   "property: Hypothesis property-based test",
   "differential: asserts reference/native bit-exactness",
 ]
@@ -147,7 +131,7 @@ line-length = 100
 target-version = "py311"
 src = ["src", "tests", "scripts", "examples"]
 # Vendored upstream code is verified by SHA-256 against its recorded manifest,
-# not by our style rules. Reformatting it would break that verification.
+# not by the project's style rules. Reformatting it would break that check.
 extend-exclude = ["src/tfidf_stability/preprocessing/_snowball"]
 
 [tool.ruff.lint.isort]
@@ -180,17 +164,18 @@ ignore = [
   # on each makes the serialised form part of the visible contract rather than
   # an inherited behaviour.
   "UP042",
-  # Function-level imports. Used in exactly two situations here, both
-  # intentional: breaking an import cycle (geometry <-> cosine, numerics <->
-  # validation) and deferring an optional dev-only dependency (hypothesis).
+  # Function-level imports. In src/ they keep numpy and the compiled extension off
+  # the stdlib-only reference path and keep CLI start-up from loading what a command
+  # does not use. In scripts/ and tests/ they sit beside the code that needs them,
+  # and keep matplotlib in make_figures.py and hypothesis in conftest.py optional.
   "PLC0415",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["PLR0915"]
 "notebooks/*" = ["E402"]
-# Full-width and zero-width characters appear as *test data* here, because the
-# point of the test is that NFKC folds them.
+# Full-width and zero-width characters appear here as test data: the test
+# asserts that NFKC folds them.
 "tests/test_preprocessing_determinism.py" = ["RUF001", "PLE2515"]
 # Structural validators read best as a sequence of guard clauses.
 "src/tfidf_stability/vectorisation/sparse.py" = ["PLR0911"]
@@ -223,21 +208,15 @@ follow_imports = "skip"
 branch = true
 source = ["src/tfidf_stability"]
 omit = [
-  # The compiled extension only, not the package beside it. This read
-  # `*/_native/*`, which was aimed at the .pyd and also caught
-  # `_native/__init__.py` -- 44 statements of this project's own Python that
-  # choose the backend, guard the ABI and self-test the floating-point
-  # environment. The repository reported 100% while that file sat at 69%, and
-  # what the gap hid was that `check_float_environment` had no test and no
-  # caller, though it is the guard against a BLAS setting flush-to-zero and
-  # flushing the subnormal margins this project is a study of.
+  # The compiled extension only. `_native/__init__.py` beside it is first-party
+  # Python that chooses the backend, guards the ABI and self-tests the
+  # floating-point environment, so coverage measures it.
+  # Rationale: docs/engineering_notes.md#coverage-omits-only-compiled-extension
   "*/_native/_tfidf_native*",
-  # Vendored Porter2, already excluded from ruff and mypy for the same reason:
-  # it is identified by hash against MANIFEST.sha256, and reformatting it breaks
-  # that identity. Covering it would test snowballstemmer 3.1.1, not this project.
-  # The evidence it runs is the 42,649-word official conformance vector pair,
-  # replayed by tests/test_preprocessing_determinism.py.
-  # It is scope, not progress: the project measured 91% with and without it.
+  # Vendored Porter2, excluded from ruff and mypy because its identity is its hash
+  # in MANIFEST.sha256; covering it would test snowballstemmer, not this project.
+  # tests/test_preprocessing_determinism.py replays the 42,649-word official
+  # conformance vectors against it.
   "*/preprocessing/_snowball/*",
 ]
 
@@ -245,8 +224,7 @@ omit = [
 exclude_lines = [
   "pragma: no cover",
   "if TYPE_CHECKING:",
-  # A Protocol's body is a declaration, not code. One regex retires the whole
-  # class of them rather than an annotation per site that drifts as the protocol
-  # grows.
+  # A Protocol's body is a declaration, not code. One regex excludes every such
+  # body, so no site needs its own pragma.
   '^\s*\.\.\.$',
 ]

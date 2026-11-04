@@ -1,29 +1,8 @@
-"""Timing the native backend against the normative reference.
+"""Time the native backend against the normative reference.
 
-The C++20 core exists as an optimisation, so it has to be fast while staying
-bit-identical. The differential suite enforces bit-identity; nothing enforced
-speed, which left "fast" as an assertion. This module measures it.
-
-Four rules shape the design.
-
-A benchmark is never a correctness escape hatch. Every comparison proves the two
-backends produced bit-identical results before it may report a ratio, and raises
-:class:`BitIdentityError` otherwise. Nobody reads timing output looking for wrong
-answers.
-
-The minimum rather than the mean. See :func:`measure`.
-
-Reference-only is a first-class mode: a contributor with no compiler gets
-reference-only timings rather than an error.
-
-Like-for-like, or say so. Two comparisons pair operations of different scope (the
-native index constructor also builds an inverted index the reference has no
-counterpart for) and carry a note giving the direction of the bias.
-
-The workload is the seeded synthetic corpus, which contains exact duplicates and
-twin pairs. The ranking rows need those: on distinctly scored documents the
-tie-break is never consulted, so random scores would time the comparator's first
-component and nothing else.
+Each comparison with a native side proves bit-identity before timing, else raises
+:class:`BitIdentityError`; :func:`measure` reports the minimum; with no native
+backend, timings are reference-only. Rationale: docs/engineering_notes.md#benchmark-design
 """
 
 from __future__ import annotations
@@ -89,13 +68,9 @@ class BitIdentityError(TfidfStabilityError):
 class Timing:
     """One measured cost, with everything needed to judge it.
 
-    Attributes:
-        label: What was timed.
-        backend: ``"reference"`` or ``"native"``.
-        seconds: Best observed cost of a single call.
-        repeats: How many timed batches the best was taken over.
-        inner: Calls per batch, chosen automatically so each batch clears
-            :data:`_MIN_BATCH_SECONDS`.
+    Fields: ``label`` (what was timed), ``backend`` (``"reference"`` or ``"native"``),
+    ``seconds`` (best single-call cost), ``repeats`` (timed batches) and ``inner``
+    (calls per batch, sized so each batch clears :data:`_MIN_BATCH_SECONDS`).
     """
 
     label: str
@@ -146,16 +121,9 @@ def measure(
 ) -> Timing:
     """Time ``fn`` and report the minimum per-call cost over ``repeats`` batches.
 
-    Timing noise is one-sided: a run interrupted by another process, a page fault
-    or a cache eviction can only be slower. The mean therefore estimates the true
-    cost plus a machine-dependent noise term, while the minimum is the sample
-    closest to interference-free execution. It is biased low against what a user
-    sees on a busy machine, which is the right trade when comparing two
-    implementations, where a shared additive term only obscures the difference.
-
-    A warm-up call precedes everything, so lazy imports, a cold branch predictor
-    and freshly allocated arenas land outside the measurement rather than on the
-    first batch.
+    Timing noise is one-sided, so the minimum is the sample closest to
+    interference-free execution. One untimed warm-up call precedes the batches.
+    Rationale: docs/engineering_notes.md#benchmark-minimum-not-mean
     """
     if repeats < 1:
         raise ValueError(f"repeats must be at least 1, got {repeats}")
@@ -176,11 +144,9 @@ def measure(
 def check_same_bits(reference: Sequence[float], native: Sequence[float], what: str) -> str:
     """Verify two float sequences are bit-identical, or raise.
 
-    Bit patterns, the standard the differential suite holds the native backend
-    to: ``==`` calls ``-0.0`` and ``0.0`` equal, and a tolerance permits the
-    divergence this project exists to detect.
-
-    Returns a short description of what was checked, for the report.
+    Compares bit patterns: ``==`` calls ``-0.0`` and ``0.0`` equal, and a
+    tolerance permits the divergence this project detects. Returns a short
+    description of what was checked, for the report.
     """
     if len(reference) != len(native):
         raise BitIdentityError(
@@ -224,17 +190,11 @@ def check_same_order(reference: Sequence[int], native: Sequence[int], what: str)
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class Comparison:
-    """One operation timed on both backends, with the identity check that
-    licensed its ratio.
+    """One operation timed on both backends, with its identity check.
 
-    Attributes:
-        name: The operation.
-        reference: Reference timing; always present.
-        native: Native timing, or ``None`` when the backend is unavailable or
-            the operation has no native counterpart.
-        verified: What was proven identical before timing.
-        note: Where the two sides differ in scope, with the direction of the
-            resulting bias.
+    Fields: ``name``, ``reference`` (always present), ``native`` (``None`` when the
+    backend is unavailable or the operation has no native counterpart), ``verified``
+    (what was proven identical before timing) and ``note`` (scope difference and bias).
     """
 
     name: str
@@ -265,8 +225,7 @@ class Comparison:
 class Workload:
     """The corpus and query set the timings are measured on.
 
-    Recorded in full beside the numbers: a speedup without its problem size says
-    nothing.
+    Recorded in full beside the numbers, since a speedup depends on problem size.
     """
 
     n_docs: int = 2000
@@ -526,12 +485,8 @@ def _index_comparison(fixture: _Fixture, native: _NativeFixture | None, repeats:
 
     def verify() -> str:
         # Checks what `native_call` builds, not the index `_build_native_fixture`
-        # prepared earlier. The two take the same arguments, so they agree -- but
-        # only the timed expression has to be right for the ratio to mean
-        # anything, and an argument wrong here alone would have been timed and
-        # reported as a speedup without ever being compared against the
-        # reference. Every other row verifies the object it times; this one did
-        # not, and the difference is invisible until the two disagree.
+        # prepared, so the object compared against the reference is the object
+        # timed, as in every other row.
         built = native_call()
         return check_same_bits(
             model.matrix.row_norms(Reduction.NAIVE),
@@ -732,16 +687,9 @@ def run_benchmarks(
 ) -> BenchmarkReport:
     """Run every comparison and return the report.
 
-    Args:
-        workload: Corpus and query sizes. Defaults to :class:`Workload`.
-        repeats: Timed batches per measurement; the minimum is reported.
-        use_native: Set ``False`` to force the reference-only path even where the
-            compiled backend exists, which is how the no-compiler install's
-            benchmark is exercised on a machine that has a compiler.
-
-    Raises:
-        BitIdentityError: If any native result differs from the reference. No
-            timing is reported in that case.
+    ``workload`` defaults to :class:`Workload`; ``repeats`` is batches per measurement;
+    ``use_native=False`` forces the reference-only path. Raises ``BitIdentityError``,
+    with no timing reported, if any native result differs from the reference.
     """
     workload = workload or Workload()
     fixture = _build_fixture(workload)
@@ -792,8 +740,7 @@ def _format_seconds(seconds: float) -> str:
 def format_report(report: BenchmarkReport) -> str:
     """Render a report as a plain-text table.
 
-    The check sits beside the ratio: a row whose check is empty has a speedup
-    that means nothing.
+    Each row prints its identity check beside its speedup.
     """
     w = report.workload
     lines = [

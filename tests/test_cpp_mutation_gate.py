@@ -1,17 +1,13 @@
-"""The C++ mutation allowlist, checked without running a campaign.
+"""The C++ mutation allowlist, checked in seconds without running a campaign.
 
-A campaign takes hours, so the failure it would report -- an argument that no
-longer describes the code it points at -- would surface a night later at the
-earliest, and only on the header that happened to be scheduled. These checks are
-the part that can run in a second: every claim must name a line that exists, a
-column that holds the token it claims, and a digest that still matches.
-
-The campaign itself is `tooling/mutation_cpp.py`, which owns the other two
-failure modes: an unlisted survivor, and an entry matching no survivor.
+Every claim must name a line that exists, a column holding its token, and a
+digest matching the line. `tooling/mutation_cpp.py` reports the other two
+failures: an unlisted survivor, and an entry that matches no survivor.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -90,8 +86,8 @@ def test_every_claim_names_a_column_holding_the_token_it_claims() -> None:
         assert actual == before, (
             f"{path}:{line}:{column} claims {before!r} -> {after!r} but the source holds {actual!r}"
         )
-        # And the scanner must agree it is a candidate there: a token inside a
-        # comment or a string is never mutated, so a claim about one is dead.
+        # The scanner must also produce this mutation somewhere in the file: it
+        # never mutates a token inside a comment or a string.
         candidates = {(off, b, a) for off, b, a in harness.scan(text) if b == before and a == after}
         assert candidates, f"{path}: the scanner produces no {before} -> {after} at all"
 
@@ -107,9 +103,11 @@ def test_every_claim_carries_an_argument_and_not_only_a_stamp() -> None:
 
 
 def test_an_entry_without_a_column_is_refused(tmp_path: Path) -> None:
-    """The Python allowlist keys on an AST node kind; this one has only position,
-    so an entry that omits the column cannot say which token it means and must
-    not be honoured by default."""
+    """An entry that omits the column is not loaded.
+
+    The Python allowlist keys on an AST node kind; this one keys on position
+    alone, so an entry without a column cannot say which token it means.
+    """
     allowlist = tmp_path / "equivalent_mutants_cpp.txt"
     module = Path("cpp/include/tfidf/core/reduction.hpp")
     harness.EQUIVALENTS = allowlist
@@ -137,15 +135,11 @@ def test_an_entry_whose_only_reason_is_its_stamp_is_refused(tmp_path: Path) -> N
 
 
 def test_the_scanner_never_mutates_a_comment_or_a_string() -> None:
-    """The property the whole approach rests on: a mutation that lands in a
-    comment is not a mutant, and one that lands in a string literal changes a
-    message rather than a behaviour. Either would be scored as a survivor and
-    read as a gap in the tests.
+    """No candidate is offered in a comment, string or preprocessor line.
 
-    The declaration below avoids a pointer, deliberately: the scanner cannot
-    tell the `*` of `char*` from multiplication and offers it as a candidate.
-    That mutation does not compile, so it costs a build and is scored stillborn
-    rather than producing a wrong verdict.
+    A mutation there would score as a survivor and read as a gap in the tests.
+    The fixture has no pointer: the scanner reads the `*` of `char*` as
+    multiplication, and that mutant fails to compile and scores stillborn.
     """
     source = (
         "// a < b and a > b in a line comment\n"
@@ -172,9 +166,11 @@ def test_the_scanner_never_mutates_a_comment_or_a_string() -> None:
     [("<", "<="), (">", ">="), ("==", "!="), ("&&", "||"), ("+", "-"), ("0", "1")],
 )
 def test_each_mutation_kind_is_produced_on_a_line_that_uses_it(before: str, after: str) -> None:
-    """Guards the operator table against a silent shrink: dropping an entry would
-    quietly stop testing that operator everywhere, and the campaign would report
-    a better score for it."""
+    """Each operator in the table is produced on a line that uses it.
+
+    A dropped table entry stops testing that operator everywhere, and the
+    campaign reports a better score for it.
+    """
     source = "if (a < b && c > d && e == f) { x = x + 0; }\n"
     produced = {(b, a) for _, b, a in harness.scan(source)}
     assert (before, after) in produced
@@ -213,11 +209,47 @@ def test_a_green_baseline_starts_the_campaign_and_is_judged_unmutated() -> None:
     assert calls == [("build-tests", "tfidf_tests", 60)]
 
 
-#: Headers whose campaign has not been triaged, so they cannot join the nightly
-#: matrix without failing it every night. Each must say why; moving one out means
-#: killing its survivors or arguing them in configs/equivalent_mutants_cpp.txt.
-#: Currently empty: every header is scheduled. The mapping stays so a new
-#: header can be deferred here with its reason.
+def test_a_header_left_mutated_by_an_interrupted_run_is_repaired(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A header left mutated by an interrupted run is restored from the marker.
+
+    The campaign's restore runs in a `finally`, which SIGKILL does not reach.
+    The marker carries the pristine text, so the next run repairs the header
+    before the baseline, which would otherwise fail for an unrelated reason.
+    """
+    pristine = "a <= b\n"
+    header = tmp_path / "cpp" / "include" / "x.hpp"
+    header.parent.mkdir(parents=True)
+    marker = tmp_path / ".mutation-cpp-interrupted.json"
+    marker.write_text(
+        json.dumps({"original": pristine, "path": "cpp/include/x.hpp"}, sort_keys=True),
+        encoding="utf-8",
+        newline="",
+    )
+    header.write_text("a < b\n", encoding="utf-8", newline="")
+
+    monkeypatch.setattr(harness, "REPO", tmp_path)
+    monkeypatch.setattr(harness, "INTERRUPTED", marker)
+
+    assert harness.restore_interrupted() == "cpp/include/x.hpp"
+    assert header.read_text(encoding="utf-8") == pristine, "the mutant must be gone"
+    assert not marker.exists(), "the marker must not survive the repair it describes"
+
+
+def test_a_run_with_no_marker_repairs_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ordinary case: no interrupted run, so nothing is touched."""
+    monkeypatch.setattr(harness, "INTERRUPTED", tmp_path / "absent.json")
+
+    assert harness.restore_interrupted() is None
+
+
+#: Headers whose campaign has not been triaged, keyed to the reason they are
+#: kept out of the nightly matrix. Moving one out means killing its survivors
+#: or arguing them in configs/equivalent_mutants_cpp.txt. Empty: every header
+#: is scheduled; the mapping stays so a new header can be deferred here.
 _NOT_YET_RECONCILED: dict[str, str] = {}
 
 
@@ -239,18 +271,11 @@ def _headers() -> set[str]:
 
 
 def test_every_header_is_either_scheduled_or_named_as_pending() -> None:
-    """A header must not go unmutated in silence, in either direction.
+    """Every header is scheduled in the matrix or deferred with a reason.
 
-    The campaign is a matrix of explicit paths rather than a glob: a glob would
-    also pick up whatever lands in cpp/include next, and there is no way to
-    spell "this one is deliberately excluded" in one. The cost is that the list
-    can fall behind, which is what this refuses -- a new header has to be either
-    scheduled or explicitly deferred, with a reason.
-
-    The matrix holds only headers whose survivors are all killed or argued. One
-    whose campaign has not been triaged would fail nightly whatever the state of
-    the tests, and a gate that always fails stops being read -- the argument
-    configs/equivalent_mutants.txt makes about itself.
+    The matrix is a list of explicit paths rather than a glob, so it can drift
+    from the headers in cpp/include; this check refuses drift either way.
+    Rationale: docs/engineering_notes.md#cpp-mutation-matrix-is-explicit
     """
     listed, present, pending = _matrix(), _headers(), set(_NOT_YET_RECONCILED)
 
@@ -271,8 +296,11 @@ def test_every_header_is_either_scheduled_or_named_as_pending() -> None:
 
 
 def test_no_equivalence_is_argued_for_a_header_the_nightly_never_runs() -> None:
-    """An argument nothing rechecks decays exactly like the line numbers it is
-    anchored to. Every claim must belong to a scheduled header."""
+    """Every argued equivalence belongs to a header the nightly runs.
+
+    An argument that nothing rechecks decays with the line numbers it is
+    anchored to.
+    """
     listed = _matrix()
     claimed = {path for path, *_ in _entries()}
 
@@ -284,10 +312,10 @@ def test_no_equivalence_is_argued_for_a_header_the_nightly_never_runs() -> None:
 
 
 def test_the_entry_the_gate_suggests_actually_loads(tmp_path: Path) -> None:
-    """The diagnostic is the only instruction a reader gets, and its first
-    version omitted the column -- which the loader requires, so pasting the
-    suggestion produced a claim that was silently ignored and the gate failed
-    again on the next run with the same message.
+    """The entry the gate suggests is accepted by its own loader.
+
+    The diagnostic is the only instruction a reader gets, and the loader
+    requires a column, so the suggestion must carry one.
     """
     module = Path("cpp/include/tfidf/core/reduction.hpp")
     survivor = {
@@ -300,8 +328,8 @@ def test_the_entry_the_gate_suggests_actually_loads(tmp_path: Path) -> None:
     suggestion = harness.suggested_entry(module.as_posix(), survivor)
 
     allowlist = tmp_path / "equivalent_mutants_cpp.txt"
-    # The placeholder stands in for the argument a reader writes; the point is
-    # that the surrounding syntax parses.
+    # The placeholder stands in for the argument a reader writes; only the
+    # surrounding syntax is under test.
     allowlist.write_text(suggestion + "\n", encoding="utf-8")
     harness.EQUIVALENTS = allowlist
 
@@ -367,17 +395,11 @@ def _resolved_cache(name: str) -> dict[str, str]:
 
 
 def test_the_mutation_baseline_does_not_treat_warnings_as_errors() -> None:
-    """Warnings-as-errors and mutation testing are incompatible purposes.
+    """The mutation baseline does not build with warnings as errors.
 
-    A mutation deliberately writes code that trips a warning: `< -> <=` makes a
-    comparison always true, `+ -> -` converts a sign, `|| -> &&` makes a branch
-    unreachable. Under `-Werror` those mutants fail to compile and score
-    `stillborn`, counted neither killed nor survived, so the tests never see
-    them. Measured on `sort_keys.hpp`: 26 killed and 23 stillborn became 16 and
-    35, and two argued survivors stopped surviving.
-
-    The workflow and the preset are one fact in two files, so this reads the
-    preset the job actually names rather than restating it.
+    Mutants trip warnings by construction; under `-Werror` they score
+    `stillborn` instead of running the tests, so the job's preset is checked.
+    Rationale: docs/engineering_notes.md#mutation-baseline-without-werror
     """
     cache = _resolved_cache(_mutation_preset())
 
@@ -415,12 +437,11 @@ def test_the_campaign_scores_against_the_directory_that_preset_builds() -> None:
 
 
 def test_the_resolver_sees_a_value_a_preset_only_inherits() -> None:
-    """The check above is only meaningful if inheritance is followed.
+    """The resolver follows ``inherits`` to a value a preset does not state.
 
-    `TFIDF_WERROR` is set once, in the hidden `base` preset, and every other
-    preset takes it from there. A resolver that read a preset's own block alone
-    would report nothing for `ci` and so would never catch the mutation preset
-    inheriting it either.
+    `TFIDF_WERROR` is set once, in the hidden `base` preset. A resolver that
+    read a preset's own block alone would report nothing for `ci`, and so
+    would miss a mutation preset that inherits `ON` from `base`.
     """
     assert _resolved_cache("ci").get("TFIDF_WERROR") == "ON", (
         "`ci` states no TFIDF_WERROR of its own, so reading ON proves the "

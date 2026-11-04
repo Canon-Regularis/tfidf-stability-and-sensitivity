@@ -1,25 +1,8 @@
 """Reference vs native for the ranking layer: permutation identity.
 
-A ranking is a sequence of ``int32``, so the claim here is element-by-element
-equality of the two orders. Margins and sorted scores are floats again and go
-back to the bitwise standard.
-
-Permutation identity holds under four separately testable conditions:
-
-1. the sort key is injective: identifier ranks are a bijection, which the native
-   constructor validates and refuses to proceed without;
-2. the key inputs are identical: scores are bit-exact by the scoring
-   differential tests, and the integer ranks cross the boundary as data with no
-   re-derivation on the native side;
-3. the comparison relation is the same in both languages: IEEE ``<`` on finite
-   doubles, with negation (a sign-bit flip) the only arithmetic applied;
-4. the build is not fast-math, per ``test_build_is_reproducible``.
-
-A uniform-random double vector contains a tie with probability near zero, so a
-differential test over random scores exercises none of the tie-break and passes
-with a completely broken attribute table. Scores here come from a small discrete
-alphabet, with a large all-zero block standing in for the zero-norm documents
-short-text corpora produce in bulk.
+A ranking is a sequence of ``int32``, so the claim is element-by-element
+equality of the two orders; margins and sorted scores are floats and stay
+bitwise. Rationale: docs/engineering_notes.md#native-ranking-permutation-identity
 """
 
 from __future__ import annotations
@@ -33,7 +16,7 @@ import pytest
 from tfidf_stability._native import native_available, unavailable_reason
 from tfidf_stability.ranking.attributes import AttributeTable
 from tfidf_stability.ranking.margins import boundary_margin, min_adjacent_margin_top
-from tfidf_stability.ranking.ranker import rank, rank_top_k, sorted_scores_desc
+from tfidf_stability.ranking.ranker import Selection, rank, rank_top_k, sorted_scores_desc
 from tfidf_stability.ranking.sort_keys import SortKeySpec
 from tfidf_stability.ranking.tie_groups import (
     chain_inflation_ratio,
@@ -123,8 +106,11 @@ def test_native_permutation_is_identical(priority: tuple[str, ...]) -> None:
 
 
 def test_the_inputs_really_do_contain_ties() -> None:
-    """Guards the guard: if the generator stopped producing ties, every test in
-    this file would keep passing while testing nothing."""
+    """The generator produces heavy tying and a substantial zero block.
+
+    Without ties, every differential test in this file passes while
+    exercising none of the tie-break.
+    """
     rng = random.Random(4242)
     scores, _ = tie_heavy(rng, 200)
     assert len(set(scores)) < len(scores) / 10, "expected heavy tying"
@@ -132,10 +118,10 @@ def test_the_inputs_really_do_contain_ties() -> None:
 
 
 def test_all_native_selection_strategies_agree() -> None:
-    """The ranking analogue of ``TAAT == DAAT``: unrelated algorithms, one answer.
+    """The three full-ranking native strategies return one permutation.
 
-    Sound because the key is injective: no two documents compare equal, so the
-    "stable" clause is vacuous.
+    `full_sort`, `stable_sort` and `bounded_heap` agree. The key is injective,
+    so no two documents compare equal and the stable-sort clause is vacuous.
     """
     rng = random.Random(777)
     scores, table = tie_heavy(rng, 90)
@@ -229,8 +215,11 @@ def test_native_ladder_reproduces_the_non_transitivity() -> None:
 # Boundary validation
 # ---------------------------------------------------------------------------
 def test_native_ranker_rejects_non_finite_scores() -> None:
-    """G3 requires a re-check here: it is the last line of defence against
-    undefined behaviour inside ``std::sort``."""
+    """The native ranker re-checks G3 and refuses a non-finite score.
+
+    A NaN inside ``std::sort`` is undefined behaviour, so the binding checks
+    before it sorts.
+    """
     rng = random.Random(1)
     scores, table = tie_heavy(rng, 8)
     ranker = native_ranker(table, ATTRS)
@@ -241,8 +230,10 @@ def test_native_ranker_rejects_non_finite_scores() -> None:
 
 
 def test_native_ranker_rejects_non_bijective_identifier_ranks() -> None:
-    """Injectivity of the key is the precondition of permutation identity, so
-    the constructor refuses to build a ranker that cannot deliver it."""
+    """The constructor refuses identifier ranks that are not a bijection.
+
+    Injectivity of the key is the precondition of permutation identity.
+    """
     with pytest.raises(ValueError, match="bijection"):
         nat.NativeRanker(
             np.array([0, 0], dtype=np.int32),
@@ -255,9 +246,9 @@ def test_native_ranker_rejects_non_bijective_identifier_ranks() -> None:
 def test_native_ranker_rejects_an_empty_corpus_as_the_reference_does() -> None:
     """`NativeRanker` refuses an empty corpus, as `rank` does under G17.
 
-    Nothing else in the constructor refuses one: `id_ranks_are_a_bijection`
-    holds vacuously on an empty table. `NativeIndex` admits an empty corpus
-    because scoring one is defined, so the rule covers ranking, not scoring.
+    `id_ranks_are_a_bijection` holds vacuously on an empty table, so the
+    constructor needs its own check. `NativeIndex` admits an empty corpus
+    because scoring one is defined; the rule covers ranking, not scoring.
     """
     empty = np.array([], dtype=np.int32)
     with pytest.raises(ValueError, match="empty corpus") as native:
@@ -278,8 +269,8 @@ def test_a_selection_outside_the_enum_is_refused(selection: int) -> None:
     """`checked_selection` refuses a strategy outside `SELECTION`.
 
     The sort key is injective, so every strategy returns the same permutation
-    and the `default:` arm answers correctly. The cost is provenance: a
-    manifest and a benchmark table would name a strategy that did not run.
+    and without the guard the `default:` arm would answer correctly; a manifest
+    or benchmark table would then name a strategy that did not run.
     """
     rng = random.Random(3)
     scores, table = tie_heavy(rng, 6)
@@ -297,12 +288,42 @@ def test_a_selection_outside_the_enum_is_refused(selection: int) -> None:
         assert len(ranker.rank(native, int(value))) == len(scores), name
 
 
+def test_the_exported_selection_names_are_the_ones_callers_index_by() -> None:
+    """The exported `SELECTION` keys are a contract indexed by literal name.
+
+    `benchmarks/tfidf_perf.py` indexes `SELECTION` by `"full_sort"` and
+    `"bounded_heap"`; a rename would surface as a KeyError inside a benchmark.
+    The out-of-enum test iterates whatever keys exist, so only this pins them.
+    """
+    assert set(nat.SELECTION) == {
+        "full_sort",
+        "stable_sort",
+        "partial_sort",
+        "nth_element",
+        "bounded_heap",
+    }
+
+
+def test_the_two_selection_enumerations_differ_on_purpose() -> None:
+    """C++ and Python name different selection strategies.
+
+    The sort key is injective, so every strategy returns the same permutation
+    and the two sides are independent implementations rather than a mirror.
+    """
+    cpp = set(nat.SELECTION)
+    py = {s.value for s in Selection}
+
+    assert cpp & py == {"full_sort", "stable_sort"}
+    assert cpp - py == {"bounded_heap", "nth_element", "partial_sort"}
+    assert py - cpp == {"heap_all", "heap_top_k", "insertion"}
+
+
 def test_the_tie_group_binding_guards_refuse_what_the_reference_refuses() -> None:
     """The tie-group binding guards refuse what the reference refuses.
 
-    `checked_tau` and the `j` range check raise `ValueError` on a negative or
-    NaN tau and `IndexError` on an out-of-range centre. Every comparison with
-    a NaN tau is false, so the three tie-group functions would disagree.
+    `checked_tau` raises `ValueError` on a negative or NaN tau and the `j`
+    range check raises `IndexError` on an out-of-range centre. With a NaN tau
+    every comparison is false, so the tie-group functions would disagree.
     """
     scores = np.array([1.0, 0.75, 0.5], dtype=np.float64)
 
@@ -346,10 +367,9 @@ def test_native_ranker_rejects_an_unknown_attribute() -> None:
 def test_both_backends_refuse_a_non_positive_k(k: int) -> None:
     """Both backends refuse a non-positive k.
 
-    ``resolve_k`` rejects one in strict and lenient modes alike. Without the
-    native guard, ``std::min(k, n)`` hands a negative k back as ``k_effective``.
-    One ``except ValueError`` catches both backends; the reference additionally
-    names which rule fired.
+    ``resolve_k`` rejects one in strict and lenient modes alike, and without
+    the native guard ``std::min(k, n)`` returns a negative k as ``k_effective``.
+    One ``except ValueError`` catches both; the reference names which rule fired.
     """
     scores = np.array([1.0, 0.5, 0.25], dtype=np.float64)
 
@@ -386,17 +406,9 @@ def test_the_effective_k_agrees_across_the_boundary_where_k_is_admissible() -> N
 
 
 # ---------------------------------------------------------------------------
-# Signed zeros: the one case where sort stability is observable
+# Signed zeros: `-0.0 == 0.0` holds while the bits differ, so sort stability
+# is observable. Rationale: docs/engineering_notes.md#signed-zero-sort-stability
 # ---------------------------------------------------------------------------
-# `-0.0 == 0.0` is true while the two differ in bits, so an unstable sort may
-# return them in either order. The reference is `sorted(..., reverse=True)`,
-# which is stable; the core used `std::sort`, which is not, and the two
-# disagreed.
-#
-# Every fixture in this file was under sixteen elements, and libstdc++'s
-# introsort falls back to insertion sort below that -- incidentally stable. So
-# the suite agreed everywhere and could not have caught it. Seventeen is where
-# it started.
 _SIGNED_ZERO_SIZES = (17, 33, 64, 129)
 
 
@@ -404,9 +416,9 @@ _SIGNED_ZERO_SIZES = (17, 33, 64, 129)
 def test_sorting_signed_zeros_agrees_bit_for_bit_with_the_reference(size: int) -> None:
     """Stability is observable here, so the two sorts must make the same choice.
 
-    Asserted on bit patterns rather than values, because every value in this
-    array is zero and `==` cannot tell the two apart -- which is the whole
-    reason an unstable sort could diverge here unnoticed.
+    Every value in the array is zero and `==` cannot tell the two apart, so the
+    assertion is on bit patterns. Every size exceeds 16, libstdc++'s
+    insertion-sort cutoff, so an unstable `std::sort` would diverge here.
     """
     scores = [(-0.0 if i % 2 else 0.0) for i in range(size)]
 
@@ -422,12 +434,11 @@ def test_sorting_signed_zeros_agrees_bit_for_bit_with_the_reference(size: int) -
 
 
 def test_the_margin_over_signed_zeros_agrees_bit_for_bit() -> None:
-    """The consequence, and why the sort mattered rather than being cosmetic.
+    """The boundary margin over signed zeros agrees bit for bit.
 
     ``m_k`` is a difference of adjacent sorted scores. Over zeros, ``0.0 - 0.0``
     is ``+0.0`` while ``-0.0 - 0.0`` is ``-0.0``, so a different arrangement
-    produces a differently-signed zero. Measured before the fix: the two
-    backends disagreed in bits at k = 2, 3 and 4.
+    of the signed zeros produces a differently-signed margin.
     """
     scores = [(-0.0 if i % 2 else 0.0) for i in range(17)]
     reference = list(sorted_scores_desc(scores))
@@ -447,8 +458,8 @@ def test_a_zero_length_top_k_is_an_empty_prefix_rather_than_a_refusal() -> None:
     """`m = 0` is a length, not an error, so `top_k` returns an empty prefix.
 
     The reference `Ranking.top_k(0)` returns the empty prefix and the binding
-    matches it. The guard is `m < 0`: `m <= 0` and `m < 1` would refuse this
-    input and agree with `m < 0` on every other one.
+    matches it. The guard is `m < 0`; `m <= 0` and `m < 1` refuse this input
+    and agree with `m < 0` on every other one.
     """
     rng = random.Random(11)
     scores, table = tie_heavy(rng, 5)
@@ -481,9 +492,9 @@ def test_a_top_k_past_the_ranked_documents_is_refused_rather_than_clamped() -> N
 def test_a_priority_longer_than_the_sort_key_is_refused_by_the_binding() -> None:
     """A priority longer than `kMaxAttributes` is refused by the binding.
 
-    `kMaxAttributes` is 4 and `build_keys` is noexcept, so it truncates instead
-    of raising and sorts on a prefix of the requested operator. The reference
-    tuple has no such bound, so the binding enforces it.
+    `kMaxAttributes` is 4 and `build_keys` is noexcept, so it truncates a longer
+    priority and sorts on a prefix of the requested operator. The reference
+    tuple has no such bound, so the binding refuses one.
     """
     ids = np.array([2, 0, 1], dtype=np.int32)
     with pytest.raises(ValueError, match="more attributes than the sort key can carry"):

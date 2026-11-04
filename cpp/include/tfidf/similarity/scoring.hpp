@@ -1,33 +1,8 @@
 // Query scoring: s_i = cos(q, w_i) for every document (README section 2.3).
 //
-// Two structurally different algorithms, required to agree bit for bit. Two
-// independent traversals of the same data, with different memory access
-// patterns and different loop nesting, emitting identical binary64 leaves
-// little room for an indexing or accumulation bug to hide in.
-//
-// --- Why they agree -----------------------------------------------------------
-//
-// TAAT determinism theorem. The outer loop runs over query terms in ascending
-// term identifier and each term contributes at most one addition to any given
-// accumulator, so document d accumulates over
-//
-//     ascending term id over supp(q) INTERSECT supp(w_d), starting from 0.0
-//
-// which is the sequence the merge-based dot product performs. Hence TAAT is
-// bit-identical to a naive row-wise dot product for any reduction that is a
-// pure left fold.
-//
-// It holds only while the outer loop ascends. Blocking or reordering the term
-// loop breaks it, so no such optimisation is applied on the normative path.
-//
-// --- Cost ---------------------------------------------------------------------
-//
-//   TAAT   O(sum of df(t) over query terms) multiply-adds, plus O(|touched|)
-//          divisions rather than O(N), since untouched documents score 0.
-//   DAAT   O(sum of nnz(d) over candidate documents).
-//
-// TAAT wins when the query's terms are individually rare, the usual case for a
-// TF-IDF profile query, and is the default.
+// TAAT (the default) and DAAT agree bit for bit: TAAT's ascending term loop adds
+// each document's products in the merge dot product's order, so it is not reordered.
+// Rationale: docs/engineering_notes.md#scoring-taat-determinism
 #pragma once
 
 #include <tfidf/core/reduction.hpp>
@@ -37,13 +12,43 @@
 #include <algorithm>
 #include <cstddef>
 #include <span>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
 namespace tfidf {
 
-/// Reusable scratch for TAAT. Allocated once and reused across queries, so the
-/// hot loop allocates nothing.
+namespace detail {
+
+/// Preconditions shared by both scoring kernels.
+///
+/// The spans carry their sizes and nothing else checks them, so a short `out` or
+/// `doc_norms` would index past the end. The Python reference `taat_scores`
+/// refuses the first two mismatches and allocates its own output.
+inline void check_scoring_shapes(TermId query_dim,
+                                 TermId n_cols,
+                                 DocId n_rows,
+                                 std::span<const Real> doc_norms,
+                                 std::span<Real> out) {
+    if (query_dim != n_cols) {
+        throw std::invalid_argument("dimension mismatch: query and corpus vocabularies differ");
+    }
+    const auto n = static_cast<std::size_t>(n_rows);
+    if (doc_norms.size() != n) {
+        throw std::invalid_argument("one norm per document is required");
+    }
+    if (out.size() != n) {
+        throw std::invalid_argument("one output slot per document is required");
+    }
+}
+
+}  // namespace detail
+
+/// Reusable scratch for TAAT, sized once and reused across queries.
+///
+/// With `Naive` the loop allocates only when `touched` outgrows the capacity it
+/// keeps across queries. The other policies also allocate one accumulator and
+/// one seen flag per document on every query.
 struct ScoringScratch {
     std::vector<Real> accumulator;  ///< dense, size n_docs
     std::vector<DocId> touched;     ///< which entries are live this query
@@ -54,8 +59,9 @@ struct ScoringScratch {
         touched.reserve(static_cast<std::size_t>(n_docs) / 8 + 16);
     }
 
-    /// Zero only the entries touched by the previous query: O(|touched|) rather
-    /// than O(n_docs), which matters when queries are sparse.
+    /// Zero only the entries the previous query touched.
+    ///
+    /// Costs O(|touched|) rather than O(n_docs), which matters for sparse queries.
     void clear_touched() {
         for (const DocId d : touched) {
             accumulator[static_cast<std::size_t>(d)] = 0.0;
@@ -75,6 +81,7 @@ void score_taat_with(const SparseView& query,
                      Real query_norm,
                      std::span<Real> out,
                      ScoringScratch& scratch) {
+    detail::check_scoring_shapes(query.dim, index.n_cols, index.n_rows, doc_norms, out);
     const auto n_docs = static_cast<std::size_t>(index.n_rows);
     std::fill(out.begin(), out.end(), 0.0);
     if (query_norm == 0.0 || query.empty()) {
@@ -101,11 +108,10 @@ void score_taat_with(const SparseView& query,
             for (std::size_t p = lo; p < hi; ++p) {
                 const DocId d = index.rowidx[p];
                 Real& slot = scratch.accumulator[static_cast<std::size_t>(d)];
-                // A slot that accumulated back to 0.0 would be pushed twice.
-                // Values are non-negative (TF-IDF lives in the non-negative
-                // orthant) and a stored value is never zero in a canonical
-                // sparse structure, so it cannot happen; the duplicate would
-                // only rewrite the same quotient. Asserted in the test suite.
+                // TF-IDF values are non-negative and stored entries non-zero, so a slot stays
+                // 0.0 after an addition only if every product so far underflowed. A duplicate
+                // push only rewrites the same quotient; test_scoring.cpp asserts that each
+                // document enters `touched` once.
                 if (slot == 0.0) {
                     scratch.touched.push_back(d);
                 }
@@ -164,19 +170,23 @@ inline void score_taat(const SparseView& query,
             score_taat_with<reduce::Exact>(query, index, doc_norms, query_norm, out, scratch);
             return;
     }
+    // No `default:`, so `-Wswitch` still makes a new enumerator a compile error.
+    // Reached only for a value outside the enumeration, which would otherwise
+    // return leaving `out` unwritten, since the fill is inside the kernel.
+    throw std::invalid_argument("unknown reduction policy");
 }
 
 /// Document-at-a-time scoring: an independent merge per document.
 ///
 /// Shares no structure with TAAT (no inverted index, no dense accumulator) and
-/// must still produce identical bits, which is the strongest check in the
-/// native suite.
+/// produces identical bits, so each kernel checks the other.
 inline void score_daat(const SparseView& query,
                        const CsrView& corpus,
                        std::span<const Real> doc_norms,
                        Real query_norm,
                        std::span<Real> out,
                        Reduction policy) {
+    detail::check_scoring_shapes(query.dim, corpus.n_cols, corpus.n_rows, doc_norms, out);
     if (query_norm == 0.0 || query.empty()) {
         std::fill(out.begin(), out.end(), 0.0);
         return;
