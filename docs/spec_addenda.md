@@ -238,8 +238,8 @@ low-norm vectors") quantitative, and localises it to *vectors with many
 distinct terms*: only a large `nnzᵢ` permits a low norm.
 
 **Verification.** A Hypothesis property test asserts the bound is never violated
-over randomised non-negative sparse inputs, evaluated under exact summation, plus
-a tightness search reporting the empirical `lhs/rhs` ratio.
+over randomised non-negative sparse inputs under the default naive summation, and
+a witness, `u` moved towards an orthogonal `v`, attains the tight form within 1%.
 
 ---
 

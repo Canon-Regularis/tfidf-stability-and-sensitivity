@@ -200,18 +200,21 @@ def test_lipschitz_bound_is_never_violated(
 
 
 def test_lipschitz_bound_is_close_to_attained() -> None:
-    """The tightness ratio over four perturbations is positive and at most 1.
+    """Moving ``u`` towards an orthogonal ``v`` attains the tight bound within 1%.
 
-    ``u'`` moves ``u`` along ``e1`` while ``v = u``, so the observed change is
-    second order in ``eps``; the best ratio is about 0.016.
+    The cosine then changes to first order in ``eps``, and the ratio is about
+    ``1 - eps**2 / 4``. With ``v = w = e0 + e1``, moving ``w`` along ``e1``
+    changes the cosine to second order only, so there the ratio is small.
     """
-    u = sv({0: 1.0, 1: 1.0})
-    v = sv({0: 1.0, 1: 1.0})
-    best = 0.0
+    u, v = sv({0: 1.0}), sv({1: 1.0})
     for eps in (1e-1, 1e-2, 1e-3, 1e-4):
-        up = sv({0: 1.0, 1: 1.0 + eps})
-        best = max(best, lipschitz_constant(u, v, up, v).tightness)
-    assert 0.0 < best <= 1.0
+        bound = lipschitz_constant(u, v, sv({0: 1.0, 1: eps}), v)
+        assert bound.holds
+        assert bound.tightness > 0.99, f"eps={eps}: tightness {bound.tightness}"
+
+    w = sv({0: 1.0, 1: 1.0})
+    second_order = lipschitz_constant(w, w, sv({0: 1.0, 1: 1.1}), w)
+    assert second_order.tightness < 0.02, "the premise: at v = w the change is second order"
 
 
 def test_lipschitz_requires_nonzero_vectors() -> None:
@@ -492,8 +495,8 @@ def test_the_rounding_slack_is_admitted_exactly_and_not_a_hair_further(scale: fl
 def test_tightness_is_the_ratio_and_is_zero_where_there_is_no_bound() -> None:
     """Tightness is `observed / tight`, not the product.
 
-    On the near-attained case both sit close to 1 and the two are hard to tell
-    apart.
+    A ratio and a product agree only where both operands are near 1; `3 / 4`
+    against `3 * 4` tells them apart.
     """
     assert _bound(uniform=9.0, tight=4.0, observed=3.0).tightness == 0.75
     # A zero tight form has no ratio; the `> 0` guard avoids a division by zero.
