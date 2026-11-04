@@ -15,13 +15,13 @@ from unittest.mock import patch
 
 import pytest
 
-from tfidf_stability.cli.commands import (
+from tfidf_stability.cli.commands import write_report
+from tfidf_stability.cli.main import main
+from tfidf_stability.configuration.loading import (
     load_config,
     pipeline_from_config,
     vectoriser_from_config,
-    write_report,
 )
-from tfidf_stability.cli.main import main
 from tfidf_stability.persistence.manifest import RunManifest
 from tfidf_stability.utils.hashing import hash_file
 from tfidf_stability.utils.numerics import Reduction, same_bits
@@ -49,6 +49,29 @@ def test_the_default_config_loads_and_carries_its_digest() -> None:
     config = load_config()
     assert config["_source"] == "default.yaml"
     assert config["_digest"] == hash_file(REPO / "configs" / "default.yaml", text=True)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "_DEFAULT_CONFIG",
+        "_resolve_default_config",
+        "load_config",
+        "pipeline_from_config",
+        "vectoriser_from_config",
+    ],
+)
+def test_the_cli_module_serves_each_configuration_name_as_the_same_object(name: str) -> None:
+    """``cli.commands`` and ``configuration.loading`` hold the same objects.
+
+    The public three are in the CLI module's ``__all__``; the two private names
+    are imported from it by ``tests/test_packaged_assets.py``.
+    """
+    from tfidf_stability.cli import commands
+    from tfidf_stability.configuration import loading
+
+    assert getattr(commands, name) is getattr(loading, name)
+    assert (name in commands.__all__) is not name.startswith("_")
 
 
 def test_the_default_config_matches_the_code_defaults() -> None:
@@ -185,7 +208,7 @@ _APPLIED_KEYS = [
 
 def _fit(config: dict[str, object]) -> str:
     """Fit the mini corpus as ``cmd_build_corpus`` does and return its digest."""
-    from tfidf_stability.cli.commands import pipeline_from_config, vectoriser_from_config
+    from tfidf_stability.configuration.loading import pipeline_from_config, vectoriser_from_config
     from tfidf_stability.utils.io import read_jsonl
 
     records = list(read_jsonl(CORPUS))
@@ -211,7 +234,7 @@ def test_the_keys_no_fixture_can_exercise_are_still_read() -> None:
     cannot change this corpus: ASCII, six documents, no n-gram spanning a gap.
     The values are asserted on the objects instead.
     """
-    from tfidf_stability.cli.commands import pipeline_from_config, vectoriser_from_config
+    from tfidf_stability.configuration.loading import pipeline_from_config, vectoriser_from_config
 
     config = load_config()
     config["preprocessing"]["unicode_form"] = "NFD"
@@ -614,7 +637,7 @@ def test_two_unicode_forms_produce_different_digests() -> None:
     corpus with U+FB01, the fi ligature: NFKC folds it to "fi" and NFC leaves
     it alone, so the two forms yield different vocabularies and digests.
     """
-    from tfidf_stability.cli.commands import pipeline_from_config, vectoriser_from_config
+    from tfidf_stability.configuration.loading import pipeline_from_config, vectoriser_from_config
 
     records = [
         {"doc_id": "d0", "text": "ﬁle sharing"},

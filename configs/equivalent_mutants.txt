@@ -199,7 +199,7 @@ src/tfidf_stability/cli/main.py  105  constant  False -> True  # src=d898869c ar
 src/tfidf_stability/cli/main.py  111  constant  False -> True  # src=cef12337 likewise for version
 
 # --- cli/commands.py -------------------------------------------------------
-src/tfidf_stability/cli/commands.py  517  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
+src/tfidf_stability/cli/commands.py  326  constant  True -> False  # src=1a072351 write_report writes through atomic_write_text, which always emits LF, so the digest is identical either way
 
 # --- datasets/synthetic.py -------------------------------------------------
 src/tfidf_stability/datasets/synthetic.py  107  constant  1 -> 0  # src=a05543f2 the quotient reaches zero only above a vocabulary of 2**40 terms
