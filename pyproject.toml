@@ -49,7 +49,7 @@ dependencies = ["numpy>=1.24", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0", "pytest-cov>=5.0",
+  "pytest>=9.1", "pytest-cov>=6.2",  # floors: see requirements-dev.txt
   "hypothesis>=6.100",
   # Exact, matching requirements-dev.txt: with a floor, `.[dev]` can install a
   # newer linter than CI runs, and a release that stabilises a rule can fail the
@@ -105,7 +105,7 @@ TFIDF_BUILD_TESTS = "OFF"
 # Tooling
 # -----------------------------------------------------------------------------
 [tool.pytest.ini_options]
-minversion = "8.0"
+minversion = "9.1"
 testpaths = ["tests"]
 # The repository root, so `tooling` imports. Not `src`: `tests/conftest.py`
 # adds that only when the package cannot already be imported, which is what

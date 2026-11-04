@@ -7,8 +7,11 @@ scikit-build-core>=0.10
 nanobind>=2.0
 
 # --- test -------------------------------------------------------------------
-pytest>=8.0
-pytest-cov>=5.0
+# pytest 9.0 added faulthandler_exit_on_timeout, which every workflow running
+# pytest sets; an older one drops the -o key silently. 9.1 stopped ignoring the
+# strict flags in addopts. pytest-cov 6.2 keeps its warnings from failing a run.
+pytest>=9.1
+pytest-cov>=6.2
 hypothesis>=6.100
 
 # External oracles for the differential tests. scikit-learn's TfidfVectorizer
