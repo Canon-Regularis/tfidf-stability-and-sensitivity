@@ -1,24 +1,8 @@
 """User-profile documents (README section 3, ``spec_addenda.md#g11``).
 
-Section 3: "User-specific documents are constructed from interactions such as
-liked, viewed, or favourited items. These user-profile documents are embedded
-using the **same vocabulary and IDF mapping as the corpus**."
-
-Aggregation
------------
-Section 7.1 says a profile is built "by aggregating **text** from a user's
-interacted items", which pins :attr:`ProfileAggregation.TEXT_CONCAT` as the
-normative mode. Its consequence, which the paper does not draw out:
-
-    concatenating token streams makes ``tf`` a length-weighted average, so one
-    verbose item can dominate a user's profile however many other items they
-    interacted with.
-
-That is a stability question in its own right (a profile whose direction is set
-by one long document is fragile in the way section 1.1 cares about), so
-:attr:`ProfileAggregation.VECTOR_MEAN` and :attr:`ProfileAggregation.VECTOR_SUM`
-are implemented as ablations, weighting each item equally in the embedding space
-rather than by token count. The default stays the paper's.
+Section 7.1 makes :attr:`ProfileAggregation.TEXT_CONCAT` normative (length-weighted);
+:attr:`ProfileAggregation.VECTOR_MEAN` and :attr:`ProfileAggregation.VECTOR_SUM` weight
+items equally as ablations. Rationale: docs/engineering_notes.md#profile-aggregation
 """
 
 from __future__ import annotations
@@ -64,11 +48,9 @@ class ProfileAggregation(str, Enum):
 class Interaction:
     """One user-item interaction.
 
-    ``weight`` carries the rating or engagement value the interaction came with.
-    The aggregation ignores it: section 7.1 describes an unweighted aggregation
-    of interacted text, and adding a weighting the paper does not specify would
-    move every published number. Retained so an eligibility filter can run over
-    it, and so a weighted variant can arrive later as a declared ablation.
+    ``weight`` holds the rating or engagement value. Only the eligibility filter reads
+    it: section 7.1 specifies an unweighted aggregation, and a weighting would move
+    every published number.
     """
 
     user_id: str
@@ -91,10 +73,9 @@ class UserProfile:
     def __post_init__(self) -> None:
         """Normalise the aggregation to the member, refusing an unknown value.
 
-        ``ProfileAggregation`` is a ``str`` enum, so ``"vector_mean"`` equals the
-        member without being it. :func:`embed_profile` selects the divisor with
-        ``is``, so that string sums instead of averaging. The profile norm moves,
-        and section 4.2's bounds are stated in terms of norms.
+        ``"vector_mean"`` equals the ``str`` enum member without being it, and
+        :func:`embed_profile` selects the divisor with ``is``; the string would sum
+        instead of averaging and move the norm that section 4.2's bounds use.
         """
         object.__setattr__(self, "aggregation", ProfileAggregation(self.aggregation))
 
@@ -110,25 +91,9 @@ def group_interactions(
 ) -> dict[str, tuple[str, ...]]:
     """Group interactions by user, applying the eligibility filter of G10(5).
 
-    Args:
-        interactions: All interactions.
-        min_weight: Keep only interactions at or above this weight. A NaN
-            threshold keeps everything, because the comparison below is
-            false for every weight; that is the same no-op as ``None``
-            rather than an error, and no caller constructs one. Spelled
-            ``weight < min_weight`` rather than the negated form used for
-            the tau thresholds, because there is no non-negative domain
-            here: a negative threshold is a legal way to keep everything.
-            For
-            MovieLens this is the ``rating >= 4.0`` threshold deciding what
-            "interacted" means, a choice section 7.1 leaves open and that
-            materially changes the profile.
-
-    Returns:
-        ``{user_id: (doc_id, ...)}`` with items in ascending identifier order
-        rather than arrival order. Interaction files are not order-stable and a
-        concatenated profile's feature tuple follows item order, so the order is
-        canonicalised here rather than inherited (G20).
+    Drops interactions with ``weight < min_weight``; ``None`` or a NaN threshold keeps all,
+    and a negative one is legal. Returns ``{user_id: (doc_id, ...)}``, deduplicated, items in
+    ascending UTF-8 byte order (G20). Rationale: docs/engineering_notes.md#profile-eligibility
     """
     grouped: dict[str, list[str]] = {}
     for interaction in interactions:
@@ -146,10 +111,9 @@ def eligible_users(
 ) -> tuple[str, ...]:
     """Users with enough interactions for leave-one-out (G10(4)).
 
-    Five is the pinned threshold: section 7.1's "users with multiple
-    interactions" does not say how many, and below five, holding one item out
-    leaves a profile too thin to be meaningful. Ascending identifier order, so
-    the evaluated query set is reproducible.
+    ``min_interactions`` defaults to the pinned five: section 7.1 gives no count, and
+    fewer items leave a held-out profile too thin. Ascending identifier byte order keeps
+    the evaluated query set reproducible.
     """
     if min_interactions < 2:
         raise ValueError(
@@ -174,43 +138,9 @@ def build_profile(
 ) -> UserProfile:
     """Aggregate a user's items into a profile document.
 
-    Items are concatenated in the order given, which
-    :func:`group_interactions` has already canonicalised into ascending
-    identifier byte order (``spec_addenda.md#g20``).
-
-    What is concatenated is feature streams
-    ---------------------------------------
-    ``features_by_doc`` holds streams already through
-    :meth:`PreprocessingPipeline.preprocess`, so the n-grams exist before this
-    function sees them and no n-gram pass runs over the joined result. Three
-    consequences, each contradicting something written earlier here or in
-    ``spec_addenda.md#g20`` (see ``#g28``):
-
-    * **No seam n-grams.** Text aggregation of ``"quick brown fox"`` and
-      ``"lazy sleeping dog"`` yields the bigram ``fox|lazi``; this yields the
-      union of the two streams and nothing spanning the join.
-    * **Aggregation is already order-insensitive.** Reordering items permutes
-      the feature tuple but leaves the multiset, hence the embedding,
-      bit-identical. G20's canonical ordering still makes the tuple
-      reproducible, which the digest depends on, though no score was moving.
-    * **``separate_items`` is inert**, for the same reason.
-
-    Switching to genuine text aggregation is a research decision: it adds one
-    bigram per item boundary, changes every profile's ``L``, and moves every
-    number in section 7.1.
-
-    Args:
-        separate_items: Insert a gap sentinel between consecutive items. Meant
-            to stop n-grams spanning the seam between two documents, but there
-            are none to stop (above) and the sentinel is out of vocabulary, so
-            it is dropped before reaching a count. Kept because it becomes
-            meaningful once aggregation moves to text; inertness asserted by
-            ``test_separate_items_is_inert_while_aggregation_joins_features``.
-
-    Raises:
-        KeyError: If an item has no feature stream. Skipping it would shrink the
-            profile without record, and profile size is part of what the
-            leave-one-out protocol reports.
+    Joins :meth:`PreprocessingPipeline.preprocess` streams in the order :func:`group_interactions`
+    gives (``spec_addenda.md#g20``); no seam n-gram forms, so ``separate_items`` is inert (G28,
+    amending ``spec_addenda.md#g20``). Rationale: docs/engineering_notes.md#profile-streams
     """
     missing = [d for d in item_ids if d not in features_by_doc]
     if missing:
@@ -251,19 +181,9 @@ def embed_profile(
 ) -> SparseVector:
     """Embed a profile into the corpus's TF-IDF space.
 
-    Uses the model's own vocabulary and IDF mapping in every mode, as section 3
-    requires (``spec_addenda.md#g12``): nothing is refitted and the vocabulary is
-    never extended.
-
-    Args:
-        profile: The aggregated profile.
-        model: The fitted corpus model.
-        features_by_doc: Required for the vector-space aggregations, which embed
-            each item separately.
-        policy: Reduction policy for the vector combination.
-
-    Returns:
-        The profile's TF-IDF vector.
+    Uses the model's vocabulary and IDF in every mode, never refitted or extended
+    (section 3, ``spec_addenda.md#g12``). The vector aggregations raise ``ValueError`` without
+    ``features_by_doc`` and combine the item vectors under the reduction ``policy``.
     """
     if profile.aggregation is ProfileAggregation.TEXT_CONCAT:
         return TfidfVectoriser.transform_query(profile.features, model)
@@ -284,8 +204,8 @@ def embed_profile(
     if divisor == 0.0:
         return SparseVector.zero(len(model.vocabulary))
 
-    # Summed in ascending term-identifier order, matching every other reduction
-    # in this project, so the result is reproducible.
+    # Each term's values are summed in `item_ids` order, and `from_mapping` sorts the
+    # indices ascending, so the result is reproducible.
     return SparseVector.from_mapping(
         {index: reduce_sum(values, policy) / divisor for index, values in accumulated.items()},
         len(model.vocabulary),

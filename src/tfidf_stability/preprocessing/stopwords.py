@@ -1,13 +1,8 @@
 """Stopword removal, backed by a frozen and hash-verified word list.
 
-The stopword set determines the vocabulary and therefore every document
-frequency, idf value and score in this repository, so it is treated as data with
-an identity: a versioned file whose SHA-256 is verified at load and recorded in
-every run manifest, never a library default that can shift between releases.
-
-Removed tokens become a :data:`~tfidf_stability.preprocessing.tokenise.GAP`
-sentinel rather than disappearing, so n-gram construction cannot bridge the hole
-they leave. See ``docs/spec_addenda.md#g7``.
+The list ``configs/default.yaml`` names has its SHA-256 verified at load and recorded in every
+run manifest. Removed tokens become a :data:`~tfidf_stability.preprocessing.tokenise.GAP`
+sentinel so n-grams cannot bridge them. See ``docs/spec_addenda.md#g7``.
 """
 
 from __future__ import annotations
@@ -25,26 +20,11 @@ __all__ = ["StopwordSet", "load_stopwords", "remove_stopwords"]
 
 
 def _resolve_asset_dir(module: Path) -> Path:
-    """Where the frozen stopword list lives, installed or in-tree.
+    """Return the stopword asset directory for ``module``, installed or in-tree.
 
-    Takes the module's own path rather than reading ``__file__`` directly, so
-    both layouts can be exercised: in a source checkout only one of them exists,
-    and the branch that matters for a wheel is the one that cannot be reached
-    from here.
-
-    Two layouts, checked in that order. In a wheel the assets sit inside the
-    package, at ``tfidf_stability/data/assets``. In a source checkout they sit at
-    the repository root, ``data/assets``, beside ``data/README.md`` which
-    explains the licence position -- and they stay there, because the manifest,
-    ``scripts/check_vendored.py`` and the docs all address them by that path.
-
-    The repository-root form used to be the only one. It resolves through
-    ``parents[3]``, which is the repository from ``src/tfidf_stability/
-    preprocessing/``, and the directory *above* ``site-packages`` from an
-    installed distribution -- so an installed package could not load its own
-    stopword list. Nothing caught it because ``tests/conftest.py`` put ``src/``
-    on ``sys.path`` unconditionally, which meant even the wheel's own test
-    command imported the source tree.
+    Checks the wheel layout ``tfidf_stability/data/assets``, then the checkout's ``data/assets``.
+    ``data/README.md`` states their licence; ``scripts/check_vendored.py`` verifies their digests.
+    Rationale: docs/engineering_notes.md#stopword-asset-layout
     """
     packaged = module.resolve().parents[1] / "data" / "assets"
     if packaged.is_dir():
@@ -75,19 +55,9 @@ def _recorded_digest(asset: str) -> str:
 class StopwordSet:
     """An immutable, identified set of stopwords.
 
-    ``digest`` goes into the run manifest, so a result traces back to the word
-    list that produced it.
-
-    Two digests, because they answer different questions and neither subsumes
-    the other. ``digest`` is *provenance*: `load_stopwords` sets it from the
-    asset's raw file bytes, so editing the file in place is detectable even if
-    the parsed set is unchanged. ``content_digest`` is *identity*: derived here
-    from the words themselves, so it cannot be handed in and cannot be wrong.
-
-    `PreprocessingPipeline` publishes the identity, so without a derived digest
-    two sets holding different words could carry one caller-supplied ``digest``
-    and hash alike. `LookupLemmatiser` derives its identity for the same reason,
-    one field along.
+    ``digest`` is provenance, from the raw file bytes via `load_stopwords`, for the run manifest.
+    ``content_digest`` is identity, derived from the words and never supplied.
+    Rationale: docs/engineering_notes.md#stopword-digests
     """
 
     __slots__ = ("_words", "content_digest", "digest", "name")
@@ -134,28 +104,11 @@ class StopwordSet:
 
 @lru_cache(maxsize=8)
 def load_stopwords(asset: str = DEFAULT_STOPWORD_ASSET) -> StopwordSet:
-    """Load a frozen stopword asset from ``data/assets``.
+    """Load the frozen stopword file ``asset`` from ``data/assets``, verified.
 
-    The digest covers the raw file bytes rather than the parsed set, so a changed
-    comment or reordering still shows in the manifest. Cached: the result is
-    immutable, and the file cannot change within a run without invalidating the
-    run's own provenance.
-
-    Args:
-        asset: File name within ``data/assets``.
-
-    Returns:
-        The loaded :class:`StopwordSet`.
-
-    Raises:
-        FileNotFoundError: If the asset is missing.
-        DataIntegrityError: If the asset has no recorded digest, or its bytes do
-            not match it. This module's header, the asset's own header and
-            ``configs/default.yaml`` all said the list was "verified at load"
-            while nothing verified it, until ``data/assets/MANIFEST.sha256``
-            existed. Editing one word silently changed every df, idf and score;
-            the reproducibility snapshot compares runs against each other rather
-            than against a pinned value, so it could not catch that.
+    Returns a cached :class:`StopwordSet` whose digest covers the raw file bytes.
+    Raises FileNotFoundError if absent, DataIntegrityError if its digest is unrecorded or wrong.
+    Rationale: docs/engineering_notes.md#stopword-load-verification
     """
     path = _ASSET_DIR / asset
     raw = path.read_bytes()
@@ -183,20 +136,11 @@ def remove_stopwords(
     *,
     insert_gaps: bool = True,
 ) -> list[str]:
-    """Remove stopwords, leaving a gap sentinel behind by default.
+    """Remove ``stopwords`` from ``tokens``, leaving a gap sentinel by default.
 
-    Args:
-        tokens: Token stream.
-        stopwords: The set to remove.
-        insert_gaps: When ``True`` (the normative setting) each removed token
-            becomes a :data:`GAP` so n-grams cannot span it. When ``False``
-            tokens are dropped, letting "king of pop" produce the spurious bigram
-            "king pop"; ablation only.
-
-    Returns:
-        The filtered token stream. Consecutive gaps are collapsed and leading and
-        trailing gaps dropped, so two inputs differing only in their stopword
-        runs give identical output.
+    With ``insert_gaps=True`` (normative) each removed token becomes a :data:`GAP` so
+    n-grams cannot span it; ``False`` drops it ("king of pop" gives "king pop"), for ablation.
+    Gap runs collapse and edge gaps drop: inputs differing only in stopword runs match.
     """
     out: list[str] = []
     for t in tokens:

@@ -1,40 +1,8 @@
 """Geometric quantities and the perturbation bounds of README section 4.
 
-Section 4.3 states that
-
-    |cos(u', v') - cos(u, v)| <= C (||u' - u|| + ||v' - v||)
-
-"for a constant C depending on lower and upper bounds on the norms" and leaves
-``C`` unspecified, which cannot be computed, tested or used. This module pins it
-and proves it. See ``docs/spec_addenda.md#g4``.
-
-**Theorem.** For non-zero ``u, v, u', v'`` and ``L = min(||u||, ||v||, ||u'||, ||v'||)``,
-
-    |cos(u', v') - cos(u, v)| <= (1/L) (||u' - u|| + ||v' - v||),   i.e. C = 1/L.
-
-*Proof.* Writing ``u_hat = u / ||u||``:
-
-1. ``|<u_hat, v_hat> - <u_hat', v_hat'>| <= |<u_hat - u_hat', v_hat>| +
-   |<u_hat', v_hat - v_hat'>| <= ||u_hat - u_hat'|| + ||v_hat - v_hat'||``, by
-   the triangle inequality and Cauchy-Schwarz with unit vectors.
-2. In an inner-product space the Dunkl-Williams inequality holds with the sharp
-   Hilbert-space constant 2:
-   ``||u/||u|| - u'/||u'|| || <= 2 ||u - u'|| / (||u|| + ||u'||)``.
-3. ``||u|| + ||u'|| >= 2L``, so ``||u_hat - u_hat'|| <= ||u - u'|| / L``; likewise
-   for ``v``. []
-
-A tighter non-uniform form is also provided, and a bound depending only on the
-corpus, with no reference to the perturbation:
-
-    C <= sqrt(max nnz)
-
-which follows because ``idf >= 1`` and ``||tf||_1 = 1`` force
-``||w_i|| >= 1/sqrt(nnz_i)``. That turns section 6's remark that "cosine
-similarity becomes unstable for low-norm vectors" into a quantitative statement
-and localises the instability to short documents.
-
-Every bound here is checked by an adversarial property test that searches for a
-violation rather than confirming a few examples.
+The section 4.3 constant is ``C = 1/L``, ``L = min(||u||, ||v||, ||u'||, ||v'||)``,
+by Dunkl-Williams; ``idf >= 1`` and ``||tf||_1 = 1`` give ``C <= sqrt(max nnz)``.
+See ``docs/spec_addenda.md#g4``. Rationale: docs/engineering_notes.md#cosine-lipschitz-constant
 """
 
 from __future__ import annotations
@@ -99,8 +67,7 @@ class LipschitzBound:
 
     @property
     def holds(self) -> bool:
-        """Whether both bounds are respected, allowing for the rounding incurred
-        while evaluating the bound itself."""
+        """Whether both bounds hold, with slack for rounding in evaluating them."""
         slack = 1e-12 * max(1.0, self.uniform) + 1e-15
         return self.observed <= self.uniform + slack and self.observed <= self.tight + slack
 
@@ -119,15 +86,9 @@ def lipschitz_constant(
 ) -> LipschitzBound:
     """Evaluate the section 4.3 bound for a concrete perturbation.
 
-    Returns a :class:`LipschitzBound` carrying the uniform constant, both bound
-    values and the observed change, so a caller can assert the inequality and
-    report how tight it was.
-
-    Raises:
-        ValueError: If any of the four vectors has a norm that is not strictly
-            positive. The bound is vacuous there: cosine at zero is a convention
-            rather than geometry, and a NaN norm that reaches the minimum gives
-            ``C = NaN``.
+    Returns a :class:`LipschitzBound` with the uniform constant, both bounds and
+    the observed change. Raises ``ValueError`` if any norm is not strictly positive
+    (NaN included): cosine at zero is a convention, and a NaN minimum gives ``C = NaN``.
     """
     nu, nv = l2_norm(u, policy), l2_norm(v, policy)
     nup, nvp = l2_norm(u_prime, policy), l2_norm(v_prime, policy)
@@ -175,10 +136,9 @@ def norm_lower_bound(nnz: int) -> float:
 def corpus_lipschitz_bound(nnz_values: Sequence[int]) -> float:
     """``C <= sqrt(max nnz)``: a Lipschitz constant computable from the corpus alone.
 
-    Needs no perturbation, so it serves as an a priori conditioning number for
-    the whole pipeline. It grows with the largest support and ``C = 1/L`` blows
-    up as norms shrink, so it identifies short documents as the source of section
-    6's instability.
+    It needs no perturbation, so it is an a priori conditioning number for the
+    pipeline. It grows with the largest support, so the instability section 6
+    describes is worst for documents with many distinct terms, not short ones.
     """
     m = max((n for n in nnz_values if n > 0), default=0)
     return math.sqrt(m) if m > 0 else math.inf
@@ -191,17 +151,11 @@ def three_term_bound(
     delta_idf_linf: float,
     policy: Reduction = Reduction.NAIVE,
 ) -> float:
-    """The section 4.2 decomposition:
+    """Bound ``||w' - w||`` by the section 4.2 three-term decomposition.
 
-        ||w' - w|| <= ||dtf|| ||idf||_inf + ||tf|| ||didf||_inf
-                      + ||dtf|| ||didf||_inf
-
-    separating a local document edit, a global corpus change, and their
-    interaction.
-
-    Presupposes a common index set. A corpus perturbation changes the vocabulary
-    and the paper does not say how ``didf`` is defined then; this project
-    resolves it on the union vocabulary. See ``docs/spec_addenda.md#g5``.
+    ``||dtf|| ||idf||_inf + ||tf|| ||didf||_inf + ||dtf|| ||didf||_inf``: a document
+    edit, a corpus change and their interaction. It presupposes a common index set;
+    ``didf`` is taken on the union vocabulary. See ``docs/spec_addenda.md#g5``.
     """
     n_dtf = l2_norm(delta_tf, policy)
     n_tf = l2_norm(tf, policy)

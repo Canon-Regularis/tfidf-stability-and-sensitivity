@@ -1,14 +1,8 @@
-"""Corpus perturbations (README section 4.1).
+"""Add, remove, edit and duplicate documents (README section 4.1).
 
-Section 4.1 considers "a perturbation of the corpus induced by adding or removing
-a document, or by modifying the token content of an existing document". This
-module makes those three edits concrete and records what changed, since the
-bounds of sections 4.2 and 4.3 are stated in terms of the difference and cannot
-be evaluated from the perturbed corpus alone.
-
-Every edit returns a new corpus. A perturbation experiment needs both sides
-simultaneously, and an in-place edit would destroy the baseline it is compared
-against.
+Each edit records what changed, because the bounds of sections 4.2 and 4.3 are stated
+in terms of the difference and cannot be evaluated from the perturbed corpus alone.
+Every edit returns a new corpus, so the baseline stays available for comparison.
 """
 
 from __future__ import annotations
@@ -50,14 +44,9 @@ class EditKind(str, Enum):
 class EditRecord:
     """What an edit did, in the terms sections 4.1-4.2 need.
 
-    Attributes:
-        kind: Which perturbation.
-        doc_id: The document added, removed or modified.
-        removed_features: Feature stream that left the corpus, if any.
-        added_features: Feature stream that entered, if any.
-        n_before, n_after: Corpus sizes. Both matter: ``idf`` depends on ``N`` as
-            well as on ``df``, so an edit leaving every ``df`` unchanged can
-            still move every ``idf`` (section 4.1's "competing effects").
+    Holds the ``kind``, the ``doc_id`` affected, the ``removed_features`` and
+    ``added_features`` streams, and the sizes ``n_before`` and ``n_after``. Both sizes
+    matter: ``idf`` depends on ``N`` as well as ``df`` (section 4.1's competing effects).
     """
 
     kind: EditKind
@@ -75,17 +64,9 @@ class EditRecord:
     def changes_corpus_size(self) -> bool:
         """Whether ``N`` changed.
 
-        Not "and hence every IDF moved", which this said and the arithmetic does
-        not support. Section 2.2 fixes ``idf(t) = log((1 + N) / (1 + df(t))) + 1``,
-        so a token appearing in every document has ``df == N``, the ratio is
-        exactly 1, and ``idf`` is exactly ``1.0`` whatever ``N`` is -- measured
-        at N = 5, 6, 100 and 101. An edit that changes ``N`` moves the IDF of
-        every term whose ``df`` did not move with it, which is most of them but
-        not all.
-
-        What the property is for is unaffected: section 4.4's certificate bounds
-        the movement of scores over a *fixed* document set, so an edit changing
-        ``N`` has no certificate at any ``k`` regardless of which IDFs moved.
+        Section 2.2's ``idf(t) = log((1 + N) / (1 + df(t))) + 1`` moves with ``N`` for each term
+        whose ``df`` does not move with it; ``df == N`` keeps ``idf`` at exactly ``1.0``. Section
+        4.4 certifies a fixed document set: an edit changing ``N`` has no certificate at any ``k``.
         """
         return self.n_before != self.n_after
 
@@ -110,10 +91,8 @@ def add_document(corpus: Corpus, doc_id: str, features: Sequence[str]) -> tuple[
     """Append a document.
 
     Raises:
-        ValueError: If the identifier already exists. Duplicate identifiers break
-            the strict total order the ranking operator depends on, so they are
-            refused here rather than surfacing later as a non-deterministic
-            ranking.
+        ValueError: If the identifier already exists; duplicate identifiers break
+            the strict total order the ranking operator depends on.
     """
     ids, docs = corpus
     if doc_id in ids:
@@ -139,8 +118,8 @@ def edit_document(
 ) -> tuple[Corpus, EditRecord]:
     """Replace a document's feature stream, leaving ``N`` unchanged.
 
-    The cleanest of the three for section 4.2: with ``N`` fixed, any IDF movement
-    comes from ``df`` alone.
+    For section 4.2 this isolates the ``df`` effect: with ``N`` fixed, any IDF
+    movement comes from ``df`` alone.
     """
     ids, docs = corpus
     i = _index_of(ids, doc_id)
@@ -153,11 +132,9 @@ def edit_document(
 def duplicate_document(corpus: Corpus, doc_id: str, new_id: str) -> tuple[Corpus, EditRecord]:
     """Append an exact copy of an existing document.
 
-    The most useful perturbation for the tie-break analysis: the copy scores
-    identically to the original against every query, so it manufactures an exact
-    tie without a search. It also raises ``df`` by one for the original's
-    features alone while raising ``N`` by one, section 4.1's two competing
-    effects in their purest form.
+    The copy scores identically to the original against every query, so it creates
+    an exact tie for the tie-break analysis without a search. It raises ``df`` by one
+    for the original's features and ``N`` by one: section 4.1's two competing effects.
     """
     ids, docs = corpus
     i = _index_of(ids, doc_id)

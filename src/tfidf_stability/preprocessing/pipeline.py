@@ -1,22 +1,8 @@
 """The fixed, deterministic preprocessing map of README section 2.
 
-    raw text -> normalise -> tokenise -> remove stopwords -> lemmatise -> n-grams
-
-Section 2 requires this map to be "deterministic and fixed across all
-perturbation experiments", meaning stable across processes, Python versions,
-platforms, and the C++ mirror of this code, and not merely within a run.
-Everything that could vary is pinned in :class:`PreprocessingConfig` and folded
-into :meth:`PreprocessingConfig.digest`, which every run manifest records.
-
-The order is forced:
-
-* Stopwords go before n-gram construction, leaving a gap sentinel, so no n-gram
-  spans a removed token (``docs/spec_addenda.md#g7``).
-* Lemmatisation runs after stopword removal, so the list is matched against
-  surface forms; otherwise "willing" stems to "will" and is silently deleted as
-  a stopword.
-* N-grams are built last, from lemmatised tokens, so "running shoes" and "run
-  shoe" collapse to the same bigram.
+Stages: normalise, tokenise, stopwords (gap sentinels, ``docs/spec_addenda.md#g7``),
+lemmatise, n-grams. Every input is pinned in :class:`PreprocessingConfig` and hashed by
+:meth:`PreprocessingConfig.digest`. Rationale: docs/engineering_notes.md#preprocessing-order
 """
 
 from __future__ import annotations
@@ -56,16 +42,9 @@ __all__ = [
 class PreprocessingConfig:
     """Every knob of the preprocessing map, in one hashable object.
 
-    Attributes:
-        normalisation: Unicode and case-folding options.
-        tokenisation: The pinned token pattern and length bounds.
-        lemmatiser: Which lemmatisation backend to use.
-        stopword_asset: File name in ``data/assets``; ``None`` disables removal.
-        insert_gaps: Leave a sentinel where a stopword was removed, so n-grams
-            cannot bridge it. The normative setting is ``True``.
-        n_min: Smallest n-gram order.
-        n_max: Largest n-gram order, inclusive.
-        cross_gaps: Allow n-grams to span gap sentinels. Ablation only.
+    ``insert_gaps`` leaves a sentinel where stopwords are removed, so n-grams cannot bridge
+    them (normative ``True``); ``cross_gaps=True`` bridges sentinels (ablation only).
+    ``stopword_asset`` is a ``data/assets`` file or ``None`` (no removal); ``n_max`` is inclusive.
     """
 
     normalisation: NormalisationConfig = field(default_factory=NormalisationConfig)
@@ -78,7 +57,7 @@ class PreprocessingConfig:
     cross_gaps: bool = False
 
     def __post_init__(self) -> None:
-        """Normalise ``lemmatiser`` to its member; ``make_lemmatiser`` selects on it."""
+        """Normalise ``lemmatiser`` to its member; :func:`make_lemmatiser` selects on it."""
         object.__setattr__(self, "lemmatiser", LemmatiserKind(self.lemmatiser))
 
     def to_dict(self) -> dict[str, Any]:
@@ -111,15 +90,9 @@ class PreprocessingConfig:
     ) -> str:
         """SHA-256 over the canonical config, optionally binding the word list.
 
-        ``stopword_digest`` makes the identity cover the contents of the stopword
-        file rather than its name alone, so editing the asset changes the config
-        digest and invalidates cached results.
-
-        ``lemmatiser_override`` covers the same hole one field along:
-        :class:`PreprocessingPipeline` accepts a ready-made lemmatiser that
-        bypasses :attr:`lemmatiser` entirely, and without this two pipelines
-        producing different features share an identity. Both keys are omitted
-        when absent, so a run with no override digests as before.
+        ``stopword_digest`` binds the word-list contents, so editing the asset changes the digest;
+        ``lemmatiser_override`` binds a backend injected into :class:`PreprocessingPipeline`
+        that bypasses :attr:`lemmatiser`. Each key is omitted when ``None``.
         """
         payload = self.to_dict()
         if stopword_digest is not None:
@@ -153,11 +126,9 @@ class PreprocessedDocument:
 class PreprocessingPipeline:
     """A configured, reusable preprocessing map.
 
-    Stateless with respect to the documents it processes: :meth:`preprocess`
-    twice on the same text gives the same result, and document order cannot
-    change any result. Both are asserted in
-    ``tests/test_preprocessing_determinism.py``; the determinism guarantee of
-    section 3 depends on them.
+    Stateless across documents: repeated :meth:`preprocess` calls agree and document
+    order changes no result. ``tests/test_preprocessing_determinism.py`` asserts both;
+    the determinism guarantee of section 3 depends on them.
     """
 
     __slots__ = ("_lemmatiser", "_stopwords", "config")
@@ -192,44 +163,19 @@ class PreprocessingPipeline:
     def digest(self) -> str:
         """Identity of this exact preprocessing map, for the run manifest.
 
-        The lemmatiser is bound only when an injected one disagrees with the
-        config, the sole way the two can differ. The digest previously read the
-        config alone, so ``PreprocessingPipeline(cfg)`` and
-        ``PreprocessingPipeline(cfg, lemmatiser=IdentityLemmatiser())``, which
-        turn "running cats" into ``run|cat`` and ``running|cats``, hashed to the
-        same string. The sibling ``stopwords=`` injection was always bound by
-        content. No current caller injects, so no recorded digest changes.
-
-        Bound by :func:`~tfidf_stability.preprocessing.lemmatise.lemmatiser_identity`
-        rather than by ``Lemmatiser.name``, because for
-        :class:`~tfidf_stability.preprocessing.lemmatise.LookupLemmatiser` the
-        name is the constant ``"lookup"`` while the output comes from a table
-        handed in at construction. Reading the name bound all such pipelines to
-        one digest: three of them producing ``cat|running``, ``feline|running``
-        and ``cat|run`` from the same input reported the same identity, which is
-        the failure this whole method exists to prevent, one field further in.
-
-        A backend carrying content is bound *unconditionally*, not only when it
-        disagrees with the config. The ``==`` short-circuit is sound exactly when
-        the name is the whole identity, and it was the second half of the same
-        hole: ``lemmatiser=LOOKUP`` in the config plus an injected table matched
-        by name and so bound nothing at all.
-
-        Recorded digests are unmoved. The short-circuit still applies to
-        :class:`IdentityLemmatiser` and :class:`Porter2Stemmer`, whose output is
-        fixed by their class, and no config-only route to a lookup pipeline
-        exists: :func:`make_lemmatiser` refuses that kind without a table.
+        Binds :func:`~tfidf_stability.preprocessing.lemmatise.lemmatiser_identity` unless it is the
+        bare name of the config kind (:class:`IdentityLemmatiser`, :class:`Porter2Stemmer`);
+        a :class:`~tfidf_stability.preprocessing.lemmatise.LookupLemmatiser` table is always bound.
         """
         identity = lemmatiser_identity(self._lemmatiser)
         if identity == self._lemmatiser.name and identity == str(self.config.lemmatiser):
             override = None
         else:
             override = identity
-        # Both stopword digests, joined the way `lemmatiser_identity` joins the
-        # backend name to its content hash. `digest` is provenance: the asset's
-        # raw file bytes, so an edit in place is detectable even when the parsed
-        # set is unchanged. `content_digest` is identity, derived from the words
-        # and impossible to hand in. Neither subsumes the other, so both go in.
+        # Both stopword digests, colon-joined as `lemmatiser_identity` joins name and hash:
+        # `digest` hashes the raw file bytes (provenance: an in-place edit is detectable) and
+        # `content_digest` hashes the words (identity). Neither subsumes the other.
+        # Rationale: docs/engineering_notes.md#pipeline-digest-identity
         stopwords = f"{self._stopwords.digest}:{self._stopwords.content_digest}"
         return self.config.digest(stopword_digest=stopwords, lemmatiser_override=override)
 
@@ -248,7 +194,7 @@ class PreprocessingPipeline:
 
     # --- the map ------------------------------------------------------------
     def _tokenise(self, text: str) -> list[str]:
-        """Normalise and tokenise: the stages before a gap sentinel can exist."""
+        """Apply :func:`normalise` and tokenise; no gap sentinel exists yet."""
         cfg = self.config
         return tokenise(normalise(text, cfg.normalisation), cfg.tokenisation)
 
@@ -267,23 +213,11 @@ class PreprocessingPipeline:
         return self._after_tokenisation(self._tokenise(text))[1]
 
     def preprocess_fields(self, fields: Sequence[str]) -> list[str]:
-        """As :meth:`preprocess`, with a hard boundary between the fields.
+        """As :meth:`preprocess`, with a hard field boundary unless gaps are ablated.
 
-        A document assembled from separate fields -- a title, a genre list, a
-        set of free-text tags -- has no continuous text across the seams, so an
-        n-gram spanning one is manufactured by the assembly order rather than
-        found in the data. Each field is tokenised alone and the streams are
-        joined with :data:`~tfidf_stability.preprocessing.tokenise.GAP`, the
-        sentinel :func:`~tfidf_stability.preprocessing.ngrams.generate_ngrams`
-        already segments on.
-
-        Joining the fields into one string first cannot do this: ``GAP`` is a
-        control character and :func:`normalise` deletes those, so the seam would
-        close rather than hold.
-
-        ``insert_gaps=False`` drops every sentinel, these included, and
-        ``cross_gaps=True`` bridges them. Both are ablations of exactly this
-        boundary, so under either the seams are not held, by construction.
+        Fields are tokenised alone, joined by :data:`~tfidf_stability.preprocessing.tokenise.GAP`
+        and split there by :func:`~tfidf_stability.preprocessing.ngrams.generate_ngrams`.
+        Rationale: docs/engineering_notes.md#field-boundaries
         """
         stream: list[str] = []
         for text in fields:
@@ -338,11 +272,9 @@ def preprocess_records(
 ) -> list[list[str]]:
     """Feature streams for corpus records, honouring a field boundary if present.
 
-    A record carrying ``fields`` goes through
-    :meth:`PreprocessingPipeline.preprocess_fields`; one carrying only ``text``
-    goes through :meth:`PreprocessingPipeline.preprocess`. Every driver reads a
-    corpus the same way, so a dataset that knows its own field boundaries does
-    not depend on which script loaded it.
+    A record with ``fields`` goes through :meth:`PreprocessingPipeline.preprocess_fields`,
+    one with only ``text`` through :meth:`PreprocessingPipeline.preprocess`, so every
+    driver reads a corpus, and its field boundaries, the same way.
     """
     return [
         pipeline.preprocess_fields([str(f) for f in record["fields"]])

@@ -1,14 +1,8 @@
 """The deterministic ranking operator (README section 2.3.1).
 
-Produces a :class:`Ranking`: a total order over documents, together with the
-sorted score array that margins and tie groups are computed from.
-
-The sort depends on neither ``k`` nor ``tau``: a ranking is a function of
-``(scores, table, priority)`` alone. Section 7's grid is therefore
-"queries x 3 operators" rather than "queries x k-values x tau-values", with every
-``k`` and ``tau`` read off the result afterwards, worth roughly three orders of
-magnitude. So :func:`rank` takes no ``k``, and the margin and tie-group modules
-take a sorted score array rather than a ``Ranking``.
+Produces a :class:`Ranking`. :func:`rank` takes no ``k`` or ``tau``: a ranking is a
+function of ``(scores, table, priority)`` alone, so section 7's grid is queries x 3 operators.
+Rationale: docs/engineering_notes.md#ranking-independent-of-k-and-tau
 """
 
 from __future__ import annotations
@@ -45,10 +39,8 @@ __all__ = [
 class Selection(str, Enum):
     """Which selection algorithm produced an order.
 
-    All of these must yield the identical permutation, since the comparator is a
-    strict total order. The agreement test over them is the operational content
-    of "sort stability is irrelevant here", and the ranking analogue of the
-    ``TAAT == DAAT`` check in the scoring layer.
+    Every member yields the identical permutation, since the comparator is a strict total
+    order, so sort stability is irrelevant; the agreement test mirrors ``TAAT == DAAT``.
     """
 
     FULL_SORT = "full_sort"
@@ -65,37 +57,29 @@ class Selection(str, Enum):
 class Ranking:
     """A total order over documents, plus everything derived from the scores.
 
-    ``order`` may be truncated by a top-k selection; ``sorted_scores`` never is.
-    Truncating the document order is what makes partial selection worth doing,
-    and keeping the full score array keeps margins and tie groups answerable at
-    every ``k`` and ``tau`` without re-ranking.
-
-    Attributes:
-        order: Document indices, best first. Length ``n_selected``.
-        sorted_scores: All scores, non-increasing. Always length ``n_documents``.
-        scores: The raw score vector, index-aligned to documents.
-        operator: The operator's name.
-        key_digest: Identity of (operator, attribute table), for the manifest.
-        query_degenerate: Every score is exactly zero, so the attributes decide
-            the order alone. Defined observationally, since "the query vector was
-            zero" is not checkable from the ranker's inputs.
-        n_zero_norm_docs: Passed in rather than derived; this module has no
-            dependency on ``vectorisation``.
-        k_effective: The clamped ``k`` when lenient mode clamped one; ``None``
-            for a full ranking.
+    ``order`` holds ``n_selected`` document indices, best first, and may be truncated.
+    ``sorted_scores`` holds all ``n_documents`` scores, non-increasing, so margins and tie
+    groups stay answerable at every ``k`` and ``tau`` without re-ranking.
     """
 
     order: tuple[int, ...]
     sorted_scores: tuple[float, ...]
+    #: The raw score vector, index-aligned to documents.
     scores: tuple[float, ...]
     operator: str
+    #: Identity of (operator, attribute table), recorded in the manifest.
     key_digest: str
     n_documents: int
     n_selected: int
+    #: Every score is exactly zero, so the attributes alone decide the order. This is
+    #: observational: the query vector is not among the ranker's inputs.
     query_degenerate: bool
+    #: Supplied by the caller; this module has no dependency on ``vectorisation``.
     n_zero_norm_docs: int
     n_excluded: int
     strict_mode: StrictMode
+    #: The ``k`` used by :func:`rank_top_k`, clamped to ``n_documents`` in lenient mode;
+    #: ``None`` for a full ranking.
     k_effective: int | None = None
 
     def __post_init__(self) -> None:
@@ -206,35 +190,18 @@ def rank(
     selection: Selection = Selection.FULL_SORT,
     _sorted_scores: tuple[float, ...] | None = None,
 ) -> Ranking:
-    """Rank every document under one operator.
+    """Rank every document under one operator and return a :class:`Ranking`.
 
-    Args:
-        scores: Similarity scores, index-aligned to the attribute table.
-        table: The rank-encoded attribute table.
-        spec: Which operator (:data:`~tfidf_stability.ranking.sort_keys.PI` by default).
-        mode: Strict or lenient handling of degenerate inputs.
-        n_zero_norm_docs: Reported on the result; supplied by the caller.
-        selection: Which algorithm to use. Every value must give the identical
-            permutation; the parameter exists so tests can prove it.
-        _sorted_scores: Internal. Lets :func:`rank_all_operators` share one
-            array object across operators.
-
-    Returns:
-        The :class:`Ranking`.
-
-    Raises:
-        EmptyCorpusError: If there are no documents.
-        TfidfStabilityError: If any score is NaN or infinite, in lenient mode
-            too: ``spec_addenda.md#g3`` lists non-finite scores among the
-            rejected inputs rather than the legitimate degenerate grid points,
-            and a NaN in a sort key is undefined behaviour in the native backend
-            rather than merely a wrong answer.
+    ``scores`` aligns to ``table``; ``_sorted_scores`` lets :func:`rank_all_operators` share one
+    array; ``spec`` defaults to :data:`~tfidf_stability.ranking.sort_keys.PI`. Raises
+    ``EmptyCorpusError``; ``NonFiniteValueError`` on NaN or inf in any mode (spec_addenda.md#g3).
     """
     n = len(scores)
     if n == 0:
         raise EmptyCorpusError("cannot rank an empty corpus")
-    # One O(N) pass guarding an O(N log N) sort: under 1% overhead, and the only
-    # thing between a corrupt score vector and undefined behaviour.
+    # Lenient mode rejects non-finite scores too: the addenda list them as rejected
+    # inputs, not degenerate grid points, and a NaN sort key is undefined behaviour in the
+    # native backend. One O(N) pass before an O(N log N) sort costs under 1%.
     check_finite(scores, "scores")
 
     keys = build_keys(scores, table, spec)
@@ -267,12 +234,9 @@ def rank_top_k(
 ) -> Ranking:
     """Rank only the top ``min(k + 1, N)`` documents.
 
-    ``k + 1`` because the boundary margin ``m_k = score(r_k) - score(r_{k+1})``
-    needs the first document outside the top-k, and section 7.3 stratifies every
-    disagreement rate by ``m_k``.
-
-    ``sorted_scores`` is still complete, so margins and tie groups remain
-    answerable.
+    The extra document gives the boundary margin ``m_k = score(r_k) - score(r_{k+1})``,
+    by which section 7.3 stratifies every disagreement rate. ``sorted_scores`` stays
+    complete, so margins and tie groups remain answerable.
     """
     n = len(scores)
     if n == 0:
@@ -309,10 +273,8 @@ def rank_all_operators(
 ) -> dict[str, Ranking]:
     """Rank under several operators, sharing one ``sorted_scores`` object.
 
-    Margins depend only on the sorted score multiset, so they are identical under
-    every operator. Sharing the array object makes that structural rather than
-    coincidental, and turns the corresponding test into a regression guard on the
-    sharing itself.
+    Margins depend only on the sorted score multiset, so they are identical under every
+    operator; sharing the object makes that structural, and a test guards the sharing.
     """
     shared = sorted_scores_desc(scores)
     return {

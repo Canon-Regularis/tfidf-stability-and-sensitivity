@@ -1,43 +1,8 @@
 """A1: how score-separation margins govern ranking stability (sections 7.2, 7.3).
 
-Section 4.4 proves a sufficient condition: if every score moves by less than
-``m_k / 2`` the top-k set is unchanged. This module measures what happens, which
-differs from the bound in two directions at once.
-
-**Worst case.** Stage 4's dyadic witness makes ``m_k / 2`` the flip radius: a
-perturbation of size ``m_k / 2 + delta`` flips the pair, so the bound cannot be
-improved.
-
-**Average case.** Under random perturbation of size ``eps`` the flip rate stays
-at zero well past ``eps = m_k / 2``, since the adversarial configuration (push
-the rank-k score down and the rank-(k+1) score up, both by the full ``eps``) is a
-measure-zero corner of the perturbation cube. Measured here: 0% at
-``eps = m_k/2``, first non-zero around ``1.1 x``, roughly half around ``4 x``.
-
-Neither implies the other. Reporting only the second understates the risk;
-reporting only the first suggests rankings are far more fragile than they are.
-:func:`transition_curve` measures the average case, :func:`certificate_audit` the
-soundness and conservatism of the bound.
-
-The certificate as a 2x2 table
-------------------------------
-``certified_stable`` is a proof when true and merely "not covered" when false, so
-accuracy would reward a certificate that always said no. The table separates the
-two error directions:
-
-* **certified but changed** must be zero. A non-zero entry falsifies section 4.4
-  and means a bug or a broken proof.
-* **uncertified but unchanged** is the conservatism and is expected to be large.
-  Reporting it stops "not certified" being read as "will break".
-
-The A1/A2 boundary
-------------------
-Queries whose ``m_k`` is zero are excluded from the transition curve and reported
-separately. At ``m_k = 0`` the boundary is an exact tie, no perturbation is
-needed to change the outcome, and the tie-break decides: A2's regime, where
-including it would let a tie-break effect read as a numerical-stability effect.
-G3 requires the exclusion for margin distributions and the same logic applies
-here.
+:func:`transition_curve` measures the average-case flip rate, :func:`certificate_audit`
+the soundness and conservatism of section 4.4's ``m_k / 2`` bound. Queries with ``m_k = 0``
+are A2's regime and are excluded (G3). Rationale: docs/engineering_notes.md#a1-margin-regimes
 """
 
 from __future__ import annotations
@@ -128,11 +93,8 @@ class CertificateAudit:
         """Whether the audit tested section 4.4 at all.
 
         ``is_sound`` is ``certified_changed == 0``, so an audit that drew no
-        certified perturbation reports the theorem upheld having checked it zero
-        times. An earlier version of the section 4.4 attack reported thousands
-        of "certified perturbations" with none inside the radius, making its
-        zero-violation result vacuous. Report soundness with this count beside
-        it.
+        certified perturbation reports soundness vacuously. Report soundness
+        with this count beside it.
         """
         return self.n_certified > 0
 
@@ -173,29 +135,9 @@ def transition_curve(
 ) -> tuple[tuple[TransitionPoint, ...], int, int]:
     """Measure the empirical top-k flip rate against ``eps / (m_k / 2)``.
 
-    Each trial perturbs every score independently and uniformly in
-    ``[-eps, +eps]``: the random case. The adversarial case is ``m_k / 2`` by the
-    Stage 4 witness and needs no sampling.
-
-    Args:
-        score_vectors: One score vector per query, in document-index order.
-        table: The attribute table supplying the tie-break, when every query
-            ranks over the same documents.
-        k: The rank to test.
-        seed: Seeds a local :class:`random.Random`; the global generator is never
-            touched, so this is reproducible regardless of what else has run.
-        ratios: Multiples of ``m_k / 2`` to sample.
-        trials: Perturbations per (query, ratio) cell.
-        tables: Per-query attribute tables, overriding ``table``. Required under
-            section 7.1's protocol, where each query excludes its own profile
-            items and so ranks over a different candidate set (G19). A restricted
-            score vector against the full-corpus table would let the tie-break
-            consider documents the query could never retrieve.
-
-    Returns:
-        ``(points, n_used, n_excluded)``, where ``n_excluded`` counts queries
-        dropped because ``m_k`` was undefined or zero: the A2 regime, which must
-        not be averaged into an A1 curve.
+    Each of ``trials`` per (query, ratio) moves every score (document-index order) uniformly in
+    ``[-eps, +eps]`` (local :class:`random.Random` from ``seed``). ``tables[i]`` overrides ``table``
+    (G19). Returns ``(points, n_used, n_excluded)``; excluded: ``k >= N``, ``m_k`` 0 or undefined.
     """
     rng = random.Random(seed)
     flips = dict.fromkeys(ratios, 0)
@@ -241,23 +183,9 @@ def certificate_audit(
 ) -> CertificateAudit:
     """Audit section 4.4's certificate against observed top-k changes.
 
-    Perturbations straddle the certified radius so both cells of each row are
-    populated; drawing only tiny ones would make the certificate look trivially
-    sound.
-
-    Args:
-        score_vectors: One score vector per query.
-        table: The attribute table supplying the tie-break.
-        k: The rank to certify.
-        seed: Seeds a local generator.
-        trials: Perturbations per query.
-        max_ratio: Largest multiple of the certified radius to draw.
-        tables: Per-query attribute tables; see :func:`transition_curve`.
-
-    Returns:
-        The :class:`CertificateAudit`. Check :attr:`~CertificateAudit.is_sound`
-        first: a false value falsifies section 4.4 and nothing else in the
-        result is meaningful.
+    Per query, ``trials`` draws of ``eps`` uniform in ``[0, max_ratio]`` certified radii fill both
+    cells of each row; ``seed`` seeds a local generator; ``tables`` as in :func:`transition_curve`.
+    Returns a :class:`CertificateAudit`; a false :attr:`~CertificateAudit.is_sound` refutes 4.4.
     """
     rng = random.Random(seed)
     cells = {(True, True): 0, (True, False): 0, (False, True): 0, (False, False): 0}
@@ -274,11 +202,9 @@ def certificate_audit(
         if not cert.defined or math.isnan(cert.set_radius):
             n_undefined += 1
             continue
-        # Exact ties are A2's regime. The audit used to include them: at m_k = 0
-        # the radius is 0.0, so eps is 0.0, `perturbed` equals `scores` element
-        # for element, `realised < 0.0` is false and "unchanged" is trivially
-        # true. Every such trial landed in (uncertified, unchanged) and inflated
-        # the published conservatism with cases where nothing was perturbed.
+        # Exact ties are A2's regime: at m_k = 0 the radius and eps are 0.0, so every
+        # trial would land in (uncertified, unchanged) with nothing perturbed and
+        # inflate the conservatism.
         if cert.set_radius == 0.0:
             n_exact_tie += 1
             continue
@@ -288,7 +214,7 @@ def certificate_audit(
             perturbed = [s + rng.uniform(-eps, eps) for s in scores]
             # Measure the realised delta rather than the drawn eps: `fl(s + d)`
             # rounds, so movement can exceed |d| by half an ulp, and the theorem
-            # is about the movement that happened.
+            # hypothesis concerns the realised movement.
             realised = max(
                 (abs(p - s) for p, s in zip(perturbed, scores, strict=True)), default=0.0
             )

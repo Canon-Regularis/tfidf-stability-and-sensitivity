@@ -1,9 +1,7 @@
 """CLI command implementations.
 
-Each command is a thin wrapper over a library function that emits a run
-manifest. The manifest comes as a side effect of every command rather than on
-request, so an undocumented result cannot be produced by accident.
-
+Each command wraps a library function. A command that writes a result to disk
+writes its run manifest beside it, so no stored result exists without one.
 stdlib-only (``argparse``), matching the reference backend.
 """
 
@@ -57,12 +55,11 @@ _E = TypeVar("_E", bound=Enum)
 
 
 def _resolve_default_config(module: Path) -> Path:
-    """The normative configuration, installed or in-tree.
+    """Return the normative configuration path, installed or in-tree.
 
-    Same two layouts as the stopword asset, and the same reason: resolving only
-    through ``parents[3]`` finds the repository from a checkout and the
-    directory above ``site-packages`` from a wheel, so ``tfidf-stability
-    build-corpus`` could not find its own default config once installed.
+    Uses the same two layouts as the stopword asset. ``parents[3]`` alone reaches
+    the repository from a checkout but the directory above ``site-packages`` from a
+    wheel, so the packaged copy is tried first.
     """
     packaged = module.resolve().parents[1] / "configs" / "default.yaml"
     if packaged.is_file():
@@ -76,19 +73,9 @@ _DEFAULT_CONFIG = _resolve_default_config(Path(__file__))
 def load_config(path: Path | str | None = None) -> dict[str, Any]:
     """Load a configuration, defaulting to the normative one.
 
-    The digest travels with the parsed content, so a manifest identifies the
-    config down to its comments, which carry the spec_addenda citations.
-
-    Every way this fails raises :class:`ConfigError`. It already did so for a
-    section of the wrong type, but a missing file left ``FileNotFoundError``, a
-    malformed document left ``yaml.YAMLError`` and a scalar at the top level
-    left ``TypeError``, all of which reach the CLI, which installs no handler --
-    so the same user error was a diagnostic in one case and a traceback in
-    three.
-
-    Raises:
-        ConfigError: If the file cannot be read, is not valid YAML, or does not
-            hold a mapping at the top level.
+    The returned ``_digest`` identifies the file down to its comments, which
+    carry the spec_addenda citations. Every failure raises :class:`ConfigError`: an
+    unreadable file, invalid YAML, a non-mapping top level or an unknown section.
     """
     import yaml
 
@@ -155,7 +142,7 @@ _NUMERICS_KEYS = frozenset({"reduction", "log_impl"})
 _UNICODE_FORMS = frozenset({"NFC", "NFD", "NFKC", "NFKD"})
 
 # Fallbacks come off the dataclasses rather than being restated, so an absent
-# key behaves as it did before the config was wired up.
+# key takes the library default.
 _NORM_DEFAULTS = NormalisationConfig()
 _TOKEN_DEFAULTS = TokenisationConfig()
 _PRE_DEFAULTS = PreprocessingConfig()
@@ -231,8 +218,8 @@ def vectoriser_from_config(config: dict[str, Any]) -> TfidfVectoriser:
     """Build the vectoriser the configuration describes.
 
     ``numerics.reduction`` fixes the summation order every norm uses and
-    ``numerics.log_impl`` is G13's cross-platform bit-exactness switch. Both were
-    once read from the file, hashed into the manifest, and then ignored.
+    ``numerics.log_impl`` is G13's cross-platform bit-exactness switch. Both reach
+    the vectoriser as well as the manifest.
     """
     vocab = _section(config, "vocabulary", _VOCABULARY_KEYS)
     numerics = _section(config, "numerics", _NUMERICS_KEYS)
@@ -350,8 +337,8 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 def cmd_verify(args: argparse.Namespace) -> int:
     """Re-derive a saved model's digests and compare against its manifest.
 
-    Does this file still contain what the manifest says it does? Answered
-    without the original corpus.
+    Checks that the file still holds what the manifest records, without the
+    original corpus.
     """
     model = load_model(args.model)
     manifest_path = Path(args.model).with_suffix(".manifest.json")
@@ -459,13 +446,9 @@ def _native_diagnosis() -> list[str]:
 def cmd_info(args: argparse.Namespace) -> int:
     """Report the environment a run would execute in.
 
-    The first question about a surprising number is which build produced it.
-    This answers it without running an experiment.
-
-    ``--require-native`` turns the report into an assertion. Every native test
-    is guarded on ``native_available()`` and pytest exits 0 when all of them
-    skip, so a job that builds the extension but cannot load it reports green
-    having compared nothing.
+    Names the build behind a number without running an experiment.
+    ``--require-native`` exits 1 when the extension does not load: every native
+    test is guarded on ``native_available()`` and pytest exits 0 when all skip.
     """
     payload: dict[str, Any] = {"environment": environment_block()}
     if args.config:

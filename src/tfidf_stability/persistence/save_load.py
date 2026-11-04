@@ -1,50 +1,8 @@
 """Byte-deterministic model serialisation: the ``.tfsx`` container.
 
-Why a custom format
--------------------
-The obvious choices break the reproducibility snapshot:
-
-* ``numpy.savez`` writes a zip, and a zip embeds a per-member modification
-  timestamp, so two saves of the same model differ in bytes.
-* ``pickle`` is version-sensitive, insecure to load, and its output tracks
-  Python's object layout rather than the data.
-* JSON cannot carry a ``double`` without losing bits or bloating the file with
-  17-digit decimals whose parse-back is a separate risk.
-
-``.tfsx`` is a plain uncompressed container: fixed-width header, raw
-little-endian arrays, UTF-8 token block. Saving the same model twice gives
-identical bytes and a one-ulp change anywhere changes the file, which is what
-``test_reproducibility_snapshot.py`` needs.
-
-Layout
-------
-All integers little-endian. The header is fixed width so it can be read without
-parsing::
-
-    magic          8   b"TFIDFSTB"
-    format_version u32
-    n_docs         u32
-    n_terms        u32
-    nnz            u64
-    flags          u32   bit 0: idf computed with a correctly-rounded logarithm
-    reduction      u32   the Reduction policy every sum was taken under
-    token_bytes    u64   length of the token block
-    doc_id_bytes   u64   length of the document-id block
-    reserved       u32 x 2
-
-    indptr    i64 x (n_docs + 1)
-    indices   i32 x nnz
-    values    f64 x nnz
-    idf       f64 x n_terms
-    norms     f64 x n_docs
-    lengths   i64 x n_docs
-    df        i64 x n_terms
-    cf        i64 x n_terms
-    tokens    utf-8, LF-separated, n_terms entries
-    doc_ids   utf-8, LF-separated, n_docs entries
-
-A JSON sidecar carries the same metadata in readable form, written alongside and
-never inside, so the container stays byte-stable whatever the sidecar gains.
+A fixed-width little-endian header, raw little-endian arrays and UTF-8 string blocks: one
+model always gives the same bytes, and a one-ulp change changes them. ``save_model`` writes
+an optional JSON sidecar beside it. Rationale: docs/engineering_notes.md#tfsx-container-format
 """
 
 from __future__ import annotations
@@ -128,8 +86,11 @@ def _unpack_floats(data: bytes, offset: int, count: int) -> tuple[tuple[float, .
 
 
 def _encode_strings(items: list[str], what: str) -> bytes:
-    """Join with LF. Normalisation strips control characters, so no token holds an
-    LF and the encoding is unambiguous."""
+    """Join strings with LF, raising if any item contains a newline.
+
+    Normalisation strips control characters, so no token holds an LF and the
+    encoding is unambiguous.
+    """
     for item in items:
         if "\n" in item:
             raise TfsxFormatError(f"{what} contains a newline: {item!r}")
@@ -144,13 +105,11 @@ def _check_csr(
     n_rows: int,
     n_cols: int,
 ) -> None:
-    """Reject index arrays that do not describe a canonical CSR matrix.
+    """Raise ``TfsxFormatError`` unless the arrays form a canonical CSR matrix.
 
-    Canonical means what ``build`` produces and what the reference scorer, the
-    native core and ``row()`` assume without re-checking: one more offset than
-    rows, starting at zero, non-decreasing, ending at ``nnz``, and column indices
-    in range and strictly increasing within a row. Strict increase makes a row's
-    support a set; a duplicate column double-counts a term in every dot product.
+    Canonical is what ``CsrMatrix.from_rows`` produces and the scorer, native core and ``row()``
+    assume unchecked: ``n_rows + 1`` offsets non-decreasing from 0 to ``nnz``, and in-range
+    columns strictly increasing per row, so no dot product double-counts a term.
     """
     if len(indptr) != n_rows + 1:
         raise TfsxFormatError(
@@ -338,11 +297,9 @@ def load_model(path: Path | str) -> TfidfModel:
 def model_from_bytes(data: bytes) -> TfidfModel:
     """Parse a ``.tfsx`` container, or raise.
 
-    The only parser here that reads untrusted input, and the fuzz target of
-    ``tests/test_fuzz_parsers.py``. Accepted bytes re-serialise identically.
-    Every length comes from the header and is checked against the file size
-    before any slice. Rejected bytes raise ``TfidfStabilityError``, never
-    ``struct.error``, ``IndexError`` or ``UnicodeDecodeError``.
+    Reads untrusted input; fuzzed by ``tests/test_fuzz_parsers.py``. Lengths are checked against
+    the file size before any slice, and accepted bytes re-serialise identically. Rejection raises
+    ``TfidfStabilityError``, never ``struct.error``, ``IndexError`` or ``UnicodeDecodeError``.
     """
     # The structural checks live in the parser rather than with the first caller
     # to trip over them. Without them, a CSR matrix whose `indices` point
@@ -403,17 +360,10 @@ def model_from_bytes(data: bytes) -> TfidfModel:
     tokens = _decode_block(token_block, head.n_terms, "token")
     doc_ids = _decode_block(doc_id_block, head.n_docs, "document id")
 
-    # Semantic validation: the checks above confirm the container is shaped
-    # right, these that its contents could have come from a real fit. A file can
-    # satisfy every count and still carry NaN weights (undefined behaviour for
-    # the sort) or repeated ids (which destroy the ranking operator's strict
-    # total order), both of which produce a plausible-looking ranking rather than
-    # an error. The three CSR arrays are read independently with only their
-    # lengths fixed by the header: of 2715 mutated containers this parser
-    # accepted, 425 carried an indptr that was non-monotonic or did not start at
-    # zero. Nothing downstream re-checks (CsrMatrix is frozen with no
-    # __post_init__), so such a model was returned intact and misbehaved far from
-    # its cause.
+    # Semantic validation: the checks above fix the container's shape; these confirm that
+    # its contents could come from a real fit. CsrMatrix is frozen with no __post_init__,
+    # so nothing downstream re-checks the three CSR arrays.
+    # Rationale: docs/engineering_notes.md#tfsx-semantic-validation
     _check_csr(indptr, indices, values, n_rows=head.n_docs, n_cols=head.n_terms)
 
     vocabulary = Vocabulary(
@@ -427,85 +377,32 @@ def model_from_bytes(data: bytes) -> TfidfModel:
 
     try:
         check_unique_ids(doc_ids)
-        # The token block gets the same treatment as the document-id block one
-        # line up, and for the same reason. It did not: `check_unique_ids` was
-        # applied to `doc_ids` alone, and `Vocabulary` is frozen with no
-        # `__post_init__`, so constructing it here bypassed the `is_sorted`
-        # guard that `build_vocabulary` runs -- the one vocabulary.py:287 calls
-        # "the one check standing between a mis-sorted vocabulary and silently
-        # wrong weights".
-        #
-        # Measured on a 301-byte container over the vocabulary ('aa','ab','cc'):
-        # flipping byte 288 from 'b' to 'a' gives ('aa','aa','cc'), which this
-        # parser accepted. `_index` then maps 'aa' to column 1, so the query
-        # ['aa'] scored the document containing "aa" twice at 0.0 and a document
-        # containing no "aa" at all at 0.707. Flipping the equivalent byte in
-        # the document-id block was already rejected, which is the asymmetry
-        # this closes -- and `load_model` is, by its own docstring, the only
-        # parser here that reads untrusted input.
-        #
-        # Ascent rather than mere uniqueness: it subsumes uniqueness and also
-        # catches a permuted block, which passes a uniqueness test while making
-        # the binary searches in tf.py and the merge in align_models wrong.
+        # `Vocabulary` is frozen with no `__post_init__`, so the parser runs the `is_sorted`
+        # guard `build_vocabulary` runs. Strictly ascending UTF-8 byte order implies
+        # uniqueness and also rejects a permuted block, which breaks the order
+        # `Vocabulary.digest` relies on. Rationale: docs/engineering_notes.md#tfsx-token-order
         if not vocabulary.is_sorted():
             raise TfidfStabilityError("vocabulary identifiers are not in UTF-8 byte order")
         check_finite(idf_values, "idf")
         check_finite(values, "weights")
         check_finite(norms, "norms")
-        # `idf` gets the same treatment as the two arrays below it, and did not.
-        # README section 2.2 fixes idf(t) = log((1 + N) / (1 + df(t))) + 1, and
-        # df <= N always, so the ratio is at least 1, the logarithm at least 0
-        # and idf at least 1. A negative entry cannot come from any fit.
-        #
-        # It could come from a corrupt file, and nothing downstream would notice.
-        # `similarity/cosine.py` opens by saying coordinates are non-negative so
-        # `cos` lies in [0, 1], and that "a negative coordinate anywhere upstream
-        # would void that silently, so check_non_negative exists to catch it" --
-        # this is the path where it was not called. `ranker.py` checks scores for
-        # finiteness but not for sign, so negative scores sort like any other.
-        #
-        # Measured on a 301-byte container over ('aa','ab','cc'): flipping the
-        # eight bytes of idf[0] to -5.0 was accepted, and the query ['aa'] scored
-        # [-0.894, 0.0, -0.707] where the genuine model gives [+0.894, 0.0,
-        # +0.707]. The ranking inverted -- the document holding "aa" twice went
-        # last, one holding no "aa" at all went first -- with no error raised on
-        # load, on scoring or on ranking, and with every score outside the range
-        # section 2.3 documents.
-        #
-        # Non-negativity rather than the tighter `>= 1`: it is what the sibling
-        # checks assert, it catches the sign flip that does the damage, and it
-        # bakes no smoothing convention into the parser.
+        # README section 2.1: idf(t) = log((1 + N) / (1 + df(t))) + 1 with df <= N, so
+        # idf >= 1; a negative entry comes only from a corrupt file, and scoring and ranking
+        # do not check sign. Non-negativity rather than `>= 1` bakes in no smoothing
+        # convention. Rationale: docs/engineering_notes.md#tfsx-idf-sign
         check_non_negative(idf_values, "idf")
         check_non_negative(values, "weights")
         check_non_negative(norms, "norms")
-        # The three integer arrays, which had no semantic check at all while
-        # every float array and both string blocks had one. Seven of the ten
-        # fields `model_bytes` writes were validated; these were the three.
-        #
-        # Each carries a constraint a real fit cannot violate. `lengths[i]` is a
-        # count of in-vocabulary terms, so it is non-negative -- zero for a
-        # document whose tokens are all stopwords, which the mini corpus has.
-        # `df[t]` counts documents containing `t`, and a term reaches the
-        # vocabulary only by appearing, so `1 <= df[t] <= N`. `cf[t]` counts
-        # total occurrences, and a term occurs at least once in each document
-        # holding it, so `cf[t] >= df[t]`.
-        #
-        # Measured on a 301-byte container: `lengths[0]` moved from 3 to 7 was
-        # accepted, and `intermediates(0)` then published `count=5, tf=0.714`
-        # where the genuine model gives `count=2, tf=0.667` -- the two fields
-        # that need `_exact_tf` to be recovered at all, wrong in the one file
-        # this project publishes with raw bit patterns beside the decimals. No
-        # error on load or on export.
+        # A real fit gives `lengths[i] >= 0` (zero for an all-stopword document),
+        # `1 <= df[t] <= N` (a term enters the vocabulary only by appearing) and
+        # `cf[t] >= df[t]` (a term occurs at least once in each document holding it).
+        # Rationale: docs/engineering_notes.md#tfsx-integer-arrays
         check_non_negative(lengths, "lengths")
         for doc, length in enumerate(lengths):
-            # Each distinct in-vocabulary term in row `doc` occurs at least
-            # once, so the document's in-vocabulary length is at least its
-            # number of non-zeros. A lower bound only: the exact value cannot be
-            # recovered from the container, since a term occurring three times
-            # and one occurring once are one non-zero either way. `lengths[0]`
-            # moved from 3 to 7 is still accepted, and no check available here
-            # could refuse it -- what this catches is a length shrunk below the
-            # row it describes.
+            # Each distinct term in row `doc` occurs at least once, so the length is at
+            # least the row's non-zero count. A lower bound only: a term occurring once
+            # and one occurring three times are one non-zero each, so an inflated length
+            # cannot be detected from the container.
             row_nnz = indptr[doc + 1] - indptr[doc]
             if length < row_nnz:
                 raise TfidfStabilityError(

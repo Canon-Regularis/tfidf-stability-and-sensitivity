@@ -1,32 +1,8 @@
-"""Tie groups and near-tie structure (README section 2.3.3, ``spec_addenda.md#g1``).
+"""Tie groups and near-ties (README section 2.3.3, ``spec_addenda.md#g1``).
 
-Section 2.3.3 defines, for a tolerance ``tau > 0`` and a rank ``j``,
-
-    G_tau(j) = { i : |s_i - score(r_j)| <= tau }
-
-and says documents inside one are "indistinguishable at the level of similarity
-scores". The definition is a ball rather than an equivalence class:
-
-* ``|s_i - s_j| <= tau`` is reflexive and symmetric but not transitive: for
-  scores ``{0, tau, 2*tau}`` the outer pair is unrelated;
-* balls therefore overlap and do not partition the corpus;
-* "the tie group of document i" is not well defined;
-* two members of one ball can differ by as much as ``2*tau``, so the quoted
-  sentence is not strictly true as written.
-
-G1's resolution is three separately named objects, never conflated:
-
-======================  =====================================  =========  ==========
-object                  definition                             cost       partition?
-======================  =====================================  =========  ==========
-:func:`tie_ball_interval` verbatim section 2.3.3               O(log N)   no
-:func:`tie_chains`      single-linkage: adjacent gaps <= tau   O(N)       **yes**
-:func:`tie_cliques`     complete-linkage: diameter <= tau      O(N)       no
-======================  =====================================  =========  ==========
-
-The ball stays the primary reported object, being what the paper defines. Chains
-are reported alongside it wherever a partition is required, and the
-chain-inflation ratio ``rho(tau)`` flags when the two have diverged.
+The ball ``G_tau(j) = {i : |s_i - score(r_j)| <= tau}`` is not a partition, as near-tie is not
+transitive. G1 reports the ball :func:`tie_ball_interval`, the partition :func:`tie_chains`
+and the complete-linkage :func:`tie_cliques`. Rationale: docs/engineering_notes.md#tie-groups
 """
 
 from __future__ import annotations
@@ -69,37 +45,16 @@ Interval = tuple[int, int]
 def tie_ball_interval(sorted_scores: Sequence[float], j: int, tau: float) -> Interval:
     """``[lo, hi)`` in rank space: ``{i : |S[i] - S[j]| <= tau}``.
 
-    Args:
-        sorted_scores: Non-increasing scores.
-        j: A **0-indexed** position in that array.
-        tau: The tolerance. ``tau = 0`` is legal and recovers exact ties.
-
-    Returns:
-        The half-open rank range. Contiguous, because the array is sorted.
-
-    Note:
-        Binary-searching for ``S[j] + tau`` and ``S[j] - tau`` is wrong: those
-        bounds are themselves rounded, so the predicate evaluated becomes
-        ``S[i] <= fl(S[j] + tau)``, a different test from ``spec_addenda.md#g9``'s
-        pinned ``|s_i - s_{r_j}| <= tau``. The two disagree only at the boundary,
-        the one place tie groups are interesting.
-
-        So the search runs on the difference itself. On a non-increasing array
-        ``S[i] - S[j]`` is non-increasing in ``i`` and ``S[j] - S[i]`` is
-        non-decreasing, so both stay binary-searchable and both evaluate the
-        subtraction G9 specifies. Monotonicity survives binary64 as well as the
-        reals, because IEEE subtraction is monotone: ``a >= b`` implies
-        ``fl(a - c) >= fl(b - c)``.
+    ``j`` is a 0-indexed position in the non-increasing ``sorted_scores``; ``tau = 0`` gives
+    exact ties. Both searches evaluate the ``spec_addenda.md#g9`` difference itself, never a
+    rounded bound ``fl(S[j] + tau)``. Rationale: docs/engineering_notes.md#tie-ball-search
     """
     n = len(sorted_scores)
     if not 0 <= j < n:
         raise IndexError(f"rank index {j} out of range 0..{n - 1}")
-    # `not (tau >= 0.0)` rather than `tau < 0.0`: comparisons with NaN are all
-    # false, so the second form lets NaN through a guard whose own message says
-    # non-negative. With tau = NaN, `gap > tau` and `gap <= tau` are both false,
-    # so tie_chains returns one group covering the corpus, tie_cliques returns
-    # all singletons, and rho reports N: three contradictory answers to the same
-    # question, with no error raised.
+    # `not (tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
+    # so the second form admits NaN. Unguarded, a NaN tau makes tie_chains return one
+    # group, tie_cliques all singletons and rho N, with no error raised.
     if not (tau >= 0.0):
         raise ValueError(f"tau must be non-negative, got {tau}")
 
@@ -132,21 +87,16 @@ def tie_ball_interval(sorted_scores: Sequence[float], j: int, tau: float) -> Int
 def tie_chains(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ...]:
     """The transitive closure of the near-tie relation: a partition.
 
-    Cut wherever an adjacent gap exceeds ``tau``. That is the closure because on
-    a linearly ordered set any sequence of "within tau" steps between two points
-    can be replaced by the monotone path through the points between them, gaps
-    only shrinking along the way. So two documents are connected when every
-    adjacent gap separating them is ``<= tau``.
+    Cut wherever an adjacent gap exceeds ``tau``. On a linearly ordered set any sequence of
+    "within tau" steps reduces to the monotone path between its ends, so two documents are
+    connected when every adjacent gap separating them is ``<= tau``.
     """
     n = len(sorted_scores)
     if n == 0:
         return ()
-    # `not (tau >= 0.0)` rather than `tau < 0.0`: comparisons with NaN are all
-    # false, so the second form lets NaN through a guard whose own message says
-    # non-negative. With tau = NaN, `gap > tau` and `gap <= tau` are both false,
-    # so tie_chains returns one group covering the corpus, tie_cliques returns
-    # all singletons, and rho reports N: three contradictory answers to the same
-    # question, with no error raised.
+    # `not (tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
+    # so the second form admits NaN. Unguarded, a NaN tau makes tie_chains return one
+    # group, tie_cliques all singletons and rho N, with no error raised.
     if not (tau >= 0.0):
         raise ValueError(f"tau must be non-negative, got {tau}")
 
@@ -166,31 +116,16 @@ def tie_chains(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ..
 def tie_cliques(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ...]:
     """Maximal sets in which every pair is within ``tau``.
 
-    These are the sets for which "mutually indistinguishable" holds; in a chain
-    only neighbours need be close.
-
-    The O(N) sweep is complete, by a small lemma. The graph ``|s_i - s_j| <= tau``
-    is an indifference graph, so every maximal clique is a contiguous interval of
-    the sorted order: if ``i < m < j`` and ``i, j`` are both in a clique, then
-    ``S[i] >= S[m] >= S[j]`` gives ``|S[i] - S[m]| <= |S[i] - S[j]| <= tau`` and
-    likewise for ``m, j``, so ``m`` belongs too. An interval graph on ``N``
-    vertices has at most ``N`` maximal cliques, so one per left endpoint misses
-    none.
-
-    Let ``R(a)`` be the largest ``b`` with ``S[a] - S[b] <= tau``. ``R`` is
-    non-decreasing, so a two-pointer pass computes all of it, and ``[a, R(a)]``
-    is maximal exactly when ``a == 0`` or ``R(a) > R(a - 1)``, since otherwise
-    the previous interval strictly contains it.
+    The near-tie graph is an indifference graph, so maximal cliques are sorted-order intervals.
+    With ``R(a)`` the largest ``b`` where ``S[a] - S[b] <= tau``, ``[a, R(a)]`` is maximal iff
+    ``a == 0`` or ``R(a) > R(a - 1)``. Rationale: docs/engineering_notes.md#tie-clique-sweep
     """
     n = len(sorted_scores)
     if n == 0:
         return ()
-    # `not (tau >= 0.0)` rather than `tau < 0.0`: comparisons with NaN are all
-    # false, so the second form lets NaN through a guard whose own message says
-    # non-negative. With tau = NaN, `gap > tau` and `gap <= tau` are both false,
-    # so tie_chains returns one group covering the corpus, tie_cliques returns
-    # all singletons, and rho reports N: three contradictory answers to the same
-    # question, with no error raised.
+    # `not (tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
+    # so the second form admits NaN. Unguarded, a NaN tau makes tie_chains return one
+    # group, tie_cliques all singletons and rho N, with no error raised.
     if not (tau >= 0.0):
         raise ValueError(f"tau must be non-negative, got {tau}")
 
@@ -210,17 +145,9 @@ def tie_cliques(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, .
 def chain_inflation_ratio(sorted_scores: Sequence[float], tau: float) -> float:
     """``rho(tau) = |largest chain| / |largest clique|``.
 
-    ``>= 1`` for the non-increasing input the parameter name requires: a clique
-    is then an interval whose adjacent gaps are all ``<= tau``, so it lies
-    inside some chain. Large values mean the reported tie groups are held
-    together by chaining rather than by indistinguishability.
-
-    The bound rests on that order and is not checked. On unsorted scores both
-    sides are computed over intervals that no longer correspond, and rho falls
-    below 1 -- ``[0.07, 0.01, 0.84, 0.26, 0.23, 1.0]`` at ``tau=0.2`` gives 0.5.
-    Nothing here can tell that from a legitimate result, so the ordering is the
-    caller's to establish; every in-package caller takes it from
-    :func:`~tfidf_stability.ranking.ranker.sorted_scores_desc`.
+    ``rho >= 1`` on non-increasing input; the order is unchecked and unsorted input can give
+    ``rho < 1``. Callers sort via :func:`~tfidf_stability.ranking.ranker.sorted_scores_desc`.
+    Large rho flags chaining. Rationale: docs/engineering_notes.md#rho-order
     """
     chains = tie_chains(sorted_scores, tau)
     cliques = tie_cliques(sorted_scores, tau)
@@ -316,11 +243,9 @@ class TieGroupIndex:
     def largest_ball(self) -> int:
         """The widest ball over every centre.
 
-        G1 makes the ball the primary reported object. A clique is
-        complete-linkage and a chain single-linkage, and the ball sits between
-        them: ``largest_clique <= largest_ball <= largest_chain``. The bounds
-        are loose; on the adversarial ladder the chain spans the whole corpus
-        while the widest ball spans three.
+        G1 makes the ball the primary object; it lies between the clique and the chain:
+        ``largest_clique <= largest_ball <= largest_chain``. The bounds are loose: on the
+        adversarial ladder the chain spans the whole corpus and the widest ball spans three.
         """
         return max(
             (hi - lo for lo, hi in (self.ball(j) for j in range(len(self.sorted_scores)))),

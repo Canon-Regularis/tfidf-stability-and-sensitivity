@@ -1,55 +1,8 @@
-"""Query scoring over an inverted index: ``s_i = cos(q, w_i)`` (README section 2.3).
+"""Inverted-index query scoring, ``s_i = cos(q, w_i)`` (README section 2.3).
 
-Normative reference for the two scoring kernels of
-``cpp/include/tfidf/similarity/scoring.hpp``. Until it existed those kernels had
-no Python counterpart to be measured against: only
-:func:`~tfidf_stability.similarity.cosine.cosine_against_corpus`, which scores a
-dense list of document vectors and shares neither loop nesting nor data structure
-with either of them.
-
-Three implementations, one number
----------------------------------
-
-**TAAT** (term at a time) walks the postings list of each query term into a dense
-accumulator. **DAAT** (document at a time) merges each document's row against the
-query independently and builds no inverted index. ``cosine_against_corpus`` does
-the same merge over a materialised sequence of rows. All three must produce
-identical bit patterns rather than values agreeing to within rounding, and
-``tests/test_scoring_kernels.py`` asserts that via
-:func:`~tfidf_stability.utils.numerics.same_bits`.
-
-*Why they agree.* The TAAT outer loop runs over query terms in ascending term
-identifier and a canonical query stores each term once, so a given term
-contributes at most one addition to any one accumulator. Document ``d`` therefore
-sees the addend sequence
-
-    ascending term id over supp(q) INTERSECT supp(w_d), starting from 0.0
-
-which is the sequence the merge in
-:func:`~tfidf_stability.vectorisation.sparse.dot` produces. Every reduction
-policy in :class:`~tfidf_stability.utils.numerics.Reduction` is a pure function
-of that ordered sequence, so equal sequences give equal bits.
-
-The property depends on the ascent. Blocking the term loop, or visiting postings
-in any order other than the one :meth:`InvertedIndex.from_csr` lays down,
-reassociates the sum and changes the digits, which is this project's subject. No
-such reordering is applied here, and none may be applied on the normative path.
-
-*Where this deviates in form from the C++.* The native kernels use incremental
-accumulator objects (one ``add`` call per product); Python's reducers are batch
-functions over a sequence, so the non-naive TAAT branch buffers each document's
-products and reduces once at the end. Plumbing only: each policy consumes its
-addends strictly in order and depends on nothing else, so buffering cannot change
-a bit.
-
-Cost
-----
-
-TAAT costs ``O(sum of df(t) over query terms)`` multiply-adds plus
-``O(|touched|)`` divisions rather than ``O(N)``, since an untouched document
-scores exactly 0. DAAT costs ``O(sum of nnz(d) over all documents)``. TAAT wins
-when the query's terms are individually rare, the usual case for the TF-IDF
-profile queries of section 7.1.
+Normative reference for ``cpp/include/tfidf/similarity/scoring.hpp``. TAAT, DAAT and
+:func:`~tfidf_stability.similarity.cosine.cosine_against_corpus` give identical bits: each adds
+products in ascending term id, TAAT in :meth:`InvertedIndex.from_csr` order. Do not reorder.
 """
 
 from __future__ import annotations
@@ -75,9 +28,9 @@ __all__ = [
 class ScoringAlgorithm(str, Enum):
     """Which traversal to score with.
 
-    The two must agree bit for bit, so the choice is a performance decision. It
-    is still explicit and recorded in run manifests: a claim of agreement is
-    worth nothing unless which one ran is knowable.
+    The traversals agree bit for bit (:func:`~tfidf_stability.utils.numerics.same_bits` in
+    ``tests/test_scoring_kernels.py``), so the choice affects speed only. TAAT costs
+    ``O(sum of df(t) over query terms)`` and suits the rare-term profile queries of section 7.1.
     """
 
     #: Term at a time over the inverted index. The default.
@@ -93,15 +46,9 @@ class ScoringAlgorithm(str, Enum):
 class InvertedIndex:
     """Compressed sparse column form of the corpus matrix: the postings lists.
 
-    Column ``t`` holds the documents containing term ``t``, in ascending document
-    order, alongside their weights. Mirrors ``tfidf::Csc``.
-
-    Attributes:
-        colptr: Column boundaries, length ``n_cols + 1``.
-        rowidx: Document indices, ascending within each column.
-        values: Weights, parallel to ``rowidx``.
-        n_rows: Document count.
-        n_cols: Vocabulary size.
+    Column ``t`` lists, in ascending document order, the documents containing term ``t`` and their
+    weights. Fields: ``colptr`` (length ``n_cols + 1``), ``rowidx`` and ``values`` (parallel),
+    ``n_rows`` (documents) and ``n_cols`` (vocabulary size). Mirrors ``tfidf::Csc``.
     """
 
     colptr: tuple[int, ...]
@@ -151,11 +98,9 @@ class InvertedIndex:
     def from_csr(cls, matrix: CsrMatrix) -> InvertedIndex:
         """Transpose a CSR corpus matrix by counting sort: ``O(nnz + n_cols)``.
 
-        Source rows are visited in ascending document order and each column's
-        entries are appended in that order, so every postings list comes out
-        ascending in document identifier without a sort, and no sort's
-        tie-breaking can influence the layout. The layout fixes the accumulation
-        order, which fixes the digits.
+        Rows are visited in ascending document order, so each postings list is ascending
+        without a sort and no sort's tie-breaking affects the layout. The layout fixes the
+        accumulation order, which fixes the digits.
         """
         colptr = [0] * (matrix.n_cols + 1)
         for t in matrix.indices:
@@ -187,15 +132,9 @@ class InvertedIndex:
 class ScoringScratch:
     """Reusable working state for TAAT, allocated once and reused per query.
 
-    Mirrors ``tfidf::ScoringScratch``. It exists so repeated scoring does no
-    per-query allocation, and it is part of the reference rather than an
-    optimisation detail because reuse must be unobservable: a stale accumulator
-    entry would silently contaminate the next query's scores, and showing it does
-    not means reproducing the reuse here and comparing.
-
-    Attributes:
-        accumulator: Dense, one slot per document.
-        touched: The documents live for the current query.
+    Mirrors ``tfidf::ScoringScratch``. Reuse must be unobservable, since a stale accumulator
+    entry would contaminate the next query, so the reference reproduces the reuse for comparison.
+    Fields: ``accumulator`` (dense, one slot per document) and ``touched`` (live documents).
     """
 
     accumulator: list[float] = field(default_factory=list)
@@ -224,31 +163,28 @@ def _accumulate(
 ) -> None:
     """Fill ``scratch`` with the unnormalised dot products of the touched documents.
 
-    Split out of :func:`taat_scores` so the two accumulation strategies sit side
-    by side and can be read against each other; the normalisation that follows is
-    common to both.
+    Called by :func:`taat_scores`, which normalises the result. Every
+    :class:`~tfidf_stability.utils.numerics.Reduction` policy is a pure function of the ordered
+    addends, so equal addend sequences give equal bits.
     """
     if policy is Reduction.NAIVE:
-        # The normative fold, and the only policy whose entire state is the
-        # running sum, so it can live directly in the dense array.
-        #
-        # ASCENDING term id. This is what makes the result bit-identical to the
-        # merge-based dot product. Do not reorder.
+        # The normative fold; its whole state is the running sum, so it lives in the dense array.
+        # ASCENDING term id makes the result bit-identical to the merge-based dot product.
+        # Do not reorder. Rationale: docs/engineering_notes.md#scoring-term-order
         for t, qv in zip(query.indices, query.values, strict=True):
             for p in range(index.colptr[t], index.colptr[t + 1]):
                 d = index.rowidx[p]
-                # A slot can in principle accumulate back to 0.0 and be recorded
-                # twice. It cannot here: TF-IDF weights are non-negative, so a
-                # sum of products of stored values is zero only if some factor is
-                # zero, which a canonical sparse structure never stores. A
-                # duplicate would rewrite the same quotient anyway.
+                # A slot still 0.0 after an addition is recorded again. TF-IDF weights are
+                # non-negative and a canonical structure stores no zeros, so that happens only if
+                # every product so far underflowed; the duplicate rewrites the same quotient.
                 if scratch.accumulator[d] == 0.0:
                     scratch.touched.append(d)
                 scratch.accumulator[d] += qv * index.values[p]
         return
 
-    # A compensated or tree-shaped reduction carries per-document state, so each
-    # touched document needs its own addend sequence.
+    # A compensated or tree-shaped reduction carries per-document state, so each touched
+    # document gets its own addend sequence, reduced once at the end. The C++ accumulates
+    # incrementally; each policy consumes addends strictly in order, so buffering changes no bit.
     products: list[list[float]] = [[] for _ in range(index.n_rows)]
     seen = bytearray(index.n_rows)
     for t, qv in zip(query.indices, query.values, strict=True):
@@ -273,21 +209,9 @@ def taat_scores(
 ) -> list[float]:
     """Score a query against every document, term at a time.
 
-    Args:
-        query: The query vector, canonical (strictly ascending indices).
-        index: The inverted index, from :meth:`InvertedIndex.from_csr`.
-        doc_norms: Precomputed ``||w_i||_2``, one per document, under ``policy``.
-        policy: Summation policy for the accumulated dot products and, when it is
-            not supplied, the query norm.
-        query_norm: Precomputed ``||q||_2``. Supplying it is a performance choice
-            and changes nothing numerically, provided the same policy produced it.
-        scratch: Working state to reuse across queries. A fresh one is allocated
-            when omitted; reusing one object is numerically indistinguishable
-            from allocating each time.
-
-    Returns:
-        ``s_i = cos(q, w_i)`` for every document, with the zero-vector convention
-        of section 2.3 applied.
+    ``query`` is canonical; ``index`` is from :meth:`InvertedIndex.from_csr`; reusing ``scratch``
+    changes no bit. ``policy`` sums the products and an omitted ``query_norm``; ``doc_norms`` and a
+    supplied ``query_norm`` must come from it too. Returns ``s_i``; zero vectors per section 2.3.
     """
     if query.dim != index.n_cols:
         raise ValueError(f"dimension mismatch: query {query.dim} vs index {index.n_cols}")
@@ -327,13 +251,9 @@ def daat_scores(
 ) -> list[float]:
     """Score a query against every document, document at a time.
 
-    An independent merge per document, with no inverted index and no dense
-    accumulator, which is why agreeing with :func:`taat_scores` to the last bit
-    says something: the two share no data structure and no loop nesting, so a
-    common indexing or accumulation bug has almost nowhere to hide.
-
-    Arguments and return value match :func:`taat_scores`, with the corpus given
-    in CSR rather than inverted form.
+    Merges each row with :func:`~tfidf_stability.vectorisation.sparse.dot`; it shares no data
+    structure or loop nesting with :func:`taat_scores`, so bit-for-bit agreement checks both.
+    Arguments and return value match :func:`taat_scores`, with the corpus in CSR form.
     """
     if query.dim != corpus.n_cols:
         raise ValueError(f"dimension mismatch: query {query.dim} vs corpus {corpus.n_cols}")
@@ -364,15 +284,11 @@ def score(
     query_norm: float | None = None,
     scratch: ScoringScratch | None = None,
 ) -> list[float]:
-    """Score by the requested traversal. Mirrors ``tfidf::score``.
+    """Score by the requested traversal, mirroring ``tfidf::score``.
 
-    The dispatch tests for DAAT and falls through to TAAT, so anything that is
-    not ``ScoringAlgorithm.DAAT`` -- including the bare string ``"daat"``, which
-    is not the enum member and fails ``is`` -- runs TAAT. That is deliberate
-    rather than overlooked: the two traversals are required to agree to the last
-    bit, and the C++ mirror does the same, so a wrong branch costs time and
-    never an answer. Raising here would make the two implementations disagree
-    about an input neither is asked for.
+    Anything that fails ``is ScoringAlgorithm.DAAT``, including the string ``"daat"``, runs TAAT,
+    as in the C++. The traversals agree to the last bit, so a wrong branch costs only time;
+    raising would make the two implementations disagree about an input neither is asked for.
     """
     if algorithm is ScoringAlgorithm.DAAT:
         return daat_scores(query, corpus, doc_norms, policy, query_norm=query_norm)

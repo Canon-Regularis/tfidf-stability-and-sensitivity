@@ -1,31 +1,8 @@
-"""Shared scalar type aliases.
+"""Shared scalar type aliases, at the C++ width where a counterpart exists.
 
-These record the width the native side uses wherever a value crosses the
-boundary. Python does not check them at run time.
-
-They do **not** mirror ``cpp/include/tfidf/core/types.hpp`` one-for-one, and an
-earlier version of this docstring said they did. The correspondence is:
-
-===============  ==========================  ====================================
-Python           C++                         note
-===============  ==========================  ====================================
-``TermId``       ``TermId``                  same concept, ``int32`` there
-``DocIndex``     ``DocId``                   **the names differ**: a row index
-``DocId``        no counterpart              the external identifier, a ``str``
-``Rank``         no counterpart              1-indexed, Python-side reporting
-``Offset``       ``Offset``                  ``int64`` there
-``Real``         ``Real``                    ``double``
-``Score``        ``Score``                   ``double``
-===============  ==========================  ====================================
-
-The ``DocId`` row is the trap. C++ ``DocId`` is a positional row index, which is
-what this module calls ``DocIndex``; Python ``DocId`` is the stable external
-string that survives a corpus reordering and terminates every sort key. The same
-name denotes a different concept on each side, so a signature read across the
-boundary means the opposite of what it appears to.
-
-``tests/test_public_api_surface.py`` parses the header and asserts this table, so
-the correspondence cannot drift again without a test failing.
+Pinned by ``tests/test_public_api_surface.py`` to ``cpp/include/tfidf/core/types.hpp``, but not
+one-to-one: C++ ``DocId`` is a row index, here ``DocIndex``; Python ``DocId`` is the stable ``str``
+identifier. No run-time check. Rationale: docs/engineering_notes.md#python-cpp-type-correspondence
 """
 
 from __future__ import annotations

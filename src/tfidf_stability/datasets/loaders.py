@@ -1,20 +1,8 @@
-"""One way in to every dataset, and one place the provenance is recorded.
+"""Load every dataset by name and record where each one came from.
 
-:data:`DATASET_NAMES` below is the registry; this module turns a name into
-records. ``configs/datasets.yaml`` documents the same datasets and is loaded by
-nothing, so editing a value there changes no behaviour. The CLI, the experiment
-scripts and the notebooks all go through :func:`load_dataset` and none of them
-know whether the corpus was generated, downloaded or read off disk.
-
-:class:`LoadedDataset` carries a :attr:`~LoadedDataset.provenance` block that
-goes verbatim into the run manifest, so a synthetic result and a MovieLens result
-stay distinguishable after the fact from the manifest alone, down to the archive
-digest or generator spec behind each. Without it the two are a filename apart,
-and filenames do not survive being copied.
-
-The asymmetry between the two datasets follows from the licence: synthetic data
-is regenerated from its spec on demand, MovieLens is loaded from a local archive
-this repository will never contain. See ``data/README.md``.
+:data:`DATASET_NAMES` is the registry; ``configs/datasets.yaml`` mirrors it and nothing loads it.
+:func:`load_dataset` returns a :class:`LoadedDataset` whose :attr:`~LoadedDataset.provenance` goes
+into the manifest. See ``data/README.md``. Rationale: docs/engineering_notes.md#dataset-provenance
 """
 
 from __future__ import annotations
@@ -40,8 +28,8 @@ __all__ = [
 #: ``scripts/build_corpus.py`` has written it out.
 DATASET_NAMES = ("synthetic_small", "synthetic_tiny", "movielens_small")
 
-#: Smaller synthetic spec for tests and doctests, where a 2000-document corpus
-#: would dominate the runtime of the suite that uses it.
+#: Smaller synthetic spec for tests and notebooks, where a 2000-document corpus
+#: would dominate the runtime.
 _TINY = synthetic.SyntheticSpec(
     n_docs=120, vocab_size=300, n_users=20, n_exact_duplicates=4, n_twin_pairs=6
 )
@@ -114,21 +102,9 @@ def load_dataset(
 ) -> LoadedDataset:
     """Load a registered dataset by name.
 
-    Args:
-        name: One of :data:`DATASET_NAMES`, or ``jsonl:<path>``.
-        archive: Path to ``ml-latest-small.zip``. Required for ``movielens_small``
-            and ignored otherwise.
-        spec: Override for the synthetic generator. Ignored for MovieLens.
-
-    Raises:
-        DataIntegrityError: Unknown name, or the dataset could not be loaded.
-
-    Example:
-        >>> data = load_dataset("synthetic_tiny")
-        >>> data.n_documents
-        120
-        >>> data.provenance["kind"]
-        'synthetic'
+    ``name`` is one of :data:`DATASET_NAMES` or ``jsonl:<path>``; ``archive``, the zip path, is
+    required for ``movielens_small`` and ignored otherwise; ``spec`` overrides the synthetic
+    generator. Raises DataIntegrityError for an unknown name or a missing or invalid corpus.
     """
     if name.startswith("jsonl:"):
         return load_jsonl_corpus(name[len("jsonl:") :])
@@ -152,8 +128,8 @@ def load_dataset(
                 "n_documents": corpus.n_documents,
                 "n_twin_pairs": len(corpus.twins),
                 "n_exact_duplicate_pairs": len(corpus.exact_duplicate_pairs),
-                # Redistributable, so this corpus regenerates anywhere: the
-                # distinction that matters when reproducing a result.
+                # The corpus regenerates from its spec anywhere, so a result
+                # built on it is reproducible from the repository alone.
                 "redistributable": True,
             },
         )

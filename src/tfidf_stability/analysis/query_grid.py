@@ -1,34 +1,8 @@
 """The section 7.1 query grid, shared by every experiment runner.
 
-Section 7.1 constructs queries as user-profile queries and leave-one-out folds,
-with item-as-query implemented but not evaluated. The experiment runners
-originally used truncated document prefixes, a different and much easier
-protocol: a prefix always retrieves its own source document at high similarity,
-whereas a fold has to find a held-out item from the rest of a user's history.
-That moves the score distribution, the margin distribution and every A1 number,
-so both runners now go through the grid built here.
-
-Per-query candidate sets
-------------------------
-Each query carries its own exclusions, so the candidate set differs per query
-(G19). A fold excludes the remaining profile items (they contributed the query
-text and would otherwise retrieve themselves) and keeps the target scoreable.
-Consequences:
-
-* ``N`` differs between queries, so ``k`` may exceed the candidate count. Those
-  queries are reported rather than silently clamped.
-* Margins are computed over the candidate scores only. Over the full corpus they
-  would include documents the query could never retrieve and would inflate the
-  apparent separation.
-* The attribute table must be restricted to the same subset, or the tie-break
-  ranks over non-candidates.
-
-Degenerate queries
-------------------
-A profile can be empty after preprocessing, and a non-empty query can embed to
-the zero vector when every feature is out of vocabulary. Both are legitimate
-section 7.1 outcomes and are counted separately: G3 excludes them from margin
-distributions and keeps them in ablations.
+Queries are user-profile queries or leave-one-out folds, each scored against its
+own candidate set (G19); item-as-query is not evaluated. G3 counts degenerate
+and zero-vector queries apart. Rationale: docs/engineering_notes.md#query-grid
 """
 
 from __future__ import annotations
@@ -74,14 +48,9 @@ class EvaluatedQuery:
     def is_zero_vector(self) -> bool:
         """Every score is zero, so attributes alone decide the ranking.
 
-        Observational rather than structural: a query can be non-empty and still
-        embed to the zero vector when every feature is out of vocabulary.
-
-        The emptiness guard earns its place. ``all()`` over no scores is
-        ``True``, so a query with no candidates once answered yes and entered
-        the published ``n_zero_vector`` as a pure-attribute ranking, with
-        nothing there to rank. No current dataset produces an empty candidate
-        set, so no published number moves.
+        A non-empty query can still embed to the zero vector when every feature is out
+        of vocabulary. An empty candidate set gives ``False``: ``all()`` over no
+        scores is ``True``, but there is nothing to rank.
         """
         return bool(self.scores) and all(s == 0.0 for s in self.scores)
 
@@ -116,8 +85,8 @@ class QueryGrid:
             "n_queries": len(self.queries),
             "n_degenerate_profiles": self.n_degenerate,
             "n_zero_vector_queries": self.n_zero_vector,
-            # Candidate sets vary per query (G19), so a single N would be a
-            # fiction; report both ends.
+            # Candidate sets vary per query (G19), so the block reports the
+            # smallest and largest N rather than a single value.
             "n_candidates_min": min((q.n_candidates for q in self.queries), default=0),
             "n_candidates_max": max((q.n_candidates for q in self.queries), default=0),
         }
@@ -135,24 +104,9 @@ def build_query_grid(
 ) -> QuerySet:
     """Construct the section 7.1 query set.
 
-    Args:
-        interactions: ``(user_id, doc_id, weight)`` triples.
-        features_by_doc: Preprocessed feature streams, keyed by document id.
-        doc_ids: Corpus order, used to size the candidate sets.
-        mode: Which construction. Item-as-query is implemented in
-            :mod:`~tfidf_stability.profiles.query_modes` but section 7.1
-            excludes it from the reported experiments, so it is rejected here.
-        min_interactions: Eligibility threshold.
-        exclude_profile_items: G10 decision 3.
-        limit: Cap the number of queries, taking a deterministic prefix. Every
-            fold of every eligible user is a lot of queries and the cap keeps CI
-            fast. Capping is always reported.
-
-    Raises:
-        ValueError: If ``mode`` is item-as-query, or ``limit`` is negative.
-            A negative cap reached the slice below, where Python counts from
-            the end: ``limit=-1`` silently dropped the last query of the grid
-            and reported the reduced count as if it were the whole protocol.
+    ``exclude_profile_items`` is G10 decision 3; ``limit`` keeps a deterministic prefix.
+    Raises ValueError for item-as-query, which :mod:`~tfidf_stability.profiles.query_modes`
+    implements but section 7.1 does not evaluate, and for a negative or NaN ``limit``.
     """
     # Loaders hand back plain triples; group_interactions wants the typed record.
     # Its `weight` feeds eligibility only, since section 7.1 specifies an

@@ -1,30 +1,8 @@
-"""Tie-break ablations: research question A2 (README sections 4.5 and 7.3).
+"""Tie-break ablations for research question A2 (README sections 4.5 and 7.3).
 
-Section 7.3 recomputes each ranking under three sorting operators
-
-    pi       = Sort(s_i, a_i)                   the full attribute tuple
-    pi_score = Sort(s_i, id_i)                  attribute-independent baseline
-    pi_alt   = Sort(s_i, a_i reordered)         alternate priority
-
-and measures how far apart the results are, isolating decision-level instability
-(change arising from the choice of secondary ordering rule) from numerical
-instability in the scores.
-
-The isolation rests on a fact the paper does not state and this implementation
-makes structural: all three operators share the same sorted score array, so every
-margin is identical between them (see
-:mod:`~tfidf_stability.ranking.margins`). Disagreement here is attributable to
-the tie-break alone, with ``delta s = 0``, which keeps A1 and A2 independent
-questions rather than confounded ones.
-
-Two guards on the interpretation:
-
-* the comparison only bites where ties exist. With all scores distinct the three
-  operators coincide, and :attr:`AblationResult.scores_all_distinct` records
-  when that was the case;
-* ``pi_score`` is the empty-priority special case of ``pi``, so it agrees with
-  ``pi`` whenever the attributes fail to discriminate. That weakens the ablation
-  slightly, and is the honest reading of section 4.5.
+pi = Sort(s_i, a_i), pi_score = Sort(s_i, id_i) and pi_alt share one sorted score array, so
+margins (:mod:`~tfidf_stability.ranking.margins`) match and disagreement is the tie-break's
+alone (``delta s = 0``). Rationale: docs/engineering_notes.md#tie-break-ablation-isolation
 """
 
 from __future__ import annotations
@@ -71,7 +49,11 @@ class OperatorPair:
 
 @dataclass(frozen=True, slots=True)
 class AblationResult:
-    """Every operator comparison for one query, across the requested ``k`` set."""
+    """Every operator comparison for one query, across the requested ``k`` set.
+
+    With all scores distinct the operators coincide; :attr:`AblationResult.scores_all_distinct`
+    records that case.
+    """
 
     query_id: str
     n_documents: int
@@ -104,20 +86,9 @@ def ablate_query(
 ) -> AblationResult:
     """Rank one query under every operator and compare each against the baseline.
 
-    Args:
-        scores: Similarity scores for this query.
-        table: The tie-break attribute table.
-        query_id: Recorded on the result for provenance.
-        ks: The k-set of section 7.1.
-        specs: Operators to evaluate; the baseline is skipped against itself.
-        baseline: The operator everything is compared against, ``pi``: section
-            7.3 asks for "pi versus pi_score" and "pi versus pi_alt".
-        n_zero_norm_docs: Passed through for reporting.
-        mode: Lenient by default, since a ``k`` larger than the corpus is a
-            legitimate grid point in a sweep rather than a configuration error.
-
-    Returns:
-        The :class:`AblationResult`.
+    ``ks`` is the k-set of section 7.1. ``baseline`` defaults to ``pi`` (section 7.3 compares pi
+    with pi_score and pi_alt) and is skipped against itself. ``mode`` is lenient because a ``k``
+    above the corpus size is a valid sweep grid point. Returns the :class:`AblationResult`.
     """
     rankings = rank_all_operators(
         scores, table, specs, mode=mode, n_zero_norm_docs=n_zero_norm_docs
@@ -173,18 +144,16 @@ def disagreement_rate(
 ) -> tuple[float, int]:
     """Section 7.3's headline statistic, with its denominator.
 
-    Returns ``(rate, n)``: the fraction of queries whose top-k set differs
-    between the two operators, and how many queries contributed. A rate over
-    three queries and a rate over thirty thousand are different claims, and
-    section 7.1 requires the query count to be reported.
+    Returns ``(rate, n)``: the fraction of queries whose top-k set differs between the two
+    operators, and the number of queries that contributed. Section 7.1 requires the query count
+    to be reported alongside the rate.
     """
     considered = []
     for result in results:
-        # At most one pair per query. `ablate_query` clamps k to the candidate
-        # count (G3's lenient mode), so several requested k values collapse onto
-        # the same effective k: on a 7-document corpus k in (10, 20, 50) all
-        # become 7. Taking every match counted such a query three times, against
-        # a denominator this docstring promises is a query count.
+        # At most one pair per query. `ablate_query` clamps k to the candidate count (G3's
+        # lenient mode), so several requested k values share one effective k: on a 7-document
+        # corpus k in (10, 20, 50) all become 7. Taking only the first match keeps the
+        # denominator a query count.
         match = next(
             (
                 p

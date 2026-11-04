@@ -1,14 +1,8 @@
-"""Loader for the compiled native backend.
+"""Loader for the compiled native backend, an optional accelerator.
 
-The extension is an optional accelerator and the pure-Python reference needs no
-compiler, so an absent extension is a capability difference and never an
-import-time error. Asking for the native backend explicitly raises
-:class:`~tfidf_stability.utils.validation.NativeBackendUnavailableError` saying
-what was tried.
-
-:func:`check_float_environment` probes the process floating-point environment
-through the extension and repairs it: a BLAS that sets flush-to-zero as numpy
-imports would silently zero the subnormal score differences under study.
+An absent extension is a capability difference, not an import-time error; asking
+for it raises :class:`~tfidf_stability.utils.validation.NativeBackendUnavailableError`.
+:func:`check_float_environment` detects and repairs flush-to-zero set process-wide by a BLAS.
 """
 
 from __future__ import annotations
@@ -30,14 +24,10 @@ __all__ = [
     "unavailable_reason",
 ]
 
-#: Bumped whenever the C++/Python contract changes shape: a symbol added,
-#: removed, or changed in signature. A mismatch means a stale build.
-#:
-#: Read from the extension's ``__abi__`` rather than its ``__version__``: the
-#: two agreed until mirroring the ordering distances added bindings without a
-#: release, so keying off the release version would have let a .pyd predating
-#: those symbols load and the differential suite skip silently. A build too old
-#: to carry ``__abi__`` reports ``None`` and is rejected the same way.
+#: Version of the C++/Python contract, bumped when a binding is added, removed or re-signed.
+#: The extension carries its own copy in ``__abi__``; a mismatch identifies a stale build,
+#: and a build without ``__abi__`` reports ``None`` and is rejected.
+#: Rationale: docs/engineering_notes.md#abi-version-check
 REQUIRED_ABI = "0.4.0"
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -62,13 +52,10 @@ except ImportError as exc:  # pragma: no cover - depends on whether a build exis
     )
 else:
     _abi = getattr(_loaded, "__abi__", None)
-    # pragma: no cover on the mismatch arm, for the same reason as the ImportError
-    # arm above: selection happens once, at import, against whichever extension is
-    # on disk. A process that has imported this module cannot replay it against a
-    # differently-versioned build, so the branch is unreachable from a test rather
-    # than merely untested. `test_validation_contracts.py` covers what the
-    # mismatch *causes* -- AbiVersionMismatchError -- by substituting the resolved
-    # state, which is the part a caller can observe.
+    # The mismatch arm is excluded from coverage, as is the ImportError arm: selection runs
+    # once, at import, against the extension on disk, so no test can replay it against
+    # another build. `test_validation_contracts.py` covers the observable effect,
+    # AbiVersionMismatchError, by substituting the resolved state.
     if _abi != REQUIRED_ABI:  # pragma: no cover - needs a stale build on disk
         _ABI_MISMATCH = True
         _REASON = (
@@ -101,23 +88,9 @@ def native_available() -> bool:
 def unavailable_reason() -> str | None:
     """Why the native backend is unavailable, or ``None`` if it is available.
 
-    Derived from :func:`native_available` rather than returned raw. The two
-    globals are set on mutually exclusive paths during this module's import --
-    ``_REASON`` on the two failure branches, ``_MODULE`` only in the ``else`` --
-    so returning ``_REASON`` alone gave the documented answer for every state
-    this module can actually reach, and the sentence above was true by
-    construction rather than by the code.
-
-    It stopped being true the moment anything set ``_MODULE`` without clearing
-    ``_REASON``, which is what a test substituting a stub backend does. On a
-    machine where the extension had been built ``_REASON`` was already ``None``
-    and nothing showed; on one where it had not, the stale explanation came back
-    beside a backend reporting itself available. That is the state
-    ``tests/test_native_selection.py`` calls "a stale explanation in every
-    manifest", and it failed all nine reference legs of the CI matrix while all
-    nine native legs passed -- the answer depended on the runner, not the code.
-
-    One line, and no behaviour changes for any state reachable by import alone.
+    Derived from :func:`native_available`, so a stub backend that sets ``_MODULE``
+    without clearing ``_REASON`` reports ``None``. Pinned by `tests/test_native_selection.py`.
+    Rationale: docs/engineering_notes.md#unavailable-reason-derivation
     """
     return None if native_available() else _REASON
 
@@ -147,10 +120,9 @@ def build_info() -> dict[str, object]:
 def check_float_environment(*, restore: bool = True) -> int:
     """Verify the process's floating-point environment, optionally repairing it.
 
-    Returns the self-test bitmask; ``0`` means the environment is trustworthy.
-    Several BLAS builds set flush-to-zero and denormals-are-zero process-wide on
-    load, which would flush the subnormal near-tie margins under study, so this
-    warns and by default repairs.
+    Returns the self-test bitmask; ``0`` means trustworthy. Some BLAS builds set FTZ and DAZ
+    process-wide on load, flushing the subnormal near-tie margins under study. ``restore``
+    repairs and re-tests; a ``RuntimeWarning`` is issued if any flag remains set.
     """
     mod = require_native()
     flags = int(mod.fp_selftest())

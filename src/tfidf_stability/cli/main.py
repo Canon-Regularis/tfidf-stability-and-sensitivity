@@ -1,11 +1,7 @@
 """``tfidf-stability`` command-line entry point.
 
-``argparse`` rather than a CLI framework: the normative backend is
-standard-library only, and a dependency for a handful of subcommands would
-undermine that.
-
-Every result-producing command writes a run manifest beside its output, so no
-flag can be forgotten into an unrecorded result.
+Built on ``argparse`` because the normative backend is standard-library only.
+Every result-producing command writes a run manifest beside its output.
 """
 
 from __future__ import annotations
@@ -122,17 +118,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 1
 
-    # Layer 3 of the floating-point guard in `cpp/include/tfidf/core/fp_guard.hpp`.
-    # The compile-time `#error` and the manifest's resolved flag string describe
-    # the binary; only this probe sees the process, where MKL and some OpenBLAS
-    # builds set flush-to-zero and denormals-are-zero process-wide as numpy
-    # imports, flushing the subnormal near-tie margins this project measures.
-    #
-    # After the dispatch guard, so `--version` and `--help` do not pay for it,
-    # and before the command runs, so the repair precedes any number produced.
-    #
-    # Both backends are checked. The native probe repairs the environment; the
-    # reference backend cannot clear MXCSR from Python, so it refuses instead.
+    # Layer 3 of the float guard in `cpp/include/tfidf/core/fp_guard.hpp`: a runtime FTZ/DAZ probe.
+    # Runs after the dispatch guard, so `--version` and `--help` skip it, and before the command.
+    # The native probe clears MXCSR FTZ/DAZ; the reference check cannot from Python, so it raises.
+    # Rationale: docs/engineering_notes.md#runtime-float-environment-probe
     from tfidf_stability._native import check_float_environment, native_available
     from tfidf_stability.utils.numerics import assert_sane_float_environment
 

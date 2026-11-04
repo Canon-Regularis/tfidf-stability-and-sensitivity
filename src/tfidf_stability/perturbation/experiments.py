@@ -1,22 +1,8 @@
-"""Perturbation experiments: apply an edit, refit, measure everything (section 4).
+"""Perturbation experiments: apply an edit, refit, measure section 4's chain.
 
-Ties the pieces together. Given a corpus, a query and an edit, reports the whole
-chain section 4 describes (corpus change, IDF shift, vector movement, score
-movement, ranking consequence) for one perturbation, in one object.
-
-Section 4's framing is that a perturbation propagates:
-
-    corpus edit -> df -> idf -> w -> cos -> ranking
-
-with each stage bounding its output movement by its input movement.
-:class:`PerturbationReport` records the measured movement at every stage
-alongside the bound governing it, so the chain can be inspected rather than only
-its endpoints.
-
-The pipeline is not incremental: both models are fitted from scratch. A partial
-update sharing state with the baseline is the thing most likely to hide a real
-perturbation effect, and these runs are a handful per experiment rather than one
-per query.
+Section 4's chain ``corpus edit -> df -> idf -> w -> cos -> ranking`` bounds each stage's
+output movement by its input; :class:`PerturbationReport` records each measured movement
+and its bound. Both models are fitted from scratch. Rationale: docs/engineering_notes.md#full-refit
 """
 
 from __future__ import annotations
@@ -62,25 +48,9 @@ class PerturbationReport:
     def certified_stable(self, k: int) -> bool | None:
         """Whether section 4.4 guarantees the top-k set survived this edit.
 
-        Returns ``None`` when no certificate exists at that ``k``. The asymmetry
-        matters: ``True`` is a proof, while ``False`` says only that the
-        certificate does not cover this perturbation, and the ranking may be
-        unchanged anyway. Section 7.2 uses these as certificates of stability.
-
-        An edit that changes the corpus size has no certificate at any ``k``.
-        Section 4.4 bounds how far the scores of *existing* documents move, and
-        :attr:`max_score_shift` measures exactly that -- over the documents
-        present on both sides. A document that did not exist in the "before"
-        ranking is outside both, so it can take rank 1 however little the
-        survivors moved, and a removal drops a document out of the top-k without
-        moving any score at all.
-
-        Measured before this guard existed: adding a document matching the query
-        exactly moved the surviving scores by 0.059, inside the k=1 radius, and
-        this returned ``True`` while the top-1 set went from ``{d0}`` to the new
-        document. That is a false proof, which is worse here than no proof --
-        ``False`` and ``None`` both invite a check, and ``True`` ends the
-        enquiry.
+        ``True`` (:attr:`max_score_shift` below ``set_radius``) is a proof; ``False`` means only
+        that the certificate does not cover this edit. ``None``: no defined certificate at ``k``,
+        or an edit that changes ``N``. Rationale: docs/engineering_notes.md#resizing-edits
         """
         if self.edit.changes_corpus_size:
             return None
@@ -116,20 +86,9 @@ def run_perturbation(
 ) -> PerturbationReport:
     """Fit both corpora, score one query against each, and measure the chain.
 
-    Args:
-        corpus: The unperturbed corpus.
-        perturbed: The result of applying ``edit`` to it.
-        edit: What changed, as returned by the functions in
-            :mod:`~tfidf_stability.perturbation.corpus_edits`.
-        query_features: The query's preprocessed feature stream. Embedded
-            separately into each model, since section 3 requires a query to use
-            the same vocabulary and IDF mapping as the corpus it is scored
-            against, so the query vector itself moves under a perturbation;
-            section 4.3 bounds movement in both arguments for that reason.
-        ks: Ranks at which to certify stability.
-
-    Returns:
-        The :class:`PerturbationReport`.
+    ``perturbed`` is ``corpus`` after ``edit`` (:mod:`~tfidf_stability.perturbation.corpus_edits`).
+    Each model embeds ``query_features`` with its own vocabulary and IDF (section 3), so section
+    4.3 bounds both arguments. The :class:`PerturbationReport` holds a certificate per ``ks``.
     """
     before = TfidfVectoriser().fit(list(corpus[1]), list(corpus[0]))
     after = TfidfVectoriser().fit(list(perturbed[1]), list(perturbed[0]))

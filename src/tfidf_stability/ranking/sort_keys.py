@@ -1,25 +1,8 @@
-"""The three ranking operators (README sections 2.3.1 and 4.5).
+"""The three ranking operators of README sections 2.3.1 and 4.5.
 
-    pi       = Sort(s_i, a_i)            the full attribute tuple, lexicographic
-    pi_score = Sort(s_i, id_i)           attribute-independent baseline
-    pi_alt   = Sort(s_i, a_i reordered)  alternate priority
-
-The key is ``(-score, rank_1, ..., rank_m, id_rank)``, compared ascending and
-lexicographically.
-
-Negating a binary64 flips the sign bit and never rounds, so ``-s`` is exact and
-order-reversing, and Python's tuple ``<`` and C++'s ``operator<`` are then the
-same relation: one comparator to reason about instead of two.
-
-Identifiers are unique and terminate every key, so the key is injective and the
-comparator is a strict total order. Move the identifier or drop it and the order
-stops being total, at which point the sorted permutation is no longer unique.
-See :func:`assert_strict_total_order`.
-
-``pi_score`` is the empty-priority case of ``pi`` rather than a separate code
-path (``spec_addenda.md`` G15). It therefore agrees with ``pi`` whenever the
-attributes fail to discriminate, which weakens the ablation slightly and is the
-correct reading of section 4.5.
+Keys ``(-score, rank_1, ..., rank_m, id_rank)`` sort ascending; unique identifiers end every
+key, so it is injective (:func:`assert_strict_total_order`). ``pi_score`` is ``pi`` with an
+empty priority (README section 4.5). Rationale: docs/engineering_notes.md#sort-key-ordering
 """
 
 from __future__ import annotations
@@ -50,8 +33,7 @@ class SortKeySpec:
 
     Attributes:
         name: Stable identity, recorded in the run manifest.
-        priority: Attribute names, highest priority first. The identifier is
-            appended implicitly and must not appear here.
+        priority: Attribute names, highest first; the identifier is implicit and must not appear.
     """
 
     name: str
@@ -91,20 +73,11 @@ def build_keys(
     table: AttributeTable,
     spec: SortKeySpec = PI,
 ) -> list[SortKey]:
-    """Build one sort key per document.
+    """Build one sort key per document, in document order.
 
-    Args:
-        scores: Similarity scores, index-aligned to the table's documents.
-            Must be finite; the caller checks that once, before reaching here.
-        table: The rank-encoded attribute table.
-        spec: Which operator.
-
-    Returns:
-        Keys in document order. Sorting them ascending yields the ranking.
-
-    Raises:
-        ValueError: If the score count does not match the table, or if the
-            priority names the identifier.
+    ``scores`` must be finite (the caller checks), index-aligned to the rank-encoded ``table``;
+    ``spec`` selects the operator. Sorting the keys ascending yields the ranking. Raises
+    ValueError if the score count differs from the table or the priority names the identifier.
     """
     if len(scores) != table.n_documents:
         raise ValueError(
@@ -126,15 +99,9 @@ def build_keys(
 def assert_strict_total_order(keys: Sequence[SortKey]) -> None:
     """Verify the comparator axioms and key injectivity.
 
-    A self-test of the comparator rather than of the data: it catches the classic
-    "sorted by score only" bug, where the key stops being injective and the
-    sorted permutation stops being unique.
-
-    For tests and an opt-in debug mode; never on the published path, since the
-    transitivity check is O(n^3).
-
-    Raises:
-        AssertionError: If any axiom fails.
+    A self-test of the comparator, not the data: a score-only key is not injective under a
+    score tie. For tests and an opt-in debug mode, never the published path: the transitivity
+    check is O(n^3). Raises AssertionError if two keys are equal or an axiom fails.
     """
     n = len(keys)
     if len(set(keys)) != n:
