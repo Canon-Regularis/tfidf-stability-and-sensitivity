@@ -133,10 +133,11 @@ enumerator for `N ≤ 12`.
 
 ## What the C++ mirror does and does not contain
 
-Mirrored: `vectorisation/`, `similarity/`, `ranking/`. Not mirrored:
-`preprocessing/`, `analysis/`, `perturbation/`, `persistence/`, `cli/`,
-`datasets/`, which are orchestration rather than hot paths.
-`scripts/check_layout.py` enforces the split so it cannot drift silently.
+Mirrored: `vectorisation/`, `similarity/`, `ranking/`. Python only:
+`analysis/`, `benchmarks/`, `cli/`, `configuration/`, `datasets/`,
+`persistence/`, `perturbation/`, `preprocessing/`, `profiles/` and `utils/`,
+which are orchestration rather than hot paths. `core/` is C++ only.
+`scripts/check_layout.py` refuses a C++ subpackage with no Python counterpart.
 
 The C++ side receives IDF and attribute ranks **as data**. It re-derives neither.
 Every delicate computation happens once, in Python, in exact arithmetic.
