@@ -94,9 +94,12 @@ def test_the_margin_table_runs_k_upwards() -> None:
     """
     rendered = _renderer().render(REPORTS)
     table = rendered.split("### E1")[1].split("###")[0]
-    rows = [line for line in table.splitlines() if line.startswith("| ") and "|" in line]
-    ks = [line.split("|")[1].strip() for line in rows[2:]]
+    # The separator row starts `|-`, so the filter leaves the header and the data.
+    header, *rows = [line for line in table.splitlines() if line.startswith("| ")]
+    ks = [line.split("|")[1].strip() for line in rows]
 
+    assert header.split("|")[1].strip() == "k", "the premise: the first column is k"
+    assert len(ks) > 1, "the premise: a single row cannot be out of order"
     assert ks == sorted(ks, key=int), f"the k column is out of order: {ks}"
 
 
