@@ -9,8 +9,9 @@ absent from its manifest. ``THIRD_PARTY_NOTICES.md`` asserts the vendored sets.
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -50,12 +51,36 @@ def _unlisted(manifest: Path, manifests: list[Path], listed: set[str]) -> list[s
     return problems
 
 
+def _manifests() -> tuple[list[Path], list[str]]:
+    """Return the manifests to verify and any reason the list is incomplete.
+
+    A checkout lists its tracked manifests through git, which leaves out
+    untracked copies such as an editable install's assets in a virtualenv
+    inside it. A tree without ``.git``, such as the mutation sandbox, is walked.
+    """
+    if not (REPO / ".git").exists():
+        return sorted(REPO.rglob("MANIFEST.sha256")), []
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout
+    except (subprocess.CalledProcessError, OSError) as exc:
+        return [], [f"git cannot list the tracked files, so vendoring is unverified: {exc}"]
+    names = sorted({n for n in listed.split("\0") if PurePosixPath(n).name == "MANIFEST.sha256"})
+    present = [REPO / name for name in names if (REPO / name).is_file()]
+    missing = [
+        f"{name}: tracked but absent from the working tree"
+        for name in names
+        if not (REPO / name).is_file()
+    ]
+    return present, missing
+
+
 def check() -> list[str]:
     """Return a list of problems; empty means everything verified."""
-    problems: list[str] = []
-    manifests = sorted(REPO.rglob("MANIFEST.sha256"))
+    manifests, problems = _manifests()
     if not manifests:
-        return ["no MANIFEST.sha256 found anywhere -- vendoring is unverified"]
+        return problems or ["no MANIFEST.sha256 found anywhere -- vendoring is unverified"]
 
     checked = 0
     for manifest in manifests:

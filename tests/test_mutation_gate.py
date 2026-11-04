@@ -110,6 +110,10 @@ _TOP_LEVEL_READ = re.compile(r'REPO / "([\w.@+-]+)"')
 #: test runs a gate script, which opens files of its own.
 _SCANNED = ("tests", "scripts", "tooling")
 
+#: Top-level names a gate probes that the sandbox must not hold. A sandbox is not
+#: a checkout, and `scripts/check_vendored.py` tests for `.git` to tell them apart.
+_PROBED_NOT_COPIED = frozenset({".git"})
+
 
 def _top_level_reads() -> dict[str, set[str]]:
     """Every top-level repository entry the suite and its gates name, by file."""
@@ -130,10 +134,11 @@ def test_the_sandbox_holds_every_top_level_path_the_suite_names() -> None:
     only writes into is copied too, at the cost of one extra copy per campaign.
     """
     contents = set(runner._SANDBOX_CONTENTS)
+    assert not contents & _PROBED_NOT_COPIED, "a sandbox holding .git would be a checkout"
     missing = {
-        where: sorted(names - contents)
+        where: sorted(names - contents - _PROBED_NOT_COPIED)
         for where, names in _top_level_reads().items()
-        if names - contents
+        if names - contents - _PROBED_NOT_COPIED
     }
 
     assert missing == {}, (

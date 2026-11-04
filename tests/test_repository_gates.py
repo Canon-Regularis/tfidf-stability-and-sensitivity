@@ -10,10 +10,11 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml
@@ -237,12 +238,79 @@ def test_the_vendored_gate_passes_on_this_repository() -> None:
     assert _script("check_vendored").main() == 0
 
 
-def test_every_hashed_directory_is_named_by_both_hook_patterns() -> None:
-    """Each directory holding a manifest is named by both hook patterns.
+def test_an_untracked_copy_of_a_vendored_directory_is_not_verified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In a checkout the vendored gate verifies tracked manifests only.
 
-    `check_vendored.py` finds manifests by globbing; `.pre-commit-config.yaml`
-    names them by hand. A directory missing from an `exclude` is rewritten and
-    fails its digest; one missing from the selector is not digest-checked.
+    An editable install copies `data/assets` into a virtualenv, which may sit
+    inside the checkout; that copy is not part of the repository.
+    """
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(name, raising=False)
+    _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
+    copy = _vendored_tree(tmp_path / ".venv" / "vendor", {"lib/header.h": "// upstream\n"})
+    (copy / "lib" / "header.h").write_text("// stale\n", encoding="utf-8")
+    gate = _vendored_gate(monkeypatch, tmp_path)
+    walked = gate.check()
+    assert any(".venv" in p and "digest changed" in p for p in walked), (
+        f"the premise: walked, the stale copy fails its digest, got {walked}"
+    )
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "vendor"], cwd=tmp_path, check=True, capture_output=True)
+
+    assert gate._manifests() == ([tmp_path / "vendor" / "MANIFEST.sha256"], [])
+    assert gate.check() == [], "the untracked copy is outside the check"
+
+
+def test_a_tracked_manifest_missing_from_the_working_tree_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tracked manifest deleted from the working tree is reported, not skipped."""
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(name, raising=False)
+    _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "vendor"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "vendor" / "MANIFEST.sha256").unlink()
+    gate = _vendored_gate(monkeypatch, tmp_path)
+
+    assert gate.check() == ["vendor/MANIFEST.sha256: tracked but absent from the working tree"]
+
+
+def test_a_checkout_git_cannot_list_is_refused_rather_than_walked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In a checkout a failed git listing is reported instead of walking.
+
+    The walk would verify untracked copies again.
+    """
+    _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
+    (tmp_path / ".git").mkdir()
+    gate = _vendored_gate(monkeypatch, tmp_path)
+
+    def unavailable(*args: object, **kwargs: object) -> None:
+        raise OSError("git is not installed")
+
+    fake = SimpleNamespace(run=unavailable, CalledProcessError=subprocess.CalledProcessError)
+    monkeypatch.setattr(gate, "subprocess", fake)
+    problems = gate.check()
+
+    assert len(problems) == 1
+    assert problems[0].startswith("git cannot list the tracked files"), problems
+
+
+def test_every_hashed_directory_is_named_by_both_hook_patterns() -> None:
+    """Each directory the vendored gate verifies is named by both hook patterns.
+
+    `check_vendored.py` lists the manifests; `.pre-commit-config.yaml` names
+    their directories by hand. A directory missing from an `exclude` is rewritten
+    and fails its digest; one missing from the selector is not digest-checked.
     """
     config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
     hooks = [hook for repo in config["repos"] for hook in repo["hooks"]]
@@ -250,7 +318,8 @@ def test_every_hashed_directory_is_named_by_both_hook_patterns() -> None:
     selector = next(h["files"].strip() for h in hooks if h["id"] == "vendored-digests")
     assert excludes, "no hook carries an exclusion, so there is nothing to compare"
 
-    manifests = sorted(REPO.rglob("MANIFEST.sha256"))
+    manifests, problems = _script("check_vendored")._manifests()
+    assert not problems, problems
     assert manifests, "no MANIFEST.sha256 in the tree, so the premise is gone"
 
     for manifest in manifests:

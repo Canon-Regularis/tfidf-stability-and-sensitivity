@@ -59,8 +59,8 @@ repos:
         entry: python scripts/check_vendored.py
         language: system
         pass_filenames: false
-        # Every directory holding a MANIFEST.sha256, which is what
-        # `check_vendored.py` discovers. `verified_bytes` above lists the same
+        # Every directory holding a tracked MANIFEST.sha256, which is what
+        # `check_vendored.py` verifies. `verified_bytes` above lists the same
         # four, from the other side: these bytes are checked, so no hook may
         # rewrite them.
         files: ^(cpp/third_party/|src/tfidf_stability/preprocessing/_snowball/|data/assets/|tests/fixtures/snowball/)
