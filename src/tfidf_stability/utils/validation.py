@@ -31,6 +31,8 @@ __all__ = [
     "UnreproducibleBuildError",
     "check_finite",
     "check_non_negative",
+    "check_prefix_k",
+    "check_tau",
     "check_unique_ids",
     "resolve_k",
 ]
@@ -194,6 +196,27 @@ def check_non_negative(values: Sequence[float], what: str) -> None:
                 f"{what}[{i}] = {v!r} is negative; TF-IDF vectors must be non-negative "
                 f"(README section 2.2), and cos in [0, 1] depends on it."
             )
+
+
+def check_tau(tau: float) -> None:
+    """Raise ``ValueError`` unless the tie tolerance ``tau`` is non-negative.
+
+    Spelled ``not (tau >= 0.0)`` because every comparison with NaN is false, so
+    ``tau < 0.0`` would admit NaN: tie chains would become one group, cliques all
+    singletons, rho N, and every positive margin would fall into ``undefined``.
+    """
+    if not (tau >= 0.0):
+        raise ValueError(f"tau must be non-negative, got {tau}")
+
+
+def check_prefix_k(k: int, caller: str) -> None:
+    """Raise ``ValueError`` if ``k`` is negative, naming ``caller`` in the message.
+
+    A negative ``k`` is a legal slice bound that drops from the end, so ``seq[:k]``
+    would return something other than a prefix without failing.
+    """
+    if k < 0:
+        raise ValueError(f"{caller}({k}) is not a prefix; k must be non-negative")
 
 
 def check_unique_ids(ids: Sequence[object]) -> None:

@@ -60,18 +60,18 @@ src/tfidf_stability/ranking/attributes.py  399  constant  0 -> 1  # src=ce4e4d1b
 src/tfidf_stability/ranking/ranker.py  175  compare  Lt -> LtE  # src=59e83664 sort keys terminate in the unique doc id, so no two compare equal and the tie branch is unreachable
 
 # --- ranking/tie_groups.py -------------------------------------------------
-src/tfidf_stability/ranking/tie_groups.py  154  boolop  Or -> And  # src=28312cda chains and cliques are always both empty or both non-empty, both being covers of the same input; asserted by test_chains_and_cliques_are_empty_together and checked over 31248 (scores, tau) combinations
-src/tfidf_stability/ranking/tie_groups.py  258  boolop  Or -> And  # src=5f0336ee the same pair on the cached property
+src/tfidf_stability/ranking/tie_groups.py  143  boolop  Or -> And  # src=28312cda chains and cliques are always both empty or both non-empty, both being covers of the same input; asserted by test_chains_and_cliques_are_empty_together and checked over 31248 (scores, tau) combinations
+src/tfidf_stability/ranking/tie_groups.py  247  boolop  Or -> And  # src=5f0336ee the same pair on the cached property
 
 # --- ranking/margins.py ----------------------------------------------------
 src/tfidf_stability/ranking/margins.py  116  constant  2 -> 1  # src=8f629c39 marked `# pragma: no cover - defensive`; n < 2 is refused before this point
 src/tfidf_stability/ranking/margins.py  117  constant  False -> True  # src=c19c3ab9 the same unreachable defensive return
 
 # --- ranking/distances.py --------------------------------------------------
-src/tfidf_stability/ranking/distances.py  47  constant  0 -> 1  # src=df18baa6 a merge scratch buffer, every entry overwritten before it is read
-src/tfidf_stability/ranking/distances.py  127  constant  1 -> 0  # src=5560e194 the mirror of the k = 0 guard in fks_max in distances.hpp. At k = 0 the fall-through computes 0.0 + p * 0.0 * -1.0, which is bit-identically +0.0 for every admissible penalty, so the short circuit and the closed form agree. Killed until _checked_penalty fixed the domain: a non-finite penalty made the fall-through NaN, and a test passed one
-src/tfidf_stability/ranking/distances.py  159  compare  Lt -> LtE  # src=75c13ecb ranking positions are distinct by construction
-src/tfidf_stability/ranking/distances.py  167  compare  Lt -> LtE  # src=234423a3 likewise, within each of the two lists
+src/tfidf_stability/ranking/distances.py  49  constant  0 -> 1  # src=df18baa6 a merge scratch buffer, every entry overwritten before it is read
+src/tfidf_stability/ranking/distances.py  129  constant  1 -> 0  # src=5560e194 the mirror of the k = 0 guard in fks_max in distances.hpp. At k = 0 the fall-through computes 0.0 + p * 0.0 * -1.0, which is bit-identically +0.0 for every admissible penalty, so the short circuit and the closed form agree. Killed until _checked_penalty fixed the domain: a non-finite penalty made the fall-through NaN, and a test passed one
+src/tfidf_stability/ranking/distances.py  161  compare  Lt -> LtE  # src=75c13ecb ranking positions are distinct by construction
+src/tfidf_stability/ranking/distances.py  169  compare  Lt -> LtE  # src=234423a3 likewise, within each of the two lists
 
 # --- ranking/sort_keys.py --------------------------------------------------
 src/tfidf_stability/ranking/sort_keys.py  122  compare  LtE -> Lt  # src=7c4df57a the self-check runs an extra size or one fewer; keys are tuples and therefore transitive, so neither finds a violation
@@ -160,7 +160,7 @@ src/tfidf_stability/profiles/query_modes.py  173  constant  2 -> 1  # src=69347c
 src/tfidf_stability/profiles/user_profile.py  199  constant  True -> False  # src=2181b96d strict zip behind SparseVector.__post_init__
 
 # --- analysis/stratify.py --------------------------------------------------
-src/tfidf_stability/analysis/stratify.py  82  compare  Lt -> LtE  # src=a8d4f837 the bands are contiguous, so a value equal to a lower bound already matched the band before it
+src/tfidf_stability/analysis/stratify.py  83  compare  Lt -> LtE  # src=a8d4f837 the bands are contiguous, so a value equal to a lower bound already matched the band before it
 
 # --- analysis/summarise.py -------------------------------------------------
 src/tfidf_stability/analysis/summarise.py  50  compare  LtE -> Lt  # src=440ee8e3 at p = 0 the general path computes rank 0, which max(1, rank) clamps to the same element the shortcut returns

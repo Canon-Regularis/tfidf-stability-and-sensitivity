@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from itertools import combinations
 from typing import Final
 
+from tfidf_stability.utils.validation import check_prefix_k
+
 __all__ = [
     "FKS_PENALTY",
     "TopKComparison",
@@ -238,8 +240,7 @@ def compare_top_k(a: Sequence[int], b: Sequence[int], k: int) -> TopKComparison:
     drop from the end instead of taking a prefix, and the native binding refuses it.
     ``kendall_intersection`` is :func:`kendall_tau_distance` on the shared elements.
     """
-    if k < 0:
-        raise ValueError(f"compare_top_k({k}) is not a prefix; k must be non-negative")
+    check_prefix_k(k, "compare_top_k")
     prefix_a, prefix_b = list(a[:k]), list(b[:k])
     sa, sb = set(prefix_a), set(prefix_b)
     shared = sa & sb

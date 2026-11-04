@@ -1337,7 +1337,7 @@ def test_a_negative_top_k_is_refused_rather_than_dropping_from_the_end() -> None
     """
     ranking = _ranked(4)
 
-    with pytest.raises(ValueError, match=r"top_k\(-1\) is not a prefix"):
+    with pytest.raises(ValueError, match=r"^top_k\(-1\) is not a prefix; k must be non-negative$"):
         ranking.top_k(-1)
     with pytest.raises(ValueError, match=r"top_k\(5\) but only 4 documents were selected"):
         ranking.top_k(5)

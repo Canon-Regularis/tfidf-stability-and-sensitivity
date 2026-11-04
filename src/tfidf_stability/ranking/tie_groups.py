@@ -16,6 +16,7 @@ from tfidf_stability.ranking.margins import adjacent_gaps
 from tfidf_stability.utils.validation import (
     ChainInflationWarning,
     TauExceedsScoreRangeWarning,
+    check_tau,
 )
 
 __all__ = [
@@ -52,11 +53,7 @@ def tie_ball_interval(sorted_scores: Sequence[float], j: int, tau: float) -> Int
     n = len(sorted_scores)
     if not 0 <= j < n:
         raise IndexError(f"rank index {j} out of range 0..{n - 1}")
-    # `not (tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
-    # so the second form admits NaN. Unguarded, a NaN tau makes tie_chains return one
-    # group, tie_cliques all singletons and rho N, with no error raised.
-    if not (tau >= 0.0):
-        raise ValueError(f"tau must be non-negative, got {tau}")
+    check_tau(tau)
 
     centre = sorted_scores[j]
 
@@ -94,11 +91,7 @@ def tie_chains(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, ..
     n = len(sorted_scores)
     if n == 0:
         return ()
-    # `not (tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
-    # so the second form admits NaN. Unguarded, a NaN tau makes tie_chains return one
-    # group, tie_cliques all singletons and rho N, with no error raised.
-    if not (tau >= 0.0):
-        raise ValueError(f"tau must be non-negative, got {tau}")
+    check_tau(tau)
 
     out: list[Interval] = []
     start = 0
@@ -123,11 +116,7 @@ def tie_cliques(sorted_scores: Sequence[float], tau: float) -> tuple[Interval, .
     n = len(sorted_scores)
     if n == 0:
         return ()
-    # `not (tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
-    # so the second form admits NaN. Unguarded, a NaN tau makes tie_chains return one
-    # group, tie_cliques all singletons and rho N, with no error raised.
-    if not (tau >= 0.0):
-        raise ValueError(f"tau must be non-negative, got {tau}")
+    check_tau(tau)
 
     out: list[Interval] = []
     right = 0

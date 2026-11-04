@@ -523,7 +523,9 @@ def test_a_negative_prefix_length_is_refused_rather_than_sliced_from_the_end() -
     whole lists. The native binding refuses the argument, so the reference does
     too and both backends answer alike. `Ranking.top_k` refuses in the same words.
     """
-    with pytest.raises(ValueError, match="non-negative"):
+    with pytest.raises(
+        ValueError, match=r"^compare_top_k\(-1\) is not a prefix; k must be non-negative$"
+    ):
         compare_top_k([1, 2, 3], [3, 2, 1], -1)
 
 

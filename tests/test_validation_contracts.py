@@ -1,7 +1,7 @@
 """Tests for the exception tree and the validators in ``utils/validation.py``.
 
 Covers the error hierarchy, the split between ``check_finite`` and
-``check_non_negative``, and the guard order of ``resolve_k``.
+``check_non_negative``, the tau and prefix guards, and the guard order of ``resolve_k``.
 Rationale: docs/engineering_notes.md#validation-contracts
 """
 
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 
 import pytest
@@ -25,6 +26,8 @@ from tfidf_stability.utils.validation import (
     TfidfStabilityError,
     check_finite,
     check_non_negative,
+    check_prefix_k,
+    check_tau,
     check_unique_ids,
     resolve_k,
 )
@@ -404,6 +407,37 @@ def test_a_negative_weight_is_named_with_its_position_and_its_consequence() -> N
 
     with pytest.raises(TfidfStabilityError, match=r"cos in \[0, 1\] depends on it"):
         check_non_negative([-1.0], "weights")
+
+
+# ---------------------------------------------------------------------------
+# check_tau and check_prefix_k
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("tau", [0.0, -0.0, 5e-324, 0.2, math.inf])
+def test_a_non_negative_tau_is_accepted(tau: float) -> None:
+    """Both zeros, the smallest subnormal, an ordinary tau and infinity pass."""
+    assert check_tau(tau) is None
+
+
+@pytest.mark.parametrize("tau", [-5e-324, -0.2, -math.inf, math.nan])
+def test_a_negative_or_nan_tau_is_refused_with_its_value(tau: float) -> None:
+    """A negative or NaN tau is refused, and the message names the value."""
+    with pytest.raises(ValueError, match=rf"^tau must be non-negative, got {re.escape(str(tau))}$"):
+        check_tau(tau)
+
+
+@pytest.mark.parametrize("k", [0, 1, 50])
+def test_a_non_negative_k_bounds_a_prefix(k: int) -> None:
+    """``k = 0``, the empty prefix, passes, as does any positive ``k``."""
+    assert check_prefix_k(k, "top_k") is None
+
+
+@pytest.mark.parametrize("caller", ["top_k", "compare_top_k"])
+def test_a_negative_k_is_refused_in_its_callers_words(caller: str) -> None:
+    """The message names the caller, so each public function keeps its own wording."""
+    with pytest.raises(
+        ValueError, match=rf"^{caller}\(-1\) is not a prefix; k must be non-negative$"
+    ):
+        check_prefix_k(-1, caller)
 
 
 # ---------------------------------------------------------------------------

@@ -1269,7 +1269,7 @@ The tie-group layer keeps the three objects of G1, the ball, the chain and the c
 
 Source: `tests/test_mutation_gate.py`.
 
-Each allowlist entry names `(path, line, kind, before, after)`. An edit above an entry moves the mutation it describes. The entry then points at a different expression on that line, or at nothing. A campaign reports the result as two findings, a stale claim at the old line and an undocumented survivor at the new one, when neither is a real finding. A campaign is the only other thing that would notice, and the nightly matrix in `nightly.yml` covers fewer modules than the allowlist argues about (12 against 34). A small edit, such as adding a few comment lines to one module, can shift several of its entries, and no campaign reports the shift when that module is outside the matrix. Whether a line still carries the mutation an entry describes can be answered from the AST alone, in about a second for the whole allowlist, so the check runs in the PR tier rather than waiting for a campaign.
+Each allowlist entry names `(path, line, kind, before, after)`. An edit above an entry moves the mutation it describes. The entry then points at a different expression on that line, or at nothing. A campaign reports the result as two findings, a stale claim at the old line and an undocumented survivor at the new one, when neither is a real finding. A campaign is the only other thing that would notice, and the nightly matrix in `nightly.yml` re-runs only 12 of the 34 modules the allowlist argues about. A small edit, such as adding a few comment lines to one module, can shift several of its entries, and no campaign reports the shift when that module is outside the matrix. Whether a line still carries the mutation an entry describes can be answered from the AST alone, in about a second for the whole allowlist, so the check runs in the PR tier rather than waiting for a campaign.
 
 ### Allowlist site enumeration
 
@@ -1509,7 +1509,7 @@ The workflow names the preset and the preset holds the cache variables, so the t
 
 Source: `tests/test_profiles_and_loo.py`.
 
-The interaction filter in `group_interactions` drops an interaction when `weight < min_weight`. That comparison is false for every weight when the threshold is NaN, so a NaN threshold keeps every interaction, exactly as no threshold does. Four other guards in the package, on the tau thresholds in `ranking/tie_groups.py` and `analysis/stratify.py`, are written as `not (tau >= 0.0)` so that a NaN is refused rather than ignored. The weight threshold does not follow that shape, for three reasons: it has no non-negative domain, a negative threshold is a legal way to keep every interaction, and no caller constructs a NaN. The difference from those four guards is a design choice, not an oversight. The test pins it alongside a negative threshold that also keeps everything and a real threshold that does filter.
+The interaction filter in `group_interactions` drops an interaction when `weight < min_weight`. That comparison is false for every weight when the threshold is NaN, so a NaN threshold keeps every interaction, exactly as no threshold does. The tau threshold guard, `check_tau` in `utils/validation.py`, which `ranking/tie_groups.py` and `analysis/stratify.py` call at four sites, is written as `not (tau >= 0.0)` so that a NaN is refused rather than ignored. The weight threshold does not follow that shape, for three reasons: it has no non-negative domain, a negative threshold is a legal way to keep every interaction, and no caller constructs a NaN. The difference from that guard is a design choice, not an oversight. The test pins it alongside a negative threshold that also keeps everything and a real threshold that does filter.
 
 ### Native differential bit exact
 
@@ -1748,13 +1748,15 @@ For every finite payload the two agree, so `hash_text(canonical_json(payload, in
 
 Source: `tests/test_validation_contracts.py`.
 
-The typed exceptions and validators in `utils/validation.py` are imported by many test files, and `tests/test_validation_contracts.py` is the file that owns them. It tests three properties.
+The typed exceptions and validators in `utils/validation.py` are imported by many test files, and `tests/test_validation_contracts.py` is the file that owns them. It tests four properties.
 
 The hierarchy is the contract. Callers catch `TfidfStabilityError` to mean a condition the package detected and reported, and catch `NativeBackendUnavailableError` to mean that the reference backend should be used instead. An error class defined outside that tree escapes both handlers. The tree is therefore checked by walking `__all__`, not by listing known classes, so a new class is covered as soon as it is exported. `AbiVersionMismatchError` is a subclass of `NativeBackendUnavailableError`, so fallback handlers also catch a stale extension.
 
 The validators divide the work between them. `-0.0` and NaN pass `check_non_negative`, and NaN fails `check_finite`. `check_non_negative` owns the sign; `check_finite` owns representability. Both exist because each covers a case the other does not, and a caller that needs both properties calls both. The tests state this contrastively so that the guard that rejects NaN is clear.
 
 Guard order is observable. `resolve_k` has three checks, and a caller sees only the first one that fires. Which error a bad `k` produces is part of the interface, so each check is reached at an input that the others do not claim. The positivity check runs before the range check, so `k = 0` on an empty corpus reports "k must be positive".
+
+The tau and prefix guards are shared. `check_tau` is spelled `not (tau >= 0.0)`, so NaN and every negative value, down to `-5e-324`, are refused while both zeros, the smallest subnormal and infinity pass; `check_prefix_k` refuses a negative `k` and accepts `k = 0`, the empty prefix, and names its caller so `top_k` and `compare_top_k` keep their own wording. Both are tested directly here because the nightly campaign for `utils/validation.py` runs this file, and its tests must kill the guards' mutants without the callers' test files.
 
 The callers are not retested in this file. `boundary_margin` and `rank_top_k` handle their own `k`; `resolve_k` is the subject here.
 

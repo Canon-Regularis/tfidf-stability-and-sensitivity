@@ -94,8 +94,8 @@ def lipschitz_constant(
     nup, nvp = l2_norm(u_prime, policy), l2_norm(v_prime, policy)
     # Each norm is tested for positivity rather than `min(...) <= 0.0`: every comparison
     # with NaN is false, so a NaN norm passes that test, and `min` returns whichever
-    # operand it saw first, making the guard depend on argument order. The `tau` guards
-    # in ranking/tie_groups.py and analysis/stratify.py negate for the same reason.
+    # operand it saw first, making the guard depend on argument order. `check_tau` in
+    # utils/validation.py negates the tau guard for the same reason.
     if not all(norm > 0.0 for norm in (nu, nv, nup, nvp)):
         raise ValueError(
             "the Lipschitz bound requires four non-zero vectors with a defined norm, "

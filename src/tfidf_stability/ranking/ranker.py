@@ -23,6 +23,7 @@ from tfidf_stability.utils.validation import (
     EmptyCorpusError,
     StrictMode,
     check_finite,
+    check_prefix_k,
     resolve_k,
 )
 
@@ -106,8 +107,7 @@ class Ranking:
         Both bounds are checked: ``order[:k]`` is a legal slice for a negative
         ``k`` and drops from the end rather than taking a prefix.
         """
-        if k < 0:
-            raise ValueError(f"top_k({k}) is not a prefix; k must be non-negative")
+        check_prefix_k(k, "top_k")
         if k > self.n_selected:
             raise ValueError(f"top_k({k}) but only {self.n_selected} documents were selected")
         return self.order[:k]

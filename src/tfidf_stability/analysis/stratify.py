@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from tfidf_stability.analysis.tie_break_ablations import AblationResult, OperatorPair
+from tfidf_stability.utils.validation import check_tau
 
 __all__ = [
     "EXACT_TIE_BAND",
@@ -102,12 +103,7 @@ def stratify_by_margin(
     the comparison. ``tau`` has no default, as section 7.1 makes every tie-break result
     conditional on it. Returns one :class:`Stratum` per (band, k), empty bands included.
     """
-    # `not (tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
-    # so the second form admits NaN. tie_ball_interval, tie_chains and tie_cliques use the
-    # same form. A NaN tau gives every band NaN bounds and sends every positive margin
-    # down _band_of's fallthrough into `undefined`.
-    if not (tau >= 0.0):
-        raise ValueError(f"tau must be non-negative, got {tau}")
+    check_tau(tau)
 
     bands = margin_bands(tau)
     labels = [EXACT_TIE_BAND, *(b[0] for b in bands), UNDEFINED_BAND]
