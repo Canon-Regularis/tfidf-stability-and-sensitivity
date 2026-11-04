@@ -130,6 +130,7 @@ def check(tag: str | None = None) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # Rationale: docs/engineering_notes.md#release-tag-joins-version-set
     parser.add_argument(
         "--tag",
         default=None,

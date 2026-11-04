@@ -4,7 +4,8 @@ Companion to README §4.5 and §7.3/7.4.
 
 **The question.** Deterministic tie-breaking makes the ranking a discontinuous
 function of the scores. A2 asks how much that matters, *independent of numerical
-error*; the phrase "independent of" is what has to be earned.
+error*. That independence is not automatic; the next section states how it is
+established.
 
 ## How the independence is earned
 
@@ -123,14 +124,14 @@ warning would abort a τ-sweep on its first call.
 ## §7.4. The near-tie case study
 
 §7.4 says two documents are "**identified** such that `|s_A − s_B| ≤ τ`".
-Identification is the only route available, because a fine near-tie **cannot be
+Identification is required because a fine near-tie **cannot be
 manufactured by editing text**. §2.2's `tf = count/L` makes a single-token edit a
 `1/(L+1)` *relative* perturbation, so a separation of 1e−9 would need a document
 of roughly a billion tokens. The synthetic twin mechanism reaches 1e−3 to 1e−1
-and cannot go finer; this is a structural consequence of the specification rather
-than a limitation of the generator.
+and cannot go finer. The limit follows from the specification, not from the
+generator.
 
-What occurs instead: adjacent gaps are either **exactly zero** (17% to 18% of
+Measured adjacent gaps are either **exactly zero** (17% to 18% of
 pairs) or above ~1e−9. The interval in between is *empty*. So at fine τ the
 near-tie regime **is** the exact-tie regime, and §7.3's `m_k ≤ τ` stratum
 measures the tie-break rather than numerical error. ([G22](spec_addenda.md#g22))
@@ -147,6 +148,6 @@ python scripts/run_tie_break_ablations.py --dataset synthetic_tiny --tau 4.8e-13
 python scripts/make_figures.py --reports reports/                             # fig_ablation
 ```
 
-`--tau` is required; there is no default anywhere in the repository. Any value in
+`--tau` is required and has no default anywhere in the repository. Any value in
 the derived band gives an identical answer; see [G23](spec_addenda.md#g23).
 `fig_ablation.png` falsifies A2 if every bar is zero.

@@ -14,6 +14,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 
 #: C++ directories with no Python counterpart.
+#: Rationale: docs/engineering_notes.md#cpp-layout-check-is-one-directional
 _CPP_ONLY = {"core"}
 
 

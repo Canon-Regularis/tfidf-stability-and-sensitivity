@@ -23,8 +23,7 @@ compares `str` by code point; the C++ mirror compares by `memcmp`. Those agree
 for ASCII and diverge outside the BMP, so the Python side sorts on the encoded
 bytes to make the two literally the same relation. `vocabulary.py::_byte_key`.
 
-**IDF is computed in `Decimal` at 60 digits, then rounded once.** This is the
-single most consequential decision in the repository.
+**IDF is computed in `Decimal` at 60 digits, then rounded once.**
 
 `math.log` is *not* correctly rounded. Measured against the correctly-rounded
 value, it differs in **15.16% of IDF entries** (44.5% of raw logarithms), and
@@ -63,7 +62,7 @@ digits*, and §6 is explicit that no stabilising transformations are applied.
 The `[0, 1]` guarantee depends on the vectors being non-negative, which
 `check_non_negative` enforces rather than assumes.
 
-**Where scale invariance actually breaks.** `l2_norm` squares before summing, so
+**Where scale invariance breaks.** `l2_norm` squares before summing, so
 `cos(αu, v) = cos(u, v)` fails once `|x| ≲ √DBL_MIN ≈ 1.49e−154` and the squares
 underflow. The code is correct per §6; a test that claimed unconditional scale
 invariance was over-claiming and was corrected. ([G18](spec_addenda.md#g18))
