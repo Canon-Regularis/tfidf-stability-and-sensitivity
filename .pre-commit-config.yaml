@@ -1,22 +1,18 @@
-# Local checks, mirroring the cheap half of ci.yml.
-#
-# Only the fast ones. A pre-commit hook that takes a minute gets
-# bypassed with --no-verify, and a bypassed hook is worse than no hook: it
-# trains the habit of skipping checks.
+# Local checks: the fast half of ci.yml. A slow hook gets bypassed with
+# --no-verify, which builds the habit of skipping checks.
 
 # The three rewriting hooks share one exclusion, defined on the first of them
-# and referenced by the other two. Those files' bytes are the point:
-# `scripts/check_vendored.py` verifies each against a recorded SHA-256, so a
-# hook that rewrites one breaks the check that proves it is upstream code.
+# and referenced by the other two. `scripts/check_vendored.py` verifies the
+# files under those paths against recorded SHA-256 digests, so no hook may
+# rewrite them.
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        # Two trailing spaces are a hard line break in Markdown. Stripping them
-        # reflows every paragraph that used one, which in README.md alone would
-        # silently rewrite 136 lines of rendered output.
+        # Two trailing spaces are a hard line break in Markdown; stripping them
+        # would reflow every paragraph that uses one.
         args: [--markdown-linebreak-ext=md]
         exclude: &verified_bytes >-
           ^(cpp/third_party/|src/tfidf_stability/preprocessing/_snowball/|data/assets/|tests/fixtures/snowball/)
@@ -30,28 +26,18 @@ repos:
         args: [--fix=lf]          # digests are taken over LF-normalised bytes
         exclude: *verified_bytes
 
-  # ruff runs from the environment, not from a mirror pinned here.
-  #
-  # This used `astral-sh/ruff-pre-commit` at rev v0.7.4 while requirements-dev.txt
-  # pins ruff==0.16.2, so a contributor's hook and CI enforced two different
-  # linters nine minor versions apart -- and the newer one is strictly stricter.
-  # That is precisely the drift the exact pin exists to prevent: ruff 0.16
-  # stabilised PLR0917, which the tree had never been checked against, and the
-  # lint job failed on a commit that changed no Python at all. A local hook makes
-  # requirements-dev.txt the single place the version is stated.
-  #
-  # The cost is that `pre-commit` no longer installs ruff itself, so the hook
-  # needs the dev requirements present. That is already true of every other
-  # local hook here.
+  # ruff runs from the environment, not from a mirror with its own `rev`, so the
+  # hook and CI run the one version requirements-dev.txt pins. pre-commit does
+  # not install ruff itself, so the hook needs the dev requirements installed.
+  # Rationale: docs/engineering_notes.md#ruff-hook-from-environment
   - repo: local
     hooks:
       - id: ruff
         name: ruff (from requirements-dev.txt)
-        # `--force-exclude` is required, not optional. pre-commit passes explicit
-        # filenames, and ruff applies `extend-exclude` from pyproject.toml only
-        # to files it discovers itself -- so without this the hook lints and
-        # rewrites the vendored Snowball stemmer, breaking the SHA-256 that
-        # `scripts/check_vendored.py` verifies.
+        # `--force-exclude` is required: pre-commit passes explicit filenames, and
+        # ruff applies pyproject.toml's `extend-exclude` only to files it finds
+        # itself. Without it the hook rewrites the vendored Snowball stemmer and
+        # breaks the SHA-256 that `scripts/check_vendored.py` verifies.
         entry: python -m ruff check --force-exclude --fix
         language: system
         types_or: [python, pyi]
@@ -68,8 +54,8 @@ repos:
     hooks:
       - id: vendored-digests
         name: vendored assets match their manifests
-        # The provenance claims in THIRD_PARTY_NOTICES.md depend on this, and it
-        # is the one check that silently decays if left to CI alone.
+        # The provenance claims in THIRD_PARTY_NOTICES.md depend on this check,
+        # so it runs at commit time as well as in CI.
         entry: python scripts/check_vendored.py
         language: system
         pass_filenames: false

@@ -30,10 +30,8 @@ htmlcov/
 
 # --- CMake / native build ----------------------------------------------------
 build/
-# Every workflow builds into its own directory beside build/: build-tests,
-# build-assert, build-bench, build-fastmath, build-asan, build-tsan. Only
-# `build/` was ignored, so running any command from ci.yml or sanitizers.yml
-# as documented left an untracked tree in `git status`.
+# Build trees beside build/, such as the build-tests tree determinism.yml
+# configures. The CMake presets build under build/ itself.
 build-*/
 _skbuild/
 CMakeUserPresets.json
@@ -52,6 +50,7 @@ src/tfidf_stability/_native/*.so
 src/tfidf_stability/_native/*.dylib
 
 # --- Data --------------------------------------------------------------------
+
 # MovieLens may NOT be redistributed (see data/README.md). Fetched, never committed.
 data/raw/
 data/interim/
@@ -61,30 +60,17 @@ data/external/
 !data/assets/
 !data/lexicon/
 
-# Figures ARE committed. They are renderings, and matplotlib stamps its version
-# into every PNG, so the bytes depend on the plotting library rather than on the
-# result: two people regenerating from identical JSON get different files. That
-# argued for keeping them out, and for a while they were.
-#
-# It was the wrong trade. reports/text/main.tex embeds seven of them, so a fresh
-# clone built the report with seven "figure not generated" boxes, and the results
-# were invisible to anyone reading the repository rather than running it. A
-# figure nobody can see is worth less than a figure whose bytes are not
-# reproducible. The JSON beside them is the reproducible artefact and the digest
-# in each caption ties the image back to it, so the provenance claim survives.
-#
-# Consequence to know about: a regenerated PNG shows as modified whenever
-# matplotlib changes, even with the underlying result identical. Check the digest
-# in the caption, not the bytes.
+# Figures are committed: reports/text/main.tex embeds them. matplotlib stamps its
+# version into every PNG, so compare a regenerated figure by the result digest
+# stamped on it, not by its bytes.
+# Rationale: docs/engineering_notes.md#figures-committed
 
 reports/*.csv
 !reports/text/
 
-# The experiment JSON *is* committed, deliberately. A figure or a quoted number
-# whose underlying data is absent from the tree is an assertion nobody can check,
-# which is the one thing this repository is built not to be. Each file carries
-# its own result digest and the provenance of the run that produced it, so a
-# reader can regenerate it and compare rather than take it on trust.
+# The experiment JSON is committed, so every figure and quoted number has its
+# data in the tree. Each file carries its result digest and the provenance of
+# the run that produced it, so a reader can regenerate it and compare.
 
 # --- LaTeX -------------------------------------------------------------------
 *.aux

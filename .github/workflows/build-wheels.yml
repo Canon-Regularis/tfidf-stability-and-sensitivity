@@ -1,9 +1,8 @@
 # The wheel build, in one place.
-#
-# Called by `release.yml`, which ships what this produces, and by `wheels.yml`,
-# which runs it on a schedule and on any change to the build system. Both call
-# the same job, so the build a release performs is the build that has already
-# been exercised rather than one that resembles it.
+
+# Called by `release.yml`, which ships its output, and by `wheels.yml`, which
+# runs it on a schedule and on build-system changes. A release therefore runs
+# the same job that has already been exercised.
 
 name: build wheels
 
@@ -33,12 +32,10 @@ on:
 permissions:
   contents: read
 
-# Workflow-level `env` does not cross a `workflow_call` boundary, so the settings
-# the callers declare would be lost here. `CIBW_TEST_COMMAND` runs pytest, and
-# without the faulthandler settings a hung test inside cibuildwheel reports a
-# timeout and no traceback. See ci.yml for why these are `-o` settings and not
-# flags: pytest derives verbosity from count(-v) minus count(-q), and the test
-# command passes -q.
+# Workflow-level `env` does not cross a `workflow_call` boundary, so it is
+# restated here. Without faulthandler, a hung test inside cibuildwheel times out
+# with no traceback. These are `-o` settings (see ci.yml) because pytest counts
+# -v minus -q, and the test command passes -q.
 env:
   PYTEST_ADDOPTS: >-
     -o verbosity_test_cases=1
@@ -63,9 +60,8 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@e090b81e30c4d855ea63bf4b6e59204c09a101ae  # v4.2
         env:
-          # The extension is a real CPython module, so wheels are
-          # version-specific. 3.11 is the floor: the code uses `X | Y` unions and
-          # `itertools.pairwise` throughout.
+          # The extension is a CPython module, so wheels are version-specific.
+          # The interpreter floor is `requires-python` in pyproject.toml.
           CIBW_BUILD: ${{ inputs.cibw-build }}
           CIBW_SKIP: "*-musllinux_i686 *_i686 *-win32"
           # Linux wheels build and test inside the manylinux container, which
@@ -90,22 +86,14 @@ jobs:
           # otherwise targets 10.9 on x86_64, where the build fails in the
           # standard headers rather than in this project's code.
           MACOSX_DEPLOYMENT_TARGET: "10.15"
-          # Test the INSTALLED wheel rather than the checkout.
-          #
-          # `snowballstemmer` is here and not in the runtime dependencies for the
-          # reason pyproject.toml gives: it is the upstream oracle the vendored
-          # Porter2 copy is checked against, so the suite needs it and the
-          # package does not.
+          # Tests run against the installed wheel, not the checkout.
+          # `snowballstemmer` is the upstream oracle for the vendored Porter2
+          # copy, so the suite needs it and the package does not.
           CIBW_TEST_REQUIRES: "pytest hypothesis scikit-learn snowballstemmer"
-          # Asserted, not printed. A wheel whose extension built but could not
-          # load (a missing runtime DLL is the usual cause, and this matrix
-          # covers three platforms) would otherwise ship green, because every
-          # native test skips and pytest exits 0 having compared nothing.
-          #
-          # `test_repository_gates.py` tests the repository rather than the
-          # package: `check_python_floor.py` runs mypy, and this environment
-          # holds the runtime and test dependencies, not the dev toolchain.
-          # `ci.yml` is where those gates run.
+          # `--require-native` fails a wheel whose extension does not load, such
+          # as one missing a runtime DLL, which would otherwise pass with every
+          # native test skipped. `test_repository_gates.py` tests the repository,
+          # not the package, and needs mypy, so `ci.yml` runs it.
           CIBW_TEST_COMMAND: >
             python -c "import tfidf_stability as t; print('version', t.__version__)" &&
             python -m tfidf_stability.cli.main info --require-native &&

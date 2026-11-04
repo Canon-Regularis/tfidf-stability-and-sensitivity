@@ -81,7 +81,7 @@
     {
       "name": "tsan",
       "inherits": "base",
-      "displayName": "ThreadSanitizer (exercises the query-parallel path)",
+      "displayName": "ThreadSanitizer",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "TFIDF_SANITIZERS": "thread" }
     },
     {

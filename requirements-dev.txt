@@ -11,34 +11,28 @@ pytest>=8.0
 pytest-cov>=5.0
 hypothesis>=6.100
 
-# External oracles for the differential tests.
-#
-# scikit-learn's TfidfVectorizer with smooth_idf=True uses the paper's
-# idf, which lets us cross-check the whole pipeline against an independent
-# implementation.
+# External oracles for the differential tests. scikit-learn's TfidfVectorizer
+# with smooth_idf=True uses the paper's idf, so it cross-checks the whole
+# pipeline against an independent implementation.
 scikit-learn>=1.4
-#
-# snowballstemmer is a TEST-TIME oracle only, never a runtime dependency. The
-# generated stemmer itself is vendored under preprocessing/_snowball/; this pin
-# lets CI assert the vendored copy still matches upstream.
+# snowballstemmer is a test-time oracle only, never a runtime dependency. The
+# generated stemmer is vendored under preprocessing/_snowball/; this pin lets CI
+# assert the vendored copy still matches upstream.
 snowballstemmer>=3.0
 
 # --- static analysis ---------------------------------------------------------
-#
-# Exact pins, unlike everything else in this file. A linter floor is not a
-# constraint, it is a promise that every future release will agree with this
-# one, and they do not: ruff 0.16 stabilised PLR0917, which the tree had
-# never been checked against, so the lint job failed on a commit that changed
-# no Python at all. Bumping these is its own commit that fixes whatever
-# the new release found, not something a rebuild does silently.
+
+# Exact pins, unlike everything else in this file: with a floor, a release that
+# stabilises a rule can fail the lint job on a commit that changes no Python. A
+# version bump is its own commit, which fixes whatever the new release reports.
+# Rationale: docs/engineering_notes.md#linters-pinned-exactly
 ruff==0.16.2
 mypy==2.3.0
-# The repository ships `.pre-commit-config.yaml`, and until this line the
-# documented dev environment could not run it. `ci.yml` now runs the same hooks,
-# so an unparseable config or a hook whose dependency moved fails there too.
+# Runs the hooks in `.pre-commit-config.yaml`. `ci.yml` runs the same hooks, so
+# an unparseable config or a hook whose dependency moved fails there too.
 pre-commit>=4.0
-# `reuse lint` is the ninth repository gate. The charset extra is not optional
-# on Windows: without it the tool cannot detect file encodings and exits before
+# `reuse lint` is a repository gate. The charset extra is not optional on
+# Windows: without it the tool cannot detect file encodings and exits before
 # linting anything.
 reuse[charset-normalizer]>=6.0
 types-PyYAML

@@ -1,20 +1,7 @@
-# Machine-readable licensing, per the REUSE specification.
-#
-# LICENSE.md states the split in prose and gives the SPDX identifiers in a
-# table; this says the same thing in a form a tool can resolve. Two things
-# follow from it that prose alone could not deliver: GitHub reports a licence
-# instead of `NOASSERTION`, and `reuse lint` can assert that every file in the
-# tree is covered rather than leaving that to a reader's inspection.
-#
-# Annotations rather than per-file headers. A header cannot go in a `.json` or
-# a `.jsonl` fixture at all, and one added to a hashed asset would change the
-# digest the vendored-code gate checks. The annotations below cover every file
-# without touching any byte that a digest is taken over.
-#
-# The first two `path` lists mirror the table in LICENSE.md. The override
-# blocks below them mirror THIRD_PARTY_NOTICES.md, which is the authority for
-# vendored material, and name files individually because each vendored
-# directory also holds first-party files. If one moves, move both.
+# Machine-readable licensing per the REUSE specification, in annotations rather
+# than per-file headers. The first two `path` lists mirror the table in
+# LICENSE.md and the overrides mirror THIRD_PARTY_NOTICES.md; change them together.
+# Rationale: docs/engineering_notes.md#reuse-annotations-not-headers
 
 version = 1
 
@@ -23,6 +10,7 @@ SPDX-PackageSupplier = "Matthew Maksymilian Miezaniec <matthewmiezaniec1@gmail.c
 SPDX-PackageDownloadLocation = "https://github.com/Canon-Regularis/tfidf-stability-and-sensitivity"
 
 # --- Software -----------------------------------------------------------------
+
 # LICENSE.md: "src/, cpp/, tests/, scripts/, examples/, notebooks/ (code cells),
 # build and CI configuration".
 [[annotations]]
@@ -53,6 +41,7 @@ SPDX-FileCopyrightText = "2026 Matthew Maksymilian Miezaniec"
 SPDX-License-Identifier = "Apache-2.0"
 
 # --- Exposition ---------------------------------------------------------------
+
 # LICENSE.md: "README.md, docs/, reports/, figures, and generated result
 # documents". CITATION.cff and the licence files themselves sit here because
 # they are metadata about the work rather than part of the software.
@@ -75,6 +64,7 @@ SPDX-FileCopyrightText = "2026 Matthew Maksymilian Miezaniec"
 SPDX-License-Identifier = "CC-BY-4.0"
 
 # --- Vendored third-party -----------------------------------------------------
+
 # Recorded from THIRD_PARTY_NOTICES.md, which is the authority. Each is
 # hash-verified against its upstream by scripts/check_vendored.py, so the
 # annotation states a licence rather than granting one. Files are named
@@ -120,6 +110,7 @@ SPDX-FileCopyrightText = "Copyright (c) 2019-2023 Martin Ankerl"
 SPDX-License-Identifier = "MIT"
 
 # --- Data ---------------------------------------------------------------------
+
 # The frozen stopword list and its manifest. Derived material rather than
 # software, and shipped inside the wheel.
 [[annotations]]
