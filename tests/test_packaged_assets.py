@@ -142,24 +142,29 @@ def test_the_live_default_config_is_the_normative_one() -> None:
     assert load_config()["_source"] == "default.yaml"
 
 
+@pytest.mark.parametrize("installed", [True, False], ids=["installed", "checkout"])
 @pytest.mark.parametrize(
     ("subpackage", "asset"),
     [("preprocessing", "data/assets"), ("cli", "configs")],
 )
 def test_neither_layout_reaches_outside_the_tree_it_names(
-    subpackage: str, asset: str, tmp_path: Path
+    subpackage: str, asset: str, installed: bool, tmp_path: Path
 ) -> None:
-    """Both resolvers return a path under the root they are given.
+    """With a copy offered just outside, each resolver stays inside its tree.
 
-    From an installed package ``parents[3]`` is the directory above
-    ``site-packages``, here ``tmp_path`` itself, so this checks containment
-    only; the tests above assert the packaged-first order.
+    The tree is the package when installed, with the packaged copy present, and
+    the checkout root otherwise. Just outside lies the directory holding
+    ``site-packages``, or the directory holding the checkout.
     """
-    module = _installed_layout(tmp_path, subpackage, asset)
+    module = (_installed_layout if installed else _checkout_layout)(tmp_path, subpackage, asset)
+    tree = module.resolve().parents[1 if installed else 3]
+    outside = module.resolve().parents[3 if installed else 4]
     resolver = _resolve_asset_dir if subpackage == "preprocessing" else _resolve_default_config
-    if subpackage == "cli":
-        (module.resolve().parents[1] / "configs" / "default.yaml").write_text("{}\n", "utf-8")
+    for root in (tree, outside):
+        (root / asset).mkdir(parents=True, exist_ok=True)
+        if subpackage == "cli":
+            (root / asset / "default.yaml").write_text("{}\n", "utf-8")
 
     resolved = resolver(module)
 
-    assert tmp_path.resolve() in resolved.resolve().parents
+    assert tree in resolved.resolve().parents
