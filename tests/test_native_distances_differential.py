@@ -1,22 +1,8 @@
-"""Reference vs native for the ordering distances: bit-exact equivalence.
+"""Bit-exact equivalence of the native ordering distances to the reference.
 
-Same claim as the scoring differential (same operations, same order), reached by
-two different routes here, which matters when diagnosing a failure.
-
-``inversion_count`` and the set measures are integer quantities, floats only at
-the final division, so agreement is combinatorial and any divergence is a logic
-bug.
-
-``kendall_fks`` accumulates floats. Its total sums ones and penalties over the
-pairs of the union, so it depends on the order the union is walked in. At
-``p = 1/2`` every addend is dyadic and the sum is exact in any order, so the
-default penalty cannot expose a mis-ordered enumeration. Non-dyadic penalties
-(``1/3``, ``0.1``) are driven as well, where the additions round and only the
-reference's first-appearance order reproduces its bits.
-
-NaN is compared as NaN rather than as a bit pattern. ``kendall_intersection`` is
-undefined below two shared elements, and the contract stops at "undefined": no
-particular quiet-NaN payload is promised.
+Integer measures agree combinatorially; ``kendall_fks`` sums floats, so
+non-dyadic penalties make the union's walk order observable. NaN compares
+as NaN. Rationale: docs/engineering_notes.md#native-distances-differential
 """
 
 from __future__ import annotations
@@ -79,14 +65,14 @@ def test_inversion_count_is_identical() -> None:
     rng = random.Random(11)
     for _ in range(200):
         n = rng.randint(0, 60)
-        # Small alphabet, so equal elements (which are not inversions) are the
-        # rule rather than the exception.
+        # Small alphabet, so equal elements (which are not inversions) are
+        # frequent.
         seq = [rng.randrange(5) for _ in range(n)]
         assert nat.inversion_count(ids(seq)) == inversion_count(seq)
 
 
 def test_inversion_count_on_a_large_tie_group() -> None:
-    """Tie groups are not bounded by k, so this path really does run long."""
+    """Tie groups are not bounded by k, so the tie path runs over a long input."""
     rng = random.Random(12)
     seq = [rng.randrange(3) for _ in range(20_000)]
     assert nat.inversion_count(ids(seq)) == inversion_count(seq)
@@ -120,10 +106,9 @@ def test_kendall_tau_refuses_differing_sets_on_both_sides() -> None:
     with pytest.raises(ValueError, match="same set"):
         nat.kendall_tau_distance(ids([1, 2]), ids([1, 3]))
 
-    # Same length and same set, different multiplicities. Both sides were blind
-    # to this -- Python compared `set`s, the core `unordered_set`s -- and both
-    # returned 0.0 rather than refusing. The sweep above cannot reach it: it
-    # builds every list with `rng.sample`, which is duplicate-free.
+    # Same length and same set, different multiplicities. A set comparison
+    # alone cannot distinguish these inputs, and the sweep above cannot reach
+    # them: it builds every list with `rng.sample`, which is duplicate-free.
     with pytest.raises(ValueError, match="same multiplicities"):
         kendall_tau_distance([1, 1, 2], [1, 2, 2])
     with pytest.raises(ValueError, match="same multiplicities"):
@@ -148,11 +133,11 @@ def test_kendall_fks_is_bit_exact(penalty: float) -> None:
 
 
 def test_the_inputs_really_do_exercise_every_fks_case() -> None:
-    """Guards the guard.
+    """The generator reaches every FKS case, cases 1 and 2 included.
 
-    If the generator drifted towards disjoint lists the tests above would keep
-    passing while never reaching case 1 or case 2, the only cases where the two
-    implementations can disagree about ordering rather than membership.
+    Cases 1 and 2 are the only ones where the two implementations can
+    disagree about ordering rather than membership. Disjoint lists reach
+    only cases 3 and 4, so the sweep above would pass vacuously on them.
     """
     rng = random.Random(15)
     seen = {"shared_pair": 0, "case_two": 0, "case_three": 0, "case_four": 0}
@@ -184,14 +169,18 @@ def test_fks_max_is_bit_exact_including_the_k_equals_one_trap() -> None:
     for k in range(0, 200):
         for penalty in (0.0, FKS_PENALTY, 1.0, *ROUNDING_PENALTIES):
             assert same_bits(nat.fks_max(k, penalty), fks_max(k, penalty))
-    # Pinned separately because an early guard returned 0.0 here, which
-    # normalised two entirely disjoint singleton lists to distance zero.
+    # Pinned separately: k = 1 is not degenerate. One case-3 pair gives a
+    # ceiling of 1.0, so two disjoint singleton lists normalise to distance
+    # one; a `k < 2` guard returning 0.0 would normalise them to zero.
     assert nat.fks_max(1, FKS_PENALTY) == 1.0
     assert nat.kendall_fks(ids([1]), ids([2]), FKS_PENALTY, True) == 1.0
 
 
 def test_the_near_metric_violation_survives_the_language_boundary() -> None:
-    """G2's witness, evaluated natively. Not a bug: do not "fix" it."""
+    """The G2 triangle-inequality witness reproduces natively.
+
+    The excess is a property of the FKS measure, not a defect.
+    """
     a, b, c = ids([3, 1, 0]), ids([5, 3, 4]), ids([5, 4, 2])
     d_ab = nat.kendall_fks(a, b, FKS_PENALTY, False)
     d_bc = nat.kendall_fks(b, c, FKS_PENALTY, False)
@@ -240,9 +229,8 @@ def test_both_backends_refuse_a_penalty_outside_the_domain(penalty: float) -> No
     """Both backends reject a case-4 penalty outside the G2 domain [0, 1].
 
     A NaN or sufficiently negative penalty makes the ceiling NaN or
-    non-positive, so `ceiling > 0.0` is false and the distance takes the
-    `k = 0` branch, reporting two disjoint lists as identical. Guarding one
-    backend alone would make them disagree.
+    non-positive, so `ceiling > 0.0` is false and the `k = 0` branch reports
+    disjoint lists as identical. A guard on one backend alone splits them.
     """
     a, b = [1, 2, 3], [4, 5, 6]
 

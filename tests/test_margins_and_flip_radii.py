@@ -1,11 +1,8 @@
 """Score-separation margins and flip radii (README sections 2.3.2 and 4.4).
 
-The paper gives ``eps < m_k / 2`` as sufficient for top-k invariance and says
-nothing about tightness. Both directions are covered here: below the radius the
-top-k set never moves, and a witness just above it flips. The witness is dyadic,
-so every intermediate value is exact in binary64 and the test carries no
-floating-point slack; the bound is attained, so ``m_k / 2`` is the flip radius
-and no smaller number will do.
+Both directions of the ``eps < m_k / 2`` bound are covered: below the radius
+the top-k set does not move, and a witness just above it flips. The witness is
+dyadic, so each of its values is exact in binary64 and it carries no slack.
 """
 
 from __future__ import annotations
@@ -103,8 +100,8 @@ def test_margins_are_identical_under_all_three_operators(
 ) -> None:
     """``m_k`` depends only on the score multiset, never on the tie-break.
 
-    Unstated in the paper. It is what keeps A1 (margins) and A2 (tie-breaking)
-    independent instead of confounded.
+    The paper does not state this; it is what keeps A1 (margins) and A2
+    (tie-breaking) independent rather than confounded.
     """
     scores = [0.9, 0.9, 0.5, 0.5, 0.0, 0.2]
     rankings = rank_all_operators(scores, mini_attributes)
@@ -125,10 +122,8 @@ def test_no_negative_zero_in_scores(mini_model) -> None:  # type: ignore[no-unty
     """Precondition for ``sorted_scores`` being bit-determined by the multiset.
 
     ``+0.0`` and ``-0.0`` compare equal but differ in bits, so with both present
-    the sorted array's bits would depend on which copy landed where, and equal
-    permutations would not give equal arrays. Cosine returns a literal ``0.0``
-    for the zero convention and a quotient of non-negatives is ``+0.0``;
-    asserted here rather than assumed.
+    the sorted array's bits would depend on placement. Cosine returns a literal
+    ``0.0`` for the zero convention and a quotient of non-negatives is ``+0.0``.
     """
     from tfidf_stability.similarity.cosine import cosine_against_corpus
     from tfidf_stability.vectorisation.tfidf import TfidfVectoriser
@@ -172,10 +167,10 @@ def test_exact_tie_gives_a_defined_zero_margin() -> None:
 
 
 def test_min_adjacent_margin_at_k_equals_one_is_nan() -> None:
-    """An empty minimum. G3 does not cover it; addendum G16 adopts NaN.
+    """The order margin at ``k = 1`` is an empty minimum, which G16 makes NaN.
 
     ``+inf`` would claim "no constraint" and pollute every percentile summary
-    it entered.
+    it entered; G3 does not cover the case and addendum G16 adopts NaN.
     """
     m = min_adjacent_margin_top((1.0, 0.5), 1)
     assert math.isnan(m.value)
@@ -232,9 +227,8 @@ def test_perturbation_below_half_the_margin_never_changes_the_top_k_set(
     """Section 4.4: ``|ds_i| <= eps`` with ``eps < m_k / 2`` keeps the top-k set.
 
     The proof is over the reals, but ``fl(s_i + d_i)`` rounds, so the realised
-    perturbation can exceed the drawn ``eps`` by up to half an ulp and an
-    ``eps`` just under ``m_k / 2`` then fails spuriously. The assume() is on the
-    realised deltas.
+    perturbation can exceed the drawn ``eps`` by up to half an ulp. The assume()
+    is therefore on the realised deltas, not on the drawn ``eps``.
     """
     n = len(scores)
     assume(k < n)
@@ -259,18 +253,9 @@ def test_perturbation_below_half_the_margin_never_changes_the_top_k_set(
 def test_the_flip_radius_bound_is_tight() -> None:
     """A witness just above ``m_k / 2`` that flips the top-k.
 
-    Every value is dyadic, so every step below is exact in binary64 and the test
-    carries no floating-point slack:
-
-        score(r_k)   = 0.5      score(r_{k+1}) = 0.25
-        m            = 0.25     m / 2          = 0.125
-        delta        = 2^-30    eps            = 0.125 + 2^-30
-        s'_a = 0.5  - eps = 0.375 - 2^-30
-        s'_b = 0.25 + eps = 0.375 + 2^-30
-
-    ``|ds_i| <= eps`` holds for every document, yet ``s'_b > s'_a`` and ``b``
-    displaces ``a``. So ``m_k / 2`` is attained, and the paper's one-directional
-    bound is tight.
+    Every value is dyadic (scores 0.5 and 0.25, ``eps = 0.125 + 2^-30``), so
+    each step is exact in binary64 and the test carries no floating-point slack.
+    Rationale: docs/engineering_notes.md#dyadic-flip-witness
     """
     scores = [1.0, 0.5, 0.25, 0.0]  # a = index 1, b = index 2
     table = table_of(4)
@@ -300,10 +285,11 @@ def test_the_flip_radius_bound_is_tight() -> None:
 
 
 def test_at_exactly_half_the_margin_the_tie_break_decides() -> None:
-    """The hinge between research questions A1 and A2.
+    """At ``eps = m / 2`` membership passes from the margin to the tie-break.
 
-    At ``eps = m / 2`` the two scores become bit-identical: the margin is spent
-    and membership passes to the tie-break. Dyadic, so reproducible to the bit.
+    The two boundary scores become bit-identical; this is where research
+    question A1 (margins) hands over to A2 (tie-breaking). The values are
+    dyadic, so the equality is exact.
     """
     scores = [1.0, 0.5, 0.25, 0.0]
     eps = 0.125
@@ -404,9 +390,7 @@ def test_no_certified_perturbation_ever_changes_the_top_k() -> None:
 
     The worst case (rank-k score down, rank-(k+1) up, each by the largest amount
     strictly inside the radius) is a measure-zero corner of the perturbation
-    cube, so random sampling never reaches it. Constructed directly at every
-    ``(n, k)``, over dyadic scores so no step rounds. One failure falsifies
-    section 4.4 or the implementation.
+    cube that random sampling does not reach, so it is built at every ``(n, k)``.
     """
     violations = []
     applied = 0
@@ -424,11 +408,9 @@ def test_no_certified_perturbation_ever_changes_the_top_k() -> None:
 
             base = frozenset(rank_top_k(scores, table, k=k).order[:k])
             order = sorted(range(n), key=lambda i: (-scores[i], i))
-            # nextafter(radius, 0) fails here: added to a dyadic score it rounds
-            # back up, putting the realised movement on the boundary the theorem
-            # excludes. An earlier version did that and counted thousands of
-            # "certified" perturbations, none of them inside the radius. A 2^-30
-            # backoff stays strictly inside and still adversarial.
+            # nextafter(radius, 0) added to a dyadic score rounds back up and
+            # puts the realised movement on the boundary the theorem excludes.
+            # A 2^-30 backoff stays strictly inside and is still adversarial.
             eps = cert.set_radius * (1.0 - 2.0**-30)
 
             for direction in (+1, -1):
@@ -452,7 +434,7 @@ def test_the_radius_is_tight_not_merely_conservative() -> None:
     """At the radius the theorem does not apply, and pairs do flip.
 
     ``test_no_certified_perturbation_ever_changes_the_top_k`` would also pass
-    against an absurdly small radius, so this pins the radius from below.
+    against an arbitrarily small radius, so this pins the radius from below.
     """
     flipped = total = 0
     for n, k in itertools.product((6, 12), (1, 2, 5)):
@@ -484,10 +466,11 @@ def test_the_radius_is_tight_not_merely_conservative() -> None:
 
 
 def test_a_summary_of_only_undefined_margins_reports_no_percentiles() -> None:
-    """Every query in the set asked for a k its corpus could not supply. The
-    counts are still meaningful and still reach the manifest; the percentiles
-    are not, and an empty tuple says so where a row of NaNs would look like a
-    measured distribution.
+    """A summary of only undefined margins carries counts but no percentiles.
+
+    The counts still reach the manifest; the percentiles would not be a
+    measured distribution, and an empty tuple says so where a row of NaNs
+    would not.
     """
     s = (1.0, 0.5)
     margins = [boundary_margin(s, 2, mode=LENIENT), boundary_margin(s, 99, mode=LENIENT)]
@@ -504,10 +487,8 @@ def test_a_summary_of_only_undefined_margins_reports_no_percentiles() -> None:
 def test_the_percentile_index_is_nearest_rank_on_a_known_distribution() -> None:
     """Ten margins of 1.0 to 10.0, so every quantile has one right answer.
 
-    Nearest rank is `defined[ceil(q * n) - 1]`. Mutation testing walked through
-    six different arithmetic changes on that one line -- `q * n` to `q / n`, the
-    `- 1` to `+ 1`, the lower clamp from 0 to 1 -- because the only assertions
-    on this summary were counts. The percentiles are what section 7 reports.
+    Nearest rank is `defined[ceil(q * n) - 1]`; the expected values pin the
+    product `q * n`, the `- 1` and the lower clamp. Section 7 reports these.
     """
     margins = [Margin("boundary", 1, 1, float(i), True) for i in range(1, 11)]
     summary = summarise(margins)
@@ -539,16 +520,17 @@ def test_the_default_quantiles_are_the_seven_the_paper_reports() -> None:
 
 
 def test_a_single_defined_margin_is_every_percentile_of_itself() -> None:
-    """n = 1 puts the lower clamp to work: `ceil(0.01 * 1) - 1` is 0."""
+    """n = 1 maps every default quantile to index 0: `ceil(q * 1) - 1` is 0."""
     got = dict(summarise([Margin("boundary", 1, 1, 7.5, True)]).percentiles)
     assert set(got.values()) == {7.5}
 
 
 def test_an_undefined_boundary_margin_says_which_case_it_hit() -> None:
-    """`k == N` and `k > N` are different situations -- one is the top of the
-    ranking, the other a request the corpus could not serve -- and the reason is
-    what a run report shows a reader. Swapping the test that picks between them
-    left both saying the same thing."""
+    """The reason text distinguishes `k == N` from `k > N`.
+
+    One is the top of the ranking, the other a request the corpus could not
+    serve, and the reason is what a run report shows a reader.
+    """
     s = (1.0, 0.5, 0.25)
     assert boundary_margin(s, 3, mode=LENIENT).reason == "k == N: r_{k+1} does not exist"
     assert boundary_margin(s, 99, mode=LENIENT).reason == "k clamped to N"
@@ -557,18 +539,22 @@ def test_an_undefined_boundary_margin_says_which_case_it_hit() -> None:
 # ---------------------------------------------------------------------------
 # Erroneous: the two refusals, with the message that tells them apart
 # ---------------------------------------------------------------------------
+
+
 # Both arrive as `KOutOfRangeError`, so a test asserting only the type passes
 # whichever guard fired. They are different situations: one is a request the
-# corpus cannot serve, the other a request that is not a request.
+# corpus cannot serve, the other a non-positive k that no clamp can repair.
 @pytest.mark.parametrize("n", [0, 1, 2, 5])
 @pytest.mark.parametrize("mode", [StrictMode.STRICT, LENIENT])
 @pytest.mark.parametrize("k", [0, -1, -(2**40)])
 def test_a_non_positive_k_is_refused_whatever_the_corpus_or_the_mode(
     k: int, mode: StrictMode, n: int
 ) -> None:
-    """Lenient mode clamps an over-large k because a sweep point past the end of
-    a small corpus is legitimate. There is nothing to clamp a non-positive k to,
-    so the corpus size and the mode are both irrelevant."""
+    """A non-positive k is refused regardless of corpus size and mode.
+
+    Lenient mode clamps an over-large k because a sweep point past the end of
+    a small corpus is legitimate; there is nothing to clamp a non-positive k to.
+    """
     scores = tuple(1.0 - 0.1 * i for i in range(n))
     with pytest.raises(KOutOfRangeError, match=f"k must be positive, got {k}"):
         boundary_margin(scores, k, mode=mode)
@@ -576,8 +562,10 @@ def test_a_non_positive_k_is_refused_whatever_the_corpus_or_the_mode(
 
 @pytest.mark.parametrize("k", [3, 9, 2**40])
 def test_an_over_large_k_names_the_corpus_it_exceeded(k: int) -> None:
-    """The message carries both numbers and the way out. A caller sweeping k
-    over a corpus smaller than the grid wants lenient mode, not a smaller grid.
+    """The message carries both numbers and the way out.
+
+    A caller sweeping k over a corpus smaller than the grid wants lenient mode,
+    not a smaller grid.
     """
     with pytest.raises(KOutOfRangeError, match=f"k={k} exceeds the 2 rankable documents"):
         boundary_margin((1.0, 0.5), k, mode=StrictMode.STRICT)
@@ -592,10 +580,11 @@ def test_the_refusal_points_at_the_mode_that_would_have_clamped() -> None:
 # Boundary: the two ways a margin comes out undefined
 # ---------------------------------------------------------------------------
 def test_the_two_undefined_reasons_are_told_apart_by_their_text() -> None:
-    """`k == N` is the top of the ranking: `r_k` exists and only `r_{k+1}` does
-    not. `k > N` clamped is a request the corpus could not serve. A report
-    showing one where it meant the other misdescribes the run, and both carry
-    `defined=False` and a NaN, so the reason is the only thing separating them.
+    """The two undefined reasons are told apart only by their text.
+
+    At `k == N` only `r_{k+1}` is missing; `k > N` clamped is a request the
+    corpus could not serve. Both carry `defined=False` and a NaN, so the reason
+    is the only field separating them.
     """
     at_the_end = boundary_margin((1.0, 0.5), 2, mode=LENIENT)
     clamped = boundary_margin((1.0, 0.5), 9, mode=LENIENT)
@@ -608,18 +597,21 @@ def test_the_two_undefined_reasons_are_told_apart_by_their_text() -> None:
 
 
 def test_a_clamped_margin_still_reports_the_k_that_was_asked_for() -> None:
-    """`k_effective` is what was computed; `k` is what the grid asked. Section
-    7.1 reports rates per requested k, so losing the request would merge three
-    grid points that all clamped to the same effective k."""
+    """`k` is the requested value and `k_effective` the computed one.
+
+    Section 7.1 reports rates per requested k, so losing the request would
+    merge grid points that all clamped to the same effective k.
+    """
     margin = boundary_margin((1.0, 0.5), 9, mode=LENIENT)
     assert (margin.k, margin.k_effective) == (9, 2)
 
 
 def test_an_empty_score_array_gives_an_undefined_margin_rather_than_refusing() -> None:
-    """Deliberately unlike ranking. G17 makes ranking an empty corpus an error
-    (`EmptyCorpusError`), because there is no ranking to return. A margin over
-    an empty array is merely undefined, which is a value a sweep can carry --
-    so a degenerate grid point does not abort the run.
+    """An empty score array gives an undefined margin, unlike ranking.
+
+    G17 makes ranking an empty corpus an error (`EmptyCorpusError`) because
+    there is no ranking to return. An undefined margin is a value a sweep can
+    carry, so a degenerate grid point does not abort the run.
     """
     margin = boundary_margin((), 1, mode=LENIENT)
     assert margin.k_effective == 0
@@ -629,9 +621,11 @@ def test_an_empty_score_array_gives_an_undefined_margin_rather_than_refusing() -
 
 @pytest.mark.parametrize("n", [1, 2, 3, 4])
 def test_a_margin_is_defined_exactly_when_the_boundary_has_a_rank_below_it(n: int) -> None:
-    """The whole matrix in one sentence: `k < N` is defined, `k >= N` is not.
-    Swept over every k a corpus of this size admits, so an off-by-one at either
-    end shows up as a defined margin that should not exist or the reverse.
+    """A margin is defined for `k < N` and undefined for `k >= N`.
+
+    The sweep covers every k a corpus of this size admits, so an off-by-one at
+    either end shows up as a defined margin that should not exist, or the
+    reverse.
     """
     scores = tuple(1.0 - 0.1 * i for i in range(n))
     for k in range(1, n + 1):
@@ -650,9 +644,11 @@ def test_a_defined_margin_is_the_subtraction_and_nothing_else() -> None:
 
 
 def test_a_margin_of_one_ulp_is_carried_at_full_precision() -> None:
-    """The regime the whole study is about. A margin computed at reduced
-    precision, or through a rounded intermediate, would collapse this to zero
-    and report an exact tie that is not one."""
+    """A one-ulp margin is carried at full precision.
+
+    A margin computed at reduced precision, or through a rounded intermediate,
+    would collapse to zero and report an exact tie that is not one.
+    """
     below = math.nextafter(1.0, 0.0)
     margin = boundary_margin((1.0, below), 1)
 
@@ -667,8 +663,10 @@ def test_a_margin_of_one_ulp_is_carried_at_full_precision() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("value", [1.0, 0.5, 0.1, 2.0**-1021, 2.0**-1074 * 2])
 def test_halving_a_margin_and_doubling_it_back_recovers_it_exactly(value: float) -> None:
-    """Division by two only shifts the exponent, so the round trip is exact --
-    for every margin whose exponent has room to shift."""
+    """Division by two only shifts the exponent, so the round trip is exact.
+
+    This holds for every margin whose exponent has room to shift.
+    """
     margin = Margin("boundary", 1, 1, value, True)
     assert same_bits(2.0 * margin.flip_radius, value)
 
@@ -676,14 +674,9 @@ def test_halving_a_margin_and_doubling_it_back_recovers_it_exactly(value: float)
 def test_the_exactness_claim_fails_for_every_odd_subnormal_margin() -> None:
     """Halving a subnormal margin is not a shift.
 
-    A subnormal has no exponent left to shift, so the halving rounds to nearest
-    even: an odd multiple `m` of `5e-324` moves to the nearest even multiple,
-    and `5e-324` itself halves to zero. Even multiples round-trip, so the
-    boundary is parity rather than the smallest subnormal alone.
-
-    Halving rounds down for `m` congruent to 1 mod 4 and up for 3 mod 4, so a
-    subnormal radius can exceed the true one by at most `2**-1074`. Reaching it
-    needs two adjacent scores a subnormal apart, far below the tau band's floor.
+    A subnormal has no exponent left to shift, so halving rounds to nearest
+    even: an odd multiple of `5e-324` loses a bit and `5e-324` itself halves to
+    zero. Rationale: docs/engineering_notes.md#subnormal-flip-radius
     """
     smallest = 5e-324
 
@@ -701,8 +694,11 @@ def test_the_exactness_claim_fails_for_every_odd_subnormal_margin() -> None:
 
 
 def test_the_flip_radius_of_a_negative_zero_margin_keeps_its_sign() -> None:
-    """`-0.0 / 2.0` is `-0.0`. It compares equal to zero, so nothing downstream
-    changes, but the bits differ and this project compares bits."""
+    """`-0.0 / 2.0` is `-0.0`, and the sign survives into the flip radius.
+
+    The value compares equal to zero, so nothing downstream changes, but the
+    bits differ and this project compares bits.
+    """
     assert same_bits(Margin("boundary", 1, 1, -0.0, True).flip_radius, -0.0)
 
 
@@ -723,9 +719,11 @@ def test_the_flip_radius_of_a_negative_zero_margin_keeps_its_sign() -> None:
 def test_an_exact_tie_is_a_defined_margin_of_zero(
     defined: bool, value: float, expected: bool
 ) -> None:
-    """Both fields matter. `P(m_k = 0)` is a headline statistic, so an undefined
-    margin counted as a tie would inflate it, and `-0.0` not counted would
-    deflate it."""
+    """An exact tie requires both `defined` and a zero value.
+
+    `P(m_k = 0)` is a headline statistic, so an undefined margin counted as a
+    tie would inflate it, and `-0.0` not counted would deflate it.
+    """
     assert Margin("boundary", 1, 1, value, defined).is_exact_tie is expected
 
 
@@ -733,22 +731,22 @@ def test_an_exact_tie_is_a_defined_margin_of_zero(
 # Degenerate inputs, and the preconditions that are not checked
 # ---------------------------------------------------------------------------
 def test_an_infinite_score_gives_an_infinite_margin_rather_than_refusing() -> None:
-    """Margins do not re-validate finiteness; `rank` rejects a non-finite score
-    before sorting. Pinning the division of responsibility, so a guard added
-    here would be a deliberate change rather than a silent one."""
+    """Margins do not re-validate finiteness.
+
+    `rank` rejects a non-finite score before sorting; this pins that division
+    of responsibility, so a guard added here changes a tested contract.
+    """
     margin = boundary_margin((math.inf, 1.0), 1)
     assert margin.defined
     assert margin.value == math.inf
 
 
 def test_a_non_increasing_input_yields_a_negative_margin_rather_than_an_error() -> None:
-    """The argument is named `sorted_scores` and the order is a precondition
-    every caller satisfies by construction. Nothing checks it, so an
-    ascending array produces a negative margin -- and a negative flip radius,
-    which `is_top_k_stable` would then compare against.
+    """A non-increasing input yields a negative margin rather than an error.
 
-    Pinned as the precondition it is. A guard here would run on every margin of
-    every query in a sweep.
+    The argument is named `sorted_scores` and every caller satisfies the order
+    by construction. Nothing checks it, so an ascending array gives a negative
+    margin and flip radius; a guard here would run on every margin in a sweep.
     """
     margin = boundary_margin((0.0, 1.0), 1)
     assert margin.defined
@@ -761,24 +759,31 @@ def test_a_non_increasing_input_yields_a_negative_margin_rather_than_an_error() 
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("n", [0, 1, 2, 3, 7])
 def test_there_is_one_fewer_gap_than_there_are_scores(n: int) -> None:
-    """`tie_groups` reads these as the runs of gaps below tau, so an extra or
-    missing entry shifts every chain boundary."""
+    """There are `n - 1` gaps for `n` scores.
+
+    `tie_groups` reads these as the runs of gaps below tau, so an extra or
+    missing entry shifts every chain boundary.
+    """
     scores = tuple(1.0 - 0.1 * i for i in range(n))
     assert len(adjacent_gaps(scores)) == max(0, n - 1)
 
 
 def test_the_gap_between_the_two_zeros_keeps_the_sign_of_the_subtraction() -> None:
-    """`-0.0 - 0.0` is `-0.0`, not `+0.0`. It is an exact tie either way, and
-    the bits differ."""
+    """`-0.0 - 0.0` is `-0.0`, not `+0.0`, and the gap keeps that sign.
+
+    It is an exact tie either way, and the bits differ.
+    """
     (gap,) = adjacent_gaps((-0.0, 0.0))
     assert gap == 0.0
     assert same_bits(gap, -0.0)
 
 
 def test_two_infinite_scores_have_no_gap_between_them() -> None:
-    """`inf - inf` is NaN, so a corpus with two infinite scores produces a gap
-    that is neither zero nor positive. Another reason `rank` refuses non-finite
-    scores upstream rather than here."""
+    """`inf - inf` is NaN, so two infinite scores have no usable gap.
+
+    The gap is neither zero nor positive, which is one reason `rank` refuses
+    non-finite scores upstream rather than here.
+    """
     (gap,) = adjacent_gaps((math.inf, math.inf))
     assert math.isnan(gap)
 
@@ -788,9 +793,11 @@ def test_two_infinite_scores_have_no_gap_between_them() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("n", [1, 2, 5])
 def test_the_order_margin_at_k_one_is_undefined_and_not_infinite(n: int) -> None:
-    """The minimum over an empty set. G16 adopts NaN because `+inf` would claim
-    "no constraint at all" and enter a percentile summary as the largest value
-    in it -- which is the opposite of what an empty constraint set means.
+    """The order margin at `k = 1` is a minimum over an empty set.
+
+    G16 adopts NaN because `+inf` would claim "no constraint at all" and enter
+    a percentile summary as its largest value, the opposite of what an empty
+    constraint set means.
     """
     scores = tuple(1.0 - 0.1 * i for i in range(n))
     margin = min_adjacent_margin_top(scores, 1, mode=LENIENT)
@@ -802,9 +809,11 @@ def test_the_order_margin_at_k_one_is_undefined_and_not_infinite(n: int) -> None
 
 
 def test_the_order_margin_is_the_smallest_gap_strictly_inside_the_top_k() -> None:
-    """Ranks 1->2 through (k-1)->k, and not the boundary gap k->k+1. Those two
-    gap sets are disjoint, which is why the two radii do not dominate one
-    another."""
+    """The order margin covers gaps 1->2 through (k-1)->k, not k->k+1.
+
+    Those two gap sets are disjoint, which is why neither radius dominates the
+    other.
+    """
     # Dyadic throughout, so every gap is exact and the assertion is the
     # arithmetic rather than a rounding of it.
     scores = (1.0, 0.75, 0.5, 0.0)
@@ -816,22 +825,25 @@ def test_the_order_margin_is_the_smallest_gap_strictly_inside_the_top_k() -> Non
 # margin_profile
 # ---------------------------------------------------------------------------
 def test_an_empty_k_set_produces_no_margins() -> None:
-    """A legitimate configuration -- a run reporting nothing per-k -- rather
-    than one to refuse."""
+    """An empty k set is a legitimate configuration rather than one to refuse."""
     assert margin_profile((1.0, 0.5), ks=()) == ()
 
 
 def test_a_non_positive_k_in_the_grid_is_refused_even_in_the_lenient_default() -> None:
-    """`margin_profile` defaults to lenient so a k past the corpus size is a
-    grid point rather than a misconfiguration. That leniency does not extend to
-    a k of zero, which no clamping can rescue."""
+    """The lenient default does not extend to a non-positive k.
+
+    `margin_profile` defaults to lenient so a k past the corpus size is a grid
+    point rather than a misconfiguration; a k of zero has nothing to clamp to.
+    """
     with pytest.raises(KOutOfRangeError, match="k must be positive, got 0"):
         margin_profile((1.0, 0.5), ks=(1, 0))
 
 
 def test_the_profile_keeps_the_order_and_the_repeats_of_its_k_set() -> None:
-    """It is reported positionally against the requested grid, so neither
-    sorting nor de-duplicating it would be safe."""
+    """The profile is reported positionally against the requested grid.
+
+    Neither sorting nor de-duplicating the k set would be safe.
+    """
     profile = margin_profile((1.0, 0.5, 0.25), ks=(2, 1, 2))
     assert [m.k for m in profile] == [2, 1, 2]
 
@@ -841,9 +853,10 @@ def test_the_profile_keeps_the_order_and_the_repeats_of_its_k_set() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(("q", "expected"), [(0.0, 1.0), (1.0, 4.0), (-1.0, 1.0), (2.0, 4.0)])
 def test_a_quantile_outside_the_unit_interval_lands_on_an_end(q: float, expected: float) -> None:
-    """The index is clamped into range, so an out-of-range quantile reports the
-    smallest or largest observation rather than raising. Pinned because the
-    clamp is what makes `q = 1.0` mean "the maximum" rather than an index error.
+    """An out-of-range quantile reports the smallest or largest observation.
+
+    The index is clamped into range rather than raising; the same clamp maps
+    `q = 0.0` to index 0, not to `defined[-1]`, which is the maximum.
     """
     margins = [Margin("boundary", 1, 1, float(i), True) for i in range(1, 5)]
     assert dict(summarise(margins, quantiles=[q]).percentiles)[q] == expected
@@ -855,18 +868,23 @@ def test_a_quantile_outside_the_unit_interval_lands_on_an_end(q: float, expected
 def test_a_non_finite_quantile_is_refused_by_the_index_arithmetic(
     q: float, error: type[Exception]
 ) -> None:
-    """`math.ceil` cannot convert either to an integer. The refusal is not a
-    guard this module wrote, so it is pinned here: a quantile grid built from a
-    computed value could carry one, and the failure is at least loud."""
+    """`math.ceil` cannot convert a non-finite quantile to an integer.
+
+    The refusal comes from the index arithmetic rather than a guard in this
+    module, and a quantile grid built from a computed value could carry one.
+    """
     margins = [Margin("boundary", 1, 1, 1.0, True)]
     with pytest.raises(error, match="cannot convert float"):
         summarise(margins, quantiles=[q])
 
 
 def test_the_exact_tie_rate_is_taken_over_the_defined_margins_only() -> None:
-    """The denominator is `n_defined`, not `n`. An undefined margin is no
-    evidence either way, and counting it would drag the headline statistic
-    towards zero on exactly the corpora where most margins are undefined."""
+    """The denominator of the exact-tie rate is `n_defined`, not `n`.
+
+    An undefined margin is no evidence either way, and counting it would drag
+    the headline statistic towards zero on corpora where most margins are
+    undefined.
+    """
     margins = [
         Margin("boundary", 1, 1, 0.0, True),
         Margin("boundary", 2, 2, 1.0, True),
@@ -883,10 +901,10 @@ def test_the_exact_tie_rate_is_taken_over_the_defined_margins_only() -> None:
 # The section 4.4 certificates
 # ---------------------------------------------------------------------------
 def test_a_certificate_carries_both_radii_because_neither_dominates() -> None:
-    """A tight cluster at the top with a wide boundary makes the order radius
+    """Neither radius dominates the other, so the certificate carries both.
+
+    A tight cluster at the top with a wide boundary makes the order radius
     bind; a well-spread top with a near-tied boundary makes the set radius bind.
-    A certificate quoted without saying which invariant it certifies is
-    ambiguous, so both are carried.
     """
     order_binds = certified_radius((1.0, 0.99, 0.5, 0.0), 3)
     assert order_binds.order_radius < order_binds.set_radius
@@ -898,16 +916,21 @@ def test_a_certificate_carries_both_radii_because_neither_dominates() -> None:
 
 
 def test_the_joint_radius_is_the_smaller_of_the_two() -> None:
-    """Section 4.4's two conditions constrain disjoint gap sets, so a caller
-    wanting both guarantees gets the minimum."""
+    """The joint radius is the minimum of the set and order radii.
+
+    Section 4.4's two conditions constrain disjoint gap sets, so a caller
+    wanting both guarantees gets the smaller.
+    """
     cert = certified_radius((1.0, 0.99, 0.5, 0.0), 3)
     assert cert.joint_radius == min(cert.set_radius, cert.order_radius)
 
 
 def test_a_certificate_with_no_order_radius_falls_back_to_the_set_radius() -> None:
-    """At `k = 1` the order margin is undefined (G16), so there is no ordering
-    to preserve inside the top-1 and the joint radius is the set radius alone --
-    not NaN, which would read as "nothing is certified"."""
+    """At `k = 1` the joint radius is the set radius alone.
+
+    The order margin is undefined there (G16) because there is no ordering to
+    preserve inside the top-1; NaN would read as "nothing is certified".
+    """
     cert = certified_radius((1.0, 0.5, 0.25), 1)
     assert math.isnan(cert.order_radius)
     assert cert.joint_radius == cert.set_radius
@@ -915,8 +938,10 @@ def test_a_certificate_with_no_order_radius_falls_back_to_the_set_radius() -> No
 
 
 def test_an_undefined_certificate_certifies_nothing_at_all() -> None:
-    """`k == N`: there is no rank below the boundary, so no perturbation can be
-    certified and the joint radius is NaN rather than zero."""
+    """At `k == N` the joint radius is NaN rather than zero.
+
+    There is no rank below the boundary, so no perturbation can be certified.
+    """
     cert = certified_radius((1.0, 0.5), 2)
     assert not cert.defined
     assert math.isnan(cert.joint_radius)
@@ -924,9 +949,11 @@ def test_an_undefined_certificate_certifies_nothing_at_all() -> None:
 
 
 def test_an_exact_tie_certifies_a_radius_of_zero_rather_than_nothing() -> None:
-    """Different from undefined: the margin exists and is zero. Membership is
-    already decided by the tie-break, so a change of operator flips it at
-    `ds = 0` -- which is a certificate, just an empty one."""
+    """An exact tie is a defined certificate with a radius of zero.
+
+    The margin exists and is zero, so membership is already decided by the
+    tie-break and a change of operator flips it at `ds = 0`.
+    """
     cert = certified_radius((0.5, 0.5, 0.1), 1)
     assert cert.defined
     assert cert.exact_tie
@@ -935,9 +962,10 @@ def test_an_exact_tie_certifies_a_radius_of_zero_rather_than_nothing() -> None:
 
 @pytest.mark.parametrize("checker", [is_top_k_stable, is_order_stable])
 def test_stability_is_not_guaranteed_at_exactly_the_radius(checker: object) -> None:
-    """The inequality is strict, and the paper's reason is that at `eps == m/2`
-    the two boundary scores can be driven to equality and membership passes to
-    the tie-break. One ulp below, it holds.
+    """The stability inequality is strict.
+
+    At `eps == m/2` the two boundary scores can be driven to equality and
+    membership passes to the tie-break; one ulp below, the guarantee holds.
     """
     scores = (1.0, 0.9, 0.5, 0.0)
     cert = certified_radius(scores, 3)
@@ -949,21 +977,21 @@ def test_stability_is_not_guaranteed_at_exactly_the_radius(checker: object) -> N
 
 @pytest.mark.parametrize("checker", [is_top_k_stable, is_order_stable])
 def test_an_undefined_certificate_guarantees_nothing_at_any_epsilon(checker: object) -> None:
-    """ "Not guaranteed" rather than "will change": the condition is sufficient,
-    not necessary. An undefined certificate must answer False even for an
-    epsilon of zero, since there is nothing to appeal to."""
+    """An undefined certificate answers False at every epsilon, even zero.
+
+    "Not guaranteed" rather than "will change": the condition is sufficient,
+    not necessary, and an undefined certificate has nothing to appeal to.
+    """
     assert not checker((1.0, 0.5), 2, 0.0)  # type: ignore[operator]
     assert not checker((1.0, 0.5), 2, -1.0)  # type: ignore[operator]
 
 
 def test_an_undefined_certificate_is_never_binding_even_with_a_radius_present() -> None:
-    """Both halves of the guard are load-bearing, and they are not redundant.
+    """An undefined certificate is never binding, whatever its order radius.
 
-    A certificate can carry a numeric `order_radius` and still be undefined --
-    the fields are independent, and `certified_radius` is not the only way one
-    is constructed. With the two conditions joined by `and` instead of `or`,
-    such a certificate falls through to the comparison and reports a binding
-    order radius for a certificate that certifies nothing.
+    The fields are independent and `certified_radius` is not the only
+    constructor, so a certificate can carry a numeric `order_radius` and still
+    be undefined; the guard tests `defined` before the comparison.
     """
     undefined_but_numeric = StabilityCertificate(
         k=3, set_radius=1.0, order_radius=0.5, exact_tie=False, defined=False
@@ -973,9 +1001,11 @@ def test_an_undefined_certificate_is_never_binding_even_with_a_radius_present() 
 
 
 def test_equal_radii_leave_neither_one_binding() -> None:
-    """ "Binding" means strictly tighter. When the two coincide there is nothing
-    to disambiguate, and reporting the order radius as binding would tell a
-    reader the ordering constraint was the limiting one when it was not.
+    """Equal radii leave neither one binding.
+
+    "Binding" means strictly tighter, and when the two coincide there is
+    nothing to disambiguate; reporting the order radius as binding would
+    misstate which constraint limited the certificate.
     """
     balanced = StabilityCertificate(
         k=2, set_radius=0.25, order_radius=0.25, exact_tie=False, defined=True
@@ -987,41 +1017,45 @@ def test_equal_radii_leave_neither_one_binding() -> None:
 # ---------------------------------------------------------------------------
 # flip_witness: the boundary rank, and how far past the radius it goes
 # ---------------------------------------------------------------------------
-# The existing witness tests pass an explicit `delta`, so the default -- which
-# is what every other caller gets -- is never exercised for its value, and the
-# rank guard is never reached from below.
+
+
+# Several tests below take the default `delta`, which every caller that omits
+# it gets, and two reach the rank guard from below.
 @pytest.mark.parametrize("k", [0, -1, -(2**30)])
 def test_a_boundary_rank_below_one_has_no_witness(k: int) -> None:
-    """Ranks are 1-indexed, so `k = 0` names no boundary. Without the lower
-    bound it would index `order[-1]` -- the *last* document -- and construct a
-    witness that reverses the worst-ranked pair while claiming to be about the
-    top of the ranking."""
+    """Ranks are 1-indexed, so `k = 0` names no boundary.
+
+    Without the lower bound the function would index `order[-1]`, the last
+    document, and construct a witness for the worst-ranked pair while claiming
+    to describe the top of the ranking.
+    """
     assert flip_witness([1.0, 0.5, 0.25, 0.0], [0, 1, 2, 3], k) is None
 
 
 @pytest.mark.parametrize("k", [4, 5, 2**30])
 def test_a_boundary_rank_at_or_past_the_end_has_no_witness(k: int) -> None:
-    """At `k == N` there is no rank below the boundary to swap with, which is
-    the same condition that makes the margin undefined."""
+    """At `k == N` there is no rank below the boundary to swap with.
+
+    This is the same condition that makes the margin undefined.
+    """
     assert flip_witness([1.0, 0.5, 0.25, 0.0], [0, 1, 2, 3], k) is None
 
 
 def test_an_exact_tie_has_no_radius_to_exceed() -> None:
-    """The pair is already tied, so no perturbation is needed to reverse it and
-    there is no radius the witness could be said to exceed. `None` rather than a
-    zero-epsilon witness, which would claim a flip the tie-break already owns.
+    """An exact tie has no radius for a witness to exceed.
+
+    The pair is already tied, so `None` is returned rather than a zero-epsilon
+    witness, which would claim a flip the tie-break already owns.
     """
     assert flip_witness([0.5, 0.5, 0.5, 0.5], [0, 1, 2, 3], 1) is None
 
 
 def test_the_default_witness_only_just_exceeds_the_radius() -> None:
-    """The point of the construction is that section 4.4's radius is *necessary*,
-    which needs a perturbation barely past it. A witness miles past would flip
-    the pair and demonstrate nothing about tightness.
+    """The default witness only just exceeds the radius.
 
     The default delta is a millionth of the radius, floored at a few ulp so the
-    excess survives rounding. Asserted as a bound on the ratio rather than as an
-    exact value, since the floor makes the exact figure scale-dependent.
+    excess survives rounding. The floor makes the exact figure scale-dependent,
+    so the test bounds the ratio rather than asserting a value.
     """
     scores = [1.0, 0.5, 0.25, 0.0]
     witness = flip_witness(scores, [0, 1, 2, 3], 2)
@@ -1037,16 +1071,11 @@ def test_the_default_witness_only_just_exceeds_the_radius() -> None:
 
 
 def test_the_witness_moves_only_the_two_documents_at_the_boundary() -> None:
-    """`|ds_i| <= eps` for every document is what makes the witness admissible
-    under section 4.4. Everything outside the straddling pair is untouched, so
-    the movement is confined to exactly two coordinates.
+    """The witness moves only the two documents at the boundary.
 
-    The realised movement is compared to `eps` in ulps rather than for equality.
-    With a non-dyadic delta `fl(s - eps)` differs from `s - eps` by up to half an
-    ulp, so the two are not equal -- which is precisely the naive assertion the
-    function's own docstring names as the reason such tests go flaky. The
-    existing dyadic witness test can assert equality because it supplies a
-    `delta` of `2**-30`; this one takes the default.
+    `|ds_i| <= eps` for every document is what makes the witness admissible
+    under section 4.4. The realised movement is compared to `eps` in ulps:
+    with the default non-dyadic delta, `fl(s - eps)` differs from `s - eps`.
     """
     scores = [1.0, 0.5, 0.25, 0.0]
     witness = flip_witness(scores, [0, 1, 2, 3], 2)
@@ -1062,30 +1091,21 @@ def test_the_witness_moves_only_the_two_documents_at_the_boundary() -> None:
 
 
 def test_a_rank_of_zero_is_refused_by_the_rank_guard_and_not_incidentally() -> None:
-    """The two `None` returns have different jobs and only one owns `k = 0`.
+    """The rank guard, not the margin guard, owns `k = 0`.
 
-    On an ordinary descending corpus a `k = 0` that slipped past the rank guard
-    would index `order[-1]` and `order[0]`, giving a negative margin that the
-    *second* guard rejects -- so the rank guard could be removed entirely and
-    every ordinary case would still return `None`.
-
-    The order here disagrees with the scores, which makes that fallback margin
-    positive and leaves the rank guard as the only thing standing between `k = 0`
-    and a witness for a boundary that does not exist. An inconsistent order is a
-    precondition violation, and that is the point: the guard must not depend on
-    the precondition holding.
+    Without the rank guard, `k = 0` on a descending corpus pairs `order[-1]`
+    with `order[0]` and the margin guard rejects the negative margin. The order
+    here disagrees with the scores, so that margin is positive.
     """
     assert flip_witness([0.0, 1.0], [0, 1], 0) is None
 
 
 def test_the_delta_floor_is_measured_at_one_rather_than_at_the_score() -> None:
-    """Below a margin of about `1e-9` the millionth-of-the-radius term vanishes
-    into rounding, and the floor of a few ulp takes over. That floor is measured
-    at `max(|s|, 1.0)`, not at the score itself.
+    """The delta floor is measured at `max(|s|, 1.0)`, not at the score.
 
-    The `1.0` is what makes it scale-independent: on scores below one, an ulp of
-    the score is smaller than an ulp of one, so a floor taken at the score would
-    shrink exactly where the excess most needs to survive the addition.
+    Below a margin of about `1e-9` the ulp floor replaces the relative term. An
+    ulp of a score below one is smaller than an ulp of one, so a floor at the
+    score would shrink where the excess most needs to survive the addition.
     """
     tiny_margin = 2.0**-40
     scores = [0.5, 0.5 - tiny_margin, 0.0]
@@ -1099,14 +1119,11 @@ def test_the_delta_floor_is_measured_at_one_rather_than_at_the_score() -> None:
 
 
 def test_a_perturbation_landing_exactly_on_a_tie_is_not_a_witness() -> None:
-    """`if not perturbed[b] > perturbed[a]: return None`. Strictly greater, and
-    the boundary is reachable exactly: with `delta = 0` the shift is `margin / 2`
-    on each side, which for a dyadic margin only moves an exponent, so the two
-    scores meet precisely rather than nearly.
+    """A perturbation that lands exactly on a tie is not a witness.
 
-    A tie is not a reversal. Accepting one would hand back a "witness" that
-    demonstrates the ranks became indistinguishable, not that they swapped --
-    and every flip radius derived from it would be a half-step short.
+    The comparison is strictly greater; with `delta = 0` a dyadic margin halves
+    exactly and the two scores meet. A tie is not a reversal, and a flip radius
+    derived from one would be a half-step short.
     """
     scores = [1.0, 0.5, 0.25, 0.0]
     order = [0, 1, 2, 3]
@@ -1118,8 +1135,11 @@ def test_a_perturbation_landing_exactly_on_a_tie_is_not_a_witness() -> None:
 
 
 def test_the_smallest_delta_that_does_reverse_the_pair_is_a_witness() -> None:
-    """The other side of the same comparison, so the refusal above is about the
-    tie rather than about `delta` being small."""
+    """The smallest reversing delta is accepted as a witness.
+
+    This is the other side of the same comparison, so the refusal above is
+    about the tie rather than about `delta` being small.
+    """
     scores = [1.0, 0.5, 0.25, 0.0]
     order = [0, 1, 2, 3]
 

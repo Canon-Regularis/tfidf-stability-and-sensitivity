@@ -1,20 +1,8 @@
-"""The repository's own gates, tested for their ability to fail.
+"""Tests that the repository's own gates can report a problem.
 
-`scripts/check_*.py` are the checks CI runs over the repository itself rather
-than over its output. Two of the five had no owning test: `check_layout.py` and
-`check_versions.py`. Nothing established that either could report a problem, and
-a gate nobody has seen fail is indistinguishable from a gate that cannot.
-
-That is not hypothetical here. `check_versions.py` grew a `--tag` argument to
-stop a release publishing one version under another, its docstring named the
-scenario, and nothing ever passed the flag: the only invocation in the
-repository was `ci.yml`, without `--tag`, and `ci.yml` triggers on branches and
-pull requests rather than tags. The guard worked. It was wired to nothing.
-
-These call the checkers' own `check()` functions with crafted inputs, so nothing
-under version control is touched. The checkers read the real tree, which is what
-makes the passing direction meaningful: it says this repository is consistent
-now, not merely that a fixture is.
+Each gate in `scripts/` is called in-process on crafted inputs, so nothing
+under version control is touched. The passing direction runs on the real tree
+and states that this repository is consistent.
 """
 
 from __future__ import annotations
@@ -58,11 +46,11 @@ def test_the_version_gate_passes_on_this_repository() -> None:
 
 
 def test_a_release_tag_naming_another_version_is_rejected() -> None:
-    """The scenario the `--tag` argument exists for.
+    """A release tag that disagrees with the tree's version is reported.
 
-    Its docstring: "`git tag v0.3.0` on a tree declaring 0.2.0 would build, test,
-    gate and publish 0.2.0 under a 0.3.0 release." The comparison is what stops
-    that, and until `release.yml` was made to pass the tag, nothing invoked it.
+    Without the comparison, `git tag v0.3.0` on a tree declaring 0.2.0 would
+    build, test, gate and publish 0.2.0 under a 0.3.0 release. `release.yml`
+    passes the tag to the gate.
     """
     problems = _script("check_versions").check("v9.9.9")
 
@@ -74,8 +62,7 @@ def test_a_release_tag_naming_another_version_is_rejected() -> None:
 def test_the_v_prefix_is_not_itself_a_disagreement() -> None:
     """`v0.2.0` and `0.2.0` are one claim written two ways.
 
-    A gate treating them as different would fail every correctly-tagged release,
-    which is the failure mode that gets a check deleted rather than fixed.
+    A gate treating them as different would fail every correctly tagged release.
     """
     gate = _script("check_versions")
     stated = gate.check()
@@ -99,17 +86,11 @@ def test_every_file_the_gate_reads_is_one_that_exists() -> None:
 
 
 def test_every_file_that_states_a_version_is_one_the_gate_reads() -> None:
-    r"""The converse of the test above: a source the gate never learned about.
+    r"""Every tracked file that declares the project version is read by the gate.
 
-    That one iterates `gate._SOURCES` and asserts each path exists, so the list
-    under test supplies its own expectation: it catches a source renamed away and
-    cannot catch one that was never added.
-
-    The expectation here is the tree. Every tracked text file is searched for a
-    line declaring this project's own version, identified by a `version`,
-    `__version__` or `VERSION` key whose value is the version the gate reports.
-    Matching on the value keeps dependency pins out: `requirements.txt` names
-    versions, but not this one under that key.
+    The test above takes its expectation from `gate._SOURCES`; this one takes it
+    from the tree. A declaration is a `version`, `__version__` or `VERSION` key
+    whose value is the version the gate reports, which excludes dependency pins.
     """
     gate = _script("check_versions")
     known = set(gate._SOURCES)
@@ -174,8 +155,7 @@ def test_the_version_gate_reads_every_place_its_docstring_claims() -> None:
     claimed = next((n for word, n in words.items() if f"{word} files name it" in doc.lower()), None)
 
     assert claimed is not None, (
-        "the docstring no longer states how many files name the version; it did, "
-        "and the number is what made the omission visible"
+        "the docstring must state, as a spelled-out word, how many files name the version"
     )
     assert claimed == len(gate._SOURCES), (
         f"the docstring claims {claimed} files name the version but the gate "
@@ -194,12 +174,11 @@ def test_the_layout_gate_passes_on_this_repository() -> None:
 def test_a_cpp_directory_with_no_python_counterpart_is_reported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The one direction this gate checks, shown to fail.
+    """A C++ directory with no Python counterpart is reported.
 
-    Adding `_CPP_ONLY = set()` removes `core`'s exemption, which is the cheapest
-    way to present the gate with a genuine orphan without writing to `cpp/`.
-    `core` is a real C++ directory with no Python module, so unexempting it is
-    exactly the condition the gate exists to catch.
+    Setting `_CPP_ONLY = set()` removes the exemption for `core`, a real C++
+    directory with no Python module. That presents the gate with a genuine
+    orphan without writing to `cpp/`.
     """
     gate = _script("check_layout")
     monkeypatch.setattr(gate, "_CPP_ONLY", set())
@@ -210,12 +189,11 @@ def test_a_cpp_directory_with_no_python_counterpart_is_reported(
 def test_the_exemption_is_what_makes_the_baseline_pass(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Contrastive with the test above, so neither passes for the wrong reason.
+    """Restoring the `core` exemption restores the pass.
 
-    `core` is exempt by design -- numeric policy, the floating-point guard and
-    the build configuration, none of which the reference backend needs a module
-    for. Restoring the exemption must restore the pass, or the failure above
-    would be evidence of something else.
+    This is the contrast to the test above. `core` holds numeric policy, the
+    floating-point guard and the build configuration, none of which the
+    reference backend needs a module for.
     """
     gate = _script("check_layout")
     monkeypatch.setattr(gate, "_CPP_ONLY", {"core"})
@@ -226,6 +204,8 @@ def test_the_exemption_is_what_makes_the_baseline_pass(
 # ---------------------------------------------------------------------------
 # check_vendored.py
 # ---------------------------------------------------------------------------
+
+
 # The gate has two halves: a digest comparison against each MANIFEST.sha256, and
 # a scan for files no manifest lists. Both are exercised below.
 def _vendored_tree(root: Path, files: dict[str, str]) -> Path:
@@ -258,12 +238,11 @@ def test_the_vendored_gate_passes_on_this_repository() -> None:
 
 
 def test_every_hashed_directory_is_named_by_both_hook_patterns() -> None:
-    """A directory holding a manifest must be excluded from the rewriters.
+    """Each directory holding a manifest is named by both hook patterns.
 
-    `check_vendored.py` finds manifests by globbing, so it covers a new
-    vendored directory the moment one appears. `.pre-commit-config.yaml` names
-    the same directories twice by hand, and a directory missing from either
-    list is rewritten by a hook and then fails the digest it was meant to keep.
+    `check_vendored.py` finds manifests by globbing; `.pre-commit-config.yaml`
+    names them by hand. A directory missing from an `exclude` is rewritten and
+    fails its digest; one missing from the selector is not digest-checked.
     """
     config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
     hooks = [hook for repo in config["repos"] for hook in repo["hooks"]]
@@ -288,7 +267,7 @@ def test_every_hashed_directory_is_named_by_both_hook_patterns() -> None:
 def test_a_changed_vendored_byte_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The digest comparison: a listed file whose bytes no longer match."""
+    """A listed file whose bytes differ from its recorded digest is reported."""
     _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
     gate = _vendored_gate(monkeypatch, tmp_path)
 
@@ -304,13 +283,11 @@ def test_a_changed_vendored_byte_is_reported(
 def test_a_file_added_inside_a_vendored_subdirectory_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The unlisted-file scan, which must descend below the manifest's own level.
+    """A file added inside a vendored subdirectory is reported.
 
-    Every file `cpp/third_party` vendors sits one level down, in `doctest/` and
-    `nanobench/`, so a scan skipping directories is inert on the real tree. An
-    unlisted file has no recorded digest, so nothing compares it to anything: it
-    ships with the provenance claim of the directory it sits in and none of its
-    own.
+    Every file in `cpp/third_party` sits one level down, in `doctest/` and
+    `nanobench/`, so the unlisted-file scan must descend below the manifest's
+    level. An unlisted file has no recorded digest, so nothing verifies it.
     """
     _vendored_tree(tmp_path / "vendor", {"lib/header.h": "// upstream\n"})
     gate = _vendored_gate(monkeypatch, tmp_path)
@@ -371,17 +348,11 @@ def test_a_tree_with_no_manifest_at_all_is_refused(
 # Dependency specifiers, stated twice
 # ---------------------------------------------------------------------------
 def test_a_dependency_named_in_both_requirement_files_agrees() -> None:
-    """`pyproject.toml`'s dev extra and `requirements-dev.txt` must not differ.
+    """A dependency named in `pyproject.toml` and `requirements-dev.txt` agrees.
 
-    Every CI job installs `requirements-dev.txt`, which pins `ruff` and `mypy`
-    exactly and says why: a floor promises that every future release agrees with
-    this one, and ruff 0.16 stabilising PLR0917 failed the lint job on a commit
-    that changed no Python. The dev extra said `ruff>=0.6, mypy>=1.11`, so a
-    contributor installing `.[dev]` got whatever was current and a clean tree
-    reported findings CI had never seen.
-
-    Compares the specifier rather than the resolved version, so it needs no
-    network and fails on the disagreement itself.
+    CI installs `requirements-dev.txt`, which pins `ruff` and `mypy` exactly, so
+    the dev extra states the same specifiers. Specifiers are compared, not
+    resolved versions. Rationale: docs/engineering_notes.md#linters-pinned-exactly
     """
     import tomllib
 
@@ -402,8 +373,8 @@ def test_a_dependency_named_in_both_requirement_files_agrees() -> None:
     declared = parse([item for group in extras.values() for item in group])
 
     shared = sorted(set(requirements) & set(declared))
-    # The linters are the reason this test exists; if either left one of the
-    # files, the comparison below quietly stopped covering it.
+    # Premise: both linters are named in both files, so the comparison below
+    # covers them.
     assert "ruff" in shared, "ruff is no longer named in both files"
     assert "mypy" in shared, "mypy is no longer named in both files"
     disagreements = [
@@ -442,7 +413,7 @@ def test_the_cpp_format_gate_passes_on_this_repository() -> None:
 def test_a_line_wider_than_the_limit_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The drift that went unnoticed: five lines past a limit nothing applied."""
+    """A line wider than the `.clang-format` column limit is reported."""
     _cpp_tree(tmp_path, {"a.hpp": "int x = 0;  //" + "-" * 100 + "\n"})
     problems = _format_gate(monkeypatch, tmp_path).problems(tmp_path)
     assert len(problems) == 1
@@ -452,8 +423,10 @@ def test_a_line_wider_than_the_limit_is_reported(
 def test_the_limit_comes_from_the_style_file_rather_than_this_script(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Otherwise editing `.clang-format` leaves the two disagreeing, which is the
-    same class of defect as the style file nothing read."""
+    """The column limit is read from `.clang-format`, not stated in the script.
+
+    A limit stated in both places can disagree once `.clang-format` is edited.
+    """
     body = "int x = 0;  //" + "-" * 60 + "\n"
     _cpp_tree(tmp_path, {"a.hpp": body}, column_limit=200)
     gate = _format_gate(monkeypatch, tmp_path)
@@ -466,8 +439,10 @@ def test_the_limit_comes_from_the_style_file_rather_than_this_script(
 def test_a_style_file_without_a_column_limit_is_refused_rather_than_defaulted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A gate that silently substitutes its own default enforces something the
-    repository never asked for, and reports success for it."""
+    """A style file without `ColumnLimit` is refused rather than defaulted.
+
+    A substituted default would enforce a limit the repository never stated.
+    """
     (tmp_path / ".clang-format").write_text("Language: Cpp\nUseTab: Never\n", encoding="utf-8")
     (tmp_path / "cpp").mkdir()
     gate = _format_gate(monkeypatch, tmp_path)
@@ -487,8 +462,11 @@ def test_tabs_and_trailing_space_are_reported(
 def test_vendored_code_is_not_ours_to_format(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """check_vendored.py asserts it matches upstream byte for byte, so
-    reformatting it would break that instead of fixing anything."""
+    """Vendored C++ under `third_party/` is not checked for format.
+
+    `check_vendored.py` asserts that it matches upstream byte for byte, so
+    reformatting it would break that check.
+    """
     _cpp_tree(tmp_path, {"third_party/doctest.h": "int x = 0;  //" + "-" * 100 + "\n"})
     assert _format_gate(monkeypatch, tmp_path).problems(tmp_path) == []
 
@@ -497,14 +475,11 @@ def test_vendored_code_is_not_ours_to_format(
 # determinism.yml counts its own matrix
 # ---------------------------------------------------------------------------
 def test_the_digest_comparison_expects_one_result_per_matrix_leg() -> None:
-    """`compare` refuses to run unless every matrix leg uploaded a digest.
+    """`compare` expects one uploaded digest per matrix leg.
 
-    That count is written as a literal, `expected=18`, because the job cannot
-    see the matrices it is comparing. A literal that falls behind fails in one
-    of two ways: too high and the job fails every night, too low and the
-    project's flagship reproducibility claim is decided by whichever legs
-    happened to finish -- which is the failure the guard was added to prevent,
-    reintroduced by arithmetic.
+    The count is a literal, `expected=18`, because the job cannot see the
+    matrices. A count too high fails every night; one too low lets the
+    comparison pass on whichever legs finished.
     """
     import yaml
 
@@ -535,18 +510,19 @@ def test_the_digest_comparison_expects_one_result_per_matrix_leg() -> None:
 def test_the_python_floor_gate_passes_on_this_repository() -> None:
     """The baseline over the whole tree, which is a mypy run and costs a minute.
 
-    Marked slow because the lint job runs `check_python_floor.py` itself on
-    every push, so this is the second reader of the same fact rather than the
-    only one. The rejection paths below stay in the fast tier: they run mypy
-    over a single generated file and are what would go quiet if the gate broke.
+    Marked slow because the lint job in `ci.yml` also runs `check_python_floor.py`.
+    The rejection paths below stay in the fast tier: each runs mypy over a
+    single generated file.
     """
     gate = _script("check_python_floor")
     assert gate.findings(REPO, gate.floor(REPO)) == []
 
 
 def test_the_floor_is_read_from_pyproject_rather_than_repeated() -> None:
-    """A version repeated in the checker drifts from the one in the metadata,
-    and then the check is enforcing something the project never claimed."""
+    """The floor is read from `pyproject.toml` rather than repeated.
+
+    A floor repeated in the checker can differ from the one in the metadata.
+    """
     gate = _script("check_python_floor")
     assert gate.floor(REPO) == "3.11"
 
@@ -571,11 +547,11 @@ def test_a_project_with_no_stated_floor_is_refused_rather_than_assumed(
 
 
 def test_a_call_the_floor_cannot_make_is_reported(tmp_path: Path) -> None:
-    """The gate's whole purpose, on the exact defect that prompted it.
+    """A call that the Python floor cannot make is reported.
 
-    `Path.read_text` grew its `newline` parameter in 3.13. At a floor of 3.11
-    the call is impossible, and mypy says so; at 3.13 the same file is fine, so
-    the check is reading the version rather than banning the argument.
+    `Path.read_text` takes `newline` from 3.13. At a floor of 3.11 mypy reports
+    the call; at 3.13 the same file passes, so the check reads the version
+    rather than banning the argument.
     """
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nrequires-python = ">=3.11"\n', encoding="utf-8"
@@ -618,16 +594,20 @@ def _abi_tree(tmp_path: Path, cpp: str, python: str, *, export: bool = True) -> 
 
 
 def test_the_abi_gate_passes_on_this_repository() -> None:
-    """The baseline. The two literals in the tree agree, so the arm marked
-    `# pragma: no cover` in `_native/__init__.py` can only fire on a stale build
-    on disk rather than on a repository nobody reconciled."""
+    """The baseline: the two ABI literals in the tree agree.
+
+    The arm marked `# pragma: no cover` in `_native/__init__.py` therefore fires
+    only on a stale build on disk.
+    """
     assert _script("check_versions").check_abi() == []
 
 
 def test_two_abis_that_disagree_are_rejected(tmp_path: Path) -> None:
-    """The failure the gate exists for. A mismatch degrades every process to the
-    reference backend, and the differential suite then skips rather than fails,
-    so the run stays green while testing nothing."""
+    """Two ABI literals that disagree are reported.
+
+    A mismatch degrades every process to the reference backend, and the
+    differential suite then skips rather than fails.
+    """
     problems = _script("check_versions").check_abi(_abi_tree(tmp_path, "0.5.0", "0.4.0"))
 
     assert problems, "a disagreement must be reported"
@@ -636,9 +616,11 @@ def test_two_abis_that_disagree_are_rejected(tmp_path: Path) -> None:
 
 
 def test_an_abi_the_binding_never_exports_is_rejected(tmp_path: Path) -> None:
-    """Agreement between the two literals says nothing unless `kAbi` is what the
-    module publishes. Without the export the gate would pass while the extension
-    reported anything at all."""
+    """An ABI that the binding never exports is reported.
+
+    Agreement between the two literals holds only if `kAbi` is what the module
+    publishes as `__abi__`.
+    """
     problems = _script("check_versions").check_abi(
         _abi_tree(tmp_path, "0.4.0", "0.4.0", export=False)
     )
@@ -647,8 +629,11 @@ def test_an_abi_the_binding_never_exports_is_rejected(tmp_path: Path) -> None:
 
 
 def test_an_abi_literal_that_cannot_be_found_is_rejected(tmp_path: Path) -> None:
-    """A regex that stops matching must fail loudly rather than report agreement
-    between two absent values."""
+    """An ABI literal that cannot be found is reported for each file.
+
+    A pattern that stops matching fails rather than reporting agreement between
+    two absent values.
+    """
     problems = _script("check_versions").check_abi(tmp_path)
 
     assert len(problems) == 2, "both files are reported"
@@ -656,10 +641,10 @@ def test_an_abi_literal_that_cannot_be_found_is_rejected(tmp_path: Path) -> None
 
 
 def test_the_abi_gate_names_every_file_it_reads_in_its_docstring() -> None:
-    """The same doctrine as the version count above, for the second claim.
+    """The gate's docstring names every file in `_ABI_SOURCES`.
 
-    A table that grows a source its own prose does not mention is how a reader
-    comes to believe the gate covers less than it does, or more.
+    This mirrors the version count above. A source missing from the prose makes
+    the gate appear to cover less than it does.
     """
     gate = _script("check_versions")
     doc = gate.__doc__ or ""
@@ -688,16 +673,19 @@ _DEP_DEV = "-r requirements.txt\nruff==0.16.2\nmypy==2.3.0\n"
 
 
 def test_the_dependency_gate_passes_on_this_repository() -> None:
-    """The baseline, and a live statement: `pyproject.toml` and the requirements
-    files name the same packages at the same versions."""
+    """The baseline: `pyproject.toml` and the requirements files agree.
+
+    Both name the same packages at the same versions.
+    """
     assert _script("check_dependencies").check() == []
 
 
 def test_a_package_in_the_requirements_file_alone_is_rejected(tmp_path: Path) -> None:
-    """The direction that was live: `snowballstemmer` was pinned in
-    `requirements-dev.txt` and named in no pyproject group, so
-    `pip install -e .[all]` and `pip install -r requirements-dev.txt` gave
-    different environments."""
+    """A package in a requirements file and no pyproject group is reported.
+
+    Such a package makes `pip install -e .[all]` and
+    `pip install -r requirements-dev.txt` give different environments.
+    """
     tree = _dep_tree(tmp_path, _DEP_PYPROJECT, "numpy>=1.24\n", _DEP_DEV + "extra-pkg>=1\n")
 
     problems = _script("check_dependencies").check(tree)
@@ -706,8 +694,10 @@ def test_a_package_in_the_requirements_file_alone_is_rejected(tmp_path: Path) ->
 
 
 def test_a_package_in_pyproject_alone_is_rejected(tmp_path: Path) -> None:
-    """The other direction, which the `docs` extra occupies today and which is
-    excluded by name rather than by accident."""
+    """A package in `pyproject.toml` and no requirements file is reported.
+
+    The `docs` extra is in this position; the gate leaves it out of `_DEV_GROUPS`.
+    """
     tree = _dep_tree(tmp_path, _DEP_PYPROJECT, "\n", _DEP_DEV)
 
     problems = _script("check_dependencies").check(tree)
@@ -716,8 +706,10 @@ def test_a_package_in_pyproject_alone_is_rejected(tmp_path: Path) -> None:
 
 
 def test_two_specifiers_for_one_package_are_rejected(tmp_path: Path) -> None:
-    """Agreeing on the name is not agreeing on the version. A floor stated twice
-    at two values resolves to whichever file the installer read."""
+    """Two different specifiers for one package are reported.
+
+    A floor stated at two values resolves to whichever file the installer read.
+    """
     tree = _dep_tree(tmp_path, _DEP_PYPROJECT, "numpy>=2.0\n", _DEP_DEV)
 
     problems = _script("check_dependencies").check(tree)
@@ -726,9 +718,11 @@ def test_two_specifiers_for_one_package_are_rejected(tmp_path: Path) -> None:
 
 
 def test_a_linter_stated_as_a_floor_is_rejected(tmp_path: Path) -> None:
-    """A floor on a linter promises that every future release agrees with this
-    one. Ruff 0.16 stabilising a rule the tree had never been checked against
-    failed the lint job on a commit that changed no Python."""
+    """A linter stated as a floor rather than an exact pin is reported.
+
+    A floor accepts every future release, including one that stabilises a rule
+    the tree has not been checked against.
+    """
     floored = _DEP_PYPROJECT.replace('"ruff==0.16.2"', '"ruff>=0.16"')
     tree = _dep_tree(
         tmp_path, floored, "numpy>=1.24\n", "-r requirements.txt\nruff>=0.16\nmypy==2.3.0\n"
@@ -750,12 +744,10 @@ def _vacuity(tmp_path: Path, body: str) -> list[str]:
 
 
 def test_the_vacuity_gate_reports_nothing_against_this_suite() -> None:
-    """The baseline, and the strongest of the three claims here: every test in
-    this repository can fail for a reason the gate recognises.
+    """The baseline: the vacuity gate reports nothing against this suite.
 
-    The gate is the largest in `scripts/` and runs in CI and in pre-commit, so a
-    passing direction that was never asserted is what the module docstring above
-    calls a gate nobody has seen fail.
+    Every test in this repository can fail for a reason the gate recognises. The
+    gate runs in CI and in pre-commit, so its passing direction is asserted here.
     """
     gate = _script("check_test_vacuity")
     findings = [f for path in sorted((REPO / "tests").glob("test_*.py")) for f in gate.scan(path)]
@@ -764,8 +756,10 @@ def test_the_vacuity_gate_reports_nothing_against_this_suite() -> None:
 
 
 def test_a_test_that_asserts_nothing_is_reported(tmp_path: Path) -> None:
-    """The finding the gate exists for. A body that cannot fail is a test in
-    name only, and it passes every other check in the repository."""
+    """A test that asserts nothing is reported.
+
+    A body that cannot fail passes every other check in the repository.
+    """
     assert "no-assertion" in _vacuity(tmp_path, "def test_x():\n    value = 1 + 1\n")
 
 
@@ -775,22 +769,31 @@ def test_an_empty_test_is_reported(tmp_path: Path) -> None:
 
 
 def test_a_constant_assertion_is_reported(tmp_path: Path) -> None:
-    """`assert True` passes whatever the code does, and `assert (a, b)` is a
-    non-empty tuple, which is the same thing spelled as a mistake."""
+    """A constant assertion is reported.
+
+    `assert True` passes whatever the code does, and `assert (a, b)` asserts a
+    non-empty tuple, which is always true.
+    """
     assert "constant-assert" in _vacuity(tmp_path, "def test_x():\n    assert True\n")
 
 
 def test_a_raises_over_a_broad_exception_is_reported(tmp_path: Path) -> None:
-    """`pytest.raises(Exception)` passes for a typo in the test itself, so it
-    asserts that something went wrong rather than that the guard fired."""
+    """`pytest.raises(Exception)` is reported as too broad.
+
+    It passes for a typo in the test itself, so it asserts that something went
+    wrong rather than that the guard fired.
+    """
     body = "import pytest\n\n\ndef test_x():\n    with pytest.raises(Exception):\n        f()\n"
 
     assert "broad-raises" in _vacuity(tmp_path, body)
 
 
 def test_a_raises_without_a_match_is_reported(tmp_path: Path) -> None:
-    """A `ValueError` from the wrong line satisfies an unmatched `raises`, so
-    the message is what pins which guard fired."""
+    """`pytest.raises` without `match` is reported.
+
+    A `ValueError` from the wrong line satisfies an unmatched `raises`; the
+    message pins which guard fired.
+    """
     body = "import pytest\n\n\ndef test_x():\n    with pytest.raises(ValueError):\n        f()\n"
 
     assert "unmatched-raises" in _vacuity(tmp_path, body)
@@ -809,16 +812,22 @@ def test_an_assertion_reachable_only_through_a_filter_is_reported(tmp_path: Path
 
 
 def test_a_loop_over_an_unfiltered_sequence_is_not_reported(tmp_path: Path) -> None:
-    """The contrast that keeps the check above from reading as "loops are bad".
-    An empty fixture would be obviously broken, so the gate says nothing."""
+    """A loop over an unfiltered sequence is not reported.
+
+    This is the contrast to the test above. An empty fixture would be obviously
+    broken, so the gate says nothing.
+    """
     body = "def test_x(items):\n    for item in items:\n        assert item\n"
 
     assert _vacuity(tmp_path, body) == []
 
 
 def test_an_empty_parametrize_is_reported(tmp_path: Path) -> None:
-    """A parametrize with no cases collects no tests at all, and pytest reports
-    that as a pass rather than as a gap."""
+    """An empty parametrize is reported.
+
+    A parametrize with no cases collects no tests, and pytest reports that as a
+    pass rather than as a gap.
+    """
     body = (
         "import pytest\n\n\n"
         '@pytest.mark.parametrize("value", [])\n'
@@ -829,6 +838,9 @@ def test_an_empty_parametrize_is_reported(tmp_path: Path) -> None:
 
 
 def test_a_file_that_cannot_be_parsed_is_reported(tmp_path: Path) -> None:
-    """An unparseable test file collects nothing, which pytest also reports as
-    a pass for that file. The gate answers for the file rather than the test."""
+    """A test file that cannot be parsed is reported.
+
+    An unparseable file collects nothing, which pytest also reports as a pass.
+    The gate reports the file rather than a test.
+    """
     assert "unparseable" in _vacuity(tmp_path, "def test_x(:\n")

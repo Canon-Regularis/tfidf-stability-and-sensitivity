@@ -1,21 +1,8 @@
-"""Asset resolution from an installed distribution, not just a checkout.
+"""Asset resolution from an installed distribution and from a checkout.
 
-Two files the package cannot work without live outside the package directory:
-the frozen stopword list under ``data/assets`` and the normative
-``configs/default.yaml``. Both were resolved through ``parents[3]``, which is the
-repository root from ``src/tfidf_stability/<sub>/`` and the directory *above*
-``site-packages`` from an installed distribution. An installed package therefore
-could not load its own hash-verified stopword list -- the asset that fixes the
-vocabulary and so every number this project publishes.
-
-Nothing caught it because ``tests/conftest.py`` prepended ``src/`` to
-``sys.path`` unconditionally. ``release.yml``'s ``CIBW_TEST_COMMAND`` runs the
-suite against a freshly built wheel for exactly this purpose and got the source
-tree instead, so no wheel has ever been under test.
-
-The resolvers now take the module's path as an argument. In a checkout only the
-repository layout exists, so the branch that matters for a wheel is unreachable
-from here unless a layout is built to order -- which is what these do.
+``data/assets`` and ``configs/default.yaml`` sit beside ``src/`` in a checkout
+and inside the package in a wheel; each resolver takes the module's path.
+Rationale: docs/engineering_notes.md#packaged-asset-resolution
 """
 
 from __future__ import annotations
@@ -56,7 +43,7 @@ def _checkout_layout(root: Path, subpackage: str, asset: str) -> Path:
 # The stopword asset
 # ---------------------------------------------------------------------------
 def test_the_stopword_asset_resolves_inside_an_installed_package(tmp_path: Path) -> None:
-    """The wheel layout, which the repository-root form could never reach."""
+    """The wheel layout resolves to the asset directory inside the package."""
     module = _installed_layout(tmp_path, "preprocessing", "data/assets")
 
     resolved = _resolve_asset_dir(module)
@@ -67,8 +54,10 @@ def test_the_stopword_asset_resolves_inside_an_installed_package(tmp_path: Path)
 
 
 def test_the_stopword_asset_still_resolves_from_a_checkout(tmp_path: Path) -> None:
-    """The layout every developer and every CI job uses. Unchanged: the packaged
-    directory does not exist in a checkout, so the fallback is what answers."""
+    """A checkout resolves to the asset directory beside ``src/``.
+
+    The packaged directory does not exist in a checkout, so the fallback answers.
+    """
     module = _checkout_layout(tmp_path, "preprocessing", "data/assets")
 
     resolved = _resolve_asset_dir(module)
@@ -79,11 +68,11 @@ def test_the_stopword_asset_still_resolves_from_a_checkout(tmp_path: Path) -> No
 
 
 def test_the_packaged_asset_wins_when_both_layouts_exist(tmp_path: Path) -> None:
-    """Order matters, and only one order is safe.
+    """The packaged copy is preferred when both layouts exist.
 
     An editable install can present both at once. Preferring the packaged copy
-    means an installed distribution is self-contained; preferring the repository
-    would make a wheel silently read whatever tree it happened to sit near.
+    keeps an installed distribution self-contained instead of reading whatever
+    tree sits above ``site-packages``.
     """
     module = _installed_layout(tmp_path, "preprocessing", "data/assets")
     outer = module.resolve().parents[3] / "data" / "assets"
@@ -93,8 +82,7 @@ def test_the_packaged_asset_wins_when_both_layouts_exist(tmp_path: Path) -> None
 
 
 def test_the_live_asset_directory_holds_the_frozen_list() -> None:
-    """The resolver is not merely returning a plausible path: this repository's
-    own assets are where it says, and they load."""
+    """The repository's own stopword assets sit at the resolved path and load."""
     from tfidf_stability.preprocessing.stopwords import (
         _ASSET_DIR,
         DEFAULT_STOPWORD_ASSET,
@@ -110,8 +98,11 @@ def test_the_live_asset_directory_holds_the_frozen_list() -> None:
 # The default configuration
 # ---------------------------------------------------------------------------
 def test_the_default_config_resolves_inside_an_installed_package(tmp_path: Path) -> None:
-    """`tfidf-stability build-corpus` with no `-c` reads this file, so an
-    installed CLI that cannot find it is a CLI with no default behaviour."""
+    """The wheel layout resolves to the packaged ``default.yaml``.
+
+    ``tfidf-stability build-corpus`` with no ``-c`` reads this file, so an
+    installed CLI depends on finding it.
+    """
     module = _installed_layout(tmp_path, "cli", "configs")
     packaged = module.resolve().parents[1] / "configs" / "default.yaml"
     packaged.write_text("preprocessing: {}\n", encoding="utf-8")
@@ -120,7 +111,7 @@ def test_the_default_config_resolves_inside_an_installed_package(tmp_path: Path)
 
 
 def test_the_default_config_still_resolves_from_a_checkout(tmp_path: Path) -> None:
-    """The fallback, and the only path that existed before."""
+    """A checkout resolves to the ``default.yaml`` beside ``src/``."""
     module = _checkout_layout(tmp_path, "cli", "configs")
     in_tree = module.resolve().parents[3] / "configs" / "default.yaml"
     in_tree.write_text("preprocessing: {}\n", encoding="utf-8")
@@ -129,8 +120,11 @@ def test_the_default_config_still_resolves_from_a_checkout(tmp_path: Path) -> No
 
 
 def test_the_config_falls_back_when_the_package_holds_no_copy(tmp_path: Path) -> None:
-    """Presence is tested, not the directory: a packaged ``configs/`` that does
-    not contain ``default.yaml`` must not shadow the checkout's copy."""
+    """The file's presence decides the result, not the directory's.
+
+    A packaged ``configs/`` without ``default.yaml`` does not shadow the
+    checkout's copy.
+    """
     module = _installed_layout(tmp_path, "cli", "configs")
     in_tree = module.resolve().parents[3] / "configs" / "default.yaml"
     in_tree.parent.mkdir(parents=True, exist_ok=True)
@@ -140,7 +134,7 @@ def test_the_config_falls_back_when_the_package_holds_no_copy(tmp_path: Path) ->
 
 
 def test_the_live_default_config_is_the_normative_one() -> None:
-    """As above: the resolver points at this repository's real config."""
+    """The resolver points at this repository's own ``default.yaml``."""
     from tfidf_stability.cli.commands import _DEFAULT_CONFIG, load_config
 
     assert _DEFAULT_CONFIG.is_file()
@@ -155,9 +149,12 @@ def test_the_live_default_config_is_the_normative_one() -> None:
 def test_neither_layout_reaches_outside_the_tree_it_names(
     subpackage: str, asset: str, tmp_path: Path
 ) -> None:
-    """The failure that shipped: `parents[3]` from an installed package points
-    above `site-packages`, at whatever happens to be there. Both resolvers must
-    return a path under the root they were given, never one beside it."""
+    """Both resolvers return a path under the root they are given.
+
+    From an installed package ``parents[3]`` is the directory above
+    ``site-packages``, here ``tmp_path`` itself, so this checks containment
+    only; the tests above assert the packaged-first order.
+    """
     module = _installed_layout(tmp_path, subpackage, asset)
     resolver = _resolve_asset_dir if subpackage == "preprocessing" else _resolve_default_config
     if subpackage == "cli":

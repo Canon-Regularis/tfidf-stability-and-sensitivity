@@ -1,40 +1,8 @@
-"""The declared surface, and the claims it makes about the C++ side.
+"""Tests for the declared public surface and its claims about the C++ side.
 
-Three properties, none of which any other test file asserts.
-
-First, ``types.py`` describes how its aliases correspond to
-``cpp/include/tfidf/core/types.hpp``. That description is checkable, and it was
-wrong until this file existed: the docstring claimed a one-for-one mirror while
-``DocId`` denoted a row index in C++ and an external string in Python. The same
-name meaning different things across a language boundary is the sort of defect
-that produces a plausible wrong answer rather than a crash, so the correspondence
-is pinned here rather than described in prose alone.
-
-Second, every enum in the package is a ``class X(str, Enum)`` with an explicit
-``__str__``. ``pyproject.toml`` justifies not using ``StrEnum`` on the grounds
-that the explicit method "makes the serialised form part of the visible contract
-rather than an inherited behaviour". Those values land in run manifests and YAML
-configs, so a member whose ``str()`` stopped being its ``value`` would change a
-published file while every existing test still passed.
-
-Third, ``__all__`` is the package's statement about what it supports. A name
-listed there that does not resolve is a broken promise, and it is the kind of
-thing that survives indefinitely because nothing imports the module.
-
-What this file deliberately does not do is import a module to make its lines
-execute. ``types.py`` is ten ``TypeAlias`` assignments that run at import; a bare
-``import tfidf_stability.types`` would score it fully covered while asserting
-nothing at all.
-
-One consequence to be aware of when reading a coverage report. The last two
-tests walk the package and import every module, which is the only way to check
-that ``__all__`` resolves. That marks import-time statements across the whole
-package as covered without exercising any behaviour, so a module can report
-coverage on the strength of this file alone. Measured at the time of writing,
-deselecting it moves the project total by nine statements; the figure shrinks as
-modules gain their own tests, which is the point. A module whose coverage depends
-on this file has gained nothing, so judge one by whether its own owning test file
-exercises it.
+``types.py`` aliases correspond to ``cpp/include/tfidf/core/types.hpp``; each enum is
+a ``class X(str, Enum)`` with an explicit ``__str__``; every ``__all__`` resolves.
+Rationale: docs/engineering_notes.md#public-api-surface-tests
 """
 
 from __future__ import annotations
@@ -60,7 +28,7 @@ HEADER = REPO / "cpp" / "include" / "tfidf" / "core" / "types.hpp"
 #: Python name -> the C++ alias it corresponds to, or None where there is none.
 _CORRESPONDENCE: dict[str, str | None] = {
     "TermId": "TermId",
-    "DocIndex": "DocId",  # the names differ on purpose; see the module docstring
+    "DocIndex": "DocId",  # C++ calls the row index DocId
     "DocId": None,  # the external string identifier; C++ has no counterpart
     "Rank": None,  # 1-indexed, Python-side reporting only
     "Offset": "Offset",
@@ -82,16 +50,17 @@ def _header_aliases() -> dict[str, str]:
 # types.py against the C++ header
 # ---------------------------------------------------------------------------
 def test_the_header_this_module_describes_still_exists() -> None:
-    """A correspondence test that silently stops finding its counterpart proves
-    nothing, so the file's existence is asserted before anything is parsed."""
+    """The C++ header exists, so the correspondence tests have a counterpart.
+
+    A correspondence test that stops finding its counterpart proves nothing.
+    """
     assert HEADER.is_file(), f"{HEADER} is missing; types.py describes a file that is not there"
 
 
 def test_every_python_alias_is_accounted_for_in_the_correspondence() -> None:
-    """`__all__` and the documented table must not drift apart.
+    """`__all__` and the documented correspondence table list the same names.
 
-    Adding an alias without deciding whether C++ has one is exactly how the
-    one-for-one claim became false.
+    Each new alias needs a recorded decision on whether C++ has a counterpart.
     """
     assert set(types.__all__) == set(_CORRESPONDENCE), (
         "types.__all__ and the documented C++ correspondence disagree; "
@@ -114,16 +83,16 @@ def test_each_alias_claiming_a_cpp_counterpart_has_one() -> None:
 
 
 def test_each_alias_claiming_no_counterpart_really_has_none() -> None:
-    """The other direction, which is the one that caught the DocId collision.
+    """Aliases claiming no C++ counterpart have none with the same meaning.
 
-    `DocId` exists in both files, so a test that only checked "the names I claim
-    are shared are present" would pass while the two meant opposite things.
+    `DocId` exists in both files, so a check that only the claimed shared names
+    are present would pass while the two sides mean different things.
     """
     aliases = _header_aliases()
     assert _CORRESPONDENCE["Rank"] is None
     assert "Rank" not in aliases, "C++ grew a Rank alias; the correspondence needs revisiting"
 
-    # DocId is the trap: present in both, same spelling, different concept.
+    # DocId is declared on both sides with the same spelling and a different meaning.
     assert "DocId" in aliases, "the header no longer declares DocId"
     assert aliases["DocId"] == "std::int32_t", (
         "C++ DocId is a row index. If it became a string type the two sides would "
@@ -175,13 +144,11 @@ def _package_enums() -> list[type[enum.Enum]]:
 
 
 def test_every_enum_str_is_its_value_so_a_manifest_round_trips() -> None:
-    """The reason `pyproject.toml` gives for not using StrEnum.
+    """Every string enum member's ``str()`` equals its ``value``.
 
-    Each of these classes writes an explicit ``__str__`` returning ``self.value``,
-    and the justification recorded against the UP042 ignore is that doing so
-    "makes the serialised form part of the visible contract". These values are
-    written into run manifests and read back out of YAML configs, so a member
-    whose ``str()`` drifted from its ``value`` would change a published file.
+    ``pyproject.toml`` justifies the UP042 ignore by the explicit ``__str__``
+    making "the serialised form part of the visible contract". The values are
+    written to run manifests and read back from YAML configs.
     """
     enums = _package_enums()
     assert len(enums) >= 10, f"only found {len(enums)} enums; the walk is not reaching the package"
@@ -200,13 +167,11 @@ def test_every_enum_str_is_its_value_so_a_manifest_round_trips() -> None:
 
 
 def test_every_enum_writes_the_method_rather_than_inheriting_it() -> None:
-    """The contract the test above checks only exists if the method is written.
+    """Every package enum declares ``__str__`` rather than inheriting it.
 
-    An enum that dropped its `__str__` would inherit `Enum.__str__` and serialise
-    as `Reduction.NAIVE`, not `naive` -- which is precisely the drift the UP042
-    ignore is justified on avoiding. The check is worth stating separately
-    because on a `class X(str, Enum)` the inherited behaviour is close enough to
-    look right in a log line and wrong in a manifest.
+    An inherited `Enum.__str__` serialises as `Reduction.NAIVE`, not `naive`. On
+    a `class X(str, Enum)` that form looks right in a log line and is wrong in a
+    manifest.
     """
     missing = [
         f"{e.__module__}.{e.__qualname__}" for e in _package_enums() if "__str__" not in vars(e)
@@ -238,11 +203,10 @@ def _modules_declaring_all() -> list[tuple[str, list[str]]]:
 
 
 def test_every_name_in_every_all_resolves() -> None:
-    """A promise in `__all__` that does not resolve survives forever otherwise.
+    """Every name in every module's `__all__` resolves on that module.
 
-    Nothing imports several of these modules, so an `__all__` entry naming a
-    symbol that was renamed would never raise until a user tried the documented
-    import.
+    Nothing else imports several of these modules, so a stale `__all__` entry
+    raises only when a user tries the documented import.
     """
     modules = _modules_declaring_all()
     assert len(modules) >= 30, (
@@ -271,10 +235,10 @@ def test_each_subpackage_reexport_resolves(package: str) -> None:
 
 
 def test_the_root_package_exports_only_its_version() -> None:
-    """Deliberate: everything else is imported from a subpackage.
+    """The root package exports only `__version__`.
 
-    Pinned because a convenience re-export added at the root would be a public
-    API commitment made by accident.
+    Everything else is imported from a subpackage, so a re-export added at the
+    root would be a new public API commitment.
     """
     assert tfidf_stability.__all__ == ["__version__"]
     assert isinstance(tfidf_stability.__version__, str)
@@ -283,24 +247,18 @@ def test_the_root_package_exports_only_its_version() -> None:
 # ---------------------------------------------------------------------------
 # Value objects are frozen and slotted, and the exceptions are named
 # ---------------------------------------------------------------------------
-# Mutation testing found this: `frozen=True` and `slots=True` could both be
-# deleted from any of nine modules' dataclasses with the whole suite still
-# green, which made about thirty surviving mutants and was by some way the
-# largest single gap. Neither flag is decoration. These objects carry measured
-# numbers into run manifests and are compared and hashed downstream, so one that
-# a caller could edit after the fact turns a record into a suggestion.
-#
-# Stated here once rather than as an assertion per class, and stated in both
-# directions: the mutable ones are listed, so adding a sixth is a deliberate
-# edit to this list rather than something that slips through.
 
-#: Dataclasses that are mutable on purpose. Each is built up in stages or reused
-#: as scratch, which is the opposite of the value-object case above.
+# Value objects carry measured numbers into run manifests and are compared and
+# hashed downstream, so `frozen=True` and `slots=True` are asserted once for the
+# whole package. The named exceptions must equal the observed set in both
+# directions, so adding or removing an exception is an explicit edit to a set.
+
+#: Mutable dataclasses. Each is built up in stages or reused as scratch.
 _MUTABLE_BY_DESIGN = {
     # Assembled field by field as a run proceeds, then written once.
     "tfidf_stability.persistence.manifest.RunManifest",
-    # A reusable accumulator: the whole point is that scoring writes into it
-    # rather than allocating per query.
+    # A reusable accumulator: scoring writes into it rather than allocating per
+    # query.
     "tfidf_stability.similarity.scoring.ScoringScratch",
     # The builder. `fit` returns the frozen TfidfModel; this is the thing that
     # holds configuration on the way there.
@@ -339,7 +297,7 @@ def test_the_package_defines_the_dataclasses_this_file_reasons_about() -> None:
 
 
 def test_every_dataclass_is_frozen_unless_it_is_a_named_exception() -> None:
-    """A measurement a caller can edit after the fact is not a measurement."""
+    """Every dataclass outside `_MUTABLE_BY_DESIGN` is frozen."""
     mutable = {
         name for name, cls in _package_dataclasses().items() if not cls.__dataclass_params__.frozen
     }
@@ -350,9 +308,11 @@ def test_every_dataclass_is_frozen_unless_it_is_a_named_exception() -> None:
 
 
 def test_every_dataclass_declares_slots_unless_it_is_a_named_exception() -> None:
-    """`slots=True` is what stops a typo'd attribute name becoming a silent
-    second field instead of an AttributeError, on objects whose field set is
-    the record being published."""
+    """Every dataclass outside `_UNSLOTTED_BY_DESIGN` declares `slots=True`.
+
+    With slots, a mistyped attribute name raises AttributeError rather than
+    adding a second field to a record whose field set is published.
+    """
     unslotted = {
         name for name, cls in _package_dataclasses().items() if "__slots__" not in vars(cls)
     }
@@ -363,8 +323,11 @@ def test_every_dataclass_declares_slots_unless_it_is_a_named_exception() -> None
 
 
 def test_a_frozen_dataclass_actually_refuses_assignment() -> None:
-    """The flags above are read off the class; this confirms the flag means what
-    the two tests assume it means, on one representative instance."""
+    """A frozen, slotted dataclass refuses assignment and has no ``__dict__``.
+
+    The tests above read the flags off the class; this checks their effect on
+    one representative instance.
+    """
     margin = Margin("boundary", 5, 5, 0.25, True)
     with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign to field 'value'"):
         margin.value = 0.0  # type: ignore[misc]
@@ -374,13 +337,12 @@ def test_a_frozen_dataclass_actually_refuses_assignment() -> None:
 # ---------------------------------------------------------------------------
 # The root docstring: it explains why there is no backend registry
 # ---------------------------------------------------------------------------
-# The explanation is architectural rather than incidental, so it is pinned: a
-# reader who wants to add a third evaluator should find the reason it was not
-# done, and a docstring that outlives what it names is worse than none.
 def test_the_signpost_points_at_names_that_exist() -> None:
-    """The root docstring says selection is "one availability check
-    (`native_available()` plus an ABI guard)". Both are named here so that
-    renaming either breaks this test rather than silently stranding the text."""
+    """The names the root docstring gives for backend selection exist.
+
+    The docstring cites `native_available()` plus an ABI guard; renaming either
+    fails this test rather than leaving the docstring naming something absent.
+    """
     from tfidf_stability import _native
 
     assert callable(_native.native_available)
@@ -405,14 +367,11 @@ def test_the_root_docstring_explains_the_absent_numpy_evaluator() -> None:
 # ---------------------------------------------------------------------------
 # str-enum fields must be coerced where the package dispatches on `is`
 # ---------------------------------------------------------------------------
+
 #: Dataclass -> why a field of its is not coerced. Empty: every one is.
-#:
-#: The package's enums are all ``str`` enums, so ``"vector_mean"`` equals the
-#: member without being it, and the dispatch sites select with ``is``. A field
-#: left uncoerced therefore takes a different branch from the one its value
-#: names, silently: `similarity/scoring.py` falls through to the compensated arm
-#: for an uncoerced `Reduction`, while `utils/numerics.py` looks the same value
-#: up in a dict and gets the right answer. One string, two behaviours.
+#: The enums are ``str`` enums and ``similarity/scoring.py`` dispatches with ``is``,
+#: so an uncoerced string equals its member without being it and takes another branch.
+#: Rationale: docs/engineering_notes.md#str-enum-field-coercion
 _UNCOERCED_BY_DESIGN: dict[str, str] = {}
 
 
@@ -457,10 +416,9 @@ def _coerced_in(cls: ast.ClassDef) -> set[str]:
 def test_every_str_enum_field_of_a_dataclass_is_coerced() -> None:
     """A ``str`` enum field must be normalised to its member in ``__post_init__``.
 
-    Without it a caller passing the string reaches a different branch from the
-    one the value names, and the record keeps the value that was asked for, so
-    nothing downstream can tell. This walks the package rather than naming
-    classes, so a new dataclass is covered the day it is written.
+    An uncoerced string reaches a different branch from the one its value names
+    while the record keeps the requested value. The test walks the package, so
+    a new dataclass is covered without being named.
     """
     root = REPO / "src" / "tfidf_stability"
     enums = _str_enums(root)

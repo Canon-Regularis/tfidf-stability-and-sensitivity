@@ -1,17 +1,8 @@
-"""Logging as a provenance channel. Three properties.
+"""Logging as a provenance channel: three properties of the package logger.
 
-*Importing must not configure logging.* A library that installs a handler takes
-the application's decision for it, and this package is imported by notebooks and
-by other people's test suites.
-
-*Captured output must be reproducible.* The events are hashed into a run record
-beside the manifest, so a timestamp would make identical runs disagree; that is
-the failure ``strip_volatile`` prevents.
-
-*Warnings must survive.* ``filterwarnings = ["error"]`` makes
-``TauExceedsScoreRangeWarning`` and ``ChainInflationWarning`` hard failures. If
-logging filed either as a line on stderr, the suite would go quiet about the
-degenerate configurations it exists to catch.
+Importing installs no handler, captured output carries no timestamp because
+events are hashed into the run record, and warnings are not rerouted through
+logging. Rationale: docs/engineering_notes.md#logging-as-a-provenance-channel
 """
 
 from __future__ import annotations
@@ -51,8 +42,10 @@ CLOCK = re.compile(r"\d{2}:\d{2}:\d{2}")
 
 @pytest.fixture(autouse=True)
 def _pristine_logging() -> Iterator[None]:
-    """Leave the logging system as each test found it. Autouse: a leaked handler
-    makes a later test pass or fail for reasons unrelated to what it asserts.
+    """Restore the package logger's handlers and level after each test.
+
+    Autouse: a leaked handler makes a later test pass or fail for reasons
+    unrelated to what it asserts.
     """
     logger = logging.getLogger(ROOT_NAME)
     before = list(logger.handlers)
@@ -67,9 +60,11 @@ def _pristine_logging() -> Iterator[None]:
 # No handler on import
 # ---------------------------------------------------------------------------
 def test_importing_the_package_installs_no_handler() -> None:
-    """Subprocess: by collection time the package is long since imported and
-    pytest's own logging plugin has a handler on the root logger, so only a fresh
-    interpreter can answer the question."""
+    """A fresh interpreter importing the package has no handler and no level.
+
+    By collection time the package is already imported and pytest's logging
+    plugin has a handler on the root logger, so only a subprocess can check.
+    """
     probe = (
         "import logging;"
         "import tfidf_stability.cli.main;"
@@ -96,9 +91,11 @@ def test_the_package_logger_has_no_handler_of_ours_until_configured() -> None:
 
 
 def test_emitting_without_configuration_does_not_raise() -> None:
-    """With no handler anywhere ``logging.lastResort`` takes the record, the
-    intended fallback: a NullHandler would silence diagnostics a reader of an
-    unconfigured run wants to see."""
+    """Emitting with no handler installed does not raise.
+
+    Records at ``WARNING`` and above then reach ``logging.lastResort``; a
+    NullHandler would silence those diagnostics in an unconfigured run.
+    """
     reset()
     log_event(get_logger("probe"), EventKind.DEGENERATE, case="degenerate_query")
 
@@ -126,10 +123,9 @@ def test_configure_is_idempotent() -> None:
 
 
 def test_configure_does_not_touch_the_root_logger() -> None:
-    """The handler list, the level and the filters, not the handlers alone.
+    """The root logger's handlers, level and filters survive ``configure``.
 
-    Configuring the package must leave the application's own logging as it was.
-    A handler list comparison misses the other two: `basicConfig()` or a
+    A handler list comparison alone misses two of them: `basicConfig()` or a
     `setLevel` on the root logger changes what every unrelated library emits
     while the handler list stays identical.
     """
@@ -160,8 +156,11 @@ def test_configure_does_not_touch_the_root_logger() -> None:
 
 
 def test_reset_leaves_a_handler_the_application_added() -> None:
-    """Removing a handler we did not install is the same overreach as configuring
-    the root logger."""
+    """``reset`` removes only the handler ``configure`` installed.
+
+    Removing a handler the application added is the same overreach as
+    configuring the root logger.
+    """
     logger = logging.getLogger(ROOT_NAME)
     foreign = logging.StreamHandler(io.StringIO())
     logger.addHandler(foreign)
@@ -205,8 +204,10 @@ def test_configured_output_carries_no_timestamp() -> None:
 
 
 def test_timestamps_are_opt_in_and_do_appear_when_asked() -> None:
-    """Negative control for the test above, whose assertion would also pass if the
-    formatter had stopped working."""
+    """Timestamps appear when requested; negative control for the test above.
+
+    The no-timestamp assertion would also pass with a broken formatter.
+    """
     buffer = io.StringIO()
     configure(stream=buffer, timestamps=True)
     log_event(get_logger("probe"), EventKind.BACKEND_SELECTED, backend="reference")
@@ -214,8 +215,11 @@ def test_timestamps_are_opt_in_and_do_appear_when_asked() -> None:
 
 
 def test_field_order_does_not_change_the_record() -> None:
-    """Two call sites recording the same decision must digest alike, under the
-    canonicalisation ``hash_json`` applies to configs."""
+    """Field order does not change the event or its digest.
+
+    Two call sites recording the same decision digest alike, under the
+    canonicalisation ``hash_json`` applies to configs.
+    """
     with capture() as first:
         log_event(get_logger("probe"), EventKind.DIGEST, artefact="model", sha256="ab")
     with capture() as second:
@@ -237,8 +241,11 @@ def test_the_digest_is_over_decisions_not_over_when_they_were_taken() -> None:
 
 
 def test_the_digest_is_sensitive_to_order() -> None:
-    """Selecting the native backend after a fallback is a different run from
-    selecting it first, so the record must distinguish them."""
+    """Reversing the event order changes the digest.
+
+    Selecting the native backend after a fallback is a different run from
+    selecting it first, so the record must distinguish them.
+    """
     log = get_logger("probe")
     with capture() as forward:
         log_event(log, EventKind.BACKEND_SELECTED, backend="reference")
@@ -251,16 +258,22 @@ def test_the_digest_is_sensitive_to_order() -> None:
 
 
 def test_a_subnormal_field_is_rendered_without_loss() -> None:
-    """A margin of 5e-324 and a margin of 0.0 separate a near-tie from an exact
-    tie; a rounded rendering erases the difference."""
+    """A subnormal float renders exactly, distinct from zero.
+
+    A margin of 5e-324 and a margin of 0.0 separate a near-tie from an exact
+    tie; a rounded rendering erases the difference.
+    """
     event = Event.build(EventKind.DEGENERATE, {"margin": 5e-324})
     assert event.render() == "degenerate margin=5e-324"
     assert Event.build(EventKind.DEGENERATE, {"margin": 0.0}).render() == "degenerate margin=0.0"
 
 
 def test_a_multiline_value_cannot_forge_extra_fields() -> None:
-    """The native loader's fallback reason is a paragraph. One event is one line,
-    or a reader cannot count events."""
+    """A value with a newline renders as one quoted field on one line.
+
+    The native loader's fallback reason is a paragraph; one event is one
+    line, or a reader cannot count events.
+    """
     event = Event.build(EventKind.BACKEND_SELECTED, {"reason": "not built\nrun cmake x=1"})
     rendered = event.render()
 
@@ -271,8 +284,11 @@ def test_a_multiline_value_cannot_forge_extra_fields() -> None:
 
 
 def test_free_text_records_stay_out_of_the_run_record() -> None:
-    """Only the closed vocabulary is digestible; a third-party library logging a
-    path or an address must not land in a hash."""
+    """Free-text log records are excluded from the captured events.
+
+    Only the closed vocabulary is digestible; a third-party library logging a
+    path or an address must not land in a hash.
+    """
     with capture() as recorder:
         get_logger("probe").info("an unstructured message from somewhere")
         log_event(get_logger("probe"), EventKind.DIGEST, artefact="model", sha256="ab")
@@ -293,17 +309,22 @@ def test_capture_restores_the_logger_afterwards() -> None:
 # Warnings still abort the suite
 # ---------------------------------------------------------------------------
 def test_configuring_logging_does_not_capture_warnings() -> None:
-    """``logging.captureWarnings`` would reroute ``showwarning`` process-wide.
-    Under ``filterwarnings = ["error"]`` these must abort the run instead of being
-    filed."""
+    """A warning still raises as an error after ``configure``.
+
+    ``logging.captureWarnings`` would reroute ``showwarning`` process-wide;
+    under ``filterwarnings = ["error"]`` warnings must abort the run instead.
+    """
     configure(stream=io.StringIO())
     with pytest.raises(UserWarning, match="load-bearing"):
         warnings.warn("load-bearing", UserWarning, stacklevel=1)
 
 
 def test_a_real_diagnostic_still_raises_with_logging_configured() -> None:
-    """End to end: the tie-group diagnostics are how the suite notices a degenerate
-    tau, and logging must not soften them."""
+    """A tie-group diagnostic warning still raises with logging configured.
+
+    The tie-group diagnostics are how the suite notices a degenerate tau, and
+    logging must not soften them.
+    """
     from tfidf_stability.ranking.tie_groups import TieGroupIndex
     from tfidf_stability.utils.validation import TauExceedsScoreRangeWarning
 
@@ -327,8 +348,11 @@ def test_the_selected_backend_is_recorded() -> None:
 
 
 def test_building_a_corpus_records_its_policy_degeneracies_and_digests(tmp_path: Path) -> None:
-    """The three questions asked of a published number: what summed it, what was
-    degenerate in the data, and what came out."""
+    """Building a corpus records its policy, degeneracies and digests.
+
+    These answer three questions asked of a published number: what summed it,
+    what was degenerate in the data, and what came out.
+    """
     from tfidf_stability.cli.main import main
 
     with capture() as recorder:
@@ -369,10 +393,11 @@ def test_the_cli_log_level_flag_configures_the_package_logger(
 
 
 def test_the_root_logger_is_returned_for_a_name_that_is_already_it() -> None:
-    """Call sites pass `__name__`, and the package's own top-level module passes
-    the root name itself. Reparenting that would give
-    `tfidf_stability.tfidf_stability`, a logger outside the subtree `configure`
-    installs its handler on -- so its records would vanish.
+    """The root name and ``None`` both resolve to the root logger itself.
+
+    A call from the package's `__init__` passes the root name as `__name__`;
+    reparenting it would give `tfidf_stability.tfidf_stability`, a name that
+    matches no module.
     """
     root = logging.getLogger(ROOT_NAME)
     assert get_logger(ROOT_NAME) is root
@@ -381,21 +406,29 @@ def test_the_root_logger_is_returned_for_a_name_that_is_already_it() -> None:
 
 
 def test_a_name_from_inside_the_package_is_used_as_written() -> None:
-    """The dotted path is what makes per-module filtering possible; rewriting it
-    would flatten every module onto one name."""
+    """A dotted name inside the package is kept as written.
+
+    The dotted path is what makes per-module filtering possible; rewriting it
+    would flatten every module onto one name.
+    """
     assert get_logger(f"{ROOT_NAME}.ranking.ranker").name == f"{ROOT_NAME}.ranking.ranker"
 
 
 def test_a_name_from_outside_the_package_is_reparented_under_the_root() -> None:
-    """Nothing may emit outside the subtree `configure` controls, or a record
-    would escape the handler and the formatter that makes it canonical."""
+    """A name outside the package is reparented under the root name.
+
+    Nothing may emit outside the subtree `configure` controls, or a record
+    would escape the handler and the formatter that makes it canonical.
+    """
     assert get_logger("scripts.benchmark").name == f"{ROOT_NAME}.scripts.benchmark"
 
 
 def test_json_scalars_render_as_json_not_as_python() -> None:
-    """`None` and `bool` go through `json.dumps`, so a log line is parseable by
-    something that is not Python. `str(None)` is "None" and `str(True)` is
-    "True"; neither is a value a JSON reader can take."""
+    """`None` and `bool` render as JSON scalars, not as Python reprs.
+
+    `str(None)` is "None" and `str(True)` is "True"; neither is a value a JSON
+    reader can take.
+    """
     event = Event.build(EventKind.BACKEND_SELECTED, {"reason": None, "native": True})
     rendered = event.render()
     assert "reason=null" in rendered
@@ -405,15 +438,20 @@ def test_json_scalars_render_as_json_not_as_python() -> None:
 
 
 def test_an_integer_field_keeps_its_bare_form() -> None:
-    """The same branch, on the value where JSON and Python agree -- so the
-    branch is shown to be about the rendering and not about the type."""
+    """An integer field renders in its bare form.
+
+    This is the value on which JSON and Python agree, so the rendering branch
+    is shown to be about the format and not about the type.
+    """
     assert "count=7" in Event.build(EventKind.DIGEST, {"count": 7}).render()
 
 
 def test_a_non_ascii_field_is_quoted_but_not_escaped() -> None:
-    """The log is UTF-8 and read by people. Escaping it to an ASCII escape sequence would make
-    a document identifier or a token unrecognisable in the one place someone
-    looks to find out what the run did with it."""
+    """A non-ASCII value is quoted but not escaped.
+
+    The log is UTF-8 and read by people; an ASCII escape sequence would make
+    a document identifier or a token unrecognisable in the log.
+    """
     event = Event.build(EventKind.DEGENERATE, {"token": "café au lait"})
     rendered = event.render()
     assert rendered == 'degenerate token="café au lait"'
@@ -424,8 +462,7 @@ def test_of_kind_accepts_the_string_spelling_of_a_kind() -> None:
     """Both spellings of a kind select the same events.
 
     `EventKind` is a `str` enum and `of_kind` compares with `is`, so an uncoerced
-    string selects nothing. A kind that was never recorded still returns an empty
-    list.
+    string selects nothing. A kind never recorded returns an empty list.
     """
     log = get_logger()
     with capture() as recorder:

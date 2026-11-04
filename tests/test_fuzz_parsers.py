@@ -1,23 +1,8 @@
-"""Fuzzing the two parsers that consume bytes this package did not write.
+"""Fuzz the two parsers that consume bytes this package does not write.
 
-A ``.tfsx`` file can arrive from anywhere and document text is arbitrary; every
-other input in the suite comes from our own code.
-
-The property, stated once
--------------------------
-Either it round-trips correctly, or it raises a typed exception from
-``tfidf_stability.utils.validation``. The three failures being hunted:
-
-* a silently wrong model, worse than a crash, because a plausible ranking
-  computed from corrupt weights looks like a real one;
-* an untyped exception (``struct.error``, ``IndexError``,
-  ``UnicodeDecodeError``, ``MemoryError``), which a caller cannot handle;
-* unbounded time or memory on a small input, which a hostile ``nnz`` field could
-  otherwise arrange.
-
-A truncation bug was found and fixed here once: the document-id block was read
-with an open-ended slice, so cutting the final byte corrupted the last identifier
-while satisfying every count check.
+The ``.tfsx`` parser round-trips a container or raises a typed exception from
+``tfidf_stability.utils.validation``; the tokeniser accepts any text.
+Rationale: docs/engineering_notes.md#parser-fuzz-contract
 """
 
 from __future__ import annotations
@@ -49,12 +34,9 @@ def valid_container(mini_model) -> bytes:
     return model_bytes(mini_model)
 
 
-#: The header layout, in the order ``_read_header`` unpacks it. Offsets are
-#: derived from it because two hand-written ones were wrong: ``token_bytes`` as 32
-#: (which is ``reduction``) and ``doc_id_bytes`` as 40 (the upper half of
-#: ``token_bytes``). The ``doc_id_bytes`` case never touched ``doc_id_bytes`` and
-#: passed anyway, since clobbering a neighbouring field also gets the container
-#: rejected.
+#: The header layout, in the order ``_read_header`` unpacks it. Field offsets
+#: are derived from it rather than written by hand, so the offset-based tests
+#: below follow a format change.
 _HEADER_LAYOUT: tuple[tuple[str, str], ...] = (
     ("magic", "8s"),
     ("version", "I"),
@@ -85,17 +67,15 @@ def test_the_header_layout_this_file_assumes_is_the_real_one() -> None:
     total = sum(struct.calcsize(f"<{code}") for _, code in _HEADER_LAYOUT)
     assert total == _HEADER.size, f"layout sums to {total}, _HEADER.size is {_HEADER.size}"
     assert _header_field("magic")[0] == 0
-    assert _header_field("token_bytes")[0] == 36, "the offset the old test got wrong"
-    assert _header_field("doc_id_bytes")[0] == 44, "the offset the old test got wrong"
+    assert _header_field("token_bytes")[0] == 36, "token_bytes starts at byte 36"
+    assert _header_field("doc_id_bytes")[0] == 44, "doc_id_bytes starts at byte 44"
 
 
 def _assert_typed(call, data: bytes) -> None:
     """The parser must round-trip or raise a typed error.
 
-    Returning normally used to be enough to pass, so "accepted" meant
-    "unexamined": before ``_check_csr`` existed, 425 of the 2715 mutated
-    containers this parser accepted carried an ``indptr`` that was non-monotonic
-    or did not start at zero, and nothing downstream re-checks it.
+    A model the parser accepts is checked against the CSR invariants, so an
+    accepted mutation that corrupts ``indptr`` is reported rather than passed.
     """
     try:
         restored = call(data)
@@ -108,13 +88,9 @@ def _assert_typed(call, data: bytes) -> None:
         ) from exc
 
     # Accepting a mutation is legitimate (a flipped mantissa bit gives a different
-    # valid model); accepting one that violates the CSR invariants is a defect.
-    # The invariants are spelled out here rather than delegated to the parser's own
-    # ``_check_csr``, which would take this test with it if it were deleted.
-    #
-    # Idempotence is the wrong property: a model whose indptr starts at 255
-    # re-serialises and reparses to identical bytes, so a fixed-point assertion
-    # passes straight over it.
+    # valid model); accepting one that violates the CSR invariants is a defect. The
+    # invariants are spelled out here rather than delegated to ``_check_csr``.
+    # Rationale: docs/engineering_notes.md#csr-invariants-asserted-in-the-fuzz-helper
     matrix = restored.matrix
     indptr, indices = list(matrix.indptr), list(matrix.indices)
     assert len(indptr) == matrix.n_rows + 1, f"indptr has {len(indptr)} entries"
@@ -135,33 +111,31 @@ def _assert_typed(call, data: bytes) -> None:
 # The .tfsx container
 # ---------------------------------------------------------------------------
 def test_a_valid_container_round_trips(mini_model, valid_container) -> None:
-    """The baseline. Without it the rest proves only that nothing crashes."""
+    """A valid container restores the original document ids and norms."""
     restored = model_from_bytes(valid_container)
     assert restored.doc_ids == mini_model.doc_ids
     assert all(same_bits(a, b) for a, b in zip(restored.norms, mini_model.norms, strict=True))
 
 
 def test_truncation_at_every_offset_is_rejected(valid_container) -> None:
-    """The regression that motivated this file.
+    """Every proper prefix of a valid container is rejected with a typed error.
 
-    Every proper prefix of a valid container is invalid. Checked exhaustively: the
-    bug was at a single offset, the last byte, which a sampler would likely have
-    missed.
+    Every offset is checked rather than sampled: the document-id block is last, so
+    a cut at the final byte shortens the last id but leaves every count check met.
     """
     for cut in range(len(valid_container)):
         _assert_typed(model_from_bytes, valid_container[:cut])
 
 
 def test_trailing_bytes_are_rejected(valid_container) -> None:
-    """Accepting a container plus junk breaks the bijection between models and
-    byte strings that the reproducibility snapshot depends on: two files would
-    decode to one model.
+    """A container followed by junk bytes is rejected.
+
+    Accepting it would break the bijection between models and byte strings that
+    the reproducibility snapshot depends on: two files would decode to one model.
     """
     for suffix in (b"\x00", b"trailing garbage"):
         # `pytest.raises`, not `_assert_typed`: that helper returns silently when
-        # the parser accepts, which is right where acceptance is legitimate and
-        # wrong here, because rejection is the claim. Relaxing
-        # `len(data) != expected` to `len(data) < expected` left it green.
+        # the parser accepts, and rejection is the claim here.
         with pytest.raises(TfidfStabilityError, match="but the header describes exactly"):
             model_from_bytes(valid_container + suffix)
 
@@ -186,9 +160,10 @@ def test_a_single_byte_flip_never_yields_a_silently_wrong_model(
 
 @pytest.mark.parametrize("field", ["n_docs", "n_terms", "nnz", "token_bytes", "doc_id_bytes"])
 def test_an_absurd_count_is_rejected_without_allocating(valid_container, field: str) -> None:
-    """A hostile length field must not become a huge allocation. ``nnz`` sizes an
-    array read, so if it were trusted a twelve-byte edit could ask the parser for
-    terabytes: denial of service reachable by anyone who can hand over a file.
+    """A hostile length field is rejected before it becomes a huge allocation.
+
+    ``nnz`` sizes an array read, so a trusted value would let a twelve-byte edit
+    ask the parser for terabytes.
     """
     offset, width = _header_field(field)
     mutated = bytearray(valid_container)
@@ -202,20 +177,17 @@ def test_a_bad_magic_is_rejected(valid_container) -> None:
 
 
 def test_an_unknown_flag_bit_is_rejected(valid_container) -> None:
-    """Ignoring an unknown bit would let two files decode to one model.
+    """Ignoring an unknown flag bit would let two files decode to one model.
 
-    The offset comes from `_header_field`, which is what that helper is for.
-    Written as `24:28` this wrote the upper half of `nnz` (20:28), so the
-    container was rejected for an absurd non-zero count and the flag mask never
-    ran: deleting the mask guard left the file green.
+    The offset comes from `_header_field`, so the write lands in ``flags`` and
+    not in a neighbouring field.
     """
     offset, code = _header_field("flags")
     mutated = bytearray(valid_container)
     mutated[offset : offset + struct.calcsize(code)] = struct.pack(code, 0xFFFF_FFFF)
 
-    # Matched on the message, so a container rejected for some other reason --
-    # which is how this test passed while writing to the wrong field -- is not
-    # mistaken for the flag mask firing.
+    # Matched on the message, so a container rejected for some other reason is
+    # not mistaken for the flag mask firing.
     with pytest.raises(TfidfStabilityError, match="unknown flag bits set"):
         model_from_bytes(bytes(mutated))
 
@@ -229,7 +201,7 @@ def test_the_empty_input_is_rejected() -> None:
 @settings(max_examples=200, deadline=None)
 @given(data=st.binary(min_size=0, max_size=512))
 def test_arbitrary_bytes_never_escape_an_untyped_exception(data: bytes) -> None:
-    """Random input almost never reaches deep parsing; the check is free."""
+    """Random bytes raise a typed error or parse to a valid model."""
     _assert_typed(model_from_bytes, data)
 
 
@@ -255,13 +227,11 @@ def test_the_tokeniser_accepts_any_text(text: str) -> None:
     )
 )
 def test_no_token_ever_contains_the_ngram_joiner(text: str) -> None:
-    """The invariant the n-gram representation rests on.
+    """No feature contains the n-gram joiner outside a bigram's one separator.
 
     Bigrams are stored as ``a + U+001F + b``, so a unigram containing U+001F would
-    be indistinguishable from a bigram and the vocabulary would stop being a
-    bijection between strings and feature identities. Normalisation strips the
-    character; checked here over arbitrary Unicode, where the unit tests use
-    ASCII.
+    be indistinguishable from a bigram. Normalisation strips the character; the
+    check here runs over arbitrary Unicode where the unit tests use ASCII.
     """
     for feature in PreprocessingPipeline().preprocess(text):
         # A bigram legitimately contains exactly one joiner; a unigram none.
@@ -296,21 +266,21 @@ def test_adversarial_text_is_handled_without_raising(text: str) -> None:
 
 
 def test_combining_and_precomposed_forms_agree() -> None:
-    """Normalisation must fold them together, or the same word gets two ids: a
-    corpus mixing the two encodings of an accented word splits its document
-    frequency across two vocabulary entries and moves every idf that depends on it.
+    """Normalisation folds the combining and precomposed forms to one feature.
+
+    Otherwise a corpus mixing the two encodings of an accented word splits its
+    document frequency across two vocabulary entries and moves every dependent idf.
     """
     pipeline = PreprocessingPipeline()
     assert pipeline.preprocess("égal") == pipeline.preprocess("égal")
 
 
 def test_the_block_separator_is_validated_not_merely_skipped(valid_container) -> None:
-    """The container must be a bijection between models and byte strings.
+    """The container is a bijection between models and byte strings.
 
     Both block lengths are fixed by the header, so the separating LF carries no
-    information and any value for it was accepted: all 255 alternatives decoded to
-    a byte-identical model, 256 distinct files sharing one meaning. ``_FLAG_MASK``
-    rejects unknown flag bits one byte further down for that same reason.
+    information; accepting any value for it would give 256 distinct files one
+    meaning. ``_FLAG_MASK`` rejects unknown flag bits for the same reason.
     """
     header = _HEADER.unpack_from(valid_container, 0)
     n_docs, n_terms, nnz, token_bytes = header[2], header[3], header[4], header[7]
@@ -326,7 +296,7 @@ def test_the_block_separator_is_validated_not_merely_skipped(valid_container) ->
         + n_terms * 8  # cf
         + token_bytes
     )
-    assert valid_container[offset : offset + 1] == b"\n", "the separator is where we think"
+    assert valid_container[offset : offset + 1] == b"\n", "the separator is at the computed offset"
 
     for value in (0x00, 0x20, 0x0D, 0xFF):
         mutated = bytearray(valid_container)

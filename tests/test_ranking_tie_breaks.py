@@ -1,13 +1,8 @@
 """The ranking operator and its tie-break (README sections 2.3.1 and 4.5).
 
-The claim under test: the comparator is a strict total order. Everything else
-follows from it. The sorted permutation is unique, sort stability is irrelevant,
-and the two backends can be required to agree exactly.
-
-:func:`test_all_distinct_scores_makes_the_three_operators_identical` establishes
-the premise of research question A2, that any disagreement between pi, pi_score
-and pi_alt is attributable to ties alone. Without it the tie-break ablation
-would be measuring something else.
+The comparator is a strict total order, so the sorted permutation is unique and the two backends
+can be required to agree exactly. Research question A2 assumes only ties separate pi, pi_score
+and pi_alt; :func:`test_all_distinct_scores_makes_the_three_operators_identical` checks it.
 """
 
 from __future__ import annotations
@@ -68,12 +63,9 @@ _POP_ONLY = SortKeySpec(name="pop_only", priority=("popularity",))
 def _two_document_table() -> AttributeTable:
     """The smallest table carrying every attribute `PI` names.
 
-    All three of `popularity`, `rating` and `engagement` are present because
-    `build_keys` resolves the whole priority; a table with only one of them
-    raises a `KeyError` that is about the fixture rather than about the code.
-
-    Local to this file by house convention: a shared builder would let a change
-    made for one suite silently alter another's fixtures.
+    `build_keys` resolves the whole priority, so a table missing one of them raises
+    a `KeyError` about the fixture. Kept local so a change made for another suite
+    cannot alter these fixtures.
     """
     return AttributeTable.from_records(
         [
@@ -96,8 +88,11 @@ def table_of(n: int, **cols: list[int]) -> AttributeTable:
 # Construction and validation
 # ---------------------------------------------------------------------------
 def test_duplicate_identifiers_are_rejected() -> None:
-    """Unique ids are the precondition of the strict total order, and so of
-    every uniqueness claim this layer makes."""
+    """Duplicate identifiers are rejected.
+
+    Unique ids are the precondition of the strict total order, and so of every
+    uniqueness claim this layer makes.
+    """
     with pytest.raises(
         DuplicateIdentifierError, match="identifier 'a' appears at positions 0 and 1"
     ):
@@ -200,12 +195,10 @@ def test_the_overflow_guard_does_not_reject_a_single_document() -> None:
 
 
 def test_the_overflow_guard_is_not_over_conservative() -> None:
-    """A false positive the naive bound would produce.
+    """The overflow guard accepts a table the naive bound would reject.
 
-    Bounding by ``max(num) * max(den)`` over the whole column rejects this
-    table: ``b`` holds the largest numerator and the largest denominator, a
-    pairing no comparison ever forms. The products that do occur are both about
-    3e17, comfortably int64-safe.
+    Bounding by ``max(num) * max(den)`` rejects this table: ``b`` holds both maxima,
+    a pairing no comparison forms. The products that do occur are about 3e17.
     """
     spec = (AttributeSpec("rating", Direction.DESC, AttributeDType.RATIO_I64),)
     table = AttributeTable.from_records(
@@ -256,9 +249,9 @@ def test_five_selection_algorithms_agree(
 
 
 def test_ranking_is_invariant_to_input_document_order() -> None:
-    """The stronger check.
+    """The ranking is invariant to a permutation of the input documents.
 
-    A non-total comparator (score-only, say) can pass the five-algorithm check
+    A non-total comparator, such as score-only, can pass the five-algorithm check
     by luck on a small input; it cannot survive a permutation of the input.
     """
     rng = random.Random(4)
@@ -331,12 +324,11 @@ def test_score_dominates_every_attribute(mini_attributes: AttributeTable) -> Non
 def test_non_finite_score_is_rejected_before_sorting(
     mini_attributes: AttributeTable, mode: StrictMode, bad: float
 ) -> None:
-    """Rejected in lenient mode too.
+    """A non-finite score is rejected in every mode, lenient included.
 
-    G3 lists non-finite scores among the rejected inputs rather than the
-    legitimate degenerate grid points. In the native backend a NaN in a sort key
-    is undefined behaviour: an out-of-bounds write in libstdc++'s final
-    insertion pass, beyond merely a wrong answer.
+    G3 rejects non-finite scores rather than treating them as degenerate grid
+    points. In the native backend a NaN sort key is undefined behaviour: an
+    out-of-bounds write in libstdc++'s final insertion pass.
     """
     scores = [0.5, bad, 0.1, 0.2, 0.3, 0.4]
     with pytest.raises(TfidfStabilityError, match="not finite"):
@@ -360,8 +352,11 @@ def test_k_out_of_range_lenient_clamps_and_records(mini_attributes: AttributeTab
 
 
 def test_top_k_selects_k_plus_one(mini_attributes: AttributeTable) -> None:
-    """m_k needs score(r_{k+1}), so a top-k that stopped at k could not report
-    its own boundary margin."""
+    """A top-k selection takes k + 1 documents.
+
+    m_k needs score(r_{k+1}), so a top-k that stopped at k could not report its
+    own boundary margin.
+    """
     r = rank_top_k([0.9, 0.8, 0.7, 0.6, 0.5, 0.4], mini_attributes, PI, k=3)
     assert r.n_selected == 4
     assert r.is_complete is False
@@ -380,8 +375,7 @@ def test_truncated_ranking_refuses_whole_corpus_questions(
 def test_sorted_scores_is_complete_even_when_the_order_is_truncated(
     mini_attributes: AttributeTable,
 ) -> None:
-    """The asymmetry that margins depend on: truncate the order, never the
-    score array."""
+    """Truncation cuts the order but never the score array, which margins need."""
     r = rank_top_k([0.9, 0.8, 0.7, 0.6, 0.5, 0.4], mini_attributes, PI, k=2)
     assert len(r.sorted_scores) == 6
     assert len(r.order) == 3
@@ -459,13 +453,11 @@ def test_sorted_scores_desc_is_a_sorted_permutation(scores: list[float]) -> None
 # Equal means must share a rank (regression)
 # ---------------------------------------------------------------------------
 def test_equal_means_written_differently_receive_the_same_rank() -> None:
-    """G8's exact comparison has to survive rank-encoding as well as
-    `ratio_less`.
+    """Equal means written as different pairs receive the same rank.
 
-    `_order_distinct` deduplicates with `dict.fromkeys`, which uses tuple
-    equality, so (14, 2) and (21, 3) both survive despite being the same mean of
-    3.5, which `_ratio_cmp` reports. Numbering the survivors positionally gave
-    them two ranks and un-tied a rating G8 requires to tie.
+    `_order_distinct` deduplicates with `dict.fromkeys`, which uses tuple equality,
+    so (14, 2) and (21, 3) both survive although both encode a mean of 3.5, which
+    `_ratio_cmp` reports as equal. G8 requires the rating to tie, so both take one rank.
     """
     table = AttributeTable.from_records(
         [
@@ -483,8 +475,11 @@ def test_equal_means_written_differently_receive_the_same_rank() -> None:
 
 
 def test_a_rating_tie_falls_through_to_the_next_attribute() -> None:
-    """The consequence of the above: if the rating does not tie, engagement is
-    never consulted, and the wrong document wins."""
+    """Equal ratings tie, so engagement decides the order.
+
+    If the rating did not tie, engagement would never be consulted and the wrong
+    document would win.
+    """
     records = [
         {"doc_id": "a", "popularity": 1, "rating_sum2": 14, "rating_count": 2, "engagement": 5},
         {"doc_id": "b", "popularity": 1, "rating_sum2": 21, "rating_count": 3, "engagement": 9},
@@ -497,11 +492,11 @@ def test_a_rating_tie_falls_through_to_the_next_attribute() -> None:
 
 
 def test_the_ranking_does_not_depend_on_the_order_records_were_supplied_in() -> None:
-    """The property section 2.3.1's total-order argument rests on.
+    """The ranking does not depend on the order the records were supplied in.
 
-    The shape the earlier bug took: `dict.fromkeys` preserves insertion order,
-    so which of two equal representations sorted first depended on the corpus
-    order, and the ranking moved with it.
+    Section 2.3.1's total-order argument rests on this. `dict.fromkeys` preserves
+    insertion order, so the rank encoding must not let corpus order decide which
+    of two equal representations sorts first.
     """
     a = {"doc_id": "a", "popularity": 1, "rating_sum2": 14, "rating_count": 2, "engagement": 5}
     b = {"doc_id": "b", "popularity": 1, "rating_sum2": 21, "rating_count": 3, "engagement": 9}
@@ -522,11 +517,12 @@ def test_the_ranking_does_not_depend_on_the_order_records_were_supplied_in() -> 
 # ---------------------------------------------------------------------------
 # The comparator self-test, shown to actually detect
 # ---------------------------------------------------------------------------
-# assert_strict_total_order is an oracle: its job is to catch a comparator that
-# has stopped being a strict total order. Its failure arms had never fired, which
-# means the detector had never been shown to detect anything. Pragmas would have
-# recorded that permanently, so each axiom gets a specimen that violates exactly
-# it. The mock here is the specimen under test, not a stand-in for a collaborator.
+
+
+# Each failure arm of the assert_strict_total_order oracle is exercised by a
+# specimen that violates exactly one axiom. The mocks are the specimens under
+# test, not stand-ins for collaborators.
+# Rationale: docs/engineering_notes.md#strict-total-order-oracle-specimens
 @dataclass(frozen=True)
 class _ReflexivelyLess:
     """Less than everything, itself included. Violates irreflexivity only."""
@@ -539,8 +535,10 @@ class _ReflexivelyLess:
 
 @dataclass(frozen=True)
 class _MutuallyLess:
-    """Less than everything except itself: two of these are each less than the
-    other, which is the asymmetry violation and nothing else."""
+    """Less than everything except itself. Violates asymmetry only.
+
+    Two of these are each less than the other.
+    """
 
     tag: int
 
@@ -587,12 +585,11 @@ def test_a_rock_paper_scissors_comparator_is_reported_as_not_transitive() -> Non
 
 
 def test_two_distinct_nan_keys_are_reported_as_non_trichotomous_not_silently_tied() -> None:
-    """Reachable with real tuple keys, no specimen required.
+    """Two distinct NaN keys are reported as non-trichotomous.
 
-    Two separately constructed NaNs hash differently, so injectivity passes, and
-    then neither compares less than the other. A comparator that answers "no"
-    both ways has no opinion about the pair, and the sorted permutation stops
-    being determined by the key.
+    Separately constructed NaNs hash differently, so injectivity passes, and
+    neither compares less than the other, so the key does not determine the
+    sorted permutation. Reachable with real tuple keys, no specimen required.
     """
     first, second = float("nan"), float("nan")
     keys = [(first, 0), (second, 1)]
@@ -604,16 +601,20 @@ def test_two_distinct_nan_keys_are_reported_as_non_trichotomous_not_silently_tie
 
 
 def test_a_duplicated_key_is_reported_as_non_injective() -> None:
-    """With duplicates the ranking is only a weak order and the sorted
-    permutation is no longer unique, which is what the message says."""
+    """A duplicated key is reported as non-injective.
+
+    With duplicates the ranking is only a weak order and the sorted permutation is
+    not unique, which is what the message says.
+    """
     with pytest.raises(AssertionError, match="not injective"):
         assert_strict_total_order([(-1.0, 0), (-1.0, 0)])
 
 
 def test_the_transitivity_sweep_is_skipped_above_its_size_limit() -> None:
-    """O(n^3) is affordable at test sizes and not beyond, so the check switches
-    off above 40. Both sides are exercised, since a limit nothing crosses is a
-    limit nothing tests."""
+    """The transitivity sweep's size limit of 40 is exercised on both sides.
+
+    The O(n^3) sweep is affordable at test sizes only, so it is skipped above 40.
+    """
     forty = [(-float(i), i) for i in range(40)]
     forty_one = [(-float(i), i) for i in range(41)]
     assert_strict_total_order(forty)
@@ -652,7 +653,7 @@ def test_a_bytes_attribute_orders_by_utf8_bytes_not_by_locale() -> None:
 
 
 def test_an_ascending_direction_reverses_the_ranks_a_descending_one_gives() -> None:
-    """Only DESC was ever built, so the reversal arm was never taken."""
+    """The ASC arm of the encoder reverses the ranks the DESC arm gives."""
     records = [{"doc_id": f"d{i}", "popularity": v} for i, v in enumerate([10, 30, 20])]
     asc = AttributeTable.from_records(
         records, (AttributeSpec("popularity", Direction.ASC, AttributeDType.INT64),)
@@ -696,8 +697,11 @@ def test_a_table_built_from_no_records_has_no_positions_rather_than_raising() ->
 
 
 def test_the_reporting_view_returns_the_raw_values_not_the_encoded_ranks() -> None:
-    """Section 7.4 prints these, so a rank leaking into the report would show a
-    dense position where a reader expects the rating that produced it."""
+    """The reporting view returns raw values, not the encoded ranks.
+
+    Section 7.4 prints these, so a leaked rank would show a dense position where
+    a reader expects the rating that produced it.
+    """
     records = [
         {"doc_id": "a", "popularity": 7, "rating_sum2": 9, "rating_count": 2},
         {"doc_id": "b", "popularity": 3, "rating_sum2": 5, "rating_count": 2},
@@ -716,8 +720,11 @@ def test_the_reporting_view_returns_the_raw_values_not_the_encoded_ranks() -> No
 
 
 def test_a_rating_count_of_zero_with_a_non_zero_sum_is_inconsistent_not_absent() -> None:
-    """Zero ratings summing to something is a corrupt record, and treating it as
-    merely missing would rank the document on a value that cannot exist."""
+    """A zero rating count with a non-zero sum is inconsistent, not absent.
+
+    Treating the corrupt record as missing would rank the document on a value
+    that cannot exist.
+    """
     records = [
         {"doc_id": "a", "rating_sum2": 7, "rating_count": 0},
         {"doc_id": "b", "rating_sum2": 4, "rating_count": 2},
@@ -752,6 +759,8 @@ def test_a_negative_rating_count_is_rejected() -> None:
 # ---------------------------------------------------------------------------
 # A truncated ranking answers only what it can
 # ---------------------------------------------------------------------------
+
+
 # rank_top_k selects a prefix, so the object it returns knows the whole score
 # vector but only part of the order. Every accessor below has to say which of the
 # two it is answering from, because a question about the corpus answered from the
@@ -773,8 +782,10 @@ def test_a_truncated_ranking_refuses_a_whole_corpus_question() -> None:
 
 
 def test_asking_a_truncated_ranking_for_more_than_it_selected_is_refused() -> None:
-    """Returning a short prefix instead would silently answer a different
-    question from the one asked."""
+    """Asking a truncated ranking for more than it selected is refused.
+
+    A short prefix would answer a different question from the one asked.
+    """
     table = table_of(6, popularity=[6, 5, 4, 3, 2, 1])
     ranking = rank_top_k([0.6, 0.5, 0.4, 0.3, 0.2, 0.1], table, POP, k=2)
     assert len(ranking.top_k(2)) == 2
@@ -783,8 +794,11 @@ def test_asking_a_truncated_ranking_for_more_than_it_selected_is_refused() -> No
 
 
 def test_the_score_at_a_rank_is_available_even_where_the_order_is_truncated() -> None:
-    """sorted_scores is always the whole corpus; only the order is cut. That
-    asymmetry is what lets margins be read at every k after a top-k selection."""
+    """The score at any rank is available where the order is truncated.
+
+    `sorted_scores` always covers the whole corpus; only the order is cut, so
+    margins can be read at every k after a top-k selection.
+    """
     scores = [0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
     table = table_of(6, popularity=[6, 5, 4, 3, 2, 1])
     ranking = rank_top_k(scores, table, POP, k=2)
@@ -795,8 +809,11 @@ def test_the_score_at_a_rank_is_available_even_where_the_order_is_truncated() ->
 
 @pytest.mark.parametrize("bad", [0, 7, -1])
 def test_a_rank_outside_one_to_n_is_refused(bad: int) -> None:
-    """Ranks are 1-indexed in the public API and 0-indexed underneath, so both
-    ends are checked rather than trusted to the array."""
+    """A rank outside 1..n is refused.
+
+    Ranks are 1-indexed in the public API and 0-indexed underneath, so both ends
+    are checked rather than trusted to the array.
+    """
     table = table_of(6, popularity=[6, 5, 4, 3, 2, 1])
     ranking = rank([0.6, 0.5, 0.4, 0.3, 0.2, 0.1], table, POP)
     with pytest.raises(IndexError, match="out of range"):
@@ -804,8 +821,11 @@ def test_a_rank_outside_one_to_n_is_refused(bad: int) -> None:
 
 
 def test_the_rank_of_an_unselected_document_says_the_ranking_was_truncated() -> None:
-    """Two different absences: not in the corpus, and not in the selected
-    prefix. The message distinguishes them so a caller can tell which."""
+    """The rank of an unselected document says the ranking was truncated.
+
+    Absent from the corpus and absent from the selected prefix are different
+    cases, and the message distinguishes them.
+    """
     table = table_of(6, popularity=[6, 5, 4, 3, 2, 1])
     truncated = rank_top_k([0.6, 0.5, 0.4, 0.3, 0.2, 0.1], table, POP, k=2)
     with pytest.raises(KeyError, match="truncated"):
@@ -816,8 +836,11 @@ def test_the_rank_of_an_unselected_document_says_the_ranking_was_truncated() -> 
 
 
 def test_restricting_to_a_subset_keeps_the_ranking_order_not_the_argument_order() -> None:
-    """Used to compare two operators over a tie group, so the result has to be
-    ordered by the ranking rather than by however the caller listed them."""
+    """A subset is returned in ranking order, not argument order.
+
+    Comparing two operators over a tie group needs the result ordered by the
+    ranking rather than by however the caller listed the documents.
+    """
     table = table_of(5, popularity=[5, 4, 3, 2, 1])
     ranking = rank([0.5, 0.4, 0.3, 0.2, 0.1], table, POP)
     assert ranking.order_within([3, 0, 2]) == (0, 2, 3)
@@ -826,8 +849,11 @@ def test_restricting_to_a_subset_keeps_the_ranking_order_not_the_argument_order(
 
 
 def test_ranking_a_top_k_of_an_empty_corpus_is_refused_like_ranking_one() -> None:
-    """Both entry points guard it: the empty case must not reach resolve_k and
-    come back as a k error, which would name the wrong cause."""
+    """A top-k of an empty corpus is refused as an empty corpus.
+
+    Both entry points guard it, so the empty case does not reach resolve_k and
+    come back as a k error naming the wrong cause.
+    """
     table = AttributeTable.from_records(
         [], (AttributeSpec("popularity", Direction.DESC, AttributeDType.INT64),)
     )
@@ -838,29 +864,38 @@ def test_ranking_a_top_k_of_an_empty_corpus_is_refused_like_ranking_one() -> Non
 # ---------------------------------------------------------------------------
 # ratio_less: the preconditions the column invariant guarantees
 # ---------------------------------------------------------------------------
-# Both denominators must be strictly positive. Nothing checks it, because a zero
-# denominator means "no rating", is carried by the `has_value` bit, and never
-# reaches here. Pinned rather than guarded: this is the innermost comparison of
-# every tie-break, and a check would run on every pair of every sort.
+
+
+# Both denominators must be strictly positive. ratio_less does not check this:
+# the `has_value` bit keeps zero denominators out, and a check here would run on
+# every pair of every sort.
+# Rationale: docs/engineering_notes.md#ratio-less-unchecked-denominators
 def test_a_zero_denominator_gives_a_defined_but_meaningless_answer() -> None:
-    """No `ZeroDivisionError` -- cross-multiplication never divides. It returns
-    a plain `False`, which is why the presence bit has to keep such rows out
-    rather than relying on this to complain."""
+    """A zero denominator gives a defined but meaningless answer.
+
+    Cross-multiplication never divides, so there is no `ZeroDivisionError`; the
+    result is a plain `False`. The presence bit, not this function, keeps such rows out.
+    """
     assert ratio_less(1, 0, 1, 1) is False
     assert ratio_less(0, 0, 0, 0) is False
 
 
 def test_a_negative_denominator_inverts_the_comparison() -> None:
-    """Cross-multiplying by a negative flips the inequality, so the answer is
-    not merely undefined but confidently wrong. `1/-2` really is less than
-    `1/1`, and this reports otherwise."""
+    """A negative denominator inverts the comparison.
+
+    Cross-multiplying by a negative flips the inequality, so the answer is wrong
+    rather than undefined: `1/-2` is less than `1/1`, and this reports otherwise.
+    """
     assert (1 / -2) < (1 / 1), "the true ordering"
     assert ratio_less(1, -2, 1, 1) is False, "and the one cross-multiplication gives"
 
 
 def test_the_comparison_is_exact_where_binary64_would_collide() -> None:
-    """The reason G8 stores `(2*sum, count)` rather than a mean: two ratios a
-    single ulp apart as floats are ordered exactly here."""
+    """The comparison is exact where binary64 would collide.
+
+    G8 stores `(2*sum, count)` rather than a mean because two ratios that round
+    to the same float are ordered exactly here.
+    """
     assert ratio_less(1, 3, 100_000_000_000_000_001, 300_000_000_000_000_000)
     assert (1 / 3) == (100_000_000_000_000_001 / 300_000_000_000_000_000), "collide as floats"
 
@@ -869,8 +904,11 @@ def test_the_comparison_is_exact_where_binary64_would_collide() -> None:
 # check_ratio_fits_int64: exactly where it starts refusing
 # ---------------------------------------------------------------------------
 def test_a_product_of_exactly_int64_max_is_admissible() -> None:
-    """The bound is `> _INT64_MAX`, so the largest representable product is
-    still representable. One past it is not, and the two differ by one."""
+    """A product of exactly int64 max is admissible.
+
+    The bound is `> _INT64_MAX`, so the largest representable product passes and
+    any larger one is refused.
+    """
     largest = (1 << 63) - 1
     check_ratio_fits_int64([(largest, 1), (1, 1)], "rating")
 
@@ -879,8 +917,11 @@ def test_a_product_of_exactly_int64_max_is_admissible() -> None:
 
 
 def test_the_overflow_message_names_both_factors_and_their_product() -> None:
-    """A reader hitting this has to decide whether to rescale the numerators or
-    the denominators, and cannot without knowing which pair collided."""
+    """The overflow message names both factors and their product.
+
+    Rescaling the numerators or the denominators requires knowing which pair
+    collided.
+    """
     largest = (1 << 63) - 1
     with pytest.raises(
         TfidfStabilityError, match=f"a numerator of {largest} against a denominator of 2"
@@ -889,17 +930,22 @@ def test_the_overflow_message_names_both_factors_and_their_product() -> None:
 
 
 def test_the_guard_says_which_attribute_it_was_checking() -> None:
-    """`what` is threaded through so a corpus with several ratio columns names
-    the one that overflowed."""
+    """The guard names the attribute it was checking.
+
+    `what` is threaded through so a corpus with several ratio columns names the
+    one that overflowed.
+    """
     with pytest.raises(TfidfStabilityError, match=r"^engagement:"):
         check_ratio_fits_int64([((1 << 63), 1), (1, 2)], "engagement")
 
 
 @pytest.mark.parametrize("pairs", [[], [(2**62, 2**62)]])
 def test_a_column_too_short_to_compare_is_never_refused(pairs: list[tuple[int, int]]) -> None:
-    """The products that occur are `num_i * den_j` for `i != j`, and with fewer
-    than two rows there are none. A single document whose own product would
-    overflow is therefore admissible -- it is never compared with itself."""
+    """A column with fewer than two rows is never refused.
+
+    The products formed are `num_i * den_j` for `i != j`, so a single document
+    whose own product would overflow is admissible: it is never compared with itself.
+    """
     check_ratio_fits_int64(pairs, "rating")
 
 
@@ -907,17 +953,22 @@ def test_a_column_too_short_to_compare_is_never_refused(pairs: list[tuple[int, i
 # AttributeTable accessors
 # ---------------------------------------------------------------------------
 def test_asking_for_no_attributes_at_all_gives_no_rank_rows() -> None:
-    """A ranking on the identifier alone is legitimate -- it is what `pi_score`
-    reduces to once the scores are distinct."""
+    """An empty attribute list gives no rank rows.
+
+    A ranking on the identifier alone is legitimate: it is what `pi_score`
+    reduces to once the scores are distinct.
+    """
     table = _two_document_table()
     assert table.rank_matrix(()) == ()
 
 
 def test_naming_an_attribute_twice_returns_its_row_twice() -> None:
-    """The matrix is positional against the priority, so a repeated name is a
-    repeated tie-break level. Degenerate -- the second can never break a tie the
-    first did not -- but well-defined, and de-duplicating would silently change
-    the priority a manifest recorded."""
+    """Naming an attribute twice returns its row twice.
+
+    The matrix is positional against the priority, so a repeated name is a repeated
+    tie-break level. It never breaks a tie the first did not, but de-duplicating
+    would change the priority a manifest recorded.
+    """
     table = _two_document_table()
     rows = table.rank_matrix(("popularity", "popularity"))
     assert len(rows) == 2
@@ -925,13 +976,11 @@ def test_naming_an_attribute_twice_returns_its_row_twice() -> None:
 
 
 def test_the_reporting_view_of_a_negative_index_is_the_document_from_the_end() -> None:
-    """Python indexing, not a bounds check. `attributes_of(-1)` returns the last
-    document rather than raising, so a caller that computed an index badly gets
-    a plausible row for the wrong document.
+    """A negative index into the reporting view counts from the end.
 
-    Pinned as the trap it is: every other rank-taking entry point in the package
-    (`ball`, `chain_of`, `score_at_rank`) refuses a negative index, and this one
-    does not.
+    `attributes_of(-1)` returns the last document rather than raising, unlike
+    `ball`, `chain_of` and `score_at_rank`, which refuse a negative index. A badly
+    computed index therefore gets a plausible row for the wrong document.
     """
     table = _two_document_table()
     assert table.attributes_of(-1)["doc_id"] == table.doc_ids[-1]
@@ -939,16 +988,20 @@ def test_the_reporting_view_of_a_negative_index_is_the_document_from_the_end() -
 
 
 def test_a_column_value_past_the_end_is_an_index_error() -> None:
-    """Unlike `attributes_of`, the column indexes a tuple directly, so it does
-    raise. The inconsistency is the point of stating both."""
+    """A column value past the end raises `IndexError`.
+
+    Unlike `attributes_of`, the column indexes a tuple directly, so it raises.
+    """
     with pytest.raises(IndexError, match="tuple index out of range"):
         _two_document_table().column("popularity").value_of(99)
 
 
 def test_an_empty_table_reports_no_documents_rather_than_refusing() -> None:
-    """A corpus can be filtered to nothing by a query protocol, and the table is
-    built before anyone asks whether it is rankable. `rank` is where an empty
-    corpus becomes an error (G17)."""
+    """An empty table reports no documents rather than refusing.
+
+    A query protocol can filter a corpus to nothing, and the table is built before
+    rankability is checked. `rank` is where an empty corpus becomes an error (G17).
+    """
     empty = AttributeTable.from_records([], specs=(AttributeSpec("popularity"),))
 
     assert empty.n_documents == 0
@@ -961,17 +1014,21 @@ def test_an_empty_table_reports_no_documents_rather_than_refusing() -> None:
 # from_records: identifiers
 # ---------------------------------------------------------------------------
 def test_a_record_without_the_identifier_field_is_a_key_error() -> None:
-    """Not a `DuplicateIdentifierError`: the identifier is absent, not repeated,
-    and conflating the two would send a reader looking for a collision that does
-    not exist."""
+    """A record without the identifier field raises `KeyError`.
+
+    Not `DuplicateIdentifierError`: the identifier is absent, not repeated, and
+    conflating the two would suggest a collision that does not exist.
+    """
     with pytest.raises(KeyError, match="doc_id"):
         AttributeTable.from_records([{"popularity": 1}], specs=(AttributeSpec("popularity"),))
 
 
 def test_two_records_with_a_null_identifier_collide_on_its_rendering() -> None:
-    """Identifiers are stringified, so two `None`s both become `'None'` and are
-    a duplicate. Better than silently ranking two documents under one key, which
-    is what the strict total order cannot survive."""
+    """Two null identifiers collide on their string rendering.
+
+    Identifiers are stringified, so two `None`s both become `'None'` and are a
+    duplicate, rather than two documents ranked under one key.
+    """
     with pytest.raises(DuplicateIdentifierError, match="'None' appears at positions 0 and 1"):
         AttributeTable.from_records(
             [{"doc_id": None}, {"doc_id": None}], specs=(AttributeSpec("popularity"),)
@@ -979,8 +1036,11 @@ def test_two_records_with_a_null_identifier_collide_on_its_rendering() -> None:
 
 
 def test_the_identifier_ranks_are_a_bijection_onto_the_positions() -> None:
-    """What makes the sort key injective, and therefore the sorted permutation
-    unique and sort stability irrelevant."""
+    """The identifier ranks are a bijection onto the positions.
+
+    This makes the sort key injective, so the sorted permutation is unique and sort
+    stability is irrelevant.
+    """
     table = AttributeTable.from_records(
         [{"doc_id": name, "popularity": 1} for name in ("delta", "alpha", "charlie", "bravo")],
         specs=(AttributeSpec("popularity"),),
@@ -989,8 +1049,10 @@ def test_the_identifier_ranks_are_a_bijection_onto_the_positions() -> None:
 
 
 def test_the_identifier_ranks_follow_utf8_byte_order_not_the_input_order() -> None:
-    """Byte order rather than a locale collation, so the ranking is the same on
-    every machine."""
+    """Identifier ranks follow UTF-8 byte order, not a locale collation.
+
+    The ranking is therefore the same on every machine.
+    """
     names = ["b", "A", "a", "B"]
     table = AttributeTable.from_records(
         [{"doc_id": n, "popularity": 1} for n in names], specs=(AttributeSpec("popularity"),)
@@ -1003,10 +1065,10 @@ def test_the_identifier_ranks_follow_utf8_byte_order_not_the_input_order() -> No
 # _extract: the type coercions, and where they leak
 # ---------------------------------------------------------------------------
 def test_a_value_that_cannot_be_coerced_leaks_a_bare_value_error() -> None:
-    """`float("abc")` raises `ValueError`, not a package error, and nothing
-    catches it. Pinned rather than wrapped: a non-numeric value in a numeric
-    column is a defect in the corpus builder, not a corpus shape this package
-    should describe.
+    """A value that cannot be coerced raises a bare `ValueError`.
+
+    `float("abc")` raises it and nothing wraps it: a non-numeric value in a numeric
+    column is a defect in the corpus builder, not a corpus shape to describe.
     """
     with pytest.raises(ValueError, match="could not convert string to float"):
         AttributeTable.from_records(
@@ -1028,9 +1090,11 @@ def test_a_value_that_cannot_be_coerced_leaks_a_bare_value_error() -> None:
 def test_a_present_value_is_coerced_to_the_declared_type(
     dtype: AttributeDType, raw: object, expected: object
 ) -> None:
-    """The declared type wins over what the record happened to carry. Note the
-    INT64 case truncates rather than rounding, so `7.9` is 7 -- which is what a
-    rank-encoded column needs, and worth stating."""
+    """A present value is coerced to the declared type.
+
+    The INT64 case truncates rather than rounding, so `7.9` becomes 7, which is
+    what a rank-encoded column needs.
+    """
     table = AttributeTable.from_records(
         [{"doc_id": "a", "v": raw}, {"doc_id": "b", "v": raw}],
         specs=(AttributeSpec("v", dtype=dtype),),
@@ -1039,9 +1103,11 @@ def test_a_present_value_is_coerced_to_the_declared_type(
 
 
 def test_a_falsy_present_value_is_not_an_absent_one() -> None:
-    """`0` and `""` are values. Testing presence by truthiness would mark the
-    least popular document as unrated, which the missing policy then sorts
-    somewhere else entirely."""
+    """A falsy present value is not an absent one.
+
+    `0` and `""` are values. A truthiness test would mark the least popular
+    document as unrated, and the missing policy would sort it elsewhere.
+    """
     table = AttributeTable.from_records(
         [{"doc_id": "a", "popularity": 0}, {"doc_id": "b"}],
         specs=(AttributeSpec("popularity"),),
@@ -1053,9 +1119,11 @@ def test_a_falsy_present_value_is_not_an_absent_one() -> None:
 
 
 def test_a_missing_first_and_a_missing_last_column_agree_when_nothing_is_present() -> None:
-    """With no distinct present values there is no ordering for the absent ones
-    to sit before or after, so the two policies coincide. A rank scheme that
-    reserved a slot per policy would disagree here."""
+    """FIRST and LAST missing policies agree when no value is present.
+
+    With no distinct present values there is nothing for the absent ones to sit
+    before or after. A rank scheme that reserved a slot per policy would disagree.
+    """
     records = [{"doc_id": "a"}, {"doc_id": "b"}]
     first = AttributeTable.from_records(
         records, specs=(AttributeSpec("p", missing_policy=MissingPolicy.FIRST),)
@@ -1094,34 +1162,30 @@ def _digest_with(**overrides: object) -> str:
 def test_anything_that_changes_the_ordering_changes_the_digest(
     label: str, override: dict[str, object]
 ) -> None:
-    """The digest goes into the run manifest as the identity of the tie-break
-    data. Two tables with the same digest must induce the same ranking, so every
-    field that can move a rank has to move it."""
+    """Every field that can move a rank changes the digest.
+
+    The digest is the run manifest's identity for the tie-break data, so two tables
+    with the same digest must induce the same ranking.
+    """
     assert _digest_with(**override) != _digest_with(), label
 
 
 def test_raw_values_that_leave_the_ranks_alone_leave_the_digest_alone() -> None:
-    """Taken over the ranks rather than the raw values, deliberately: the ranks
-    determine the ordering. Rescaling a popularity column by a constant is not a
-    different tie-break, and a digest that changed would force a rerun for
-    nothing.
+    """Raw values that leave the ranks alone leave the digest alone.
+
+    The digest is taken over the ranks, which determine the ordering. Rescaling a
+    popularity column by a constant is not a different tie-break.
     """
     scaled = [{"doc_id": "a", "popularity": 300}, {"doc_id": "b", "popularity": 100}]
     assert _digest_with(records=scaled) == _digest_with()
 
 
 def test_reordering_the_records_changes_the_digest_but_not_the_ranking() -> None:
-    """The digest is positional; the ranking is not. Both are deliberate.
+    """Reordering the records changes the digest but not the ranking.
 
-    `ranks` is indexed by document position, so supplying the same corpus in a
-    different order permutes the tuple and the digest changes -- even though the
-    per-document mapping, and therefore every ranking built from it, is
-    identical. The digest identifies *this table*, not the corpus in the
-    abstract, which is what makes it usable as a manifest key for a run that
-    also recorded the corpus order.
-
-    Stated in both directions because the invariance is easy to assume from the
-    neighbouring test that reordering does not change the ranking.
+    `ranks` is indexed by document position, so the digest identifies this table,
+    not the corpus in the abstract. The per-document mapping is unchanged.
+    Rationale: docs/engineering_notes.md#attribute-digest-is-positional
     """
     forwards = [{"doc_id": "a", "popularity": 3}, {"doc_id": "b", "popularity": 1}]
     backwards = list(reversed(forwards))
@@ -1143,9 +1207,11 @@ def test_reordering_the_records_changes_the_digest_but_not_the_ranking() -> None
 def test_a_score_count_that_disagrees_with_the_table_names_both_counts(
     n_scores: int, n_docs: int
 ) -> None:
-    """Zipping the shorter of the two would silently rank a prefix of the corpus
-    and report it as the whole thing, so the counts are compared first and the
-    message carries both."""
+    """A score count that disagrees with the table names both counts.
+
+    Zipping to the shorter would rank a prefix of the corpus as the whole, so the
+    counts are compared first.
+    """
     table = AttributeTable.from_records(
         [{"doc_id": chr(97 + i), "popularity": i} for i in range(n_docs)],
         specs=(AttributeSpec("popularity"),),
@@ -1158,9 +1224,11 @@ def test_a_score_count_that_disagrees_with_the_table_names_both_counts(
 
 @pytest.mark.parametrize("name", ["identifier", "doc_id"])
 def test_the_identifier_may_not_be_named_in_a_priority(name: str) -> None:
-    """Both spellings. It terminates every key implicitly, so naming it would
-    either duplicate it or move it -- and moving it makes the ordering non-total,
-    which is the one property the whole tie-break rests on."""
+    """Neither spelling of the identifier may be named in a priority.
+
+    It terminates every key implicitly, so naming it would duplicate or move it,
+    and moving it makes the ordering non-total.
+    """
     table = _two_document_table()
     spec = SortKeySpec(name="broken", priority=("popularity", name))
 
@@ -1169,9 +1237,11 @@ def test_the_identifier_may_not_be_named_in_a_priority(name: str) -> None:
 
 
 def test_the_key_leads_with_the_negated_score_and_ends_with_the_identifier() -> None:
-    """The shape is `(-score, *attribute ranks, id_rank)`. Negated because the
-    sort is ascending while scores rank descending, and the identifier last
-    because it is the only field guaranteed to break every remaining tie."""
+    """The key is `(-score, *attribute ranks, id_rank)`.
+
+    The score is negated because the sort is ascending while scores rank
+    descending; the identifier is last because only it breaks every remaining tie.
+    """
     table = _two_document_table()
     keys = build_keys([0.25, 0.75], table, _POP_ONLY)
 
@@ -1181,8 +1251,10 @@ def test_the_key_leads_with_the_negated_score_and_ends_with_the_identifier() -> 
 
 
 def test_a_priority_of_no_attributes_still_ends_with_the_identifier() -> None:
-    """`pi_score` reduces to this once scores are distinct: the key is the score
-    and the identifier, and it is still injective."""
+    """A priority of no attributes still ends the key with the identifier.
+
+    `pi_score` reduces to this once scores are distinct, and the key stays injective.
+    """
     table = _two_document_table()
     keys = build_keys([0.5, 0.5], table, SortKeySpec(name="score_only", priority=()))
 
@@ -1191,9 +1263,11 @@ def test_a_priority_of_no_attributes_still_ends_with_the_identifier() -> None:
 
 
 def test_a_non_finite_score_is_not_rejected_when_the_key_is_built() -> None:
-    """`rank` rejects it before sorting; `build_keys` does not. Pinning the
-    division of responsibility, so the guard is not accidentally duplicated or
-    accidentally removed from the one place that has it."""
+    """`build_keys` does not reject a non-finite score; `rank` does.
+
+    This pins the division of responsibility: `rank` and `rank_top_k` reject a
+    non-finite score before sorting, and `build_keys` does not.
+    """
     table = _two_document_table()
     keys = build_keys([math.nan, 0.5], table, PI)
     assert math.isnan(keys[0][0])
@@ -1203,24 +1277,30 @@ def test_a_non_finite_score_is_not_rejected_when_the_key_is_built() -> None:
 # assert_strict_total_order: the size gate
 # ---------------------------------------------------------------------------
 def test_the_axioms_hold_vacuously_on_nothing_and_on_one() -> None:
-    """No pairs and no triples. A guard that indexed before checking the size
-    would fail here rather than passing trivially."""
+    """The axioms hold vacuously on zero keys and on one.
+
+    There are no pairs and no triples; a guard that indexed before checking the
+    size would fail here.
+    """
     assert_strict_total_order([])
     assert_strict_total_order([(1.0, 0)])
 
 
 def test_the_duplicate_report_counts_how_many_collided() -> None:
-    """The count tells a reader whether one document was duplicated or the key
-    collapsed entirely -- which are different bugs."""
+    """The duplicate report counts how many keys collided.
+
+    The count separates one duplicated document from a key that collapsed
+    entirely, which are different defects.
+    """
     with pytest.raises(AssertionError, match=r"not injective: 2 duplicate key\(s\)"):
         assert_strict_total_order([(1.0, 0), (1.0, 0), (1.0, 0)])
 
 
 @pytest.mark.parametrize("n", [40, 41])
 def test_the_transitivity_sweep_runs_at_forty_and_stops_above_it(n: int) -> None:
-    """The check is O(n^3), so it is gated at 40. Both sides of the gate are
-    exercised here: at 41 the sweep is skipped and the call still returns, which
-    is what keeps a debug mode usable on a real corpus.
+    """The O(n^3) transitivity sweep runs at 40 keys and is skipped at 41.
+
+    At 41 the call still returns, which keeps a debug mode usable on a real corpus.
     """
     keys = [(float(-i), i) for i in range(n)]
     assert_strict_total_order(keys)
@@ -1269,8 +1349,11 @@ def test_a_negative_top_k_is_refused_rather_than_dropping_from_the_end() -> None
 
 @pytest.mark.parametrize("j", [0, -1, 5, 99])
 def test_a_rank_outside_one_to_n_is_refused_with_the_range(j: int) -> None:
-    """Ranks are 1-indexed in the public API to match `r_1 ... r_n`, so 0 is out
-    of range at the bottom exactly as `n + 1` is at the top."""
+    """A rank outside 1..n is refused with the range in the message.
+
+    Ranks are 1-indexed to match `r_1 ... r_n`, so 0 is out of range at the bottom
+    exactly as `n + 1` is at the top.
+    """
     with pytest.raises(IndexError, match=f"rank {j} out of range 1..4"):
         _ranked(4).score_at_rank(j)
 
@@ -1283,9 +1366,11 @@ def test_the_first_and_last_ranks_are_both_reachable() -> None:
 
 
 def test_a_truncated_ranking_says_so_when_asked_for_an_unselected_document() -> None:
-    """The two `KeyError` messages differ by one clause, and that clause is the
-    whole diagnosis: on a complete ranking the document does not exist, on a
-    truncated one it merely was not selected."""
+    """The `KeyError` message says whether the ranking is truncated.
+
+    On a complete ranking the document does not exist; on a truncated one it was
+    not selected. The two messages differ by that one clause.
+    """
     with pytest.raises(KeyError, match="the ranking is truncated"):
         _ranked(4, k=2).rank_of(3)
 
@@ -1295,8 +1380,10 @@ def test_a_truncated_ranking_says_so_when_asked_for_an_unselected_document() -> 
 
 
 def test_a_whole_corpus_question_names_what_was_asked_and_what_was_selected() -> None:
-    """The message routes the reader to `rank()` rather than leaving them to
-    work out why a ranking they hold cannot answer."""
+    """A whole-corpus question names what was asked and what was selected.
+
+    The message routes the reader to `rank()`.
+    """
     with pytest.raises(ValueError, match="needs the complete ranking, but only 2 of 4"):
         _ranked(4, k=1).require_complete("kendall_tau_distance")
 
@@ -1311,8 +1398,11 @@ def test_a_complete_ranking_answers_whole_corpus_questions_silently() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("k", [1, 2])
 def test_one_more_than_k_is_selected_so_the_boundary_gap_is_available(k: int) -> None:
-    """`m = min(k + 1, n)`. The extra document is `r_{k+1}`, without which the
-    boundary margin at `k` could not be computed from the ranking."""
+    """One more than k is selected, so the boundary gap is available.
+
+    `m = min(k + 1, n)`. The extra document is `r_{k+1}`, without which the
+    boundary margin at `k` could not be computed from the ranking.
+    """
     ranking = _ranked(4, k=k)
     assert ranking.n_selected == k + 1
     assert not ranking.is_complete
@@ -1320,18 +1410,22 @@ def test_one_more_than_k_is_selected_so_the_boundary_gap_is_available(k: int) ->
 
 @pytest.mark.parametrize("k", [3, 4])
 def test_once_k_plus_one_reaches_the_corpus_the_ranking_is_complete(k: int) -> None:
-    """`m = min(k + 1, n)`, so the clamp bites one k *below* the corpus size:
-    on four documents a top-3 already selects all four, and there is no further
-    document for the boundary gap to point at."""
+    """Once k + 1 reaches the corpus size, the ranking is complete.
+
+    `m = min(k + 1, n)`, so the clamp applies one k below the corpus size: on four
+    documents a top-3 already selects all four.
+    """
     ranking = _ranked(4, k=k)
     assert ranking.n_selected == 4
     assert ranking.is_complete
 
 
 def test_the_sorted_scores_are_complete_even_where_the_order_is_truncated() -> None:
-    """Margins are computed from the score multiset, which does not depend on
-    the selection, so a truncated ranking can still answer a margin question at
-    any k."""
+    """The sorted scores are complete where the order is truncated.
+
+    Margins are computed from the score multiset, which does not depend on the
+    selection, so a truncated ranking answers a margin question at any k.
+    """
     ranking = _ranked(6, k=2)
     assert len(ranking.sorted_scores) == 6
     assert len(ranking.order) == 3
@@ -1341,14 +1435,11 @@ def test_the_sorted_scores_are_complete_even_where_the_order_is_truncated() -> N
 # The selection algorithms
 # ---------------------------------------------------------------------------
 def test_an_unrecognised_selection_falls_through_to_the_insertion_sort() -> None:
-    """The dispatch is an `if` chain with no `else: raise`, so a value outside
-    the enumeration takes the final branch rather than being refused.
+    """An unrecognised selection falls through to the insertion sort.
 
-    It cannot be reached through the public API -- `rank` types the parameter as
-    `Selection` -- and the fallback is a correct independent implementation, so
-    the consequence is a slow ranking rather than a wrong one. Pinned because
-    the shape invites a fifth algorithm being added above the fallback and
-    silently never running.
+    The dispatch has no `else: raise`; `rank` types the parameter as `Selection`. The
+    fallback is a correct independent implementation, so the result is slow, not wrong.
+    A new `Selection` member with no branch of its own runs the insertion sort silently.
     """
     table = _two_document_table()
     keys = build_keys([0.25, 0.75], table, PI)
@@ -1358,8 +1449,10 @@ def test_an_unrecognised_selection_falls_through_to_the_insertion_sort() -> None
 
 @pytest.mark.parametrize("how", list(Selection))
 def test_every_selection_algorithm_answers_the_degenerate_sizes_alike(how: Selection) -> None:
-    """`m = 0` and `m = n` are where a top-k heap and a full sort are most
-    likely to disagree, and they must not."""
+    """Every selection algorithm agrees at the degenerate sizes m = 0 and m = n.
+
+    These are where a top-k heap and a full sort are most likely to disagree.
+    """
     table = _two_document_table()
     keys = build_keys([0.25, 0.75], table, PI)
 
@@ -1371,9 +1464,11 @@ def test_every_selection_algorithm_answers_the_degenerate_sizes_alike(how: Selec
 # rank_all_operators
 # ---------------------------------------------------------------------------
 def test_every_operator_sees_one_and_the_same_score_array() -> None:
-    """Asserted by identity, not equality. A disagreement between operators is
-    only attributable to the tie-break if the scores they saw were the same
-    object; two equal arrays computed twice would leave a second explanation.
+    """Every operator sees the identical score array object.
+
+    A disagreement between operators is attributable to the tie-break only if the
+    scores were the same object; two equal arrays computed twice leave a second
+    explanation.
     """
     table = _two_document_table()
     rankings = rank_all_operators([0.5, 0.5], table)
@@ -1387,9 +1482,11 @@ def test_asking_for_no_operators_returns_no_rankings() -> None:
 
 
 def test_two_specs_of_one_name_collapse_to_a_single_entry() -> None:
-    """The result is keyed by operator name, so a repeated name overwrites
-    rather than accumulating. Pinned because an ablation sweeping a list of
-    specs would silently measure fewer operators than it listed."""
+    """Two specs with one name collapse to a single entry.
+
+    The result is keyed by operator name, so a repeated name overwrites. An
+    ablation sweeping a list of specs would measure fewer operators than it listed.
+    """
     table = _two_document_table()
     duplicated = (PI, SortKeySpec(name=PI.name, priority=("engagement",)))
 
@@ -1397,9 +1494,10 @@ def test_two_specs_of_one_name_collapse_to_a_single_entry() -> None:
 
 
 def test_the_overflow_bound_is_the_largest_int64_and_not_one_past_it() -> None:
-    """Straddled exactly. The C++ mirror multiplies into `__int128` and this
-    guard is what lets its inner loop skip a checked multiply, so the bound has
-    to be the largest value that mirror can hold and not the first it cannot.
+    """The overflow bound is the largest int64, not one past it.
+
+    The C++ mirror multiplies into `__int128`, and this guard lets its inner loop
+    skip a checked multiply, so the bound is the largest value the mirror can hold.
     """
     largest = (1 << 63) - 1
     check_ratio_fits_int64([(largest, 1), (1, 1)], "rating")
@@ -1409,13 +1507,11 @@ def test_the_overflow_bound_is_the_largest_int64_and_not_one_past_it() -> None:
 
 
 def test_the_guard_looks_past_the_single_largest_numerator_and_denominator() -> None:
-    """Why it takes the *two* largest of each rather than the one.
+    """The guard considers the two largest numerators and denominators.
 
-    Here the largest numerator and the largest denominator belong to the same
-    document, so their product never arises -- nothing is compared with itself.
-    The maximising pair is the largest numerator against the *second* largest
-    denominator, and a guard that kept only the top one would find no admissible
-    combination at all and pass a column the mirror cannot represent.
+    Here the largest numerator and denominator belong to one document, so their
+    product never arises. The maximising pair uses the second largest denominator.
+    Rationale: docs/engineering_notes.md#ratio-overflow-scan-two-largest
     """
     same_document = [(2**62, 2**62), (2**40, 2**40)]
 
@@ -1425,19 +1521,11 @@ def test_the_guard_looks_past_the_single_largest_numerator_and_denominator() -> 
 
 
 def test_the_scan_keeps_looking_after_the_first_admissible_combination() -> None:
-    """The maximum is over all four combinations, not the first one that fits.
+    """The scan checks every combination, not the first admissible one.
 
-    The test above overflows on the first admissible pair, so a scan that
-    stopped there would still pass it. Here the first pair the loop reaches is
-    the largest numerator against the *second* largest denominator, whose
-    product is comfortably inside int64; the pair that overflows is the second
-    numerator against the largest denominator, and the loop only sees it by
-    carrying on.
-
-    A selection rule that ranked the candidates by anything other than their
-    product -- the quotient, say -- would settle on the first pair and pass a
-    column the C++ mirror cannot represent, which is the failure this guard
-    exists to prevent.
+    The first pair reached fits in int64; the overflowing one is the second
+    numerator against the largest denominator, found only by carrying on.
+    Rationale: docs/engineering_notes.md#ratio-overflow-scan-two-largest
     """
     pairs = [(4_000_000_000, 4_000_000_000), (3_000_000_000, 2)]
     first_admissible = 4_000_000_000 * 2
@@ -1463,9 +1551,11 @@ def test_the_scan_keeps_looking_after_the_first_admissible_combination() -> None
 def test_the_ratio_comparator_reports_all_three_outcomes(
     a: tuple[int, int], b: tuple[int, int], expected: int
 ) -> None:
-    """A three-way comparison, and each value has to be distinct: collapsing
-    "less" onto "equal" would make the sort treat an ordered pair as tied and
-    fall through to the next attribute that should never have been reached."""
+    """The ratio comparator reports all three outcomes distinctly.
+
+    Collapsing "less" onto "equal" would treat an ordered pair as tied and fall
+    through to an attribute that should never be reached.
+    """
     assert _ratio_cmp(a, b) == expected
 
 
@@ -1473,8 +1563,7 @@ def test_a_missing_first_column_shifts_every_present_value_up_by_one() -> None:
     """The absent documents take rank 0, so the present ones start at 1.
 
     Without the shift a present value would share rank 0 with every absent one,
-    and the tie-break would treat "least popular" and "unrated" as the same
-    thing -- which is exactly the conflation the presence bit exists to prevent.
+    and the tie-break would treat "least popular" and "unrated" as the same thing.
     """
     records = [{"doc_id": "a", "p": 5}, {"doc_id": "b"}, {"doc_id": "c", "p": 3}]
 
@@ -1496,13 +1585,11 @@ def test_a_missing_first_column_shifts_every_present_value_up_by_one() -> None:
 # The overflow scan reads the two *largest* of each column
 # ---------------------------------------------------------------------------
 def test_the_scan_takes_the_largest_pairs_and_not_the_smallest() -> None:
-    """`sorted(..., reverse=True)[:2]`. With more than two documents the top-two
-    selection actually excludes something, and taking the wrong end excludes the
-    overflow.
+    """The overflow scan takes the largest pairs, not the smallest.
 
-    The two-document cases above cannot see this: with two pairs, both orderings
-    reach the same four combinations, so ascending and descending agree and the
-    guard looks correct either way.
+    `sorted(..., reverse=True)[:2]` excludes something only with more than two documents;
+    here taking the two smallest pairs would exclude the overflow.
+    Rationale: docs/engineering_notes.md#ratio-overflow-scan-two-largest
     """
     pairs = [(2**62, 2**62), (2**40, 2**40), (1, 1)]
 
@@ -1514,22 +1601,29 @@ def test_the_scan_takes_the_largest_pairs_and_not_the_smallest() -> None:
 
 
 def test_a_column_of_small_ratios_is_accepted_however_many_documents() -> None:
-    """The other side, so the scan above is refusing the overflow rather than
-    refusing every column with three entries in it."""
+    """A column of small ratios is accepted with three entries.
+
+    The counterpart to the test above: the scan refuses the overflow, not every
+    column with three entries.
+    """
     check_ratio_fits_int64([(2**20, 2**20), (2**10, 2**10), (1, 1)], "rating")
 
 
 # ---------------------------------------------------------------------------
 # Values and their presence bits are one column, read in step
 # ---------------------------------------------------------------------------
+
+
 # `_build_column` is reached directly, as `test_datasets.py` reaches the
 # generator's primitives. Through `AttributeTable.from_records` the two lists are
 # built together by `_extract` and cannot disagree; the guard is what keeps that
 # true if anything ever builds a column another way.
 def test_a_column_whose_presence_bits_run_short_is_refused() -> None:
-    """`zip(values, has_value, strict=True)`. Truncating instead would drop the
-    tail of the column: those documents would carry no attribute at all, and the
-    ranking would silently fall through to the next tie-break for them."""
+    """A column whose presence bits run short is refused.
+
+    `zip(values, has_value, strict=True)`. Truncating would drop the tail: those
+    documents would carry no attribute and fall through to the next tie-break.
+    """
     spec = AttributeSpec("popularity", Direction.DESC, AttributeDType.INT64)
 
     with pytest.raises(ValueError, match="argument 2 is shorter"):
@@ -1562,12 +1656,11 @@ def test_a_column_in_step_ranks_every_document_it_was_given() -> None:
 # What a Ranking records about the run that produced it
 # ---------------------------------------------------------------------------
 def test_a_query_with_any_score_at_all_is_not_degenerate() -> None:
-    """`query_degenerate=all(s == 0.0 for s in scores)`. The all-zero case is
-    covered above; the complement is what makes the field mean anything.
+    """A query with any non-zero score is not degenerate.
 
-    A degenerate query is ranked by attributes alone, so mislabelling an
-    ordinary query as degenerate -- or the reverse -- changes which of section
-    2.3.1's mechanisms the published number is attributed to.
+    `query_degenerate=all(s == 0.0 for s in scores)`. A degenerate query is ranked
+    by attributes alone, so a wrong label changes which of section 2.3.1's
+    mechanisms the published number is attributed to.
     """
     table = table_of(3, popularity=[3, 2, 1], rating=[3, 2, 1], engagement=[3, 2, 1])
 
@@ -1577,8 +1670,11 @@ def test_a_query_with_any_score_at_all_is_not_degenerate() -> None:
 
 
 def test_a_single_subnormal_score_is_enough_to_leave_the_degenerate_case() -> None:
-    """The boundary of `s == 0.0`: the smallest positive double is a score, and a
-    comparison against any other constant would swallow it."""
+    """A single subnormal score leaves the degenerate case.
+
+    At the boundary of `s == 0.0`, the smallest positive double is a score; a
+    comparison against any other constant would swallow it.
+    """
     table = table_of(2, popularity=[2, 1], rating=[2, 1], engagement=[2, 1])
 
     assert rank([5e-324, 0.0], table, PI).query_degenerate is False
@@ -1586,17 +1682,20 @@ def test_a_single_subnormal_score_is_enough_to_leave_the_degenerate_case() -> No
 
 
 def test_a_ranking_reports_no_zero_norm_documents_unless_told_of_any() -> None:
-    """`n_zero_norm_docs: int = 0`. The count is passed in by whoever fitted the
-    model, since the ranker never sees the norms. Defaulting to anything else
-    would put a number into a run record that nothing measured.
+    """A ranking reports no zero-norm documents unless told of any.
+
+    `n_zero_norm_docs: int = 0`. The ranker never sees the norms, so the count is
+    passed in; any other default would record a number nothing measured.
     """
     assert _ranked().n_zero_norm_docs == 0
     assert _ranked(k=2).n_zero_norm_docs == 0
 
 
 def test_a_ranking_carries_the_zero_norm_count_it_was_given() -> None:
-    """The other side, so the default above is a default rather than the only
-    value the field can hold."""
+    """A ranking carries the zero-norm count it was given.
+
+    The counterpart to the default above: the field can hold other values.
+    """
     table = table_of(3, popularity=[3, 2, 1], rating=[3, 2, 1], engagement=[3, 2, 1])
     told = rank([1.0, 0.5, 0.25], table, PI, n_zero_norm_docs=2)
 
@@ -1604,11 +1703,11 @@ def test_a_ranking_carries_the_zero_norm_count_it_was_given() -> None:
 
 
 def test_a_ranking_over_the_whole_corpus_excluded_nothing() -> None:
-    """`n_excluded=0`. Candidate exclusion is the query grid's job (G10 decision
-    3), not the ranker's: `rank` is handed every document it is to order.
+    """A ranking over the whole corpus reports that it excluded nothing.
 
-    Reported rather than omitted so the two paths produce the same shape of
-    record, and a reader can tell "nothing was excluded" from "nobody said".
+    `n_excluded=0`: candidate exclusion is the query grid's job (G10 decision 3).
+    It is reported so both paths give one record shape, and "nothing was excluded"
+    differs from "nobody said".
     """
     assert _ranked().n_excluded == 0
     assert _ranked(k=2).n_excluded == 0
@@ -1616,14 +1715,11 @@ def test_a_ranking_over_the_whole_corpus_excluded_nothing() -> None:
 
 
 def test_a_truncated_ranking_records_the_same_degeneracy_as_a_full_one() -> None:
-    """`rank_top_k` builds its own `Ranking`, so it carries a second copy of the
-    `query_degenerate` computation. The flag is a property of the query -- were
-    all its scores zero -- and not of how many documents were selected, so
-    truncating to k must not change it.
+    """A truncated ranking records the same degeneracy as a full one.
 
-    Tested here because the existing degenerate cases all go through `rank`, and
-    the two constructions can drift apart without either one being wrong on its
-    own.
+    `rank_top_k` builds its own `Ranking` with a second copy of the
+    `query_degenerate` computation. The flag belongs to the query, not to how many
+    documents were selected, so truncating to k must not change it.
     """
     table = table_of(4, popularity=[4, 3, 2, 1], rating=[4, 3, 2, 1], engagement=[4, 3, 2, 1])
     zeros = [0.0] * 4
@@ -1637,9 +1733,11 @@ def test_a_truncated_ranking_records_the_same_degeneracy_as_a_full_one() -> None
 
 
 def test_a_truncated_ranking_leaves_the_degenerate_case_on_one_real_score() -> None:
-    """The boundary of `s == 0.0` on the truncated path, matching the full one:
-    a single subnormal anywhere in the score vector is a score, even when the
-    selection never reaches it."""
+    """A truncated ranking leaves the degenerate case on one real score.
+
+    At the boundary of `s == 0.0` on the truncated path, a single subnormal anywhere
+    in the score vector is a score, even when the selection never reaches it.
+    """
     table = table_of(4, popularity=[4, 3, 2, 1], rating=[4, 3, 2, 1], engagement=[4, 3, 2, 1])
     tail_only = [0.0, 0.0, 0.0, 5e-324]
 
@@ -1654,11 +1752,9 @@ def test_a_truncated_ranking_leaves_the_degenerate_case_on_one_real_score() -> N
 def test_a_spec_built_from_strings_ranks_exactly_as_one_built_from_members() -> None:
     """A spec built from strings ranks as one built from members.
 
-    `Direction`, `AttributeDType` and `MissingPolicy` are `str` enums: `"asc"`
-    equals the member without being it, and every branch reading them selects on
-    `is`. An uncoerced string takes the fall-through arm -- ascending order, and
-    `missing_rank = n_distinct` -- changing the rank encoding the tie-break
-    sorts on. Both fixtures below discriminate between the arms.
+    The enums are `str` enums and every branch selects on `is`, so an uncoerced
+    `"asc"` would take the fall-through arm (ascending, `missing_rank = n_distinct`).
+    Both fixtures discriminate between the arms.
     """
     records = [{"doc_id": "a", "p": 10}, {"doc_id": "b", "p": 30}, {"doc_id": "c", "p": 20}]
 

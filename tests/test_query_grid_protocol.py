@@ -1,30 +1,8 @@
-"""Section 7.1's query-grid protocol: who is asked, what they may retrieve.
+"""Tests for the section 7.1 query-grid protocol in `analysis/query_grid.py`.
 
-`analysis/query_grid.py` decides which queries the reported experiments run and,
-for each one, which documents it is allowed to retrieve. Every A1 and A2 number
-is computed over the grid this module builds, and until this file existed nothing
-imported it: the scripts under `scripts/` were its only caller, so a change here
-would have moved every published figure with the suite still green.
-
-Four properties are load-bearing.
-
-A per-query candidate set, not a corpus-wide one. `_score_one` restricts the
-attribute table to the same subset as the scores, so the tie-break cannot reach a
-document the query was never allowed to retrieve. Scores and table drifting apart
-would rank a candidate against an outsider's attributes.
-
-Degenerate and zero-vector are different findings. A query with no features at
-all is counted and skipped; a query whose features are all out of vocabulary is
-scored and comes back all-zero. Both produce a ranking decided by attributes
-alone, and conflating them would report one cause for two.
-
-The emptiness guard on `is_zero_vector`. `all()` over no scores is `True`, so a
-query with no candidates once answered yes and entered the published
-`n_zero_vector` as a pure-attribute ranking with nothing there to rank. The
-module records this as fixed; this file is what keeps it fixed.
-
-A deterministic prefix under `limit`. Two runs at different caps have to remain
-comparable, so the cap takes a prefix rather than a sample.
+The module decides which queries the A1 and A2 experiments run and which
+documents each query may retrieve. Rationale:
+docs/engineering_notes.md#query-grid-protocol
 """
 
 from __future__ import annotations
@@ -110,8 +88,10 @@ def test_the_user_profile_mode_asks_one_query_per_user_not_one_per_interaction()
 
 
 def test_the_restricted_table_holds_exactly_the_candidates_and_no_others() -> None:
-    """Scores and table must describe the same set, or the tie-break ranks a
-    candidate against an outsider's attributes."""
+    """Scores and attribute table describe the same set of candidates.
+
+    Otherwise the tie-break ranks a candidate against an outsider's attributes.
+    """
     grid = evaluate(built(), model(), records(), DOC_IDS)
     assert grid.queries, "the grid is empty, so nothing below is tested"
 
@@ -160,17 +140,20 @@ def test_not_excluding_profile_items_leaves_the_whole_corpus_retrievable() -> No
 # Erroneous: the mode section 7.1 excludes
 # ---------------------------------------------------------------------------
 def test_item_as_query_is_rejected_rather_than_silently_evaluated() -> None:
-    """It is implemented in profiles/query_modes.py, which is exactly why the
-    rejection has to be here: an available mode is easy to reach by accident."""
+    """Item-as-query mode is rejected by the grid builder.
+
+    The mode is implemented in profiles/query_modes.py, so it is easy to reach
+    by accident, and section 7.1 excludes it.
+    """
     with pytest.raises(ValueError, match=r"section 7\.1 excludes it"):
         built(mode=QueryMode.ITEM_AS_QUERY)
 
 
 # ---------------------------------------------------------------------------
-# Boundary: empty, capped, and the guard that was once wrong
+# Boundary: empty, capped, and the zero-vector emptiness guard
 # ---------------------------------------------------------------------------
 def test_a_query_with_no_candidates_is_not_reported_as_a_zero_vector_ranking() -> None:
-    """The bug the module's own docstring records as fixed.
+    """An empty candidate set is not reported as a zero-vector ranking.
 
     `all()` over an empty sequence is `True`, so without the emptiness guard a
     candidate-free query answers "every score is zero" and enters the published
@@ -229,9 +212,8 @@ def test_an_out_of_vocabulary_query_is_counted_as_zero_vector_not_degenerate() -
     grid = evaluate(query_set, model(), records(), DOC_IDS)
     assert grid.n_degenerate == 0, "the query has features, so it is not degenerate"
 
-    # The count this test is named for. Asserting only `n_degenerate` left the
-    # tally itself unchecked, so a `n_zero_vector` that never counted anything
-    # would have passed here under a name promising it did.
+    # The count the test name promises. Without this assertion, a
+    # `n_zero_vector` that never counts anything passes.
     assert grid.n_zero_vector == 1, "the out-of-vocabulary fold is the zero-vector one"
     assert [q.is_zero_vector for q in grid.queries] == [True, False]
 
@@ -256,8 +238,11 @@ def test_a_cap_larger_than_the_grid_is_not_an_error() -> None:
 
 
 def test_provenance_over_an_empty_grid_reports_zero_rather_than_raising() -> None:
-    """`min`/`max` over no queries need their defaults, or the manifest crashes
-    on a configuration that produced nothing."""
+    """Provenance over an empty grid reports zero candidates.
+
+    `min`/`max` over no queries need their defaults, or the manifest crashes
+    on a configuration that produced nothing.
+    """
     grid = QueryGrid(
         queries=(),
         mode="leave_one_out",
@@ -308,8 +293,11 @@ def test_an_eligibility_threshold_above_every_user_produces_an_empty_grid() -> N
 # Degenerate queries are counted, not scored
 # ---------------------------------------------------------------------------
 def test_a_query_whose_features_all_preprocess_away_is_counted_and_skipped() -> None:
-    """Scoring it would give an all-zero vector indistinguishable from an
-    out-of-vocabulary query, and those are different findings."""
+    """A featureless query is counted as degenerate and not scored.
+
+    Scoring it gives an all-zero vector indistinguishable from an
+    out-of-vocabulary query, and those are different findings.
+    """
     featureless = {**_FEATURES, "d1": (), "d2": ()}
     query_set = build_query_grid(
         interactions_for({"u1": ["d1", "d2"]}),
@@ -360,10 +348,12 @@ def _grid_inputs() -> tuple[list[tuple[str, str, float]], dict[str, list[str]], 
 
 
 def test_item_as_query_is_refused_here_rather_than_quietly_evaluated() -> None:
-    """The mode is implemented in `profiles.query_modes`, and section 7.1
-    excludes it from the reported experiments. Building a grid from it would
-    produce numbers the paper does not license, so the refusal is at the
-    protocol boundary rather than left to the reader."""
+    """Item-as-query mode is refused at the protocol boundary.
+
+    The mode is implemented in `profiles.query_modes`, and section 7.1 excludes
+    it from the reported experiments. A grid built from it produces numbers the
+    paper does not license.
+    """
     interactions, features, doc_ids = _grid_inputs()
     with pytest.raises(ValueError, match=r"section 7\.1 excludes it"):
         build_query_grid(
@@ -378,23 +368,21 @@ def test_no_limit_at_all_keeps_every_fold() -> None:
 
 
 def test_a_limit_of_zero_produces_an_empty_grid_rather_than_every_fold() -> None:
-    """Zero is a number of queries, not an absence of a limit. A run configured
-    with `limit: 0` should evaluate nothing and say so, not silently evaluate
-    the lot."""
+    """A limit of zero is a number of queries, not an absence of a limit.
+
+    A run configured with `limit: 0` evaluates nothing and reports an empty
+    grid rather than evaluating every fold.
+    """
     interactions, features, doc_ids = _grid_inputs()
     assert len(build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=0)) == 0
 
 
 def test_a_negative_limit_is_refused_rather_than_counted_from_the_end() -> None:
-    """`folds[:-1]` is a legal slice, so `-1` used to trim one query rather than
-    raise or mean unlimited, and the reduced count was then reported as the
-    protocol's own.
+    """A negative limit is refused rather than counted from the end.
 
-    One of five sites in this package where a negative index was accepted where
-    the positive side is checked, after `short`, `Ranking.top_k`,
-    `compare_top_k` and `CsrMatrix.row`. This is the one a driver can reach:
-    both experiment drivers pass `--queries` straight through as `limit`, and
-    argparse takes `type=int` with no lower bound.
+    `folds[:-1]` is a legal slice, so without the guard `-1` trims one query and
+    the reduced count is reported as the protocol's own. Rationale:
+    docs/engineering_notes.md#negative-index-guards
     """
     interactions, features, doc_ids = _grid_inputs()
     with pytest.raises(ValueError, match="limit must be non-negative"):
@@ -407,18 +395,23 @@ def test_a_negative_limit_is_refused_rather_than_counted_from_the_end() -> None:
 
 
 def test_a_nan_limit_is_refused_by_the_same_guard() -> None:
-    """Spelled `not limit >= 0` rather than `limit < 0` precisely so this holds:
-    a NaN compares false against both bounds and would otherwise reach the
-    slice, where it raises TypeError from inside the library instead."""
+    """A NaN limit is refused by the same non-negativity guard.
+
+    The guard is `not limit >= 0` rather than `limit < 0`: a NaN compares false
+    against both bounds, so `limit < 0` lets it through, the cap test is also
+    false, and the full grid comes back uncapped.
+    """
     interactions, features, doc_ids = _grid_inputs()
     with pytest.raises(ValueError, match="limit must be non-negative"):
         build_query_grid(interactions, features, doc_ids, min_interactions=2, limit=float("nan"))
 
 
 def test_the_limited_prefix_is_the_same_folds_every_time() -> None:
-    """A truncated grid has to be a prefix of the full one in a fixed order, or
-    two runs at the same limit would evaluate different queries and their
-    numbers would not be comparable."""
+    """A truncated grid is a prefix of the full grid in a fixed order.
+
+    Otherwise two runs at the same limit evaluate different queries and their
+    numbers are not comparable.
+    """
     interactions, features, doc_ids = _grid_inputs()
     full = [
         q.query_id for q in build_query_grid(interactions, features, doc_ids, min_interactions=2)
@@ -433,22 +426,23 @@ def test_the_limited_prefix_is_the_same_folds_every_time() -> None:
 
 
 def test_a_threshold_no_user_reaches_produces_an_empty_grid() -> None:
-    """A legitimate configuration -- a strict eligibility threshold on a small
-    corpus -- rather than an error. The provenance still records what was asked
-    for, which is how a run says it measured nothing on purpose."""
+    """A threshold no user reaches gives an empty grid, not an error.
+
+    A strict eligibility threshold on a small corpus is a legitimate
+    configuration. The provenance still records what was asked for, so the run
+    reports that it measured nothing.
+    """
     interactions, features, doc_ids = _grid_inputs()
     grid = build_query_grid(interactions, features, doc_ids, min_interactions=99)
     assert len(grid) == 0
 
 
 def test_the_profile_items_are_excluded_unless_the_caller_says_otherwise() -> None:
-    """`exclude_profile_items: bool = True`. G10 decision 3 is the default, not
-    an opt-in: a fold that could retrieve the items its own query was built from
-    would score its own input and report the retrieval as a success.
+    """Profile items are excluded when the caller passes no flag.
 
-    Both arms are covered above, but each passes the flag explicitly, so the
-    default itself -- what every caller that does not think about it gets -- was
-    never exercised.
+    `exclude_profile_items` defaults to `True` (G10 decision 3): a fold that can
+    retrieve its own profile items reports its own input as a success. The
+    tests of both arms pass the flag explicitly; this one checks the default.
     """
     default = evaluate(built(), model(), records(), DOC_IDS)
     asked_for = evaluate(built(exclude_profile_items=True), model(), records(), DOC_IDS)
