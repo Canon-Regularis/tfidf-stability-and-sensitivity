@@ -13,11 +13,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <numeric>
 #include <random>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>

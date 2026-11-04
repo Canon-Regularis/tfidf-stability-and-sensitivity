@@ -18,14 +18,14 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
-#include <nanobind/stl/string.h>
-#include <nanobind/stl/vector.h>
 
 #include <cmath>
-#include <cstring>
+#include <cstddef>
+#include <cstdint>
 #include <span>
-#include <string>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace nb = nanobind;
@@ -145,10 +145,11 @@ std::int32_t checked_k(std::int32_t k) {
 constexpr const char* kAbi = "0.4.0";
 
 /// Return an owning numpy array built from a vector, without copying twice.
-nb::ndarray<nb::numpy, double> to_numpy(std::vector<double>&& v) {
-    auto* held = new std::vector<double>(std::move(v));
-    nb::capsule owner(held, [](void* p) noexcept { delete static_cast<std::vector<double>*>(p); });
-    return nb::ndarray<nb::numpy, double>(held->data(), {held->size()}, owner);
+template <class T>
+nb::ndarray<nb::numpy, T> to_numpy(std::vector<T>&& v) {
+    auto* held = new std::vector<T>(std::move(v));
+    nb::capsule owner(held, [](void* p) noexcept { delete static_cast<std::vector<T>*>(p); });
+    return nb::ndarray<nb::numpy, T>(held->data(), {held->size()}, owner);
 }
 
 /// An immutable, fitted corpus index: CSR, its transpose, and the row norms.
@@ -251,14 +252,6 @@ class NativeIndex {
     ScoringScratch scratch_;
 };
 
-/// Return an owning numpy int32 array built from a vector.
-nb::ndarray<nb::numpy, std::int32_t> to_numpy_i32(std::vector<std::int32_t>&& v) {
-    auto* held = new std::vector<std::int32_t>(std::move(v));
-    nb::capsule owner(held,
-                      [](void* p) noexcept { delete static_cast<std::vector<std::int32_t>*>(p); });
-    return nb::ndarray<nb::numpy, std::int32_t>(held->data(), {held->size()}, owner);
-}
-
 /// A corpus's tie-break ranks plus one operator's attribute priority.
 ///
 /// Python builds the rank matrix in exact unbounded-precision integer arithmetic and passes
@@ -317,7 +310,7 @@ class NativeRanker {
         prepare(scores);
         std::vector<DocId> out(static_cast<std::size_t>(table_.n_docs));
         ranking::rank_full(keys_, out, checked_selection(selection));
-        return to_numpy_i32(std::vector<std::int32_t>(out.begin(), out.end()));
+        return to_numpy(std::move(out));
     }
 
     nb::ndarray<nb::numpy, std::int32_t> top_k(const F64Array& scores,
@@ -336,7 +329,7 @@ class NativeRanker {
         const auto take = static_cast<std::size_t>(m);
         std::vector<DocId> out(take);
         ranking::select_top(keys_, take, out, checked_selection(selection));
-        return to_numpy_i32(std::vector<std::int32_t>(out.begin(), out.end()));
+        return to_numpy(std::move(out));
     }
 
   private:
@@ -530,7 +523,7 @@ NB_MODULE(_tfidf_native, m) {
                 flat.push_back(lo);
                 flat.push_back(hi);
             }
-            return to_numpy_i32(std::move(flat));
+            return to_numpy(std::move(flat));
         },
         nb::arg("sorted_scores"), nb::arg("tau"), nb::rv_policy::move,
         "Flattened [lo, hi) pairs.");
@@ -544,7 +537,7 @@ NB_MODULE(_tfidf_native, m) {
                 flat.push_back(lo);
                 flat.push_back(hi);
             }
-            return to_numpy_i32(std::move(flat));
+            return to_numpy(std::move(flat));
         },
         nb::arg("sorted_scores"), nb::arg("tau"), nb::rv_policy::move);
 

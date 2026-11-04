@@ -7,10 +7,10 @@
 
 #include <tfidf/core/types.hpp>
 
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace tfidf::reduce {
@@ -120,7 +120,7 @@ struct Pairwise {
 struct Exact {
     std::vector<Real> partials;
 
-    void add(Real x) noexcept {
+    void add(Real x) noexcept {  // noexcept: std::bad_alloc from push_back calls std::terminate
         std::size_t out = 0;
         for (const Real y_const : partials) {
             Real y = y_const;

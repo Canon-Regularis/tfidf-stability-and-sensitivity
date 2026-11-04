@@ -6,10 +6,10 @@
 #pragma once
 
 #include <tfidf/core/types.hpp>
-#include <tfidf/ranking/attributes.hpp>
 #include <tfidf/ranking/sort_keys.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <span>

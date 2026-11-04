@@ -7,8 +7,8 @@
 
 #include <tfidf/core/types.hpp>
 
+#include <cstddef>
 #include <cstdint>
-#include <span>
 #include <vector>
 
 namespace tfidf::ranking {

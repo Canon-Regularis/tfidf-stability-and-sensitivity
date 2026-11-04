@@ -11,9 +11,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <random>
+#include <span>
 #include <vector>
 
 using namespace tfidf;
