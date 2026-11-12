@@ -1,15 +1,9 @@
 # Wheels and a citable archive.
-#
-# Publishing is now straightforward because the code is Apache-2.0. Before the
-# licence split it was not: the repository was CC BY 4.0 throughout, which
-# Creative Commons explicitly advises against for software: no patent grant,
-# and attribution terms that do not map onto compiled binaries. The prose and
-# generated reports remain CC BY 4.0; see LICENSE.md.
-#
-# Every wheel is verified before release by running the suite against the
-# INSTALLED package rather than the source tree. A wheel that builds but omits
-# a data file (the stopword list, say, or the vendored stemmer) would pass
-# every source-tree test and fail for the first person who installed it.
+
+# Each wheel is tested as the INSTALLED package, not the source tree, so a
+# wheel that omits a data file (the stopword list, the vendored stemmer) fails
+# here. The code is Apache-2.0; prose and generated reports are CC BY 4.0.
+# Rationale: docs/engineering_notes.md#release-licence-split
 
 name: release
 
@@ -21,11 +15,9 @@ on:
 permissions:
   contents: read
 
-# One run per ref at a time. Without this every push to a branch leaves its
-# predecessor running to completion against code nobody will merge, which on a
-# matrix this wide is the difference between a queue that drains and one that
-# does not. Scheduled runs are keyed by workflow rather than ref so a nightly
-# cannot cancel a push.
+# One run per ref at a time. cancel-in-progress is false, so a newer run for
+# the same ref waits for the one in progress instead of cancelling it, and a
+# release is not abandoned half-made.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -57,45 +49,23 @@ jobs:
             requirements-dev.txt
       - run: python -m pip install --upgrade pip build twine
       - name: The tag and the tree must state the same version
-        # `check_versions.py` has taken a `--tag` since it was written, and its
-        # own docstring says why: "`release.yml` triggers on `v*` and hands the
-        # tag to nothing that checks it, so `git tag v0.3.0` on a tree declaring
-        # 0.2.0 would build, test, gate and publish 0.2.0 under a 0.3.0
-        # release." Nothing then passed it. The only invocation anywhere was
-        # `ci.yml`, without `--tag` -- and `ci.yml` triggers on branches and
-        # pull requests, not on tags, so on a release no version check ran at
-        # all. The guard existed, worked, and was wired to nothing.
-        #
-        # Here rather than in `publish`, because `publish` needs this job and a
-        # tag naming the wrong version should stop the build before any artefact
-        # is made, not after three matrices have run.
-        #
-        # Guarded on the ref being a tag: `workflow_dispatch` runs this workflow
-        # from a branch, where `github.ref_name` is "main" and the comparison
-        # would be meaningless rather than informative.
+        # Without this, `git tag v0.3.0` on a tree declaring 0.2.0 publishes
+        # 0.2.0 under a 0.3.0 release. It runs in `sdist`, which every later job
+        # needs, so a wrong tag stops the build before any artefact is made.
+        # Rationale: docs/engineering_notes.md#release-tag-version-check
         if: startsWith(github.ref, 'refs/tags/v')
         run: python scripts/check_versions.py --tag "${{ github.ref_name }}"
       - run: python -m build --sdist
       - name: The distribution metadata must be valid before it is published
-        # `twine check --strict` is what PyPI itself applies on upload, so
-        # without it the first time the metadata is validated is the moment it
-        # is rejected -- after the tag exists, the wheels are built and the
-        # release is half-made. --strict makes a rendering warning on the long
-        # description an error too, since a README that will not render is a
-        # published page nobody can read.
+        # PyPI applies the same checks on upload, so this rejects bad metadata
+        # before the release is half-made. --strict also fails on a warning,
+        # such as a missing long description or description content type.
         run: python -m twine check --strict dist/*
       - name: The sdist must build from vendored C++ sources alone
-        # Renamed: the old name, "must build without network access", is not what
-        # this does and cannot be. `[build-system] requires`
-        # names scikit-build-core and nanobind, which come from PyPI, so a
-        # `--no-index` run fails before it reaches any C++ at all. Adding that
-        # flag was tried and reverted for exactly this reason.
-        #
-        # What the step does test is real and worth keeping: building the sdist
-        # compiles the extension, and the C++ third-party sources are vendored
-        # under cpp/third_party/, so a missing or unvendored C++ dependency
-        # fails here. The Python build backend is a declared dependency rather than a
-        # vendored one, and was never claimed otherwise.
+        # `pip download` unpacks the sdist and asks its build backend for the
+        # metadata. The build requirements (scikit-build-core, nanobind) come
+        # from PyPI, so this step needs network access; the C++ is vendored.
+        # Rationale: docs/engineering_notes.md#sdist-vendored-cpp-check
         run: |
           python -m pip download --no-deps --no-binary :all: --dest /tmp/check dist/*.tar.gz
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
@@ -107,13 +77,10 @@ jobs:
           retention-days: 7
 
   wheels:
-    # The same reusable job `wheels.yml` runs nightly and on any build-system
-    # change, so the build a release performs has already been exercised.
-    #
-    # `needs: [sdist]` is what makes the version check above a gate. Without it
-    # the matrix started alongside `sdist` and ran to completion even when the
-    # tag named the wrong version -- which the comment on that check already
-    # claimed it prevented.
+    # `wheels.yml` calls the same reusable workflow nightly and on build-system
+    # changes, so this build has already run before a release. `needs: [sdist]`
+    # makes the version check a gate: a wrong tag stops the matrix before it
+    # starts.
     needs: [sdist]
     uses: ./.github/workflows/build-wheels.yml
     with:
@@ -154,14 +121,9 @@ jobs:
           echo "installing $wheel"
           python -m pip install "$wheel"
       - name: A release build must not be fast-math or arch-tuned
-        # The manifest refuses to stamp such a run as reproducible, so shipping
-        # one would ship a binary that cannot produce publishable numbers.
-        #
-        # `is_reproducible_build` is True whenever no native backend is loaded
-        # (manifest.py), so the backend's presence is asserted first and the
-        # flags are read off the extension.
-        #
-        # Run outside the checkout so the installed wheel is what is imported.
+        # The manifest refuses to stamp such a build as reproducible. With no
+        # native backend loaded `is_reproducible_build` is True, so the backend
+        # is required first. Runs outside the checkout to import the wheel.
         run: |
           cd "$RUNNER_TEMP"
           python -m tfidf_stability.cli.main info --require-native
@@ -183,31 +145,24 @@ jobs:
           print("build is reproducible:", m.is_reproducible_build)
           PY
       - name: The pipeline digest must be the value this repository records
-        # `--verbose` alone printed the digest and exited 0 whatever it said, so
-        # this job asserted nothing: there was no recorded value to compare
-        # against, and `determinism.yml` proves only that every platform agrees
-        # with every other -- not that they agree with what was published.
-        # A change moving all platforms together passed both.
+        # `--verbose` prints the digest and always exits 0; `--check` compares
+        # it with the recorded value. `determinism.yml` shows only that the
+        # platforms agree, so a change that moves all of them needs this check.
         run: |
           python scripts/snapshot.py --verbose
           python scripts/snapshot.py --check
       - name: Record what the wheel depends on
-        # Generated from the environment the wheel was installed into, so it
-        # describes the dependency closure a user actually resolves rather than
-        # the floors `pyproject.toml` declares.
-        #
-        # What it does not cover: the vendored C++ and the Snowball stemmer are
-        # compiled or copied into the wheel and are not Python distributions, so
-        # no environment scan can see them. THIRD_PARTY_NOTICES.md is the record
-        # for those, and `scripts/check_vendored.py` is what verifies it.
+        # Scans the environment the wheel is installed into: the resolved
+        # dependency closure, not the `pyproject.toml` floors. Vendored C++ and
+        # the Snowball stemmer are not distributions; THIRD_PARTY_NOTICES.md
+        # records them and `scripts/check_vendored.py` verifies it.
         run: |
           set -euo pipefail
-          # A clean environment holding the wheel and nothing else. Scanning this
-          # job's own environment would describe requirements-dev.txt -- pytest,
-          # ruff, mypy and their closure -- which is not what anyone installs.
+          # A clean environment holding only the wheel. This job's own
+          # environment also holds requirements-dev.txt.
           python -m venv /tmp/sbom-env
-          # Re-derived: `$wheel` was set in an earlier step, and a shell variable
-          # does not survive one.
+          # A shell variable does not survive across steps, so `$wheel` is set
+          # again here.
           wheel=$(ls wheelhouse/*cp312*manylinux*x86_64*.whl | head -1)
           /tmp/sbom-env/bin/python -m pip install --quiet --upgrade pip "$wheel"
           python -m pip install --quiet cyclonedx-bom
@@ -222,15 +177,10 @@ jobs:
           path: sbom.cyclonedx.json
           retention-days: 7
 
-  # A rehearsal on TestPyPI before the upload that cannot be undone. A PyPI
-  # filename is permanent: a wheel published with the wrong contents cannot be
-  # replaced, only yanked and superseded by a new version. This job uploads the
-  # same artefacts to an index where that does not matter, so a metadata or
-  # naming fault surfaces while the version number is still reusable.
-  #
-  # `skip-existing` because TestPyPI rejects a filename it already holds, and a
-  # re-run of a release must not fail on that alone. Every other failure here is
-  # a real one and blocks `publish`.
+  # A PyPI filename is permanent, so the same artefacts go to TestPyPI first.
+  # `skip-existing` lets a re-run pass over files TestPyPI already holds; any
+  # other failure blocks `publish`.
+  # Rationale: docs/engineering_notes.md#testpypi-rehearsal
   testpypi:
     name: rehearse on TestPyPI
     needs: [sdist, wheels, determinism-gate]

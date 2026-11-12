@@ -1,13 +1,8 @@
 """The TF-IDF vectoriser (README section 2.2): ``w_i(t) = tf_i(t) * idf(t)``.
 
-Holds the frozen vocabulary, the IDF vector, the document matrix in CSR form and
-the precomputed row norms, and exposes all of them: section 1.2 requires
-intermediate quantities to stay inspectable.
-
-:meth:`TfidfVectoriser.transform_query` embeds queries with the same vocabulary
-and the same IDF mapping as the corpus, as section 3 requires. IDF is never
-recomputed for a query and the vocabulary is never extended; both are asserted
-rather than assumed (``spec_addenda.md#g12``).
+Exposes the vocabulary, IDF, CSR matrix and row norms for inspection (section 1.2).
+:meth:`TfidfVectoriser.transform_query` reuses the corpus vocabulary and IDF (section 3);
+both are asserted rather than assumed (``spec_addenda.md#g12``).
 """
 
 from __future__ import annotations
@@ -32,13 +27,11 @@ __all__ = ["TfidfModel", "TfidfVectoriser"]
 
 
 def _exact_tf(weight: float, idf: float, length: int) -> float:
-    """Recover the exact ``tf`` behind a stored weight.
+    """Recover the exact ``tf`` behind a stored weight ``fl(tf * idf)``.
 
-    ``tf`` is ``count / length`` for an integer ``count`` and ``weight`` is
-    ``fl(tf * idf)``. Dividing the weight back by ``idf`` does not return ``tf``
-    (two roundings do not cancel), but it stays far inside half a unit of the
-    integer count, so recover the count and divide once. See the note at the call
-    site.
+    ``tf`` is ``count / length`` for an integer ``count``. ``weight / idf`` does not return
+    ``tf`` (two roundings do not cancel), but ``weight / idf * length`` stays far within 0.5
+    of ``count``, so the count is rounded and divided once.
     """
     if idf == 0.0 or length == 0:
         return 0.0
@@ -49,14 +42,9 @@ def _exact_tf(weight: float, idf: float, length: int) -> float:
 class TfidfModel:
     """A fitted TF-IDF model, retaining every intermediate.
 
-    Attributes:
-        vocabulary: The frozen vocabulary; identifiers are its byte-sorted order.
-        idf: IDF per term identifier.
-        matrix: Document-term TF-IDF matrix in CSR form, one row per document.
-        norms: ``||w_i||_2`` per document, precomputed under ``reduction``.
-        lengths: ``L_i``, the exact in-vocabulary token count per document.
-        doc_ids: Stable document identifiers, parallel to the matrix rows.
-        reduction: The policy every sum in this model was computed under.
+    Holds the frozen ``vocabulary`` (byte-sorted identifiers), ``idf`` per term, the CSR
+    ``matrix`` (one row per document), ``norms`` (``||w_i||_2`` under ``reduction``), ``lengths``
+    (``L_i``, exact in-vocabulary token counts) and stable ``doc_ids`` parallel to the rows.
     """
 
     vocabulary: Vocabulary
@@ -70,10 +58,9 @@ class TfidfModel:
     def __post_init__(self) -> None:
         """Normalise ``reduction`` to its member.
 
-        ``similarity/scoring.py`` selects the summation policy with ``is``, so
-        an uncoerced string takes the compensated arm, while
-        ``utils/numerics.py`` looks the same value up in a dict and returns
-        the naive answer. One string, two behaviours.
+        ``similarity/scoring.py`` selects the summation policy with ``is`` and
+        ``utils/numerics.py`` with a dict lookup, so an uncoerced ``"naive"`` fails
+        the ``is`` test in the first and matches the naive entry in the second.
         """
         object.__setattr__(self, "reduction", Reduction(self.reduction))
 
@@ -89,10 +76,9 @@ class TfidfModel:
     def zero_norm_documents(self) -> tuple[int, ...]:
         """Indices of documents that embed to the zero vector.
 
-        Section 2.3 gives these a similarity of 0 against every query, so they
-        sit at the bottom of every ranking as one large block of exact ties,
-        which is the regime the tie-break analysis of section 4.5 covers. Their
-        count is reported in every experiment.
+        Section 2.3 gives these similarity 0 against every query, so they form one
+        block of exact ties at the bottom of every ranking (section 4.5 tie-break
+        regime). Every experiment reports their count.
         """
         return tuple(i for i, n in enumerate(self.norms) if n == 0.0)
 
@@ -117,16 +103,10 @@ class TfidfModel:
                     "term_id": t,
                     "df": self.vocabulary.df[t],
                     "idf": self.idf[t],
-                    # ``w / idf`` does not recover ``tf``: two roundings do not
-                    # cancel, and the round trip misses by an ulp in 9.01% of a
-                    # sweep over 184,080 realistic (N, df, L, count) cases
-                    # (N=100, df=1, L=6, count=5 gives 0x1.aaaaaaaaaaaaap-1 for
-                    # a true 0x1.aaaaaaaaaaaabp-1). `tfidf inspect` printed that
-                    # field, off by the quantity under study.
-                    #
-                    # ``tf`` is ``count / L`` for an integer count, so recover
-                    # the count (the rounding is far below 0.5) and divide once.
-                    # Exact on all 184,080 of those cases.
+                    # ``w / idf`` misses ``tf`` by an ulp in 9.01% of 184,080 cases;
+                    # ``_exact_tf`` rounds to the integer count and divides by
+                    # ``L`` once, exact on all of them.
+                    # Rationale: docs/engineering_notes.md#exact-tf-recovery
                     "tf": _exact_tf(w, self.idf[t], self.lengths[i]),
                     "weight": w,
                 }
@@ -138,8 +118,8 @@ class TfidfModel:
         """SHA-256 over the vocabulary, IDF and every weight, byte-exactly.
 
         Hashes the raw binary64 bit patterns rather than a decimal rendering, so
-        a single-ulp change anywhere moves the digest. Backbone of the
-        reproducibility snapshot test.
+        a single-ulp change anywhere moves the digest. ``reduction``, ``doc_ids`` and
+        ``lengths`` are not hashed. The model manifest records it as ``model_digest``.
         """
         h = hashlib.sha256()
         h.update(self.vocabulary.digest().encode())
@@ -159,12 +139,9 @@ class TfidfModel:
 class TfidfVectoriser:
     """Fits a :class:`TfidfModel` and embeds queries into the same space.
 
-    Args:
-        vocabulary_config: ``min_df`` / ``max_df`` / ``max_features`` options.
-        log_impl: Which logarithm to use for IDF. Defaults to the
-            correctly-rounded one; see ``spec_addenda.md#g13``.
-        reduction: Summation policy for norms. Defaults to the left-to-right
-            fold section 2.3 specifies.
+    ``vocabulary_config`` holds ``min_df`` / ``max_df`` / ``max_features``. ``log_impl`` is
+    the IDF logarithm, correctly rounded by default (``spec_addenda.md#g13``). ``reduction``
+    is the norm summation policy, by default the left-to-right fold of section 2.3.
     """
 
     vocabulary_config: VocabularyConfig = field(default_factory=VocabularyConfig)
@@ -174,8 +151,8 @@ class TfidfVectoriser:
     def __post_init__(self) -> None:
         """Normalise both enums to their members.
 
-        Coerced at construction only, since the builder is mutable by design;
-        a field reassigned afterwards is caught downstream by the model.
+        Coerced at construction only, since the builder is mutable; a field
+        reassigned afterwards is caught downstream by the model.
         """
         self.log_impl = LogImpl(self.log_impl)
         self.reduction = Reduction(self.reduction)
@@ -187,14 +164,9 @@ class TfidfVectoriser:
     ) -> TfidfModel:
         """Build the vocabulary, IDF and document matrix from feature streams.
 
-        Args:
-            documents: One preprocessed feature sequence per document.
-            doc_ids: Stable identifiers, defaulting to ``"0"``, ``"1"``, ...
-                Separate from the ranking tie-break identifiers, which live in
-                the attribute table.
-
-        Returns:
-            The fitted :class:`TfidfModel`.
+        ``documents`` holds one preprocessed feature sequence per document. ``doc_ids``, stable
+        identifiers defaulting to ``"0"``, ``"1"``, ..., are separate from the ranking tie-break
+        identifiers in the attribute table. Returns the fitted :class:`TfidfModel`.
         """
         if doc_ids is None:
             doc_ids = [str(i) for i in range(len(documents))]
@@ -236,11 +208,9 @@ class TfidfVectoriser:
     def transform_query(features: Sequence[str], model: TfidfModel) -> SparseVector:
         """Embed a query using the model's own vocabulary and IDF.
 
-        Section 3: query vectors are "embedded using the same vocabulary V and
-        IDF mapping as the corpus documents, ensuring that all similarity
-        computations take place in a common vector space". No IDF is recomputed,
-        the vocabulary is not extended, and out-of-vocabulary query terms are
-        dropped as they are for documents.
+        Section 3: queries use "the same vocabulary V and IDF mapping as the corpus
+        documents". IDF is not recomputed, the vocabulary is not extended, and
+        out-of-vocabulary query terms are dropped as they are for documents.
         """
         tf, _ = term_frequencies(features, model.vocabulary)
         return SparseVector(

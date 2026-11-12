@@ -1,38 +1,8 @@
 """Query construction, and the leave-one-out protocol (section 7.1, G10).
 
-Section 7.1 names three query modes and evaluates two:
-
-* **user-profile queries**: aggregate a user's interacted items;
-* **leave-one-out**: hold one interacted item out as the target, build the
-  profile from the rest;
-* **item-as-query**: "part of the implementation but not evaluated in the
-  present experiments".
-
-The leave-one-out description is four sentences and leaves five decisions open,
-each of which changes the reported margin distribution. They are pinned here and
-recorded on the :class:`Query`, so a result traces back to the protocol that
-produced it (``spec_addenda.md#g10``).
-
-1. **Which item is held out.** Every interacted item in turn, all folds, no
-   sampling. The query count is then a function of the data rather than of a
-   seed.
-2. **Does the held-out item stay in the corpus?** Yes. It is the retrieval
-   target; removing it makes the fold unanswerable.
-3. **Are the user's remaining profile items excluded from the candidate set?**
-   Yes, the most consequential unstated choice in section 7.1. Those items
-   contributed the query's text, so left in they score near the top, occupy the
-   top-k and dominate the margin distribution with an artefact. Excluding them
-   makes the measurement about retrieval rather than self-similarity.
-4. **Eligibility.** Users with at least five qualifying interactions
-   (:func:`~tfidf_stability.profiles.user_profile.eligible_users`).
-5. **What counts as an interaction.** A weight threshold from the dataset
-   configuration; for MovieLens, ``rating >= 4.0``.
-
-Decision 3 has a knock-on the paper never mentions: the candidate set is smaller
-than the corpus and differs per fold, so ``N`` differs per query and any
-statistic aggregated across folds has a varying denominator.
-:attr:`Query.n_candidates` carries it, so that is visible rather than assumed
-constant.
+Each item of every user passing :func:`~tfidf_stability.profiles.user_profile.eligible_users` is a
+:class:`Query` target and a candidate; by default the rest are not, so :attr:`Query.n_candidates`
+varies (``spec_addenda.md#g10``). Rationale: docs/engineering_notes.md#leave-one-out-protocol
 """
 
 from __future__ import annotations
@@ -73,16 +43,9 @@ class QueryMode(str, Enum):
 class Query:
     """One evaluable query, with the protocol decisions that shaped it.
 
-    Attributes:
-        query_id: Unique and deterministic: ``{user}::{held_out}`` for a fold.
-        mode: Which construction.
-        features: The query's preprocessed feature stream.
-        profile: The profile it came from, or ``None`` for item-as-query.
-        target: The held-out item a leave-one-out fold is trying to retrieve.
-        excluded: Documents removed from the candidate set (decision 3). The
-            target is absent from it and stays scoreable.
-        n_candidates: Corpus size minus exclusions. Varies per fold, so it is
-            carried rather than inferred.
+    ``query_id`` is unique and deterministic, ``{user}::{held_out}`` for a fold; ``profile`` is
+    ``None`` for item-as-query. ``excluded`` documents leave the candidates (decision 3) and never
+    include ``target``; ``n_candidates`` is corpus size minus exclusions, which varies per fold.
     """
 
     query_id: str
@@ -148,10 +111,9 @@ class QuerySet:
     def candidate_spread(self) -> tuple[int, int, int]:
         """``(min, median, max)`` candidate count across queries (G19).
 
-        Excluding a user's profile makes ``N`` differ from query to query, so a
-        margin distribution pools populations of different sizes and a
-        disagreement rate has a varying denominator. The spread makes that
-        visible rather than assumed away.
+        Excluding a user's profile makes ``N`` differ per query, so a margin
+        distribution pools populations of different sizes and a disagreement
+        rate has a varying denominator. The spread records that variation.
         """
         counts = sorted(q.n_candidates for q in self.queries)
         if not counts:
@@ -178,16 +140,9 @@ class QuerySet:
 def _require_feature_bearing(aggregation: ProfileAggregation) -> None:
     """Reject an aggregation the query grid cannot carry.
 
-    A `Query` travels as a feature stream, and `Profile.features` is documented
-    as "Empty for the vector-space aggregations, which never build one" -- those
-    carry the profile as a vector instead. Nothing in the grid layer embeds one,
-    so a vector aggregation produced a query with no features, `evaluate` counted
-    every one of them as a degenerate profile and skipped it, and the caller got
-    an empty grid and an `n_degenerate` equal to its size. No error, no queries.
-
-    Two of the three documented aggregations behaved that way. Raising here says
-    so at the point of the choice, in the style `build_query_grid` already uses
-    for the item-as-query mode it declines to run.
+    Raises ValueError unless ``aggregation`` is TEXT_CONCAT: a `Query` travels as a feature
+    stream, the vector-space aggregations leave `UserProfile.features` empty, and `evaluate`
+    would skip every such query as degenerate. `build_query_grid` raises alike for item-as-query.
     """
     if ProfileAggregation(aggregation) is not ProfileAggregation.TEXT_CONCAT:
         raise ValueError(
@@ -256,27 +211,11 @@ def leave_one_out_queries(
     exclude_profile_items: bool = True,
     doc_ids: Sequence[str] | None = None,
 ) -> QuerySet:
-    """Every fold for every eligible user (G10).
+    """Every fold for every eligible user, as a :class:`QuerySet` (G10, G11).
 
-    For each eligible user and each of their items in turn, the item becomes the
-    target and the remainder becomes the profile. The target stays in the corpus
-    (decision 2); the remaining profile items leave the candidate set
-    (decision 3).
-
-    Args:
-        grouped: ``{user_id: (doc_id, ...)}`` from
-            :func:`~tfidf_stability.profiles.user_profile.group_interactions`.
-        features_by_doc: Preprocessed feature streams.
-        aggregation: Profile aggregation mode (G11).
-        min_interactions: Eligibility threshold (decision 4).
-        exclude_profile_items: Decision 3, default ``True``. ``False`` is a
-            declared ablation: it changes what the margin distribution measures.
-        doc_ids: The corpus's identifiers, for the candidate count. Defaults to
-            the keys of ``features_by_doc``.
-
-    Returns:
-        The :class:`QuerySet`. Query count is ``sum(len(items))`` over eligible
-        users: a function of the data alone, no sampling and no seed.
+    Each item in ``grouped`` (:func:`~tfidf_stability.profiles.user_profile.group_interactions`) of
+    a user meeting ``min_interactions`` is one target; the rest leave the candidates unless
+    ``exclude_profile_items`` is False. ``doc_ids``, else ``features_by_doc``, sizes the corpus.
     """
     _require_feature_bearing(aggregation)
     users = eligible_users(grouped, min_interactions)
@@ -322,11 +261,8 @@ def item_as_query(
     """A single item used as its own query.
 
     Section 7.1 lists this as "part of the implementation but not evaluated in
-    the present experiments", so it is provided and kept out of the reported
-    results.
-
-    ``exclude_self`` defaults to ``True``: an item is its own nearest neighbour
-    at similarity 1, which tells you nothing and displaces a real result.
+    the present experiments". ``exclude_self`` defaults to ``True``: an item is
+    its own nearest neighbour at similarity 1, which is uninformative.
     """
     total_docs = len(doc_ids) if doc_ids is not None else len(features_by_doc)
     excluded = frozenset({doc_id}) if exclude_self else frozenset()

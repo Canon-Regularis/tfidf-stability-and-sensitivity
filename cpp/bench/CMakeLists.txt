@@ -1,11 +1,11 @@
 # =============================================================================
 # Native microbenchmarks (nanobench, vendored).
-#
-# These measure individual kernels. pytest-benchmark measures across the FFI
-# boundary and so cannot separate scoring cost from marshalling cost; this
-# binary can. Built only with -DTFIDF_BUILD_BENCH=ON, and normally with the
-# `bench` preset, which enables arch tuning and is therefore NOT reproducible.
 # =============================================================================
+
+# These time individual kernels; pytest-benchmark measures across the FFI
+# boundary and cannot separate kernel cost from marshalling cost. Built only with
+# -DTFIDF_BUILD_BENCH=ON, normally through the `bench` preset, which enables
+# arch tuning and so is not reproducible.
 add_library(tfidf_nanobench INTERFACE)
 target_include_directories(tfidf_nanobench INTERFACE
   "${CMAKE_SOURCE_DIR}/cpp/third_party/nanobench")

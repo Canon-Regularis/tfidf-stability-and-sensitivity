@@ -1,1 +1,1 @@
-"""Hashing, IO, logging, numerics policies and validation."""
+"""Hashing, IO, logging, numerics policies, packaged paths and validation."""

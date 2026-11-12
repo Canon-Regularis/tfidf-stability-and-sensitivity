@@ -1,28 +1,8 @@
 """TF-IDF vector perturbation: section 4.2's three-term decomposition.
 
-Section 4.2 writes ``w = tf (*) idf`` and expands
-
-    w' - w = (dtf) (*) idf + tf (*) (didf) + (dtf) (*) (didf)
-
-then applies ``||a (*) b||_2 <= ||a||_2 ||b||_inf`` termwise to get
-
-    ||w' - w||_2 <= ||dtf||_2 ||idf||_inf
-                  + ||tf||_2  ||didf||_inf
-                  + ||dtf||_2 ||didf||_inf
-
-separating a **local** document edit, a **global** corpus change, and their
-**interaction**.
-
-All three terms are evaluated here alongside the quantity they bound, so a caller
-can assert the inequality and report how tight it was. Which term dominates is
-also reported: section 4.2 claims the interaction term provides "a natural
-mechanism for perturbation amplification" and offers no evidence, and the
-decomposition makes that measurable.
-
-Everything is computed on the union vocabulary (``spec_addenda.md#g5``), since a
-corpus perturbation moves the vocabulary while the bound as stated presupposes a
-fixed index set. The exact Pythagorean split is reported alongside, separating
-genuine coordinate change from vocabulary churn.
+Evaluates ``||dtf||_2 ||idf||_inf`` (local), ``||tf||_2 ||didf||_inf`` (global) and
+``||dtf||_2 ||didf||_inf`` (interaction), whose sum bounds ``||w' - w||_2``, on the union
+vocabulary (``spec_addenda.md#g5``). Rationale: docs/engineering_notes.md#three-term-vector-bound
 """
 
 from __future__ import annotations
@@ -121,13 +101,10 @@ class VectorPerturbation:
 
     @property
     def pythagoras_holds(self) -> bool:
-        """The three parts are supported on disjoint coordinate sets, so
+        """Whether ``||w' - w||^2 = shared^2 + gained^2 + lost^2`` holds to rounding.
 
-            ||w' - w||^2 = shared^2 + gained^2 + lost^2
-
-        holds exactly in the reals and to rounding in binary64. A cheap guard
-        against an alignment bug: a misaligned index breaks this identity long
-        before it breaks any inequality.
+        The three parts lie on disjoint coordinate sets, so the identity is exact in
+        the reals. A misaligned index breaks it long before it breaks any inequality.
         """
         lhs = self.bound.observed**2
         rhs = self.shared_shift**2 + self.gained_mass**2 + self.lost_mass**2
@@ -155,15 +132,9 @@ def analyse_vector_shift(
 ) -> VectorPerturbation:
     """Decompose one document's TF-IDF movement between two models.
 
-    Args:
-        before, after: Models fitted on the unperturbed and perturbed corpora.
-        doc_id: A document present in both models. The section 4.2 bound compares
-            a document with itself, so one that was added or removed has no
-            ``w' - w`` to bound.
-        policy: Reduction policy for every norm.
-
-    Raises:
-        KeyError: If the document is absent from either model.
+    ``before`` and ``after`` are fitted on the unperturbed and perturbed corpora, and
+    ``policy`` sets the reduction for every norm. Raises ``KeyError`` unless ``doc_id``
+    is in both models: the section 4.2 bound compares a document with itself.
     """
     if doc_id not in before.doc_ids or doc_id not in after.doc_ids:
         raise KeyError(

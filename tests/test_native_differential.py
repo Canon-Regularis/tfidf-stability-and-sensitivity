@@ -1,24 +1,8 @@
-"""Reference vs native: bit-exact equivalence.
+"""Reference versus native evaluator: bit-exact equivalence.
 
-The claim under test: the C++20 evaluator performs the same floating-point
-operations in the same order as the pure-Python reference, so section 6's "no
-numerical optimisation techniques are employed" stays literally true while the
-experiment grid still runs in minutes.
-
-Comparison is on bit patterns, never tolerances; ``pytest.approx`` does not
-appear in this file. A tolerance would pass while permitting the divergence this
-project exists to detect.
-
-Three implementations are compared:
-
-* the Python reference (normative);
-* the native **TAAT** kernel, which walks postings lists out of an inverted
-  index into a dense accumulator;
-* the native **DAAT** kernel, which merges each document's row against the query
-  and never builds an inverted index at all.
-
-TAAT and DAAT share no data structure and no loop nesting, so their agreeing to
-the last bit says more than either matching a recorded expectation.
+The C++20 evaluator performs the same floating-point operations in the same
+order as the Python reference, so comparison is on bit patterns, never on a
+tolerance. Rationale: docs/engineering_notes.md#native-differential-bit-exact
 """
 
 from __future__ import annotations
@@ -81,11 +65,9 @@ def index(model: TfidfModel):  # type: ignore[no-untyped-def]
 def test_build_is_reproducible() -> None:
     """A build with fast-math or arch tuning must never produce published numbers.
 
-    The contraction check is per compiler because they spell it differently.
-    MSVC has no negative form of ``/fp:contract``: the flag list carried
-    ``/fp:contract-``, MSVC answered ``warning D9002: ignoring unknown option``
-    and went on contracting, so the assertion matched a substring of a flag that
-    did nothing. ``/fp:strict`` is the documented way to forbid it there.
+    The contraction check is per compiler. MSVC has no negative form of
+    ``/fp:contract`` and ignores ``/fp:contract-`` as an unknown option, so
+    ``/fp:strict`` is the flag that forbids FMA contraction there.
     """
     info = build_info()
     assert info["reproducible"] is True, f"non-reproducible build: {info}"
@@ -95,14 +77,18 @@ def test_build_is_reproducible() -> None:
     flags = str(info["numeric_flags"])
     compiler = str(info["compiler_id"])
     if compiler == "MSVC":
-        # "/fp:contract-" is the spelling that never worked.
+        # MSVC ignores "/fp:contract-" as an unknown option.
         assert "/fp:strict" in flags, f"MSVC may contract to FMA: {flags}"
     else:
         assert "-ffp-contract=off" in flags, f"{compiler} may contract to FMA: {flags}"
 
 
 def test_float_environment_is_trustworthy() -> None:
-    """Catches a BLAS having set MXCSR flush-to-zero when numpy imported."""
+    """The run-time floating-point self-test reports no failure flag.
+
+    A BLAS loaded with numpy can set flush-to-zero or denormals-are-zero
+    process-wide, which flushes subnormal score differences to zero.
+    """
     flags = int(nat.fp_selftest())
     assert flags == 0, nat.fp_describe(flags)
 
@@ -112,7 +98,7 @@ def test_float_environment_is_trustworthy() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("policy", list(Reduction))
 def test_reduction_policies_are_bit_exact(policy: Reduction) -> None:
-    """Every policy, over lengths spanning the pairwise tree-shape boundaries."""
+    """Every policy is bit-exact over lengths that span the pairwise tree shapes."""
     rng = random.Random(1234)
     for _ in range(60):
         n = rng.randint(0, 600)
@@ -125,10 +111,9 @@ def test_reduction_policies_are_bit_exact(policy: Reduction) -> None:
 def test_pairwise_agrees_at_tree_shape_boundaries(n: int) -> None:
     """Pairwise is the policy most sensitive to the shape of the summation tree.
 
-    The two implementations started from different formulations (recursive split
-    at n//2 versus a streaming binary-counter merge) and first diverged at
-    n = 129. Both are legitimate; the streaming one is the pinned specification
-    because the dot-product kernel cannot see n in advance.
+    The pinned specification is a streaming binary-counter merge rather than a
+    recursive split at n//2, because the dot-product kernel cannot see n in
+    advance; the two shapes first differ at n = 129.
     """
     v = ([1.0] + [1e-17] * (n - 1)) if n else []
     got = nat.reduce_sum(np.array(v, dtype=np.float64), _policy(Reduction.PAIRWISE))
@@ -136,8 +121,11 @@ def test_pairwise_agrees_at_tree_shape_boundaries(n: int) -> None:
 
 
 def test_exact_reduction_matches_math_fsum() -> None:
-    """`Exact` is the ground truth for the noise-floor study, so both languages
-    must share it down to CPython's half-even correction."""
+    """`Exact` agrees with ``math.fsum`` down to CPython's half-even correction.
+
+    `Exact` is the ground truth for the noise-floor study, so both languages
+    must share it.
+    """
     cases = [
         [1e-16, 1.0, 1e16],  # CPython's own half-even regression case
         [1e100, 1.0, -1e100, 1.0],  # catastrophic cancellation
@@ -208,11 +196,11 @@ def test_scores_are_bit_exact(
 
 
 def test_taat_and_daat_agree(model: TfidfModel, index, corpus: list[list[str]]) -> None:  # type: ignore[no-untyped-def]
-    """Two structurally unrelated traversals of the same data.
+    """Two structurally unrelated traversals of the same data agree bit for bit.
 
     TAAT accumulates over postings lists into a dense array; DAAT merges each
-    row independently with no inverted index. Identical bits from both leaves an
-    indexing or accumulation bug nowhere to hide.
+    row independently with no inverted index, so the two share no data
+    structure and no loop nesting.
     """
     rng = random.Random(31337)
     alpha = sorted({t for d in corpus for t in d})
@@ -227,8 +215,10 @@ def test_taat_and_daat_agree(model: TfidfModel, index, corpus: list[list[str]]) 
 
 
 def test_scratch_reuse_does_not_leak_between_queries(model: TfidfModel, index) -> None:  # type: ignore[no-untyped-def]
-    """The dense accumulator is reused across calls; a stale entry would
-    silently contaminate the next query's scores."""
+    """The dense accumulator reused across calls carries no state between queries.
+
+    A stale entry would contaminate the next query's scores.
+    """
     q1 = TfidfVectoriser.transform_query(["t1", "t2", "t3"], model)
     q2 = TfidfVectoriser.transform_query(["t100", "t200"], model)
 
@@ -244,7 +234,7 @@ def test_scratch_reuse_does_not_leak_between_queries(model: TfidfModel, index) -
 
 
 def test_zero_query_scores_zero_everywhere(model: TfidfModel, index) -> None:  # type: ignore[no-untyped-def]
-    """Degenerate but legitimate (spec_addenda G3): no NaN may escape."""
+    """An empty query is legitimate (spec_addenda G3) and scores zero with no NaN."""
     empty = index.score(np.array([], dtype=np.int32), np.array([], dtype=np.float64), 0)
     assert len(empty) == model.n_documents
     assert all(s == 0.0 for s in empty)
@@ -294,16 +284,14 @@ def test_out_of_range_term_is_rejected(index) -> None:  # type: ignore[no-untype
 
 
 # ---------------------------------------------------------------------------
-# The boundary is the last line of defence (G3)
+# Boundary validation (G3)
 # ---------------------------------------------------------------------------
 def test_paired_arrays_must_agree_in_length() -> None:
-    """``dot`` built its two spans independently and read past the end.
+    """The free functions reject index and value spans of different length.
 
-    With 64 indices and 1 value it read 63 doubles beyond the values buffer:
-    undefined behaviour reachable from pure Python with no unsafe API, and
-    visible as identical calls returning ``nan``, ``1.0``, ``nan``, ``nan``. The
-    reference rejects the same input and ``NativeIndex`` already checked it;
-    only the free functions did not.
+    Spans of unequal length would let ``dot`` read past the end of the values
+    buffer from pure Python. ``NativeIndex`` checks the same condition at
+    construction and the reference rejects the input too.
     """
     many = np.arange(64, dtype=np.int32)
     one = np.array([1.0], dtype=np.float64)
@@ -324,11 +312,11 @@ def test_paired_arrays_must_agree_in_length() -> None:
 
 @pytest.mark.parametrize("policy", [-1, 4, 999])
 def test_a_reduction_policy_outside_the_enumeration_is_rejected(policy: int) -> None:
-    """``static_cast<Reduction>(999)`` silently fell back to a policy.
+    """A policy value outside the enumeration is rejected, not substituted.
 
     The summation policy is recorded in every run manifest, so a quiet
     substitution leaves the manifest naming a policy the arithmetic did not use.
-    ``Reduction(999)`` raises in Python; it raises here too.
+    ``Reduction(999)`` raises in Python; the native binding raises too.
     """
     values = np.array([1.0, 2.0], dtype=np.float64)
     with pytest.raises(ValueError, match="policy"):
@@ -361,19 +349,18 @@ def test_a_scoring_algorithm_outside_the_enumeration_is_rejected(
     "name", ["sorted_scores_desc", "boundary_margin", "min_adjacent_margin_top", "tie_chains"]
 )
 def test_every_score_taking_entry_point_rejects_nan(name: str) -> None:
-    """A NaN makes ``<`` false both ways, destroying the strict weak ordering.
+    """Every score-taking free function rejects NaN, as ``NativeRanker.rank`` does.
 
-    ``NativeRanker.rank`` re-checked per G3, the free functions did not, and it
-    showed: ``min_adjacent_margin_top`` returned ``inf`` where the normative
-    reference returns ``nan``. Sorting 65,536 scores containing NaN did not
-    crash, but it is formally undefined behaviour and must stay unreachable.
+    A NaN makes ``<`` false both ways and destroys the strict weak ordering, so
+    sorting scores that contain one is undefined behaviour and must stay
+    unreachable (G3).
     """
     scores = np.array([0.9, float("nan"), 0.1], dtype=np.float64)
     extra = {"boundary_margin": (1,), "min_adjacent_margin_top": (2,), "tie_chains": (0.1,)}
     with pytest.raises(ValueError, match="finite"):
         getattr(nat, name)(scores, *extra.get(name, ()))
 
-    # The same call on finite scores must still work, or this proves nothing.
+    # The same call on finite scores must still work, or the test proves nothing.
     getattr(nat, name)(np.array([0.9, 0.5, 0.1]), *extra.get(name, ()))
 
 
@@ -381,13 +368,11 @@ def test_every_score_taking_entry_point_rejects_nan(name: str) -> None:
 def test_negative_dimensions_are_rejected_before_any_size_arithmetic(
     n_docs: int, n_terms: int
 ) -> None:
-    """These segfaulted the interpreter (SIGSEGV, rc 139) from pure Python.
+    """Negative dimensions are rejected before any size arithmetic runs.
 
     ``n_docs = -1`` satisfies ``indptr.size() == n_docs + 1`` for an empty
-    indptr, so the length check passed it; ``is_canonical()`` then called
-    ``front()``/``back()`` on an empty span and ``transpose()`` sized a colptr
-    from a negative count. Later checks cast to ``std::size_t``, where a
-    negative wraps to something enormous, so the guard comes first.
+    indptr, and later checks cast to ``std::size_t``, where a negative wraps
+    to an enormous value, so the sign guard runs first.
     """
     empty_i64 = np.array([], dtype=np.int64)
     empty_i32 = np.array([], dtype=np.int32)
@@ -400,13 +385,11 @@ def test_negative_dimensions_are_rejected_before_any_size_arithmetic(
 
 @pytest.mark.parametrize("values", [[-0.0], [-0.0, -0.0], [-0.0, -0.0, -0.0], [-0.0, 0.0], [0.0]])
 def test_exact_agrees_with_fsum_on_signed_zero(values: list[float]) -> None:
-    """``Exact`` is the declared cross-language ground truth, so of all the
-    policies it must agree bit-for-bit.
+    """``Exact`` agrees with the reference bit for bit on inputs of signed zeros.
 
-    CPython's ``math_fsum`` appends the running total only ``if (x != 0.0)``;
-    the C++ pushed unconditionally, so an input of nothing but negative zeros
-    made ``value()`` return -0.0 against the reference's +0.0. Since
-    ``-0.0 == 0.0``, only a bit comparison catches it.
+    CPython's ``math_fsum`` appends the running total only ``if (x != 0.0)``,
+    so nothing but negative zeros sums to +0.0. Since ``-0.0 == 0.0``, only a
+    bit comparison distinguishes the two.
     """
     native = nat.reduce_sum(np.array(values, dtype=np.float64), _policy(Reduction.EXACT))
     reference = reduce_sum(values, Reduction.EXACT)
@@ -427,19 +410,11 @@ def test_exact_agrees_with_fsum_on_signed_zero(values: list[float]) -> None:
 def test_exact_diverges_from_fsum_once_a_partial_overflows(
     values: tuple[float, float], reference_behaviour: str
 ) -> None:
-    """The one place the two implementations do not agree.
+    """The one input class on which the two `Exact` implementations differ.
 
-    `reduction.hpp` records it: CPython's `math_fsum` tracks infinities and
-    intermediate overflow separately and raises, while the C++ transcription has
-    no such machinery and yields NaN. The gap is `Exact`'s alone; the other
-    three policies agree with the reference on these inputs.
-
-    Pinned rather than fixed. The tracking would put exception machinery in a
-    `noexcept` accumulator on the hot path to serve an input the pipeline cannot
-    produce: a TF-IDF weight is at most `ln(1 + N)`, so squaring one overflows
-    only for a corpus of about e^(1e154) documents. Both cases below pass finite
-    values, since `l2_norm` squares before it sums and so creates the infinity
-    itself.
+    The reference reports inf or raises once a partial overflows; the C++
+    accumulator yields NaN. The gap is pinned and is `Exact`'s alone.
+    Rationale: docs/engineering_notes.md#exact-overflow-divergence
     """
     arr = np.array(values, dtype=np.float64)
     exact = _policy(Reduction.EXACT)

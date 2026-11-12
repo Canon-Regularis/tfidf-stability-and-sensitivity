@@ -1,13 +1,8 @@
-"""The report summary renderer.
+"""Tests for the report summary renderer.
 
-`reports/summary.md` is generated and committed, so the thing that can go wrong
-is the two drifting apart. `--check` is what catches that, and a check is only
-evidence if it can fail, so both directions are asserted here.
-
-The renderer's whole job is presentation: it must not introduce a number, and it
-must put the ones it copies in an order the file itself cannot express. Both are
-tested against the committed reports rather than against a fixture, because a
-fixture would pass while the real artefact rotted.
+`reports/summary.md` is committed; `--check` passes when it is current and
+fails when it is not. The renderer copies numbers and computes none. The tests
+read the committed reports, not a fixture, so they fail when those drift.
 """
 
 from __future__ import annotations
@@ -40,16 +35,21 @@ def _renderer() -> ModuleType:
 # The committed summary matches the committed reports
 # ---------------------------------------------------------------------------
 def test_the_committed_summary_is_current() -> None:
-    """The baseline, and the reason the file is committed at all: a summary that
-    disagreed with its reports would be a second set of numbers to trust."""
+    """The committed summary matches a fresh render of the committed reports.
+
+    A summary that disagreed with its reports would be a second set of numbers.
+    """
     rendered = _renderer().render(REPORTS)
 
     assert (REPORTS / "summary.md").read_text(encoding="utf-8") == rendered
 
 
 def test_rendering_twice_gives_the_same_bytes() -> None:
-    """No clock, no environment, no dictionary-order dependence. Without this
-    `--check` would fail at random and stop being believed."""
+    """Two renders of the same reports produce identical text.
+
+    The output depends on no clock, environment or dictionary order, so
+    `--check` gives the same answer on every run.
+    """
     renderer = _renderer()
 
     assert renderer.render(REPORTS) == renderer.render(REPORTS)
@@ -59,8 +59,10 @@ def test_rendering_twice_gives_the_same_bytes() -> None:
 # It presents, and does not compute
 # ---------------------------------------------------------------------------
 def test_every_result_digest_reaches_the_summary() -> None:
-    """The digest is what ties a quoted number to the run behind it. A summary
-    that dropped one would be quoting numbers with no provenance."""
+    """Every report's result digest prefix appears in the summary.
+
+    The digest ties each quoted number to the run that produced it.
+    """
     rendered = _renderer().render(REPORTS)
 
     for name in ("similarity", "stability_profile", "tie_break_ablations"):
@@ -69,9 +71,11 @@ def test_every_result_digest_reaches_the_summary() -> None:
 
 
 def test_the_k_blocks_are_restored_to_numeric_order() -> None:
-    """`canonical_json` sorts keys as strings, so the file reads k1, k10, k20,
-    k5, k50. The sort is what the digest rests on and cannot change, so the
-    ordering is the renderer's job."""
+    """`_ks` orders k-block keys numerically rather than as strings.
+
+    `canonical_json` sorts keys as strings (k1, k10, k20, k5, k50) and the
+    digest depends on that sort, so the renderer restores numeric order.
+    """
     renderer = _renderer()
 
     assert renderer._ks({"k50": 0, "k1": 0, "k10": 0, "k5": 0, "k20": 0}) == [
@@ -84,19 +88,27 @@ def test_the_k_blocks_are_restored_to_numeric_order() -> None:
 
 
 def test_the_margin_table_runs_k_upwards() -> None:
-    """The same claim against the real artefact, since `_ks` could be right and
-    unused."""
+    """The rendered E1 margin table lists k in ascending numeric order.
+
+    The check runs on the rendered output, so it fails if `_ks` is unused.
+    """
     rendered = _renderer().render(REPORTS)
     table = rendered.split("### E1")[1].split("###")[0]
-    rows = [line for line in table.splitlines() if line.startswith("| ") and "|" in line]
-    ks = [line.split("|")[1].strip() for line in rows[2:]]
+    # The separator row starts `|-`, so the filter leaves the header and the data.
+    header, *rows = [line for line in table.splitlines() if line.startswith("| ")]
+    ks = [line.split("|")[1].strip() for line in rows]
 
+    assert header.split("|")[1].strip() == "k", "the premise: the first column is k"
+    assert len(ks) > 1, "the premise: a single row cannot be out of order"
     assert ks == sorted(ks, key=int), f"the k column is out of order: {ks}"
 
 
 def test_an_ngram_is_rendered_so_a_reader_can_see_its_parts() -> None:
-    """The joiner is U+001F, which cannot occur inside a token and also cannot be
-    seen. Rendered raw, a bigram reads as one long token."""
+    """An n-gram renders as backticked parts joined by a visible plus sign.
+
+    The joiner U+001F cannot occur inside a token and is invisible, so a raw
+    bigram would read as one long token.
+    """
     renderer = _renderer()
 
     assert renderer._term("alpha\x1fbeta") == "`alpha` + `beta`"
@@ -104,8 +116,11 @@ def test_an_ngram_is_rendered_so_a_reader_can_see_its_parts() -> None:
 
 
 def test_a_column_no_row_fills_is_dropped() -> None:
-    """An always-empty cell reads as a value that went missing. The contrasting
-    case is what shows the column is dropped for being empty rather than last."""
+    """A column that no row fills is dropped from the table.
+
+    An always-empty cell reads as a missing value. The filled case shows the
+    column is dropped for being empty, not for being last.
+    """
     renderer = _renderer()
 
     empty = renderer._table(["a", ""], [["1", ""], ["2", ""]])
@@ -119,8 +134,11 @@ def test_a_column_no_row_fills_is_dropped() -> None:
 # Absence
 # ---------------------------------------------------------------------------
 def test_a_missing_report_is_skipped_rather_than_fatal(tmp_path: Path) -> None:
-    """`export_intermediates.py` is optional, and a checkout that has not run it
-    should still get a summary of what it does have."""
+    """A missing report is skipped and the remaining reports still render.
+
+    `export_intermediates.py` is optional, so a checkout without its output
+    still gets a summary of the reports it has.
+    """
     renderer = _renderer()
     (tmp_path / "similarity.json").write_bytes((REPORTS / "similarity.json").read_bytes())
 
@@ -131,8 +149,10 @@ def test_a_missing_report_is_skipped_rather_than_fatal(tmp_path: Path) -> None:
 
 
 def test_no_reports_at_all_renders_a_document_that_says_so(tmp_path: Path) -> None:
-    """Rather than an empty file or a traceback, either of which reads as a
-    broken renderer instead of an empty directory."""
+    """An empty reports directory renders a document stating that none exist.
+
+    An empty file or a traceback would read as a broken renderer.
+    """
     assert "No reports found." in _renderer().render(tmp_path)
 
 
@@ -153,8 +173,7 @@ def test_check_passes_on_a_summary_that_matches(tmp_path: Path, capsys) -> None:
 
 
 def test_check_fails_on_a_summary_that_has_drifted(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
-    """The half that makes the gate worth running: a stale summary must fail,
-    and must name the script that regenerates it."""
+    """`--check` exits 1 on a stale summary and names the regenerating script."""
     renderer = _renderer()
     for name in ("similarity.json", "stability_profile.json"):
         (tmp_path / name).write_bytes((REPORTS / name).read_bytes())
@@ -169,8 +188,10 @@ def test_check_fails_on_a_summary_that_has_drifted(tmp_path: Path, capsys) -> No
 def test_check_fails_when_the_summary_is_absent_rather_than_writing_it(
     tmp_path: Path,
 ) -> None:
-    """`--check` reports; it never repairs. A check that quietly wrote the file
-    would pass on every run and prove nothing."""
+    """`--check` exits 1 on a missing summary and does not create the file.
+
+    A check that wrote the file would pass on every run.
+    """
     renderer = _renderer()
     (tmp_path / "similarity.json").write_bytes((REPORTS / "similarity.json").read_bytes())
 

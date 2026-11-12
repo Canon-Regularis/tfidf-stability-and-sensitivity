@@ -1,8 +1,8 @@
 """Text normalisation: the first step of the fixed preprocessing map (section 2).
 
-Every decision here is pinned rather than left to a library default: the
-preprocessing map must be reproducible across Python versions, platforms, and the
-C++ mirror of this code. See ``docs/spec_addenda.md#g7``.
+Every decision here is pinned rather than left to a library default, so the
+preprocessing map is reproducible across Python versions and platforms. See
+``docs/spec_addenda.md#g7``.
 """
 
 from __future__ import annotations
@@ -25,25 +25,18 @@ _FORM: Final[UnicodeForm] = "NFKC"
 
 #: Characters deleted outright rather than mapped to a separator, since a
 #: control character would otherwise collide with the n-gram joiner (ngrams.py).
-#: `Cn` is excluded deliberately: which code points are unassigned changes with
+#: `Cn` is excluded: the set of unassigned code points changes with
 #: the Unicode version, so deleting them would tie the token stream to that.
 _CONTROL_CATEGORIES: Final = frozenset({"Cc", "Cf", "Co", "Cs"})
 
 
 @dataclass(frozen=True, slots=True)
 class NormalisationConfig:
-    """Pinned normalisation options.
+    """Pinned normalisation options for the preprocessing map.
 
-    Attributes:
-        unicode_form: Always ``"NFKC"`` in the normative configuration.
-        lowercase: Apply :meth:`str.lower`. Full Unicode case folding
-            (:meth:`str.casefold`) cannot be reproduced in C++ without ICU, whose
-            tailorings vary by version, so the stricter portable ``lower()`` is
-            used. Documented in spec_addenda G7.
-        strip_control: Remove Unicode control and format characters.
-        collapse_whitespace: Collapse runs of whitespace to a single space and
-            strip the ends, so token boundaries do not depend on incidental
-            formatting.
+    ``unicode_form`` is ``"NFKC"`` when normative; ``lowercase`` applies :meth:`str.lower`, as
+    :meth:`str.casefold` needs ICU in C++ (spec_addenda G7); ``strip_control`` deletes
+    non-whitespace Cc/Cf/Co/Cs characters; ``collapse_whitespace`` collapses and trims whitespace.
     """
 
     unicode_form: UnicodeForm = _FORM
@@ -58,12 +51,12 @@ _DEFAULT = NormalisationConfig()
 def _canonical_case(text: str, cfg: NormalisationConfig) -> str:
     """Normalisation form and case, in the order that makes them commute.
 
-    Normalise first so case mapping sees canonical forms: some compatibility
-    characters case-map differently before and after NFKC. Normalise again
-    because ``lower()`` can denormalise a handful of characters, and without that
-    second pass idempotence fails.
+    Normalising first lets case mapping see canonical forms, since some compatibility
+    characters case-map differently before and after NFKC. The second normalisation
+    is required because ``lower()`` can denormalise characters, breaking idempotence.
     """
     out = unicodedata.normalize(cfg.unicode_form, text)
+    # str.lower, not str.casefold. Rationale: docs/engineering_notes.md#lowercase-not-casefold
     if cfg.lowercase:
         out = unicodedata.normalize(cfg.unicode_form, out.lower())
     return out
@@ -72,16 +65,9 @@ def _canonical_case(text: str, cfg: NormalisationConfig) -> str:
 def normalise(text: str, config: NormalisationConfig | None = None) -> str:
     """Apply the normalisation stage of the preprocessing map.
 
-    Idempotent: ``normalise(normalise(t)) == normalise(t)`` for all ``t``,
-    asserted as a property test. A non-idempotent normaliser makes the
-    preprocessing map depend on how many times it has been applied.
-
-    Args:
-        text: Raw input text.
-        config: Pinned options; the normative defaults if omitted.
-
-    Returns:
-        The normalised string.
+    Idempotent: ``normalise(normalise(t)) == normalise(t)`` for all ``t`` (property-tested),
+    so the map does not depend on how often it is applied. Returns the normalised
+    ``text``; ``config`` holds the pinned options and defaults to the normative ones.
     """
     cfg = config or _DEFAULT
 
@@ -92,14 +78,10 @@ def normalise(text: str, config: NormalisationConfig | None = None) -> str:
             ch for ch in out if ch.isspace() or unicodedata.category(ch) not in _CONTROL_CATEGORIES
         )
         if stripped != out:
-            # Deleting a format character can bring a base character and a
-            # combining mark into contact, giving a composed form the first pass
-            # never saw: "e", U+200B, U+0301 leaves "e" U+0301, which is not
-            # NFKC and tokenises to "e" where composed "e-acute" tokenises to
-            # itself. Recomposing here suffices: composition merges a starter
-            # with a following mark, so it cannot yield a character this stage
-            # deletes, and the whitespace collapse below always leaves a space
-            # between the characters it separates.
+            # Deleting a format character can bring a base character and a combining
+            # mark into contact ("e", U+200B, U+0301 leaves non-NFKC "e" U+0301), so
+            # the stripped text is recomposed. A single recomposition suffices.
+            # Rationale: docs/engineering_notes.md#recompose-after-control-strip
             out = _canonical_case(stripped, cfg)
 
     if cfg.collapse_whitespace:

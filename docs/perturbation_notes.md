@@ -1,8 +1,8 @@
 # Perturbation bounds, as implemented
 
 Companion to README §4.1 to §4.3. Each bound in §4 is implemented as a
-*checkable* object rather than a formula in prose: the code computes both sides
-and the property tests search adversarially for a counterexample.
+*checkable* object rather than a formula in prose: the code computes both
+sides of the inequality, and the property tests search adversarially for a counterexample.
 
 ## The chain
 
@@ -12,7 +12,7 @@ corpus edit → Δdf → Δidf → Δw (per document) → Δs (per score) → ra
 
 `perturbation/experiments.py::run_perturbation` walks the whole chain for one
 edit and returns a `PerturbationReport` carrying every intermediate, so a
-violation can be localised to a stage rather than merely observed at the end.
+violation can be localised to a stage rather than only observed at the end.
 
 ## §4.1. Document frequency and IDF
 
@@ -57,20 +57,20 @@ anyway.
 
 `tests/test_perturbation_bounds.py` uses Hypothesis to **search for
 counterexamples** to §4's inequalities rather than to sample typical inputs. A
-bound that holds on random data and fails on a crafted edge case is no bound.
+bound must hold on crafted edge cases as well as on random data.
 
-Two subtleties decide whether these tests are theorem checks or flaky annoyances:
+Two rules keep these tests from failing intermittently:
 
 - **Assume on the realised delta rather than the drawn one.** The proofs are over
   the reals, but `fl(s + d)` rounds, so realised movement can exceed `|d|` by half
   an ulp. A test that filtered on the drawn `d` would fail intermittently at the
   boundary, and the theorem is about the movement that happened.
-- **Draw indices from the actual length.** An early test used
-  `assume(j < len(s))`, which tripped Hypothesis's `filter_too_much` health check
-  *intermittently*, because the example database cached the passing runs. Before
-  changing any code, the search itself was brute-forced over 600,000 cases
-  (signed zeros, subnormals, ulp-adjacent values) to confirm it was correct; the
-  fix went into the test.
+- **Draw indices from the actual length.** A filter such as
+  `assume(j < len(s))` trips Hypothesis's `filter_too_much` health check
+  *intermittently*, because the example database caches the passing runs. A one-off
+  brute-force check over 600,000 cases (signed zeros, subnormals, ulp-adjacent
+  values) finds no defect in the code under test, so the fix belongs in the
+  test, not the code.
 
 ## What perturbation magnitudes actually occur
 
@@ -82,9 +82,8 @@ Measured over 40 corpus edits (add, remove, edit) on a 200-document corpus:
 | arithmetic noise floor | ≤ 1.665e−16 |
 
 **Twelve orders of magnitude at the nearest edges** (1.694e−04 against
-1.665e−16), widening to fifteen at the far ends. Twelve is the honest single
-figure: it is the closest the two regimes come, and an earlier draft of this
-line and of the report said thirteen, which is neither endpoint. §5's injected
+1.665e−16), widening to fifteen at the far ends. Twelve is the single figure
+to quote, because it is the closest the two regimes come. §5's injected
 score-level noise can reach any
 magnitude by construction, but *text-level* perturbation cannot go below roughly
 `1/L`; see [G22](spec_addenda.md#g22). The two perturbation models are not
@@ -96,5 +95,5 @@ interchangeable at fine scales, and the paper should say which it means.
 python -m pytest tests/test_perturbation_bounds.py -q --hypothesis-profile=nightly
 ```
 
-The `nightly` profile runs far more examples than the PR gate; a bound that only
-holds under `dev` is not established.
+The `nightly` profile runs far more examples than the PR gate; a bound that
+holds only under `dev` is not established.

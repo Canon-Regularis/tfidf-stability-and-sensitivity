@@ -15,13 +15,13 @@ from unittest.mock import patch
 
 import pytest
 
-from tfidf_stability.cli.commands import (
+from tfidf_stability.cli.commands import write_report
+from tfidf_stability.cli.main import main
+from tfidf_stability.configuration.loading import (
     load_config,
     pipeline_from_config,
     vectoriser_from_config,
-    write_report,
 )
-from tfidf_stability.cli.main import main
 from tfidf_stability.persistence.manifest import RunManifest
 from tfidf_stability.utils.hashing import hash_file
 from tfidf_stability.utils.numerics import Reduction, same_bits
@@ -41,16 +41,41 @@ def build(tmp_path: Path) -> Path:
 # Config
 # ---------------------------------------------------------------------------
 def test_the_default_config_loads_and_carries_its_digest() -> None:
-    """The digest is over the file, comments included: they carry the
-    spec_addenda citations, and a manifest records which config produced a
-    result."""
+    """The digest covers the whole file, comments included.
+
+    Comments carry the spec_addenda citations, and a manifest records which
+    config produced a result.
+    """
     config = load_config()
     assert config["_source"] == "default.yaml"
     assert config["_digest"] == hash_file(REPO / "configs" / "default.yaml", text=True)
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "_DEFAULT_CONFIG",
+        "_resolve_default_config",
+        "load_config",
+        "pipeline_from_config",
+        "vectoriser_from_config",
+    ],
+)
+def test_the_cli_module_serves_each_configuration_name_as_the_same_object(name: str) -> None:
+    """``cli.commands`` and ``configuration.loading`` hold the same objects.
+
+    The public three are in the CLI module's ``__all__``; the two private names
+    are imported from it by ``tests/test_packaged_assets.py``.
+    """
+    from tfidf_stability.cli import commands
+    from tfidf_stability.configuration import loading
+
+    assert getattr(commands, name) is getattr(loading, name)
+    assert (name in commands.__all__) is not name.startswith("_")
+
+
 def test_the_default_config_matches_the_code_defaults() -> None:
-    """A config that drifted from the code describes a run that never happened."""
+    """A config that differs from the code describes a run that never happened."""
     from tfidf_stability.preprocessing.tokenise import DEFAULT_PATTERN
     from tfidf_stability.ranking.sort_keys import PI, PI_ALT
 
@@ -61,9 +86,12 @@ def test_the_default_config_matches_the_code_defaults() -> None:
 
 
 def test_tau_has_no_default_only_a_flagged_provisional_value() -> None:
-    """Section 7.1 makes every tie-break result conditional on tau, and tau comes
-    from the measured noise floor. A plain ``tau:`` key would let a run inherit an
-    unjustified constant unnoticed."""
+    """The config pins no ``tau``, only ``tau_provisional`` and ``tau_sweep``.
+
+    Section 7.1 makes every tie-break result conditional on tau, and tau comes
+    from the measured noise floor. A plain ``tau:`` key would let a run inherit
+    an unjustified constant unnoticed.
+    """
     evaluation = load_config()["evaluation"]
     assert "tau" not in evaluation
     assert "tau_provisional" in evaluation
@@ -80,8 +108,8 @@ def test_every_ablation_names_the_field_it_varies() -> None:
         assert "description" in entry, f"{name} is undocumented"
 
 
-#: `vary` paths that name a key `configs/default.yaml` deliberately does not
-#: carry, with the reason it is absent.
+#: `vary` paths that name a key `configs/default.yaml` does not carry, with
+#: the reason it is absent.
 _VARIES_AN_ABSENT_KEY = {
     "evaluation.tau": (
         "section 7.1 derives tau from the measured noise floor, so default.yaml "
@@ -91,14 +119,11 @@ _VARIES_AN_ABSENT_KEY = {
 
 
 def test_every_ablation_varies_a_field_that_exists_and_offers_values_that_are_legal() -> None:
-    """The shape test above accepts any three keys, whatever they say.
+    """Every ``vary`` names a pinned key and every ``values`` entry is legal.
 
-    An ablation is a claim that varying one pinned decision changes a published
-    number. If ``vary`` names a key the config does not have, the run writes a
-    manifest recording a field nothing read, which is the failure the section
-    below this one exists to prevent -- one level up, in the grid rather than in
-    the reader. If ``values`` holds something the field cannot take, the run
-    fails at the far end of an experiment instead of here.
+    A ``vary`` naming a key the config does not have would put a field nothing
+    read into the manifest; a value the field cannot take would fail at the
+    far end of an experiment instead of here.
     """
     import itertools
 
@@ -143,9 +168,9 @@ def test_every_ablation_varies_a_field_that_exists_and_offers_values_that_are_le
     # from the other would report a sweep it did not perform.
     assert ablations["tau_sweep"]["values"] == config["evaluation"]["tau_sweep"]
 
-    # `tie_break_priority` claimed six orderings and listed five. The five are
-    # right -- the sixth is `pi_priority`, the baseline every run already uses --
-    # so the count is pinned here rather than left to a description.
+    # `tie_break_priority` offers every ordering except `pi_priority`, the
+    # baseline every run already uses, so the count is pinned here rather than
+    # left to a description.
     priority = config["ranking"]["pi_priority"]
     expected = [list(p) for p in itertools.permutations(priority) if list(p) != priority]
     listed = [list(v) for v in ablations["tie_break_priority"]["values"]]
@@ -157,14 +182,10 @@ def test_every_ablation_varies_a_field_that_exists_and_offers_values_that_are_le
 # ---------------------------------------------------------------------------
 # A recorded key must be an applied key
 # ---------------------------------------------------------------------------
+
 #: ``(section, key, a value that must produce a different model)``. Covers every
 #: key of the three sections ``build-corpus`` consumes, bar the four whose
 #: alternatives the mini corpus cannot distinguish (see below).
-#:
-#: ``cmd_build_corpus`` used to read four keys (``n_min``, ``n_max``,
-#: ``insert_gaps``, ``cross_gaps``) while hashing the whole file into the run
-#: manifest: ``numerics.reduction: exact`` got a naive model whose manifest
-#: recorded ``exact``, and a typo got the default in silence.
 _APPLIED_KEYS = [
     ("preprocessing", "lowercase", False),
     # One letter per token. ``[a-z]+`` would be a no-op: the corpus is lowercased
@@ -186,8 +207,8 @@ _APPLIED_KEYS = [
 
 
 def _fit(config: dict[str, object]) -> str:
-    """Fit the mini corpus the way ``cmd_build_corpus`` does; return its digest."""
-    from tfidf_stability.cli.commands import pipeline_from_config, vectoriser_from_config
+    """Fit the mini corpus as ``cmd_build_corpus`` does and return its digest."""
+    from tfidf_stability.configuration.loading import pipeline_from_config, vectoriser_from_config
     from tfidf_stability.utils.io import read_jsonl
 
     records = list(read_jsonl(CORPUS))
@@ -207,11 +228,13 @@ def test_every_config_key_reaches_the_model(section: str, key: str, value: objec
 
 
 def test_the_keys_no_fixture_can_exercise_are_still_read() -> None:
-    """``unicode_form``, ``max_df``, ``max_features_policy`` and ``cross_gaps``
-    cannot move this corpus: ASCII, six documents, no n-gram spanning a gap.
-    Assert they reach the objects instead, so they cannot be dropped the way the
-    others were."""
-    from tfidf_stability.cli.commands import pipeline_from_config, vectoriser_from_config
+    """Keys the mini corpus cannot move still reach the configured objects.
+
+    ``unicode_form``, ``max_df``, ``max_features_policy`` and ``cross_gaps``
+    cannot change this corpus: ASCII, six documents, no n-gram spanning a gap.
+    The values are asserted on the objects instead.
+    """
+    from tfidf_stability.configuration.loading import pipeline_from_config, vectoriser_from_config
 
     config = load_config()
     config["preprocessing"]["unicode_form"] = "NFD"
@@ -232,7 +255,7 @@ def test_the_keys_no_fixture_can_exercise_are_still_read() -> None:
     [("preprocessing", "n_maks"), ("vocabulary", "min_dff"), ("numerics", "redution")],
 )
 def test_an_unrecognised_config_key_is_fatal(section: str, key: str) -> None:
-    """A typo used to be indistinguishable from the default."""
+    """A misspelled key raises ``ConfigError`` naming the key."""
     config = load_config()
     config[section][key] = 3  # type: ignore[index]
     with pytest.raises(ConfigError, match=key):
@@ -247,8 +270,10 @@ def test_an_inadmissible_value_names_the_key_it_came_from() -> None:
 
 
 def test_the_default_config_still_produces_the_documented_model(tmp_path: Path) -> None:
-    """Guard on the fix above: wiring the remaining keys up must leave the default
-    path where it was, or every published number moves with it."""
+    """The default CLI path fits the same model as ``_fit``.
+
+    A change to the default path moves every published number with it.
+    """
     out = build(tmp_path)
     manifest = json.loads(out.with_suffix(".manifest.json").read_text(encoding="utf-8"))
     assert manifest["model"]["model_digest"] == _fit(load_config())
@@ -311,8 +336,10 @@ def test_verify_rejects_a_manifest_that_does_not_match(tmp_path: Path, capsys) -
 
 
 def test_verify_reports_a_non_reproducible_build_as_a_failure(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
-    """A fast-math build must not pass verification. The obvious form of the
-    check, ``native is None or True``, is always true and passes everything.
+    """A fast-math build must not pass verification.
+
+    The form ``native is None or True`` is always true and would pass
+    everything.
     """
     out = build(tmp_path)
     manifest_path = out.with_suffix(".manifest.json")
@@ -365,9 +392,9 @@ def test_schema_describes_the_whole_container(capsys) -> None:  # type: ignore[n
     """`schema` describes the whole container, not the arrays alone.
 
     A reader needs the header to parse a file: `flags` is G13's logarithm
-    switch and `reduction` is the policy every sum is accumulated under.
-    `block_separator` divides the two string blocks, and a parser that misses
-    it misparses every container."""
+    switch, `reduction` is the policy every sum is accumulated under, and
+    `block_separator` divides the two string blocks.
+    """
     capsys.readouterr()
     assert main(["schema"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -402,15 +429,9 @@ def test_every_command_is_registered(command: str) -> None:
 def test_experiment_drivers_do_not_contradict_the_pinned_config() -> None:
     """A driver default that shadows a pinned key must agree with it.
 
-    ``--min-interactions`` defaulted to 3 in both experiment drivers while
-    ``configs/default.yaml`` pinned ``min_interactions: 5`` citing G10(4) ("users
-    with >= 5 qualifying interactions"). No driver calls ``load_config``, so
-    nothing reconciled the two and every unattended run used a threshold the
-    specification does not sanction, moving published numbers as well as the
-    query count.
-
-    Scans rather than lists, so a key added to either side is covered the day it
-    appears.
+    No driver calls ``load_config``, so a default such as ``--min-interactions``
+    that differs from the pinned value (5, per G10(4)) moves published numbers
+    under a digest recording the pinned one. Scans rather than lists.
     """
     import re
 
@@ -468,16 +489,9 @@ _SHADOWED_BY_DESIGN = {
 def test_src_defaults_do_not_contradict_the_pinned_config() -> None:
     """The same guard as the drivers get, applied to the library itself.
 
-    Three of the six sections in ``configs/default.yaml`` -- ``ranking``,
-    ``evaluation`` and ``profiles`` -- are read by no module in ``src``. Their
-    values are hashed into the run manifest all the same, so a default that
-    drifts from the pinned value produces numbers the digest attributes to a
-    configuration that did not produce them. The driver-side scan above cannot
-    see it, because the disagreement is in a function signature rather than an
-    ``add_argument`` call.
-
-    Defaults are read from the live signature rather than the source text, so an
-    enum member and a module constant compare by the value they actually carry.
+    No ``src`` module reads ``ranking``, ``evaluation`` or ``profiles``, yet all
+    three are hashed into the manifest, so a differing default yields numbers
+    the digest misattributes. Signatures are read live, so enums compare by value.
     """
     import enum
     import importlib
@@ -537,8 +551,8 @@ def test_src_defaults_do_not_contradict_the_pinned_config() -> None:
     assert not disagreements, "src defaults contradict configs/default.yaml: " + "; ".join(
         disagreements
     )
-    # An exemption for a signature that no longer exists is a stale argument, and
-    # a reader would take it as still describing the code.
+    # An exemption for a signature that does not exist is a stale argument, and
+    # a reader would take it as describing the code.
     assert sorted(set(exempted)) == sorted(_SHADOWED_BY_DESIGN), (
         "every entry in _SHADOWED_BY_DESIGN must name a default that is still there"
     )
@@ -547,18 +561,17 @@ def test_src_defaults_do_not_contradict_the_pinned_config() -> None:
 # ---------------------------------------------------------------------------
 # Config sections: a key that is read but ignored is worse than one rejected
 # ---------------------------------------------------------------------------
-# Every value in the config is folded into the run manifest's digest, so a key
-# that is hashed and then ignored makes two different configurations produce the
-# same numbers under different digests. The section reader refuses rather than
-# skipping, and these are the arms that do the refusing.
-def test_every_way_of_failing_to_load_a_config_raises_the_same_type(tmp_path: Path) -> None:
-    """`load_config` raised ConfigError for a section of the wrong type and
-    leaked three other exceptions for the rest.
 
-    A missing file left FileNotFoundError, a malformed document left
-    yaml.YAMLError and a scalar at the top level left TypeError. `cli/main.py`
-    installs no handler, so the same class of user error -- a bad --config --
-    was a diagnostic in one case and a traceback in three.
+
+# Every config value is folded into the run manifest's digest, so a key hashed
+# and then ignored makes two configurations produce the same numbers under
+# different digests. The section reader refuses rather than skipping.
+def test_every_way_of_failing_to_load_a_config_raises_the_same_type(tmp_path: Path) -> None:
+    """Every way `load_config` can fail raises `ConfigError`.
+
+    A missing file, a directory, a malformed document and a scalar at the top
+    level are the same class of user error, and `cli/main.py` installs no
+    handler, so each must arrive as a diagnostic rather than a traceback.
     """
     missing = tmp_path / "absent.yaml"
     with pytest.raises(ConfigError, match="cannot read config"):
@@ -581,8 +594,11 @@ def test_every_way_of_failing_to_load_a_config_raises_the_same_type(tmp_path: Pa
 
 
 def test_a_wrapped_config_failure_still_carries_the_original(tmp_path: Path) -> None:
-    """`from exc`, so an out-of-tree caller that needs to tell a missing file
-    from a permission failure can still reach the distinction."""
+    """The wrapped error is chained with `from exc`.
+
+    An out-of-tree caller that needs to tell a missing file from a permission
+    failure can reach the original through `__cause__`.
+    """
     with pytest.raises(ConfigError, match="cannot read config") as caught:
         load_config(tmp_path / "absent.yaml")
     assert isinstance(caught.value.__cause__, FileNotFoundError)
@@ -615,14 +631,13 @@ def test_every_documented_unicode_form_is_accepted(form: str) -> None:
 
 
 def test_two_unicode_forms_produce_different_digests() -> None:
-    """The premise of validating the field: the choice has to be able to matter.
+    """The choice of unicode form has to be able to change a digest.
 
-    The mini corpus is ASCII, where NFC and NFKC agree, so this fits a corpus
-    carrying a compatibility character instead. U+FB01, the fi ligature, is
-    folded to "fi" by NFKC and left alone by NFC, so the two forms yield
-    different vocabularies and different digests.
+    The mini corpus is ASCII, where NFC and NFKC agree, so the fit here uses a
+    corpus with U+FB01, the fi ligature: NFKC folds it to "fi" and NFC leaves
+    it alone, so the two forms yield different vocabularies and digests.
     """
-    from tfidf_stability.cli.commands import pipeline_from_config, vectoriser_from_config
+    from tfidf_stability.configuration.loading import pipeline_from_config, vectoriser_from_config
 
     records = [
         {"doc_id": "d0", "text": "ﬁle sharing"},
@@ -646,8 +661,7 @@ def test_two_unicode_forms_produce_different_digests() -> None:
 # info, in the form a human reads
 # ---------------------------------------------------------------------------
 def test_info_without_json_prints_the_human_readable_block(capsys) -> None:  # type: ignore[no-untyped-def]
-    """The --json path was the only one exercised, so the rendering a person
-    actually sees was unchecked."""
+    """The human-readable block prints the python, platform, native and float lines."""
     assert main(["info"]) == 0
     out = capsys.readouterr().out
     for field in ("python", "platform", "native", "float"):
@@ -657,8 +671,11 @@ def test_info_without_json_prints_the_human_readable_block(capsys) -> None:  # t
 
 
 def test_info_says_which_of_the_two_native_states_it_found(capsys) -> None:
-    """Either the extension is built and described, or it is absent and the
-    reference is named as normative. Silence about it would be the bad case."""
+    """Exactly one of the two native states is reported.
+
+    Either the extension is built and described, or it is absent and the
+    reference is named as normative. Silence about it is the failure.
+    """
     assert main(["info"]) == 0
     out = capsys.readouterr().out
     built = "reproducible =" in out
@@ -691,8 +708,10 @@ def test_schema_prints_the_on_disk_layout_as_json(capsys) -> None:  # type: igno
 # write_report: a result and the manifest that names it
 # ---------------------------------------------------------------------------
 def test_a_written_report_carries_its_own_digest_in_the_manifest(tmp_path: Path) -> None:
-    """The manifest records the digest of the file beside it, so a report edited
-    after the fact stops matching its own provenance."""
+    """The manifest records the digest of the report beside it.
+
+    A report edited after the fact stops matching its own provenance.
+    """
     target = tmp_path / "result.json"
     manifest = RunManifest("test-run")
     write_report(target, {"value": 1}, manifest)
@@ -720,10 +739,10 @@ def test_editing_the_report_breaks_the_digest_the_manifest_recorded(tmp_path: Pa
 
 
 def test_a_corpus_with_no_zero_norm_document_logs_no_degenerate_event(tmp_path: Path) -> None:
-    """The branch that fires only when something degenerate exists.
+    """A corpus with no zero-norm document builds through the skip arm.
 
-    Every fixture so far contains an all-stopword document, so the skip arm was
-    never taken and a build that always logged the event would have passed.
+    The mini corpus contains an all-stopword document, so the arm that logs no
+    degenerate event needs a corpus of its own.
     """
     source = tmp_path / "clean.jsonl"
     source.write_text(
@@ -741,12 +760,11 @@ def test_a_corpus_with_no_zero_norm_document_logs_no_degenerate_event(tmp_path: 
 def test_info_reports_an_absent_native_backend_as_normative_not_broken(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:  # type: ignore[no-untyped-def]
-    """On a machine with the extension built, the other arm is unreachable.
+    """An absent backend is described as supported, not broken.
 
-    Only the environment block is substituted; the rendering being tested runs
-    unchanged, so this is not a test of its own mock. The claim that matters is
-    the wording: an absent backend is a supported configuration, and saying so
-    keeps a contributor without a compiler from reading it as a failure.
+    Only the environment block is substituted; the rendering runs unchanged.
+    An absent backend is a supported configuration, and the wording keeps a
+    contributor without a compiler from reading it as a failure.
     """
     from tfidf_stability.cli import commands
 
@@ -763,11 +781,11 @@ def test_info_reports_an_absent_native_backend_as_normative_not_broken(
 def test_info_requiring_a_native_backend_fails_when_there_is_none(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:  # type: ignore[no-untyped-def]
-    """The gate the workflows use in place of five hand-written variants.
+    """The workflows' ``--require-native`` gate fails with no extension loaded.
 
     Every native test is guarded on ``native_available()`` and pytest exits 0
-    when all of them skip, so a job that builds the extension but cannot load it
-    would otherwise report green having compared nothing.
+    when all of them skip, so a job that builds the extension but cannot load
+    it would otherwise report green having compared nothing.
     """
     from tfidf_stability.cli import commands
 
@@ -785,8 +803,7 @@ def test_info_requiring_a_native_backend_fails_when_there_is_none(
 def test_info_requiring_a_native_backend_passes_when_there_is_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The other direction: the flag must not fail a build that has a backend,
-    or CI would be red on every machine that did the right thing."""
+    """The flag must not fail a build that has a backend."""
     from tfidf_stability.cli import commands
 
     real = commands.environment_block
@@ -805,8 +822,11 @@ def test_info_requiring_a_native_backend_passes_when_there_is_one(
 def test_info_still_emits_its_json_when_the_native_requirement_fails(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:  # type: ignore[no-untyped-def]
-    """The diagnosis goes to stderr, so stdout stays parseable. A gate that
-    corrupted its own machine-readable output would be unusable in a pipe."""
+    """The diagnosis goes to stderr, so stdout stays parseable.
+
+    A gate that corrupted its own machine-readable output would be unusable
+    in a pipe.
+    """
     import json as _json
 
     from tfidf_stability.cli import commands
@@ -824,8 +844,11 @@ def test_info_still_emits_its_json_when_the_native_requirement_fails(
 def test_the_native_diagnosis_reports_the_raw_import_error_when_there_is_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The loader's reason can be a summary. The raw exception is what names a
-    missing runtime DLL, which is the usual cause on Windows."""
+    """The raw import error is reported beside the loader's summary.
+
+    The raw exception is what names a missing runtime DLL, the usual cause on
+    Windows.
+    """
     import importlib
 
     from tfidf_stability.cli.commands import _native_diagnosis
@@ -839,8 +862,11 @@ def test_the_native_diagnosis_reports_the_raw_import_error_when_there_is_one(
 
 
 def test_the_native_diagnosis_separates_what_is_built_from_what_can_load() -> None:
-    """The usual cause is a build tagged for another interpreter, and only the
-    difference between the two lists says so."""
+    """The diagnosis lists built extensions and loadable ones separately.
+
+    A build tagged for another interpreter is visible only as the difference
+    between the two lists.
+    """
     from tfidf_stability.cli.commands import _native_diagnosis
 
     lines = _native_diagnosis()
@@ -850,8 +876,11 @@ def test_the_native_diagnosis_separates_what_is_built_from_what_can_load() -> No
 
 
 def test_a_log_level_configures_logging_and_names_the_backend(capsys) -> None:  # type: ignore[no-untyped-def]
-    """Logging is configured only on request, so the configured path is separate
-    from every other invocation in this file."""
+    """``--log-level`` configures logging without swallowing the payload.
+
+    Logging is configured only on request, so the configured path is separate
+    from every other invocation in this file.
+    """
     from tfidf_stability.utils.logging import reset
 
     try:
@@ -873,8 +902,7 @@ def _corpus_with(tmp_path: Path, *, newline: bytes) -> Path:
     """The mini corpus rewritten with a chosen line ending.
 
     `write_bytes`, not `write_text`: text mode applies its own newline
-    translation on Windows and would produce CRLF for both arms, which is
-    exactly the difference this section is about.
+    translation on Windows and would produce CRLF for both arms.
     """
     body = CORPUS.read_bytes().replace(b"\r\n", b"\n")
     target = tmp_path / f"corpus{len(newline)}.jsonl"
@@ -883,12 +911,11 @@ def _corpus_with(tmp_path: Path, *, newline: bytes) -> Path:
 
 
 def test_the_recorded_dataset_digest_does_not_depend_on_the_line_endings(tmp_path: Path) -> None:
-    """`hash_file(..., text=True)`. The corpus is an input the caller supplies,
-    so it arrives with whatever endings its checkout produced; git's `text=auto`
-    hands a Windows worktree CRLF and a Linux one LF for the same commit.
+    """The dataset digest is taken in text mode, so line endings do not count.
 
-    Digesting the raw bytes would give the same corpus two identities and make
-    a manifest written on one platform fail verification on the other.
+    Git's `text=auto` hands a Windows worktree CRLF and a Linux one LF for the
+    same commit. Digesting the raw bytes would give the same corpus two
+    identities and fail verification across platforms.
     """
     digests = []
     for i, newline in enumerate((b"\n", b"\r\n")):
@@ -902,8 +929,11 @@ def test_the_recorded_dataset_digest_does_not_depend_on_the_line_endings(tmp_pat
 
 
 def test_the_two_line_ending_forms_really_are_different_files(tmp_path: Path) -> None:
-    """The premise of the test above. If the two arms produced identical bytes
-    it would be asserting that a digest equals itself."""
+    """The two line-ending forms are different files.
+
+    If the two arms produced identical bytes, the test above would assert that
+    a digest equals itself.
+    """
     lf = _corpus_with(tmp_path, newline=b"\n").read_bytes()
     crlf = _corpus_with(tmp_path, newline=b"\r\n").read_bytes()
 
@@ -917,7 +947,7 @@ def test_the_two_line_ending_forms_really_are_different_files(tmp_path: Path) ->
 # verify: what an absent field is allowed to mean
 # ---------------------------------------------------------------------------
 def _manifest_of(model_path: Path) -> tuple[Path, dict[str, object]]:
-    """The manifest beside a built model, parsed. Local by house convention."""
+    """The manifest beside a built model, parsed."""
     path = model_path.with_suffix(".manifest.json")
     return path, json.loads(path.read_text(encoding="utf-8"))
 
@@ -926,13 +956,11 @@ def test_a_model_built_without_a_native_backend_verifies_as_reproducible(
     tmp_path: Path,
     capsys,  # type: ignore[no-untyped-def]
 ) -> None:
-    """No native block means the pure-Python reference produced this file, and
-    the reference is normative and reproducible on its own -- there is no build
-    whose flags could have moved a bit.
+    """A manifest with no native block verifies as reproducible.
 
-    Reading the absent block as "not reproducible" would fail every result
-    produced on a machine without a compiler, which is the supported
-    configuration the `info` command goes out of its way to describe as such.
+    No native block means the pure-Python reference produced the file, and the
+    reference is reproducible on its own. Reading the absent block as "not
+    reproducible" would fail every result built without a compiler.
     """
     out = build(tmp_path)
     path, manifest = _manifest_of(out)
@@ -952,11 +980,11 @@ def test_a_native_block_that_omits_the_flag_is_not_taken_as_reproducible(
     tmp_path: Path,
     capsys,  # type: ignore[no-untyped-def]
 ) -> None:
-    """`native.get("reproducible", False)`. The default is the conservative one:
-    a build that did not say is not thereby a build that promised.
+    """A native block without the flag defaults to not reproducible.
 
-    Contrastive with the absent-block case above, where the same missing
-    information means the opposite -- there, nothing was compiled at all.
+    `native.get("reproducible", False)`: a build that did not say is not
+    thereby a build that promised. The absent-block case above means the
+    opposite, because there nothing was compiled at all.
     """
     out = build(tmp_path)
     path, manifest = _manifest_of(out)
@@ -974,8 +1002,7 @@ def test_a_native_block_that_declares_the_flag_is_taken_at_its_word(
     tmp_path: Path,
     capsys,  # type: ignore[no-untyped-def]
 ) -> None:
-    """The third arm, so the default above is shown to be a default rather than
-    the only answer the branch can give."""
+    """A native block that declares the flag true verifies as reproducible."""
     out = build(tmp_path)
     path, manifest = _manifest_of(out)
     environment = manifest["environment"]
@@ -992,12 +1019,11 @@ def test_a_native_block_that_declares_the_flag_is_taken_at_its_word(
 # The parser refuses an invocation that could not produce a manifest
 # ---------------------------------------------------------------------------
 def test_building_a_corpus_without_a_destination_is_refused_by_the_parser() -> None:
-    """`--output` is required. Without the guard `args.output` is None,
-    `Path(None)` raises a TypeError from inside the command, and the corpus has
-    already been read and fitted by then -- the work is done and discarded, and
-    the diagnostic names a type rather than the missing flag.
+    """`--output` is required, and the parser refuses its absence with exit 2.
 
-    Exit code 2 is argparse's, and is what a shell script tests for.
+    Without the guard `args.output` is None, `Path(None)` raises a TypeError
+    from inside the command after the corpus has been read and fitted, and
+    the diagnostic names a type rather than the missing flag.
     """
     with pytest.raises(SystemExit) as excinfo:
         main(["build-corpus", str(CORPUS)])
@@ -1006,8 +1032,11 @@ def test_building_a_corpus_without_a_destination_is_refused_by_the_parser() -> N
 
 @pytest.mark.parametrize("level", ["debug", "info", "warning", "error"])
 def test_every_documented_log_level_is_accepted(level: str) -> None:
-    """The choices are lowercased for the command line and upper-cased before
-    they reach `configure`, so each one has to make the round trip."""
+    """Every documented level makes the round trip to `configure`.
+
+    The choices are lowercased for the command line and upper-cased before
+    they reach `configure`.
+    """
     from tfidf_stability.utils.logging import reset
 
     try:
@@ -1017,8 +1046,11 @@ def test_every_documented_log_level_is_accepted(level: str) -> None:
 
 
 def test_an_undocumented_log_level_is_refused_rather_than_defaulted() -> None:
-    """A typo'd level silently falling back to INFO would make a run that was
-    asked to be quiet emit provenance into a captured stream."""
+    """An unknown level is refused by the parser with exit 2.
+
+    A misspelled level falling back to INFO would make a run asked to be quiet
+    emit provenance into a captured stream.
+    """
     with pytest.raises(SystemExit) as excinfo:
         main(["--log-level", "verbose", "schema"])
     assert excinfo.value.code == 2
@@ -1027,18 +1059,11 @@ def test_an_undocumented_log_level_is_refused_rather_than_defaulted() -> None:
 # ---------------------------------------------------------------------------
 # scripts/export_intermediates.py: the payload must carry what it advertises
 # ---------------------------------------------------------------------------
-# `ci.yml` runs this script and asserts only that it exits 0, so for as long as
-# it wrote *a* file it passed. It wrote one missing two of the six quantities its
-# own docstring names first, and `reports/intermediates_d000000.json` shipped
-# that way: term counts and term frequencies were absent, because the record was
-# built by zipping the CSR row rather than through `TfidfModel.intermediates`,
-# and the row does not carry them.
-#
-# `tf` is the one quantity here that cannot be read off: `w / idf` does not
-# recover it, missing by an ulp in 9.01% of a 184,080-case sweep. So the field
-# the export dropped was precisely the one needing the care the library already
-# takes, in the only file this project publishes with raw bit patterns beside
-# the decimals.
+
+
+# The payload must carry `tf` itself: `w / idf` does not recover it, missing by
+# an ulp in 9.01% of a 184,080-case sweep, and `ci.yml` asserts only that the
+# exporter exits 0. Rationale: docs/engineering_notes.md#export-intermediates-tf
 def _export_record(tmp_path: Path) -> dict[str, object]:
     """Run the exporter into a temp directory and return the whole record.
 
@@ -1072,7 +1097,7 @@ def _export_record(tmp_path: Path) -> dict[str, object]:
 
 
 def _export(tmp_path: Path) -> dict[str, object]:
-    """Just the measured quantities, which is what most of these tests are about."""
+    """Just the measured quantities, which most of these tests are about."""
     payload = _export_record(tmp_path)["payload"]
     assert isinstance(payload, dict)
     return payload
@@ -1103,12 +1128,11 @@ def test_the_export_carries_the_envelope_every_other_report_carries(tmp_path: Pa
 
 
 def test_the_export_carries_every_quantity_its_docstring_names(tmp_path: Path) -> None:
-    """Six quantities are promised; the record carried four.
+    """Every quantity the exporter's docstring names is in the record.
 
     The docstring opens "Term counts, term frequencies, document frequencies,
-    IDF, the tf-idf weights and the norm". Counts and frequencies were missing.
-    Asserted per name rather than as a set comparison, so a failure says which
-    one went.
+    IDF, tf-idf weights and the norm". Asserted per name rather than as a
+    set comparison, so a failure says which one is absent.
     """
     payload = _export(tmp_path)
     terms = payload["terms"]
@@ -1126,13 +1150,11 @@ def test_the_export_carries_every_quantity_its_docstring_names(tmp_path: Path) -
 
 
 def test_every_float_in_the_export_has_its_bit_pattern_beside_it(tmp_path: Path) -> None:
-    """The docstring's stated reason for existing.
+    """Every float in the export has its raw bit pattern beside it.
 
-    "each with its raw bit pattern beside the decimal ... A decimal rendering of
-    a binary64 is a lossy summary at whatever precision the formatter chose, so
-    two values one ulp apart, the difference this study is about, can print
-    identically." A float exported without its hex defeats the point of the file,
-    and `tf` was exported with neither.
+    A decimal rendering of a binary64 is a lossy summary at whatever precision
+    the formatter chose, so two values one ulp apart can print identically. A
+    float exported without its hex defeats the point of the file.
     """
     payload = _export(tmp_path)
 
@@ -1148,12 +1170,11 @@ def test_every_float_in_the_export_has_its_bit_pattern_beside_it(tmp_path: Path)
 
 
 def test_the_exported_weight_is_exactly_tf_times_idf(tmp_path: Path) -> None:
-    """The check the count and tf make possible, and the reason they matter.
+    """The exported weight is fl(tf * idf), bit for bit.
 
     With only `weight` and `idf` published a reader cannot verify the weight
-    without dividing, which is the operation that loses an ulp. With `count`, `L`
-    and `tf` present the identity is checkable bit for bit, which is what makes
-    this file evidence rather than a listing.
+    without dividing, which loses an ulp. With `count`, `L` and `tf` present
+    the identity is checkable bit for bit.
     """
     payload = _export(tmp_path)
     length = payload["in_vocabulary_length"]
@@ -1171,11 +1192,9 @@ def test_the_exported_weight_is_exactly_tf_times_idf(tmp_path: Path) -> None:
 def test_an_unreproducible_build_leaves_no_artefact_behind(tmp_path: Path) -> None:
     """The guard runs before `save_model`, not after it.
 
-    `require_reproducible` refuses a fast-math or arch-tuned build, which cannot
-    produce publishable numbers. Run after `save_model`, it would raise with the
-    container and its sidecar already on disk and `manifest.write` never
-    reached, leaving a complete-looking model from a build the project declares
-    unfit and no manifest to say so.
+    `require_reproducible` refuses a fast-math or arch-tuned build. Run after
+    `save_model`, it would raise with the container and sidecar on disk and no
+    manifest to say the build is unfit.
     """
     out = tmp_path / "m.tfsx"
 
@@ -1193,11 +1212,9 @@ def test_an_unreproducible_build_leaves_no_artefact_behind(tmp_path: Path) -> No
 def test_a_reproducible_build_writes_both_the_model_and_its_manifest(tmp_path: Path) -> None:
     """The guard's other half: it must not refuse an ordinary build.
 
-    Contrastive with the test above, so a refusal that wrote nothing because it
-    refused *everything* could not pass for correct. The manifest is asserted
-    alongside the container because the ordering change moved when it is filled
-    in -- `manifest.model` is now assigned after `save_model` returns, and a
-    manifest written without it would record no container digest at all.
+    A refusal that wrote nothing because it refused everything would otherwise
+    pass. `manifest.model` is assigned after `save_model` returns, so the
+    manifest is asserted to carry the container digest.
     """
     out = tmp_path / "m.tfsx"
 
@@ -1216,10 +1233,11 @@ def test_a_reproducible_build_writes_both_the_model_and_its_manifest(tmp_path: P
 # ---------------------------------------------------------------------------
 # verify compares the whole file, not just the two digests that cover part of it
 # ---------------------------------------------------------------------------
+
+
 # `TfidfModel.digest()` hashes the vocabulary, the IDF and every weight, and
-# stops there: `reduction`, `doc_ids` and `lengths` round-trip through the
-# container without reaching it. `container_sha256` is the only recorded value
-# covering the whole file, so `verify` compares that one too.
+# stops there: `reduction`, `doc_ids` and `lengths` never reach it. Only
+# `container_sha256` covers the whole file, so `verify` compares that one too.
 def _built(tmp_path: Path) -> Path:
     out = tmp_path / "m.tfsx"
     assert main(["build-corpus", str(CORPUS), "-o", str(out)]) == 0
@@ -1227,7 +1245,7 @@ def _built(tmp_path: Path) -> Path:
 
 
 def test_verify_accepts_a_file_it_has_not_touched(tmp_path: Path) -> None:
-    """The baseline. Every rejection below is vacuous if this fails."""
+    """An untouched file verifies, or every rejection below is vacuous."""
     assert main(["verify", str(_built(tmp_path))]) == 0
 
 
@@ -1237,8 +1255,8 @@ def test_verify_rejects_a_container_whose_reduction_and_ids_were_altered(
     """Two fields that `model_digest` and `vocabulary_digest` cannot see.
 
     Moving the reduction word from NAIVE to EXACT and the last document id from
-    `d6` to `d9` leaves both of those digests unchanged, so `container_sha256`
-    is the only one that rejects the file.
+    `d6` to `d9` leaves both digests unchanged, so only `container_sha256`
+    rejects the file.
     """
     out = _built(tmp_path)
     data = bytearray(out.read_bytes())
@@ -1271,12 +1289,11 @@ def test_verify_refuses_a_manifest_that_records_nothing_to_compare(
 def test_verify_fails_on_a_manifest_missing_only_some_of_its_digests(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The partial manifest, between "all present" and "none present".
+    """A manifest carrying one digest of three does not verify on that one.
 
-    A manifest carrying one digest of three must not verify on the strength of
-    that one: an absent digest is reported as absent rather than skipped.
-    Dropping every key returns 2 above; dropping some returns 1 here, and it is
-    the shape a hand-edited or partially-written manifest takes.
+    An absent digest is reported as absent rather than skipped. Dropping every
+    key returns 2 above; dropping some returns 1 here, the shape a hand-edited
+    or partially written manifest takes.
     """
     out = _built(tmp_path)
     manifest_path = out.with_suffix(".manifest.json")
@@ -1297,7 +1314,7 @@ def test_verify_fails_on_a_manifest_missing_only_some_of_its_digests(
 def test_verify_reports_which_digest_disagreed(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A mismatch has to say what moved, or the next step is bisecting by hand.
+    """A mismatch names what moved, or the next step is bisecting by hand.
 
     The container digest is the one that catches a field the model digest does
     not cover, so it is the one a reader most needs named.
@@ -1317,10 +1334,11 @@ def test_verify_reports_which_digest_disagreed(
 # ---------------------------------------------------------------------------
 # The floating-point environment is checked before a command produces numbers
 # ---------------------------------------------------------------------------
-# `fp_guard.hpp` calls this "layer 3, run time": the first two layers describe
-# the binary, and only this one sees the process. MKL and some OpenBLAS builds
-# set flush-to-zero as numpy imports, which flushes exactly the subnormal
-# near-tie margins under study, so every command probes before it computes.
+
+
+# `fp_guard.hpp` calls this "layer 3, run time", the only layer that sees the
+# process. MKL and some OpenBLAS builds set flush-to-zero as numpy imports and
+# flush the subnormal near-tie margins under study, so each command probes first.
 def test_a_command_checks_the_float_environment_before_producing_numbers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1328,8 +1346,7 @@ def test_a_command_checks_the_float_environment_before_producing_numbers(
 
     Repairing a flushing environment after the numbers are computed repairs
     nothing, so the substitute asserts from inside itself that the command has
-    not yet written its output. Recording only that it was called would pass
-    with the probe moved after the dispatch.
+    not yet written its output.
     """
     from tfidf_stability import _native
 
@@ -1356,12 +1373,11 @@ def test_a_command_checks_the_float_environment_before_producing_numbers(
 def test_the_reference_backend_is_not_turned_into_an_error_by_the_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The probe is skipped outright when no extension is present.
+    """The native probe is not attempted when no extension is present.
 
     `check_float_environment` goes through `require_native`, which raises
-    `NativeBackendUnavailableError` without an extension. Calling it
-    unconditionally would turn the pure-Python reference backend, a supported
-    configuration, into a crash on every CLI invocation.
+    without an extension, so the reference backend runs
+    `assert_sane_float_environment` instead.
     """
     from tfidf_stability import _native
 
@@ -1410,10 +1426,9 @@ def test_an_untrustworthy_environment_is_not_swallowed_by_the_cli(
 def test_a_misspelled_config_section_is_fatal_rather_than_inert(tmp_path: Path) -> None:
     """An unrecognised config section raises `ConfigError`.
 
-    `_section` checks the keys within a section, not the section name. Without
-    the guard in `load_config` a misspelled `preprocesing:` would apply nothing
-    yet still be hashed into the manifest. The same keys spelled correctly are
-    honoured, so the rejection is on the name."""
+    `_section` checks the keys within a section, not the section name, so a
+    misspelled `preprocesing:` would apply nothing yet be hashed into the
+    manifest. The same keys spelled correctly are honoured."""
     bad = tmp_path / "typo.yaml"
     bad.write_text("preprocesing:\n  n_max: 5\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="unrecognised config section"):

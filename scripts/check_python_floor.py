@@ -1,33 +1,9 @@
 #!/usr/bin/env python3
-"""Refuse a stdlib call that the oldest supported interpreter cannot make.
+"""Refuse a stdlib call that the minimum supported Python cannot make.
 
-``pyproject.toml`` says ``requires-python = ">=3.11"``, and CI runs 3.11, 3.12
-and 3.13. A contributor on a newer interpreter cannot see the difference: a
-call that their Python accepts and 3.11 does not passes every local check and
-fails in five CI jobs at once.
-
-That happened. ``Path.write_text`` has taken a ``newline`` argument since 3.10
-and ``Path.read_text`` only since 3.13, so ``read_text(encoding=..., newline="")``
-ran locally on 3.14 and raised ``TypeError`` on every supported version, in the
-test suite, the coverage job and the native job.
-
-``mypy`` already knows this -- typeshed models each signature per version -- and
-the project already runs it at the floor. It just runs over ``src/`` only, and
-this defect was in ``tests/`` and ``scripts/``. Pointing strict mypy at those
-would report several hundred findings about pytest decorators and untyped test
-helpers, which is a different piece of work; this asks mypy one question instead:
-
-    is any call passing an argument the signature at the floor does not accept?
-
-That is mypy's ``call-arg``, and it is the shape this class of defect takes. The
-floor is read from ``pyproject.toml`` rather than repeated here, so raising
-``requires-python`` moves the check with it.
-
-Usage::
-
-    python scripts/check_python_floor.py
-
-Exits non-zero if any such call exists, so it can gate CI beside the others.
+Runs mypy at the ``requires-python`` floor from ``pyproject.toml`` over
+``tests/``, ``scripts/`` and ``examples/`` and reports every ``call-arg``
+finding. Rationale: docs/engineering_notes.md#python-floor-call-arg-check
 """
 
 from __future__ import annotations
@@ -39,16 +15,16 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-#: Checked in addition to `src/`, which the main mypy run already covers.
+#: Checked in addition to `src/`, which the main mypy run covers.
 _ROOTS = ("tests", "scripts", "examples")
 
-#: The one question. Every other mypy code is about typing style rather than
-#: about whether the call is possible, and enabling them here would bury this.
+#: The only mypy error code reported. Other codes concern typing style rather
+#: than whether the call is possible at the floor.
 _WANTED = "call-arg"
 
 
 def floor(root: Path) -> str:
-    """The minimum interpreter, as ``major.minor``, from ``requires-python``."""
+    """Return the ``major.minor`` floor from ``requires-python``."""
     pyproject = root / "pyproject.toml"
     text = pyproject.read_text(encoding="utf-8")
     match = re.search(r'^requires-python\s*=\s*"[^0-9]*(\d+\.\d+)', text, re.M)
@@ -58,7 +34,7 @@ def floor(root: Path) -> str:
 
 
 def findings(root: Path, version: str) -> list[str]:
-    """Every ``call-arg`` mypy reports over the extra roots at ``version``."""
+    """List mypy's ``call-arg`` lines for the extra roots at ``version``."""
     roots = [str(root / name) for name in _ROOTS if (root / name).is_dir()]
     if not roots:
         raise SystemExit(f"none of {_ROOTS} exist under {root}; there is nothing to check")

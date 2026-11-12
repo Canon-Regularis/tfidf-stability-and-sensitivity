@@ -1,16 +1,8 @@
 """The equivalent-mutant allowlist and the verdict it feeds.
 
-A mutation that no test kills is usually a gap. Sometimes it is not: the
-expression cannot be reached, or reaches the same answer another way, and no
-test could tell the difference. `configs/equivalent_mutants.txt` records those
-with their reasons, and `tooling/mutation_python.py` reads it to decide whether a
-campaign passed.
-
-That decision is the whole value of the nightly job, so it is tested here rather
-than trusted. Two directions matter equally: an undocumented survivor must fail,
-and a documented one that no longer survives must fail too. Without the second,
-the file quietly becomes a blanket suppression -- entries accumulate, nothing
-ever prunes them, and the campaign goes green whatever the tests do.
+`configs/equivalent_mutants.txt` records mutations no test can kill, with a
+reason each, and `tooling/mutation_python.py` reads it to pass or fail a
+campaign. An undocumented survivor fails, and so does a claim matching no survivor.
 """
 
 from __future__ import annotations
@@ -39,9 +31,10 @@ def _mutant(line: int, kind: str, before: str, after: str) -> object:
 # The allowlist file itself
 # ---------------------------------------------------------------------------
 def test_every_claim_names_a_module_that_exists() -> None:
-    """A claim about a file that was deleted or renamed is an argument about
-    nothing, and it would sit here unnoticed because no campaign would ever look
-    for it."""
+    """Every allowlist claim names a module that exists in the tree.
+
+    No campaign runs for an absent module, so a stale claim would go unnoticed.
+    """
     missing = set()
     for raw in ALLOWLIST.read_text(encoding="utf-8").splitlines():
         statement, _, _reason = raw.partition("#")
@@ -53,9 +46,11 @@ def test_every_claim_names_a_module_that_exists() -> None:
 
 
 def test_every_claim_carries_a_reason() -> None:
-    """The reason is what separates a documented equivalence from a silenced
-    finding. The loader ignores an entry without one, so a claim written without
-    a reason would fail open -- present in the file, absent from the gate."""
+    """Every allowlist claim carries a reason.
+
+    The loader ignores an entry without one, so an unreasoned claim fails open:
+    present in the file, absent from the gate.
+    """
     unreasoned = []
     for raw in ALLOWLIST.read_text(encoding="utf-8").splitlines():
         statement, _, reason = raw.partition("#")
@@ -66,8 +61,10 @@ def test_every_claim_carries_a_reason() -> None:
 
 
 def test_the_allowlist_covers_more_than_one_module() -> None:
-    """The premise of the file. If it held a single module's claims the gate
-    would be doing almost nothing."""
+    """The allowlist documents claims for more than one module.
+
+    A file holding a single module's claims would leave the gate almost idle.
+    """
     modules = {
         line.split()[0]
         for line in ALLOWLIST.read_text(encoding="utf-8").splitlines()
@@ -78,8 +75,7 @@ def test_the_allowlist_covers_more_than_one_module() -> None:
 
 
 def test_claims_are_loaded_only_for_the_module_asked_about() -> None:
-    """Keyed by path, so one module's equivalences cannot excuse another's
-    survivors."""
+    """Claims are keyed by path, so one module's cannot excuse another's."""
 
     numerics = runner._load_equivalents(Path("src/tfidf_stability/utils/numerics.py"))
     sort_keys = runner._load_equivalents(Path("src/tfidf_stability/ranking/sort_keys.py"))
@@ -90,26 +86,33 @@ def test_claims_are_loaded_only_for_the_module_asked_about() -> None:
 
 
 def test_a_claim_resolves_to_its_reason() -> None:
-    """The key is the whole mutation, not just the line: two mutable sites share
-    a line often enough that a line-only key would excuse the wrong one."""
+    """A claim is keyed by the whole mutation and resolves to its reason.
+
+    Two mutable sites often share a line, so a line-only key could excuse the
+    wrong one.
+    """
     claims = runner._load_equivalents(Path("src/tfidf_stability/ranking/sort_keys.py"))
 
-    assert (155, "compare", "LtE", "Lt") in claims
-    assert "transitive" in claims[(155, "compare", "LtE", "Lt")]
+    assert (123, "compare", "LtE", "Lt") in claims
+    assert "transitive" in claims[(123, "compare", "LtE", "Lt")]
 
 
 # ---------------------------------------------------------------------------
 # The sandbox: what a campaign needs to be a working checkout
 # ---------------------------------------------------------------------------
-#: A top-level entry named as `REPO / "<something>"`. The captured name must look
-#: like a path: without that this pattern matches its own source, and the two
-#: fragments of itself are the only things it would report.
+
+#: A top-level entry named as `REPO / "<name>"`. The capture must look like a
+#: path, or the pattern matches its own source in this file.
 _TOP_LEVEL_READ = re.compile(r'REPO / "([\w.@+-]+)"')
 
-#: Where a path reaches the suite from. `tests/` is the direct signal -- a test
-#: that opens a repository file needs it in the sandbox -- and the other two are
-#: there because a test runs a gate script, which opens files of its own.
+#: Directories whose files name repository paths. A test that opens a repository
+#: file needs it in the sandbox; `scripts/` and `tooling/` are scanned because a
+#: test runs a gate script, which opens files of its own.
 _SCANNED = ("tests", "scripts", "tooling")
+
+#: Top-level names a gate probes that the sandbox must not hold. A sandbox is not
+#: a checkout, and `scripts/check_vendored.py` tests for `.git` to tell them apart.
+_PROBED_NOT_COPIED = frozenset({".git"})
 
 
 def _top_level_reads() -> dict[str, set[str]]:
@@ -124,19 +127,18 @@ def _top_level_reads() -> dict[str, set[str]]:
 
 
 def test_the_sandbox_holds_every_top_level_path_the_suite_names() -> None:
-    """A campaign runs against a copy, so a file only the real tree has is a
-    file the suite cannot open, and the baseline fails before any mutant.
+    """The sandbox copies every top-level path the suite or its gates name.
 
-    Deliberately an over-approximation: a path a script only writes into is
-    copied too. One extra directory costs a single copy per campaign, and the
-    other way round costs a red nightly job a day later, reported as an exit
-    code with no reference to the file that went missing.
+    A campaign runs against a copy, so a file only the real tree has fails the
+    baseline before any mutant. The check over-approximates: a path a script
+    only writes into is copied too, at the cost of one extra copy per campaign.
     """
     contents = set(runner._SANDBOX_CONTENTS)
+    assert not contents & _PROBED_NOT_COPIED, "a sandbox holding .git would be a checkout"
     missing = {
-        where: sorted(names - contents)
+        where: sorted(names - contents - _PROBED_NOT_COPIED)
         for where, names in _top_level_reads().items()
-        if names - contents
+        if names - contents - _PROBED_NOT_COPIED
     }
 
     assert missing == {}, (
@@ -146,8 +148,9 @@ def test_the_sandbox_holds_every_top_level_path_the_suite_names() -> None:
 
 
 def test_the_scan_finds_the_paths_it_is_meant_to_check() -> None:
-    """The premise. A pattern that matched nothing would make the check above
-    pass for the wrong reason, and it is the kind that silently stops matching.
+    """The scan matches the paths it is meant to find.
+
+    A pattern that matched nothing would make the sandbox check pass vacuously.
     """
     reads = _top_level_reads()
     named = {name for names in reads.values() for name in names}
@@ -164,19 +167,21 @@ def test_the_scan_finds_the_paths_it_is_meant_to_check() -> None:
 # The verdict
 # ---------------------------------------------------------------------------
 def test_a_documented_survivor_does_not_fail_the_campaign() -> None:
-    """The reason the file exists. Every module has equivalents, so without this
-    the nightly fails every night whatever the tests do."""
+    """A survivor with an allowlist claim does not fail the campaign.
+
+    Every module has equivalents, so without this the nightly fails every night.
+    """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
-    survivors = [_mutant(155, "compare", "LtE", "Lt")]
+    survivors = [_mutant(123, "compare", "LtE", "Lt")]
 
     assert runner._verdict(module, survivors) == 0
 
 
 def test_an_undocumented_survivor_fails_the_campaign() -> None:
-    """The gap the tool exists to find, which the allowlist must not swallow."""
+    """A survivor with no allowlist claim fails the campaign."""
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
     survivors = [
-        _mutant(155, "compare", "LtE", "Lt"),
+        _mutant(123, "compare", "LtE", "Lt"),
         _mutant(42, "constant", "1", "0"),
     ]
 
@@ -184,8 +189,11 @@ def test_an_undocumented_survivor_fails_the_campaign() -> None:
 
 
 def test_a_claim_that_matches_no_survivor_fails_the_campaign() -> None:
-    """The anti-accretion half. The mutant is killed now, or the line moved;
-    either way the argument has to be re-read rather than left standing."""
+    """A claim that matches no survivor fails the campaign.
+
+    The mutant is killed now, or the line moved; either way the argument must
+    be re-read rather than left standing.
+    """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
 
     assert runner._verdict(module, []) == 1
@@ -194,13 +202,11 @@ def test_a_claim_that_matches_no_survivor_fails_the_campaign() -> None:
 def test_a_module_with_no_claims_still_fails_on_any_survivor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Absence of an allowlist entry must never read as permission. A module
-    nobody has documented behaves exactly as the tool did before this file.
+    """A module with no claims fails on any survivor and passes on none.
 
-    The empty allowlist is substituted rather than borrowed, so the premise does
-    not depend on which modules the real file happens to document. The module
-    named carries real entries, which places the emptiness in the substituted
-    file rather than in the module.
+    An empty allowlist is substituted rather than borrowed, so the premise does
+    not depend on which modules the real file documents. The module named
+    carries real entries, which places the emptiness in the substituted file.
     """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
 
@@ -211,104 +217,73 @@ def test_a_module_with_no_claims_still_fails_on_any_survivor(
     monkeypatch.setattr(runner, "_EQUIVALENTS", empty)
 
     assert runner._load_equivalents(module) == {}, "and now, by construction, it is not"
-    assert runner._verdict(module, [_mutant(155, "compare", "LtE", "Lt")]) == 1
+    assert runner._verdict(module, [_mutant(123, "compare", "LtE", "Lt")]) == 1
     assert runner._verdict(module, []) == 0
 
 
 @pytest.mark.parametrize(
     ("line", "kind", "before", "after"),
     [
-        (155, "compare", "LtE", "GtE"),
-        (155, "constant", "LtE", "Lt"),
-        (156, "compare", "LtE", "Lt"),
+        (123, "compare", "LtE", "GtE"),
+        (123, "constant", "LtE", "Lt"),
+        (124, "compare", "LtE", "Lt"),
     ],
 )
 def test_a_near_miss_is_not_covered_by_the_claim(
     line: int, kind: str, before: str, after: str
 ) -> None:
-    """Every field is part of the key. A different mutation on the same line, or
-    the same mutation one line over, is a different claim and needs its own."""
+    """Every field of the key must match for a claim to cover a mutant.
+
+    A different mutation on the same line, or the same mutation one line over,
+    needs a claim of its own.
+    """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
 
     assert runner._verdict(module, [_mutant(line, kind, before, after)]) == 1
 
 
 def test_one_claim_covers_every_mutant_sharing_its_key() -> None:
-    """The documented limitation, pinned so it stays deliberate.
+    """One claim covers every survivor that shares its key.
 
-    `@dataclass(frozen=True, slots=True)` is two mutable sites on one line, and
-    both yield `constant True -> False`. The key cannot separate them, so a
-    single claim excuses both -- which is why the file's header requires such a
-    claim to justify every mutation matching it, not whichever was looked at
-    first.
-
-    The count is reported over survivors rather than over claims, so two
-    survivors under one claim read as two accounted for and not as one still
-    outstanding.
+    `@dataclass(frozen=True, slots=True)` is two mutable sites on one line that
+    both yield `constant True -> False`; the key cannot separate them, so the
+    allowlist header requires a claim to justify every mutation matching it.
     """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
     twins = [
-        _mutant(155, "compare", "LtE", "Lt"),
-        _mutant(155, "compare", "LtE", "Lt"),
+        _mutant(123, "compare", "LtE", "Lt"),
+        _mutant(123, "compare", "LtE", "Lt"),
     ]
 
     assert runner._verdict(module, twins) == 0
 
 
 def test_a_claim_does_not_cover_the_same_mutation_one_line_over() -> None:
-    """A note, not a check: the mutation's index in document order would
-    separate the twins above, but it shifts whenever anything earlier in the
-    file is edited, so every claim in a module would go stale on an unrelated
-    change. The line-based key trades that for the collision.
+    """A claim is keyed by line, so moving the expression invalidates it.
 
-    What is asserted is the consequence: a claim is keyed by line, so moving the
-    expression invalidates it.
+    A document-order index would separate twins on one line but shifts on any
+    edit earlier in the file.
+    Rationale: docs/engineering_notes.md#line-keyed-allowlist
     """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
-    moved = [_mutant(156, "compare", "LtE", "Lt")]
+    moved = [_mutant(124, "compare", "LtE", "Lt")]
 
-    assert runner._verdict(module, moved) == 1, "the claim at 155 must not cover 156"
+    assert runner._verdict(module, moved) == 1, "the claim at 123 must not cover 124"
 
 
 # ---------------------------------------------------------------------------
 # The sandbox: the campaign must execute the mutant, not the working tree
 # ---------------------------------------------------------------------------
-# Everything above tests the verdict. None of it tests the premise the verdict
-# rests on -- that the tests a campaign runs import the *mutated copy*. They did
-# not, and nothing noticed, because a campaign in that state reports every
-# mutant as a survivor and a survivor is a normal result.
-#
-# scikit-build-core's editable `.pth` has two lines: one installs a
-# `sys.meta_path` finder, the other appends the real `src/` to `sys.path`.
-# `_make_sandbox` undid the first. The second still put the working tree on the
-# path, and `tests/conftest.py` adds `src/` only `if find_spec("tfidf_stability")
-# is None` -- which it then was not, so the sandbox was never inserted.
-#
-# Measured while the second line stood: `margins.py` scored 0 killed of 6 and
-# `stratify.py` 0 of 29, including flips their own test files fail on when run
-# by hand. Both score normally once the sandbox really is first.
-#
-# It bit a developer checkout rather than the nightly: `requirements-dev.txt`
-# does not install this package, so in CI `find_spec` returns None and conftest
-# inserts the sandbox's own `src/`. The editable install is what supplies the
-# competing answer. That is precisely why it needs a test -- the environment
-# where it breaks is the one no job runs in.
+
+
+# Rationale: docs/engineering_notes.md#sandbox-import-precedence
 @pytest.mark.slow
 def test_a_test_run_inside_the_sandbox_imports_the_sandbox_copy() -> None:
-    """A module written only into the sandbox must be the one a test sees.
+    """A module written only into the sandbox is the one a test run there sees.
 
-    Marked slow, and its faster sibling below is the one the PR tier runs. That
-    sibling is strictly stronger -- proving the sandbox wins subsumes proving it
-    is reachable -- so the PR tier keeps the assertion that matters and this one
-    adds the cleaner diagnostic on the nightly, where the campaign it guards
-    runs anyway. Both spend their time copying the tree and starting a pytest
-    subprocess; neither has a cheap form.
-
-    The probe is a new module rather than an edit to an existing one, so the
-    assertion cannot pass by coincidence: if the working tree is imported
-    instead, the module is simply not there and the run fails on ImportError.
-    That is the same signal a mutated module gives, arrived at without having to
-    mutate anything.
+    The probe is a new module, so a run that imports the working tree fails on
+    ImportError instead of passing. The faster sibling below is strictly stronger;
+    this one is slow, so only ci.yml's reference and native jobs run it.
     """
     sandbox = runner._make_sandbox()
     try:
@@ -334,13 +309,11 @@ def test_a_test_run_inside_the_sandbox_imports_the_sandbox_copy() -> None:
 
 
 def test_the_sandbox_shadows_the_working_tree_rather_than_sitting_behind_it() -> None:
-    """The stronger half: not merely reachable, but *first*.
+    """The sandbox copy of a real module is imported ahead of the working tree.
 
-    A probe module is enough to prove the sandbox is on the path somewhere. It
-    is not enough to prove it wins, and winning is the whole question -- every
-    module a campaign mutates exists in both trees. Here the sandbox's copy of a
-    real module is replaced outright, so the only way the run can fail is if the
-    sandbox is what got imported.
+    Every module a campaign mutates exists in both trees, so reachability is not
+    enough. The sandbox's copy is replaced outright, and the run can only fail
+    if that copy is what gets imported.
     """
     sandbox = runner._make_sandbox()
     try:
@@ -370,34 +343,16 @@ def test_the_sandbox_shadows_the_working_tree_rather_than_sitting_behind_it() ->
 # ---------------------------------------------------------------------------
 # The allowlist is keyed by line number, so an edit above one invalidates it
 # ---------------------------------------------------------------------------
-# Every entry names `(path, line, kind, before, after)`. Insert a comment above
-# one and the mutation it describes moves; the entry now points at whatever else
-# is on that line, or at nothing. The campaign then reports the same mutant
-# twice over -- stale here, undocumented there -- which reads as two findings
-# and is neither.
-#
-# A campaign is the only thing that notices, and `nightly.yml` runs campaigns
-# for twelve modules while the allowlist argues about thirty-four. Adding five
-# comment lines to `noise_floor.py` shifts nine of its entries and no gate
-# anywhere would say so.
-#
-# It does not need a campaign. Whether a line still carries the mutation an
-# entry describes is answerable from the AST alone, in about a second for the
-# whole file, so it belongs in the PR tier rather than the nightly.
+
+
+# Line drift is checked from the AST, in the PR tier rather than by a campaign.
+# Rationale: docs/engineering_notes.md#allowlist-drift-check
 def _sites_by_key(module: Path) -> set[tuple[int, str, str, str]]:
     """Every mutable site in `module`, keyed the way the allowlist keys them.
 
-    One pass rather than one per site. `_Mutator` is built to apply a single
-    mutation chosen by index, so the obvious enumeration re-parses the module
-    once per site: over the modules this file documents that was 23
-    seconds through `_apply`, which also unparses, and 11 through the mutator
-    alone. `_hit` is called at every site whatever the target, so overriding it
-    records the lot in a single visit and mutates nothing -- `target=-1` matches
-    no index, so the base call always declines.
-
-    The count is cross-checked against `_count_sites`, which walks the same
-    visitor independently. If the two ever disagree this enumeration has missed
-    a site and the check above would silently stop covering it.
+    One visit with `target=-1` records every `_hit` and mutates nothing; the
+    count is cross-checked against `_count_sites`, which walks the same visitor.
+    Rationale: docs/engineering_notes.md#allowlist-site-enumeration
     """
     source = module.read_text(encoding="utf-8")
 
@@ -421,15 +376,11 @@ def _sites_by_key(module: Path) -> set[tuple[int, str, str, str]]:
 
 
 def test_every_allowlist_entry_still_names_a_mutation_that_exists() -> None:
-    """An entry pointing at a line that no longer carries that mutation is dead.
+    """Every allowlist entry names a mutation that exists at its line.
 
-    Dead in a way that costs twice: the argument it records is lost, and the
-    mutant it was written for is now undocumented and will fail a campaign that
-    should have passed. Both were true of eleven entries after a round of edits
-    that changed no behaviour at all.
-
-    The failure message carries the whole key, because the fix is a renumber and
-    the only thing needed to make it is the line the mutation moved to.
+    A dead entry costs twice: its argument is lost, and the mutant it covers is
+    undocumented and fails a campaign that should pass. The failure message
+    carries the whole key, because the fix is a renumber to the new line.
     """
     entries = [
         line.split()
@@ -461,10 +412,10 @@ def test_every_allowlist_entry_still_names_a_mutation_that_exists() -> None:
 
 
 def test_the_allowlist_names_only_modules_that_are_still_in_the_package() -> None:
-    """A renamed or deleted module leaves entries that can never match again.
+    """Every allowlist entry names a module that is still in the package.
 
-    Separate from the test above so the message says which of the two happened:
-    a moved line and a moved file need different fixes.
+    Separate from the test above so the message says which happened: a moved
+    line and a moved file need different fixes.
     """
     named = {
         line.split()[0]
@@ -480,9 +431,8 @@ def test_the_allowlist_names_only_modules_that_are_still_in_the_package() -> Non
 def _stamped_entries() -> list[tuple[str, int, str, str]]:
     """Every allowlist entry as `(path, line, stamp, reason)`.
 
-    Local by house convention. Separate from `_sites_by_key` above, which asks
-    whether the mutation exists rather than whether the line it sits on is still
-    the line the entry was written about.
+    Separate from `_sites_by_key`, which asks whether the mutation exists rather
+    than whether the line it sits on is the one the entry describes.
     """
     entries: list[tuple[str, int, str, str]] = []
     for raw in ALLOWLIST.read_text(encoding="utf-8").splitlines():
@@ -496,13 +446,11 @@ def _stamped_entries() -> list[tuple[str, int, str, str]]:
 
 
 def test_every_allowlist_entry_still_describes_the_line_it_names() -> None:
-    """The half `..._still_names_a_mutation_that_exists` does not cover.
+    """Every entry's `src=` stamp matches the fingerprint of the line it names.
 
-    That test asks whether a site with the entry's `(line, kind, before, after)`
-    exists, not whether it is the site the entry was written about: a renumber
-    onto the nearest same-signature line satisfies it. `src=<8 hex>` prefixes
-    each reason with a fingerprint of the source line, and the failure prints
-    the line now sitting there.
+    The mutation-exists check is satisfied by a renumber onto the nearest line
+    with the same signature. The stamp prefixes each reason with a fingerprint
+    of the source line, and the failure prints the line now sitting there.
     """
     entries = _stamped_entries()
     assert entries, "the premise: the allowlist is not empty"
@@ -562,16 +510,11 @@ def test_a_stamp_pointing_at_a_different_expression_is_rejected() -> None:
 def test_an_entry_whose_only_reason_is_its_fingerprint_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The emptiness test runs after the `src=` stamp is stripped, not before.
+    """An entry whose reason is only a `src=` stamp is refused by the loader.
 
-    A reason may carry a `src=<8 hex>` prefix, which the loader removes because
-    it is bookkeeping for the drift guard rather than part of the argument.
-    Testing the raw text for emptiness accepted an entry whose whole reason was
-    that prefix, leaving an empty argument behind: a survivor silenced with no
-    stated reason, which is the suppression this file's header refuses.
-
-    The stamped-and-argued form must still load, or the fix would silence the
-    real allowlist instead.
+    The loader strips the stamp before testing the reason for emptiness, so a
+    stamp alone leaves no argument and the entry is dropped. A stamped entry
+    that also argues its case still loads.
     """
     allowlist = tmp_path / "equivalent_mutants.txt"
     entry = "src/tfidf_stability/utils/numerics.py  112  compare  GtE -> Gt  #"
@@ -594,12 +537,11 @@ def test_an_entry_whose_only_reason_is_its_fingerprint_is_refused(
 # ---------------------------------------------------------------------------
 # An argument nothing rechecks
 # ---------------------------------------------------------------------------
-#: Modules whose equivalence arguments the nightly matrix does not re-run. Each
-#: entry is a promise to schedule that module, not a licence to leave it out:
-#: the allowlist's own header says a claim that stops matching a survivor "must
-#: be re-checked rather than left to rot", and that check only runs for modules
-#: the matrix names. Scheduling one needs its scoped test list measured, because
-#: too narrow a list reports survivors the whole suite would kill.
+
+#: Argued modules the nightly matrix does not re-run, each with its reason. The
+#: "matched no survivor" check runs only for modules the matrix names, so each
+#: entry is a module still to schedule; scheduling one needs a measured scoped
+#: test list, because too narrow a list reports false survivors.
 _NOT_YET_SCHEDULED: dict[str, str] = {
     "src/tfidf_stability/ranking/attributes.py": (
         "no scoped test list measured yet; too narrow a list reports false survivors"
@@ -695,15 +637,11 @@ def _matrix_entries() -> list[dict[str, str]]:
 
 
 def test_every_argued_module_is_scheduled_or_deferred_with_a_reason() -> None:
-    """The four relations between the matrix, the allowlist and the deferrals.
+    """Every argued module is scheduled, or deferred with a reason.
 
-    An equivalence argument is only as good as the campaign that rechecks it,
-    and the "matched no survivor" half can only fire for a module the matrix
-    runs. This does not schedule the rest; it stops the gap growing silently.
-
-    Stated as one test over four relations, matching
-    `tests/test_cpp_mutation_gate.py`, so the two languages reconcile the same
-    way rather than in three tests here and one there.
+    The "matched no survivor" check fires only for modules the matrix runs, so
+    an unscheduled, undeferred module is a silent gap. Stated as one test over
+    four relations, matching `tests/test_cpp_mutation_gate.py`.
     """
     scheduled, pending = _scheduled(), set(_NOT_YET_SCHEDULED)
     claimed = {path for path, *_ in _stamped_entries()}
@@ -724,11 +662,11 @@ def test_every_argued_module_is_scheduled_or_deferred_with_a_reason() -> None:
 
 
 def test_every_scheduled_module_and_its_tests_exist() -> None:
-    """A matrix entry names paths as bare strings, and nothing resolves them.
+    """Every scheduled module and the test paths it names exist on disk.
 
-    A missing module path makes the runner exit before it starts. A missing
-    test path makes pytest report a collection error, which the runner scores
-    as `killed`: every mutant passes for a module nothing tested.
+    A matrix entry names paths as bare strings that nothing resolves. A missing
+    module makes the runner exit; a missing test path is a pytest collection
+    error, which the runner scores as `killed` for every mutant.
     """
     entries = _matrix_entries()
     assert entries, "no module is scheduled; the check is vacuous"
@@ -763,8 +701,10 @@ def _crafted(tmp_path: Path, source: str, line: int, argument: str = "an argumen
 
 
 def test_the_renumberer_proposes_nothing_on_a_clean_tree() -> None:
-    """The live direction. Every entry in both allowlists names the line its
-    stamp describes, so the tool has nothing to do and the gates agree."""
+    """The renumberer proposes no moves or refusals on the live allowlists.
+
+    Every entry in both allowlists names the line its stamp describes.
+    """
     for path, parse in renumber.ALLOWLISTS.items():
         moves, refusals = renumber.plan_file(parse(path.read_text(encoding="utf-8")))
 
@@ -773,8 +713,7 @@ def test_the_renumberer_proposes_nothing_on_a_clean_tree() -> None:
 
 
 def test_a_stamped_line_that_moved_down_is_relocated(tmp_path: Path) -> None:
-    """The operation the tool exists for: an edit above a covered line shifts it,
-    and the stamp says which line it became."""
+    """An edit above a covered line moves its entry to the line the stamp finds."""
     entries = _crafted(tmp_path, "a = 1\nif x <= y:\nb = 2\n", 2)
     (tmp_path / "src" / "crafted.py").write_text(
         "# added\n# added\na = 1\nif x <= y:\nb = 2\n", encoding="utf-8"
@@ -787,8 +726,11 @@ def test_a_stamped_line_that_moved_down_is_relocated(tmp_path: Path) -> None:
 
 
 def test_an_entry_whose_expression_changed_is_refused(tmp_path: Path) -> None:
-    """A changed expression is not a moved line. Only a reader can say whether
-    the argument still holds, so the tool reports and changes nothing."""
+    """A changed expression is refused rather than relocated.
+
+    Only a reader can say whether the argument still holds, so the tool reports
+    and changes nothing.
+    """
     entries = _crafted(tmp_path, "a = 1\nif x <= y:\nb = 2\n", 2)
     (tmp_path / "src" / "crafted.py").write_text("a = 1\nif x < y:\nb = 2\n", encoding="utf-8")
 
@@ -800,11 +742,10 @@ def test_an_entry_whose_expression_changed_is_refused(tmp_path: Path) -> None:
 
 
 def test_an_entry_whose_stamp_matches_two_lines_is_refused_as_ambiguous(tmp_path: Path) -> None:
-    """Why the line stays the key and the stamp stays corroborating.
+    """A stamp matching two lines is refused as ambiguous.
 
-    Thirteen of the Python entries and five of the C++ ones sit on line text that
-    is not unique in its own file, so a stamp alone cannot place an entry. Where
-    it cannot, the tool refuses rather than picking one.
+    Thirteen of the Python entries and five of the C++ ones sit on line text
+    that is not unique in its file, so a stamp alone cannot place an entry.
     """
     entries = _crafted(tmp_path, "a = 1\nif x <= y:\nb = 2\n", 2)
     # The entry's own line must stop matching first: an entry still sitting on a
@@ -822,8 +763,11 @@ def test_an_entry_whose_stamp_matches_two_lines_is_refused_as_ambiguous(tmp_path
 
 
 def test_a_refusal_carries_the_argument_a_reader_must_re_read(tmp_path: Path) -> None:
-    """The reason is the whole point of a refusal: it is what the reader has to
-    judge, and it would otherwise have to be looked up by hand."""
+    """A refusal carries the entry's reason.
+
+    The reason is what the reader has to judge, so the refusal includes it
+    rather than leaving it to be looked up.
+    """
     entries = _crafted(
         tmp_path, "a = 1\nif x <= y:\n", 2, argument="the branches agree at equal magnitude"
     )
@@ -835,8 +779,11 @@ def test_a_refusal_carries_the_argument_a_reader_must_re_read(tmp_path: Path) ->
 
 
 def test_a_move_rewrites_only_the_position_field(tmp_path: Path) -> None:
-    """Every other byte survives, so a renumbered allowlist diffs as one number
-    per entry rather than as a reformatting."""
+    """A move rewrites the line field and nothing else.
+
+    A renumbered allowlist then diffs as one number per entry rather than as a
+    reformatting.
+    """
     entries = _crafted(tmp_path, "a = 1\nif x <= y:\n", 2, argument="unchanged prose")
     (tmp_path / "src" / "crafted.py").write_text("# added\na = 1\nif x <= y:\n", encoding="utf-8")
     moves, _refusals = renumber.plan_file(entries, repo=tmp_path)
@@ -849,9 +796,11 @@ def test_a_move_rewrites_only_the_position_field(tmp_path: Path) -> None:
 
 
 def test_a_truncated_run_does_not_report_a_claim_it_never_reached() -> None:
-    """`--max-mutants` stops the campaign early, so a claim past the cut is
-    unmatched rather than stale. Reporting it fails a smoke run for entries that
-    are perfectly good, which is what the C++ campaign's `partial` flag avoids.
+    """A truncated run does not report an unreached claim as stale.
+
+    `--max-mutants` stops the campaign early, so a claim past the cut is
+    unmatched rather than stale, and reporting it would fail a smoke run on good
+    entries. The C++ campaign's `partial` flag withholds the same failure.
     """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
 
@@ -860,16 +809,22 @@ def test_a_truncated_run_does_not_report_a_claim_it_never_reached() -> None:
 
 
 def test_a_complete_run_still_reports_the_same_claim_as_stale() -> None:
-    """The other half. Withholding the failure on a truncated run must not
-    withhold it on a full one, or the anti-accretion half stops working."""
+    """A complete run reports the same unmatched claim as stale.
+
+    Withholding the failure on a truncated run must not withhold it on a full
+    one.
+    """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
 
     assert runner._verdict(module, [], partial=False) == 1
 
 
 def test_a_truncated_run_still_fails_on_an_undocumented_survivor() -> None:
-    """Truncation withholds one failure, not both. A survivor the run did see is
-    evidence whatever the cut was."""
+    """A truncated run still fails on an undocumented survivor.
+
+    Truncation withholds one failure, not both; a survivor the run saw is
+    evidence whatever the cut was.
+    """
     module = Path("src/tfidf_stability/ranking/sort_keys.py")
     survivors = [_mutant(42, "constant", "1", "0")]
 

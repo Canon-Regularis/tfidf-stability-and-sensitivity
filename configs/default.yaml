@@ -1,9 +1,7 @@
-# The normative configuration.
-#
-# Every value here can move a published number, so each is pinned explicitly
-# rather than inherited from a library default, and each is folded into the run
-# manifest's digest. Where the paper leaves a choice open, the spec_addenda entry
-# that resolves it is cited.
+# The normative configuration. Every value can move a published number, so each
+# is pinned explicitly rather than inherited from a library default, and each is
+# folded into the run manifest's digest. Where the paper leaves a choice open,
+# the spec_addenda entry that resolves it is cited.
 
 preprocessing:
   unicode_form: NFKC          # G7. NFC would leave compatibility variants apart.
@@ -55,11 +53,10 @@ evaluation:
 profiles:
   aggregation: text_concat    # G11. Length-weighted; see the addendum.
   separate_items: false       # G28. Intended as G20's ablation against n-grams
-                              # spanning item seams, but aggregation joins
+                              # spanning item seams. Aggregation joins
                               # already-expanded feature streams, so no seam
-                              # n-gram exists and this flag changes nothing.
-                              # Kept because it becomes real if aggregation
-                              # ever moves to text.
+                              # n-gram exists and the flag has no effect unless
+                              # aggregation moves to text.
   min_interactions: 5         # G10(4)
   exclude_profile_items: true # G10(3), the most consequential choice
   interaction_min_weight: 4.0 # G10(5): what "interacted" means

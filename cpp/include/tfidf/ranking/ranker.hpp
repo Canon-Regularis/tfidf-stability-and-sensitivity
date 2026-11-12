@@ -1,20 +1,15 @@
-// The ranking operator: turn scores plus tie-break ranks into a permutation.
+// The ranking operator: turns scores plus tie-break ranks into a permutation.
 //
-// All five selection strategies must produce the identical permutation, the
-// ranking analogue of the `TAAT == DAAT` check in the scoring layer, and the
-// operational content of the claim that sort stability cannot matter here.
-//
-// The claim holds because the key is injective (identifier ranks are a
-// bijection), so no two documents ever compare equal, so "elements that compare
-// equal keep their input order" quantifies over the empty set and every correct
-// algorithm satisfies it vacuously.
+// All five selection strategies produce the identical permutation. The sort key
+// is injective, so sort stability cannot affect the order.
+// Rationale: docs/engineering_notes.md#ranker-injective-key-stability
 #pragma once
 
 #include <tfidf/core/types.hpp>
-#include <tfidf/ranking/attributes.hpp>
 #include <tfidf/ranking/sort_keys.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -24,11 +19,9 @@ namespace tfidf::ranking {
 
 /// Which sorting strategy produces the order.
 ///
-/// Unlike `Reduction`, these integers do not cross the language boundary; only
-/// the `SELECTION` names do. The Python `Selection` names other algorithms past
-/// its first two members. The sort key is injective, so every strategy gives the
-/// same permutation; `benchmarks/tfidf_perf.py` names the strategy each timing
-/// ran under.
+/// Python looks each value up by name in the exported `SELECTION`, as it does
+/// `Reduction` in `REDUCTION`. Every strategy yields the same permutation.
+/// Rationale: docs/engineering_notes.md#ranker-selection-strategies
 enum class Selection : std::int32_t {
     FullSort = 0,
     StableSort = 1,
@@ -68,17 +61,9 @@ inline void rank_full(std::span<SortKey> keys,
 
 /// Select the `m` best documents, in order, leaving the rest unspecified.
 ///
-/// Two hazards in the standard algorithms, handled explicitly here:
-///
-///   * `nth_element` says nothing about the contents of the remainder and
-///     standard libraries partition it differently, so `[m, n)` must never be
-///     read;
-///   * `nth_element` leaves the selected prefix unordered, so it is sorted
-///     afterwards.
-///
-/// The implementation-independent postcondition (every key before `m` compares
-/// less than every key after it) is what `partition_is_valid` checks in the
-/// test build.
+/// `nth_element` leaves the order of `[m, n)` unspecified and the prefix unordered,
+/// so the remainder is never read and the prefix is sorted afterwards.
+/// Rationale: docs/engineering_notes.md#ranker-nth-element-hazards
 inline void select_top(std::span<SortKey> keys,
                        std::size_t m,
                        std::span<DocId> out,
@@ -128,28 +113,9 @@ inline void select_top(std::span<SortKey> keys,
 
 /// Scores in non-increasing order.
 ///
-/// Sorted as raw doubles, independently of any ranking. One array serves every
-/// operator, every `k` and every `tau`, which is what makes margins provably
-/// independent of the tie-break.
-///
-/// `std::stable_sort`, because the normative Python is `sorted(..., reverse=True)`
-/// and `sorted` is stable. For doubles that matters in exactly one case, and it
-/// is a real one: `-0.0 == 0.0` compares equal while the two differ in bits, so
-/// an unstable sort is free to return them in either order. It did.
-///
-/// Measured against the reference on 17 alternating signed zeros: this returned
-/// `0.0, 0.0, -0.0, 0.0, ...` where the reference returns `0.0, -0.0, 0.0, ...`,
-/// and `boundary_margin` over the two arrangements then disagreed in bits at
-/// k = 2, 3 and 4 -- the sign of zero flipping between the backends. Seventeen
-/// is where it starts: libstdc++'s introsort falls back to insertion sort below
-/// sixteen elements, which is incidentally stable, so every smaller fixture in
-/// the differential suite agreed and none of them could have caught this.
-///
-/// Latent rather than live: TF-IDF coordinates are non-negative, so a dot
-/// product is `+0.0` or positive and the zero-vector convention returns a
-/// literal `0.0` -- scoring cannot produce a `-0.0` to sort. But
-/// `sorted_scores_desc` and `boundary_margin` are both exposed through the
-/// bindings and take caller-supplied arrays, and `check_finite` admits `-0.0`.
+/// `std::stable_sort` matches the stable Python `sorted(..., reverse=True)`
+/// and keeps `-0.0` and `0.0`, which compare equal, in input order.
+/// Rationale: docs/engineering_notes.md#ranker-stable-score-sort
 [[nodiscard]] inline std::vector<Real> sorted_scores_desc(std::span<const Real> scores) {
     std::vector<Real> out(scores.begin(), scores.end());
     std::stable_sort(out.begin(), out.end(), std::greater<>());

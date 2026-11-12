@@ -1,14 +1,7 @@
-# Dataset registry.
-#
-# Nothing here is committed to the repository. MovieLens may not be
-# redistributed under its usage licence, so it is fetched on demand and verified
-# against a pinned digest. GroupLens updates ml-latest-small *in place*, so the
-# pin is not optional: a changed digest must fail loudly and be reconciled
-# explicitly, with the resolved value recorded in every manifest.
-#
-# This file is descriptive. The authoritative defaults live in
-# `datasets.synthetic.SyntheticSpec`, and `spec_digest` in each run manifest is
-# what actually identifies a corpus.
+# Dataset registry. It is descriptive: `datasets.synthetic.SyntheticSpec` holds
+# the authoritative defaults, and `spec_digest` in each run manifest identifies a
+# corpus. No dataset is committed; MovieLens may not be redistributed, so it is
+# fetched on demand and verified against a pinned digest.
 
 synthetic_small:
   kind: synthetic
@@ -36,9 +29,9 @@ synthetic_small:
     # separation.
     n_twin_pairs: 40
     twin_extra_token_df: [1, 2, 4, 8, 16, 32, 64, 128]
-  # Measured rather than assumed; see spec_addenda G22. A single-token edit is a
-  # 1/(L+1) *relative* perturbation because section 2.2 normalises tf = count/L,
-  # so the twin grid cannot reach below about 1e-3 at these document lengths.
+  # From spec_addenda G22. A single-token edit is a 1/(L+1) *relative*
+  # perturbation because section 2.2 normalises tf = count/L, so the twin grid
+  # cannot reach below about 1e-3 at these document lengths.
   # Fine near-ties are located with `find_near_ties`, never constructed.
   near_tie_range: [1.0e-3, 1.0e-1]
 
@@ -57,8 +50,10 @@ movielens_small:
   kind: movielens
   description: ml-latest-small, 610 users, 9742 movies, 100836 ratings.
   url: https://files.grouplens.org/datasets/movielens/ml-latest-small.zip
-  # Filled by scripts/fetch_data.py on first verified download, then committed.
-  # Held in `datasets.movielens.MOVIELENS_SHA256`, which is what `load` checks.
+  # The pin is `datasets.movielens.MOVIELENS_SHA256`, which `load` checks and
+  # scripts/fetch_data.py prints when none is set. GroupLens updates the archive
+  # in place, so a changed digest fails and is reconciled explicitly. Each run
+  # manifest records the archive digest.
   sha256: null
   licence: >
     Usage licence permits research use but PROHIBITS redistribution. Never
@@ -72,8 +67,7 @@ movielens_small:
     rating: mean_rating_exact      # G8: stored as (2*sum, count), never a float
     engagement: tag_count
   interaction_min_weight: 4.0      # G10(5); inclusive at 4.0
-  # Some films carry no ratings at all, so their mean is genuinely undefined:
-  # has_value = False, sorting last. G8's missing-value path, exercised against
-  # real data rather than a constructed fixture. The count is reported by
-  # scripts/fetch_data.py rather than pinned here, since it is a property of an
-  # archive this repository does not contain.
+  # Films with no ratings have an undefined mean (has_value = False, sorted last),
+  # which exercises G8's missing-value path on real data. scripts/fetch_data.py
+  # reports their count; it is not pinned here because the repository does not
+  # contain the archive.

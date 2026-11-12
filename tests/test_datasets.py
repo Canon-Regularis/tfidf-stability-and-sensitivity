@@ -1,16 +1,8 @@
 """Dataset generation, parsing and loading.
 
-The MovieLens tests build a synthetic archive: the licence forbids committing the
-real one, so a test needing it would skip everywhere including CI.
-
-The archive reproduces the quirks of ``ml-latest-small`` the parser copes with:
-
-* a UTF-8 BOM on every CSV (corrupts the first column's name, leaving its value
-  intact);
-* pipe-separated genres and parenthesised release years;
-* films with no ratings at all, which upstream has;
-* half-star ratings, which make G8's exact integer pair available;
-* ``movieId`` ordering where string and integer collation disagree.
+The MovieLens tests build a synthetic archive, because the licence forbids
+committing the real one. The archive reproduces the quirks of ``ml-latest-small``
+the parser handles. Rationale: docs/engineering_notes.md#synthetic-movielens-archive
 """
 
 from __future__ import annotations
@@ -21,6 +13,7 @@ import importlib.util
 import io
 import json
 import random as random_module
+import re
 import sys
 import zipfile
 from itertools import pairwise
@@ -76,12 +69,12 @@ def _archive(
     *,
     prefix: str = "ml-latest-small/",
 ) -> bytes:
-    """Build a MovieLens-shaped zip, BOM and all."""
+    """Build a MovieLens-shaped zip with a BOM on every CSV."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         for name, body in (("movies.csv", movies), ("ratings.csv", ratings), ("tags.csv", tags)):
-            # utf-8-sig: GroupLens does ship a BOM, and a parser reading plain
-            # utf-8 leaves it glued to the front of the first column name.
+            # utf-8-sig: GroupLens ships a BOM, and a parser reading plain utf-8
+            # leaves it glued to the front of the first column name.
             archive.writestr(f"{prefix}{name}", body.encode("utf-8-sig"))
     return buffer.getvalue()
 
@@ -112,7 +105,7 @@ def test_parses_the_archive_layout() -> None:
 
 
 def test_documents_are_ordered_by_integer_movie_id() -> None:
-    """Neither string order nor CSV row order.
+    """Documents are ordered by integer movie id, not string or row order.
 
     The file lists 3 and 9 after 10, and string collation puts "10" before "9".
     Either alternative indexes documents stably but arbitrarily, so a result
@@ -128,11 +121,11 @@ def test_the_byte_order_mark_does_not_become_part_of_a_column_name() -> None:
 
 
 def test_ratings_are_kept_as_an_exact_integer_pair() -> None:
-    """G8's representation.
+    """Ratings are stored as G8's exact ``(2*sum, count)`` pair.
 
     Toy Story: 4.0 + 5.0 + 4.5 = 13.5, a mean of 4.5 over three ratings, stored as
-    ``(27, 3)``. 13.5/3 happens to be exact in binary64; the code never forms it,
-    so the guarantee does not rest on that.
+    ``(27, 3)``. 13.5/3 is exact in binary64, but the code never forms it, so
+    the guarantee does not rest on that.
     """
     corpus = movielens.parse_archive(_archive())
     by_id = dict(zip(corpus.doc_ids, corpus.attributes, strict=True))
@@ -148,9 +141,11 @@ def test_a_rating_that_is_not_a_half_star_is_rejected() -> None:
 
 
 def test_an_unrated_film_has_count_zero_rather_than_a_mean_of_zero() -> None:
-    """The missing-value path: a mean of zero would rank an unrated film alongside
-    a genuinely terrible one. ``count == 0`` makes the attribute table treat the
-    rating as absent and sort it last.
+    """An unrated film has a rating count of zero, not a mean of zero.
+
+    A mean of zero would rank an unrated film alongside a terrible one.
+    ``count == 0`` makes the attribute table treat the rating as absent and
+    sort it last.
     """
     corpus = movielens.parse_archive(_archive())
     by_id = dict(zip(corpus.doc_ids, corpus.attributes, strict=True))
@@ -173,8 +168,11 @@ def test_genres_and_years_are_split_into_tokens() -> None:
 
 
 def test_the_fields_are_the_joined_text_taken_apart() -> None:
-    """Both forms describe the same document, so a reader that uses only `text`
-    sees what it always did."""
+    """Joining the fields with a space gives back the text.
+
+    Both forms describe the same document, so a reader of `text` alone sees
+    the same content.
+    """
     corpus = movielens.parse_archive(_archive())
 
     assert corpus.texts, "the premise: this archive yields documents to compare"
@@ -183,9 +181,11 @@ def test_the_fields_are_the_joined_text_taken_apart() -> None:
 
 
 def test_the_title_the_genres_and_each_tag_are_separate_fields() -> None:
-    """The seam an n-gram must not span. Joined into one string the boundary is
-    unrecoverable, and a bigram spanning it records the concatenation order
-    rather than the data (spec_addenda.md#g7).
+    """The title, the genres and each tag are separate fields.
+
+    An n-gram must not span the seam between them. Joined into one string the
+    boundary is unrecoverable, and a bigram spanning it records the
+    concatenation order rather than the data (spec_addenda.md#g7).
     """
     corpus = movielens.parse_archive(_archive())
     parts = dict(zip(corpus.doc_ids, corpus.fields, strict=True))["m1"]
@@ -226,13 +226,13 @@ def test_an_archive_missing_a_member_is_rejected_by_name() -> None:
 
 
 def test_a_missing_file_names_the_fetch_script(tmp_path) -> None:
-    """The archive is absent by design, so the error has to say how to get it."""
+    """The archive is not committed, so the error says how to obtain it."""
     with pytest.raises(DataIntegrityError, match=r"fetch_data\.py"):
         movielens.load(tmp_path / "absent.zip")
 
 
 def test_a_digest_mismatch_is_fatal_rather_than_a_warning(tmp_path) -> None:
-    """GroupLens updates the archive in place, so this is the realistic failure."""
+    """A digest mismatch raises, since GroupLens updates the archive in place."""
     path = tmp_path / "ml.zip"
     path.write_bytes(_archive())
     with pytest.raises(DataIntegrityError, match="pinned digest"):
@@ -247,8 +247,11 @@ def test_the_digest_is_reported_even_when_unpinned(tmp_path) -> None:
 
 
 def test_movielens_attributes_are_accepted_by_the_attribute_table() -> None:
-    """Real-shaped data reaches the ranking layer intact, the unrated film
-    included: its rating must arrive missing rather than zero."""
+    """Parsed MovieLens attributes build an attribute table.
+
+    The five films include the unrated one, whose `rating_count` of zero the
+    table reads as a missing rating rather than a zero.
+    """
     corpus = movielens.parse_archive(_archive())
     table = AttributeTable.from_records(corpus.records())
     assert table.n_documents == 5
@@ -340,10 +343,9 @@ def test_find_near_ties_handles_degenerate_lengths() -> None:
 def test_a_single_token_edit_cannot_produce_a_fine_near_tie() -> None:
     """G22 as an executable statement.
 
-    Section 2.2's ``tf = count / L`` makes a one-token edit a ``1/(L+1)`` relative
-    perturbation, so document length floors the separation it induces. Hence
-    section 7.4 identifies a near-tie instead of constructing one, and the twin
-    grid bottoms out around 1e-3.
+    Section 2.2's ``tf = count / L`` makes a one-token edit a ``1/(L+1)``
+    relative perturbation, so document length floors the separation. Section 7.4
+    identifies a near-tie rather than constructing one; the twin grid ends near 1e-3.
     """
     corpus = synthetic.generate(_spec(300, 600, n_users=20, len_max=40))
     longest = max(len(d) for d in corpus.documents)
@@ -364,18 +366,57 @@ def test_load_dataset_records_provenance() -> None:
 
 
 def test_the_corpus_digest_is_over_documents_not_provenance() -> None:
-    """Two loads producing identical documents must agree, however they got there."""
+    """Two loads with identical documents agree, whatever their provenance."""
     assert load_dataset("synthetic_tiny").digest() == load_dataset("synthetic_tiny").digest()
 
 
 def test_an_unknown_dataset_name_lists_the_valid_ones() -> None:
-    with pytest.raises(DataIntegrityError, match="synthetic_small"):
+    expected = (
+        "unknown dataset 'no_such_dataset'; expected one of "
+        "('synthetic_small', 'synthetic_tiny', 'movielens_small') or 'jsonl:<path>'"
+    )
+    with pytest.raises(DataIntegrityError, match=f"^{re.escape(expected)}$"):
         load_dataset("no_such_dataset")
 
 
 def test_movielens_without_an_archive_says_how_to_get_one() -> None:
-    with pytest.raises(DataIntegrityError, match=r"fetch_data\.py"):
+    expected = (
+        "movielens_small needs an archive path. MovieLens may not be redistributed, so it is "
+        "not in the repository -- run 'python scripts/fetch_data.py' first, then pass its path."
+    )
+    with pytest.raises(DataIntegrityError, match=f"^{re.escape(expected)}$"):
         load_dataset("movielens_small")
+
+
+def test_the_movielens_provenance_block_is_exactly_these_keys(tmp_path, monkeypatch) -> None:
+    """MovieLens records its provenance key for key, and ignores ``spec``."""
+    data = _archive()
+    path = tmp_path / "ml-latest-small.zip"
+    path.write_bytes(data)
+    monkeypatch.setattr(
+        movielens.load,
+        "__kwdefaults__",
+        {**movielens.load.__kwdefaults__, "expect_sha256": hash_bytes(data)},
+    )
+    expected = {
+        "kind": "movielens",
+        "variant": "ml-latest-small",
+        "archive_sha256": hash_bytes(data),
+        "n_documents": 5,
+        "n_ratings": 6,
+        "n_users": 3,
+        "n_unrated_documents": 1,
+        "interaction_min_weight": 4.0,
+        "redistributable": False,
+    }
+    custom = synthetic.SyntheticSpec(
+        n_docs=30, vocab_size=60, n_users=3, n_exact_duplicates=2, n_twin_pairs=2
+    )
+
+    assert load_dataset("movielens_small", archive=path).provenance == expected
+    assert load_dataset("movielens_small", archive=path, spec=custom) == load_dataset(
+        "movielens_small", archive=path
+    ), "a spec changes nothing a MovieLens load returns"
 
 
 def test_a_jsonl_corpus_round_trips(tmp_path) -> None:
@@ -424,16 +465,9 @@ def test_the_interaction_threshold_is_configurable_and_exact() -> None:
 def test_the_near_tie_interval_below_tau_is_empty() -> None:
     """A property of the synthetic generator alone.
 
-    On a seeded synthetic corpus adjacent score gaps land at zero or well above
-    1e-9, with the interval between them empty. The CI experiments run on this
-    generator, so the lattice is pinned here.
-
-    It does not generalise, and an earlier version of G22 said it did. Measured on
-    MovieLens under the normative naive reduction: 197 of 114,504 adjacent pairs
-    fall in (0, 4.44e-16) and the smallest strictly-positive gap is 8.67e-19,
-    below the arithmetic noise floor. Recomputed exactly those gaps disappear, so
-    they are artefacts of naive summation. Section 7.4's regime differs on real
-    data; G22 now records both.
+    On a seeded synthetic corpus, adjacent score gaps are zero or above 1e-9,
+    with nothing between. The property does not hold on MovieLens.
+    Rationale: docs/engineering_notes.md#near-tie-interval-synthetic-only
     """
     corpus = synthetic.generate(_spec(600, 1200, n_users=40))
     pipeline = PreprocessingPipeline()
@@ -458,26 +492,11 @@ def test_the_near_tie_interval_below_tau_is_empty() -> None:
 
 @pytest.mark.slow
 def test_the_gap_table_g22_publishes_is_the_one_this_corpus_produces() -> None:
-    """G22 prints a five-row table of measured gap counts. This recomputes it.
+    """G22's five-row table of gap counts is the one this corpus produces.
 
-    Its sibling above pins the row the section's argument rests on, `(0, 1e-9)`
-    being empty, and nothing pinned the rest. Three of them drifted: the
-    addendum read 104, 2323 and 19 with a smallest positive gap of 2.0e-08,
-    against the 130, 2292, 24 and 1.575e-08 measured here. The two figures that
-    identify the corpus -- 553 exact ties and 2524 documents scoring above zero
-    -- never moved, and no other seed reproduces either, so the generator was
-    never in question; the drift is downstream of it.
-
-    The wording drifted with the numbers. "Seed as specified" and "the first six
-    tokens of document 0" did not determine a run: document 0 is five words,
-    which become nine features once bigrams are added, so "six tokens" has no
-    reading in raw words and the two available readings give different tables.
-    G22 now names the spec and writes the query as the expression below.
-
-    Marked slow for the 3000-document fit, about six seconds, almost all of it
-    preprocessing. There is no cheaper form -- the table is a property of that
-    corpus at that size -- and the fast sibling above covers the load-bearing
-    claim on a 600-document corpus, so no line depends on this test alone.
+    The sibling above pins only the `(0, 1e-9)` row; this pins every row and
+    the smallest positive gap. Slow: the 3000-document fit takes about six
+    seconds. Rationale: docs/engineering_notes.md#g22-gap-table
     """
     corpus = synthetic.generate(
         synthetic.SyntheticSpec(
@@ -516,13 +535,13 @@ def test_the_gap_table_g22_publishes_is_the_one_this_corpus_produces() -> None:
     assert len(gaps) == 2999, "3000 documents give 2999 adjacent pairs"
     assert sum(counted.values()) == len(gaps), "the bands partition the gaps"
     assert counted == published, (
-        "G22's table no longer matches this corpus. Update the table in "
-        "docs/spec_addenda.md and this test together, and say in the addendum "
-        "what moved -- a silent edit to either one is how it drifted before."
+        "G22's table does not match this corpus. Update the table in "
+        "docs/spec_addenda.md and this test together, and state in the addendum "
+        "what moved."
     )
     # Exact, not approximate: the corpus is seeded and the arithmetic is fixed,
     # so this is a reproducibility assertion like every other float in this
-    # repository. A tolerance would let the value drift the way the counts did.
+    # repository.
     assert min(positive) == 1.575373397705304e-08, (
         "G22 quotes the smallest strictly-positive gap as 1.575e-08"
     )
@@ -535,10 +554,11 @@ def test_the_gap_table_g22_publishes_is_the_one_this_corpus_produces() -> None:
 # ---------------------------------------------------------------------------
 # Writing the corpus out: the committed bytes are the artefact
 # ---------------------------------------------------------------------------
-# Nothing regenerates from the spec at experiment time, so PRNG portability stays
-# out of the reproducibility surface and the written files are what downstream
-# reads. That makes write_corpus part of the provenance chain rather than a
-# convenience, and it had no test at all.
+
+
+# Nothing regenerates from the spec at experiment time, so PRNG portability
+# stays out of the reproducibility surface and the written files are what
+# downstream reads. write_corpus is therefore part of the provenance chain.
 def test_writing_a_corpus_produces_the_three_files_and_a_manifest(tmp_path: Path) -> None:
     corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30))
     digests = synthetic.write_corpus(corpus, tmp_path)
@@ -550,8 +570,7 @@ def test_writing_a_corpus_produces_the_three_files_and_a_manifest(tmp_path: Path
 
 
 def test_the_manifest_records_the_digest_of_every_file_beside_it(tmp_path: Path) -> None:
-    """A manifest that disagreed with the files would make the corpus
-    unverifiable while looking verified."""
+    """Every manifest entry matches the digest of the file beside it."""
     corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30))
     digests = synthetic.write_corpus(corpus, tmp_path)
 
@@ -566,8 +585,11 @@ def test_the_manifest_records_the_digest_of_every_file_beside_it(tmp_path: Path)
 
 
 def test_the_manifest_is_written_with_lf_endings_on_every_platform(tmp_path: Path) -> None:
-    """The manifest is itself hashed by the repository-wide gate, so a CRLF here
-    would make the same corpus verify on Linux and fail on Windows."""
+    """The manifest has LF endings on every platform.
+
+    The manifest is itself hashed by the repository-wide gate, so a CRLF would
+    make the same corpus verify on Linux and fail on Windows.
+    """
     corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30))
     synthetic.write_corpus(corpus, tmp_path)
     assert b"\r\n" not in (tmp_path / "MANIFEST.sha256").read_bytes()
@@ -585,8 +607,11 @@ def test_the_manifest_lists_its_entries_in_sorted_order(tmp_path: Path) -> None:
 
 
 def test_the_written_spec_records_the_constructed_cases_it_planted(tmp_path: Path) -> None:
-    """An experiment finds the twins and duplicates by reading this rather than
-    searching for them, so the record has to match what was generated."""
+    """The written spec records the twins and duplicates that were planted.
+
+    An experiment finds them by reading this record rather than searching, so
+    the record has to match what was generated.
+    """
     spec = _spec(n_docs=16, vocab_size=30, n_twin_pairs=2, n_exact_duplicates=2)
     corpus = synthetic.generate(spec)
     synthetic.write_corpus(corpus, tmp_path)
@@ -617,32 +642,42 @@ def test_writing_into_a_directory_that_does_not_exist_creates_it(tmp_path: Path)
 # Generation boundaries
 # ---------------------------------------------------------------------------
 def test_a_corpus_too_small_for_its_constructed_cases_is_refused() -> None:
-    """The planted duplicates and twins consume documents, so a spec asking for
-    more of them than it has room for is a caller error rather than a corpus
-    with no ordinary documents in it."""
+    """A spec with more planted cases than documents is refused.
+
+    The duplicates and twins consume documents, so such a spec is a caller
+    error rather than a corpus with no ordinary documents in it.
+    """
     with pytest.raises(ValueError, match="too small for"):
         synthetic.generate(_spec(n_docs=4, vocab_size=20, n_exact_duplicates=2, n_twin_pairs=2))
 
 
 def test_a_non_integer_zipf_exponent_is_permitted_but_goes_through_the_platform() -> None:
-    """The integer path is exact; a fractional exponent uses pow and therefore
-    the platform libm, which is why the generated files rather than the spec
-    become the artefact."""
+    """A fractional Zipf exponent is accepted and uses the platform libm.
+
+    The integer path is exact; a fractional exponent uses pow, which is why
+    the generated files rather than the spec are the artefact.
+    """
     corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30, zipf_exponent=1.2))
     assert corpus.n_documents == 12
     assert all(doc for doc in corpus.documents), "no document may come out empty"
 
 
 def test_a_missing_jsonl_corpus_is_named_rather_than_raising_an_oserror(tmp_path) -> None:
-    """Every failure out of the loader façade is a DataIntegrityError, so a
-    caller catching that one type cannot be surprised by a FileNotFoundError."""
+    """A missing JSONL corpus raises DataIntegrityError, not FileNotFoundError.
+
+    Every failure out of the loader façade is a DataIntegrityError, so a
+    caller catching that one type sees every failure.
+    """
     with pytest.raises(DataIntegrityError, match="corpus file not found"):
         load_jsonl_corpus(tmp_path / "absent.jsonl")
 
 
 def test_the_jsonl_prefix_reaches_the_same_loader_as_calling_it_directly(tmp_path) -> None:
-    """`jsonl:<path>` is the documented escape hatch from the registered names,
-    and it must not be a second, divergent parse."""
+    """`jsonl:<path>` reaches the same loader as calling it directly.
+
+    The prefix is the documented escape hatch from the registered names, and
+    it must not be a second, divergent parse.
+    """
     source = load_dataset("synthetic_tiny")
     path = tmp_path / "corpus.jsonl"
     path.write_text(
@@ -652,8 +687,11 @@ def test_the_jsonl_prefix_reaches_the_same_loader_as_calling_it_directly(tmp_pat
 
 
 def test_the_doc_ids_of_a_loaded_corpus_are_its_records_in_order() -> None:
-    """Downstream indexes documents by position and reports them by id, so the
-    two orders being the same is what makes a reported rank meaningful."""
+    """A loaded corpus's doc ids are its records' ids, in order.
+
+    Downstream indexes documents by position and reports them by id, so the
+    two orders being the same is what makes a reported rank meaningful.
+    """
     data = load_dataset("synthetic_tiny")
     assert data.doc_ids == [str(r["doc_id"]) for r in data.records]
     assert len(data.doc_ids) == data.n_documents
@@ -663,12 +701,11 @@ def test_the_doc_ids_of_a_loaded_corpus_are_its_records_in_order() -> None:
 def test_loading_movielens_through_the_facade_records_that_it_is_not_redistributable(
     tmp_path, monkeypatch
 ) -> None:
-    """The provenance is the only place a reader learns that this result cannot
-    be reproduced from the repository alone.
+    """The façade records that MovieLens is not redistributable.
 
-    The digest pin is repointed at the fixture archive rather than removed: the
-    pin's own behaviour is tested separately, and what is under test here is the
-    wiring from a parsed corpus into a LoadedDataset.
+    The provenance is the only place a reader learns that the result cannot be
+    reproduced from the repository alone. The digest pin is repointed at the
+    fixture archive, not removed: the pin's own behaviour is tested separately.
     """
     data = _archive()
     path = tmp_path / "ml-latest-small.zip"
@@ -689,8 +726,11 @@ def test_loading_movielens_through_the_facade_records_that_it_is_not_redistribut
 
 
 def test_a_whole_star_rating_written_with_a_zero_decimal_is_the_same_rating() -> None:
-    """GroupLens writes 4.0, not 4. The doubled-integer domain has to treat the
-    trailing zero as absent rather than as a fraction it cannot represent."""
+    """A whole-star rating written with a zero decimal is the same rating.
+
+    GroupLens writes 4.0, not 4. The doubled-integer domain treats the
+    trailing zero as absent rather than as a fraction it cannot represent.
+    """
     ratings = "userId,movieId,rating,timestamp\n1,1,4.00,964982703\n1,2,4,964981247\n"
     corpus = movielens.parse_archive(_archive(ratings=ratings))
     assert {w for _, _, w in corpus.interactions} == {4.0}
@@ -699,20 +739,18 @@ def test_a_whole_star_rating_written_with_a_zero_decimal_is_the_same_rating() ->
 # ---------------------------------------------------------------------------
 # The deterministic sampling primitives
 # ---------------------------------------------------------------------------
-# Every existing test of the generator asserts that the same spec produces the
-# same corpus. A corrupted sampler is still deterministic, so that property
-# cannot detect one: mutation testing broke the binary search, inverted the Zipf
-# division and shifted the inclusive bounds, and the suite stayed green at 50%.
-#
-# These test the primitives directly. `_pick` and `_uniform_int` take their
-# entropy from an injected `getrandbits`, so a stub for that -- and only that --
-# drives the arithmetic through every value it can see.
+
+
+# "The same spec produces the same corpus" holds for a corrupted sampler too,
+# so these test the primitives directly. `_pick` and `_uniform_int` take their
+# entropy from an injected `getrandbits`, so a stub for that alone drives the
+# arithmetic through every value it can see.
 class _FixedBits:
     """A `random.Random` stand-in whose draws are scripted.
 
     Only `getrandbits` is used by the code under test; `_pick` and
-    `_uniform_int` are written against it precisely so the sampling does not
-    depend on anything CPython does not promise to keep stable.
+    `_uniform_int` are written against it so the sampling does not depend on
+    anything CPython does not promise to keep stable.
     """
 
     def __init__(self, *draws: int) -> None:
@@ -724,9 +762,11 @@ class _FixedBits:
 
 
 def test_the_zipf_weights_are_exact_integer_division_at_exponent_one() -> None:
-    """Integers so the cumulative distribution and every comparison against it
-    are exact, which is what makes the sampling reproducible without depending
-    on how a float division rounds."""
+    """At exponent one the Zipf weights are exact integer divisions.
+
+    Integers make the cumulative distribution and every comparison against it
+    exact, so the sampling reproduces without depending on float rounding.
+    """
     weights = synthetic._zipf_weights(5, 1.0)
     scale = synthetic._ZIPF_SCALE
     assert weights == [scale // 1, scale // 2, scale // 3, scale // 4, scale // 5]
@@ -734,13 +774,11 @@ def test_the_zipf_weights_are_exact_integer_division_at_exponent_one() -> None:
 
 
 def test_a_zipf_weight_never_falls_below_one() -> None:
-    """The floor keeps every token reachable. A weight of zero would make its
-    cumulative entry equal to its predecessor's, and the token could never be
-    drawn -- silently shrinking the effective vocabulary.
+    """A Zipf weight never falls below one.
 
-    Reached with a steep exponent rather than a huge vocabulary: at exponent 1
-    the scale is 2**40, so the quotient only reaches zero past a rank no corpus
-    will ever have.
+    A weight of zero would make its cumulative entry equal its predecessor's,
+    so the token could never be drawn. A steep exponent reaches the floor; at
+    exponent 1 the 2**40 scale only reaches zero past any realistic rank.
     """
     weights = synthetic._zipf_weights(8, 20.0)
     assert weights[0] == synthetic._ZIPF_SCALE, "rank 0 is untouched by the floor"
@@ -750,8 +788,11 @@ def test_a_zipf_weight_never_falls_below_one() -> None:
 
 
 def test_a_fractional_exponent_still_falls_away_with_rank() -> None:
-    """The platform-libm path. Its exact values are not pinned -- that is the
-    point of the warning against it -- but it is still a Zipf law."""
+    """An exponent other than one still gives weights that fall with rank.
+
+    The platform-libm path's exact values are not pinned, but it is still a
+    Zipf law.
+    """
     weights = synthetic._zipf_weights(6, 2.0)
     assert weights == sorted(weights, reverse=True)
     assert weights[0] > weights[-1]
@@ -765,12 +806,11 @@ def test_the_cumulative_distribution_is_the_running_total() -> None:
 
 
 def test_picking_agrees_with_a_linear_scan_for_every_draw() -> None:
-    """The binary search is the one piece of real algorithm here, and a corpus
-    generated by a broken one still regenerates identically.
+    """`_pick` agrees with `bisect_right` for every draw in the space.
 
-    Exhaustive over the whole draw space rather than sampled: the interesting
-    values are the boundaries between adjacent cumulative entries, and there are
-    few enough of them to check all of them.
+    A corpus generated by a broken binary search still regenerates identically.
+    The draw space is small enough to check exhaustively, including every
+    boundary between adjacent cumulative entries.
     """
     cumulative = synthetic._cumulative([3, 1, 4, 1, 5])
     total = cumulative[-1]
@@ -782,8 +822,11 @@ def test_picking_agrees_with_a_linear_scan_for_every_draw() -> None:
 
 
 def test_picking_rejects_a_draw_at_or_above_the_total() -> None:
-    """Rejection sampling is what makes the result uniform without a float
-    division. A draw equal to the total is out of range, not the last index."""
+    """A draw at or above the total is rejected, not read as the last index.
+
+    Rejection sampling is what makes the result uniform without a float
+    division.
+    """
     cumulative = [3, 4]
     # 4 and 5 are rejected, 2 is accepted and lands in the first bucket.
     assert synthetic._pick(_FixedBits(4, 5, 2), cumulative) == 0
@@ -794,9 +837,11 @@ def test_picking_from_a_single_bucket_always_returns_it() -> None:
 
 
 def test_a_uniform_integer_covers_both_ends_of_its_range() -> None:
-    """Inclusive at both ends, so the span is `high - low + 1`. Dropping the
-    `+ 1` makes the top value unreachable, which for `_uniform_int(rng, 0, 4)`
-    silently removes 5.0 from the interaction weights."""
+    """The range is inclusive at both ends, so the span is `high - low + 1`.
+
+    Dropping the `+ 1` makes the top value unreachable, which for
+    `_uniform_int(rng, 0, 4)` removes 5.0 from the interaction weights.
+    """
     span_draws = list(range(5))
     assert [synthetic._uniform_int(_FixedBits(d), 10, 14) for d in span_draws] == [
         10,
@@ -808,8 +853,10 @@ def test_a_uniform_integer_covers_both_ends_of_its_range() -> None:
 
 
 def test_a_uniform_integer_rejects_a_draw_outside_its_span() -> None:
-    """`bit_length` rounds up to a power of two, so draws above the span happen
-    and have to be discarded rather than folded back in."""
+    """A draw at or above the span is discarded rather than folded back in.
+
+    `bit_length` rounds up to a power of two, so such draws happen.
+    """
     assert synthetic._uniform_int(_FixedBits(5, 6, 7, 3), 0, 4) == 3
 
 
@@ -821,9 +868,11 @@ def test_a_degenerate_range_returns_its_only_value() -> None:
 # What the generator builds out of them
 # ---------------------------------------------------------------------------
 def test_the_document_budget_counts_two_documents_for_every_twin_pair() -> None:
-    """A twin pair is two documents, not one, so the budget is
-    `n_docs - duplicates - 2 * pairs`. Counting one apiece lets a spec through
-    that then produces more documents than it asked for."""
+    """A twin pair costs two documents from the budget, not one.
+
+    The budget is `n_docs - duplicates - 2 * pairs`. Counting one apiece lets
+    a spec through that then produces more documents than it asked for.
+    """
     # 10 - 2 - 2*4 = 0 base documents: one short.
     with pytest.raises(ValueError, match="too small for"):
         synthetic.generate(_spec(n_docs=10, vocab_size=30, n_exact_duplicates=2, n_twin_pairs=4))
@@ -836,10 +885,11 @@ def test_the_document_budget_counts_two_documents_for_every_twin_pair() -> None:
 
 
 def test_the_twin_token_is_picked_by_rank_so_its_frequency_is_intended() -> None:
-    """`vocab_size // target_df - 1`, clamped into the vocabulary. Drawing from
-    the Zipf head gives a high document frequency and from the tail a low one,
-    so the rank is what makes the twin's separation tunable rather than
-    incidental."""
+    """The twin token's rank is `vocab_size // target_df - 1`, clamped.
+
+    Drawing from the Zipf head gives a high document frequency and from the
+    tail a low one, so the rank makes the twin's separation tunable.
+    """
     corpus = synthetic.generate(
         _spec(n_docs=20, vocab_size=64, n_twin_pairs=2, n_exact_duplicates=2)
     )
@@ -856,9 +906,11 @@ def test_the_twin_token_is_picked_by_rank_so_its_frequency_is_intended() -> None
 
 
 def test_every_planted_duplicate_is_an_exact_copy_of_a_base_document() -> None:
-    """They tie exactly, which is the tau = 0 baseline the whole tie-break study
-    rests on. A source index off the end of the base documents would copy a
-    duplicate or a twin instead."""
+    """Every planted duplicate copies a base document exactly.
+
+    They tie exactly, the tau = 0 baseline of the tie-break study. A source
+    index off the end of the base documents would copy a duplicate or a twin.
+    """
     spec = _spec(n_docs=20, vocab_size=40, n_exact_duplicates=3, n_twin_pairs=2)
     corpus = synthetic.generate(spec)
     by_id = dict(zip(corpus.doc_ids, corpus.documents, strict=True))
@@ -872,8 +924,11 @@ def test_every_planted_duplicate_is_an_exact_copy_of_a_base_document() -> None:
 
 
 def test_the_attributes_stay_inside_the_ranges_the_generator_documents() -> None:
-    """G8's exact pair: `rating_sum2` is twice a sum of 0.5-quantised ratings,
-    so it is a product of two integers and never a float mean."""
+    """The attributes stay inside the documented ranges.
+
+    G8's exact pair: `rating_sum2` is twice a sum of 0.5-quantised ratings,
+    generated as a product of two integers and never a float mean.
+    """
     corpus = synthetic.generate(_spec(n_docs=40, vocab_size=60, n_users=5))
     assert len(corpus.attributes) == corpus.n_documents
 
@@ -886,18 +941,23 @@ def test_the_attributes_stay_inside_the_ranges_the_generator_documents() -> None
 
 
 def test_interaction_weights_are_the_five_half_star_values_from_three_up() -> None:
-    """`3.0 + u(0, 4) * 0.5`. Every one of the five has to be reachable: the
-    interaction threshold is compared exactly, so a missing 5.0 would quietly
-    change which interactions count as positive."""
+    """Interaction weights are `3.0 + u(0, 4) * 0.5`, all five reachable.
+
+    The interaction threshold is compared exactly, so a missing 5.0 would
+    change which interactions count as positive.
+    """
     corpus = synthetic.generate(_spec(n_docs=60, vocab_size=80, n_users=60))
     weights = {w for _, _, w in corpus.interactions}
     assert weights == {3.0, 3.5, 4.0, 4.5, 5.0}
 
 
 def test_a_user_interacts_at_least_once_and_never_more_than_the_cap() -> None:
-    """`1 + _pick(...)` over a heavy-tailed distribution of length
-    `max_interactions_per_user`, so the count is in `[1, cap]` -- and a user with
-    no interactions at all would have no profile to build a query from."""
+    """A user's interaction count is in `[1, cap]`.
+
+    The count is `1 + _pick(...)` over a heavy-tailed distribution of length
+    `max_interactions_per_user`; a user with no interactions would have no
+    profile to build a query from.
+    """
     cap = 6
     corpus = synthetic.generate(
         _spec(n_docs=40, vocab_size=60, n_users=40, max_interactions_per_user=cap)
@@ -913,8 +973,10 @@ def test_a_user_interacts_at_least_once_and_never_more_than_the_cap() -> None:
 
 
 def test_a_user_never_interacts_with_the_same_document_twice() -> None:
-    """The candidate is redrawn into a list that rejects repeats, so an
-    interaction list is a set of documents rather than a multiset."""
+    """An interaction list is a set of documents, not a multiset.
+
+    A candidate already in the user's list is skipped rather than appended.
+    """
     corpus = synthetic.generate(_spec(n_docs=30, vocab_size=50, n_users=30))
     seen: set[tuple[str, str]] = set()
     for user, doc_id, _ in corpus.interactions:
@@ -924,8 +986,11 @@ def test_a_user_never_interacts_with_the_same_document_twice() -> None:
 
 
 def test_every_interaction_names_a_document_in_the_corpus() -> None:
-    """The index is drawn over `len(doc_ids)`, which includes the duplicates and
-    twins appended after the base documents."""
+    """Every interaction names a document in the corpus.
+
+    The index is drawn over `len(doc_ids)`, which includes the duplicates and
+    twins appended after the base documents.
+    """
     corpus = synthetic.generate(_spec(n_docs=30, vocab_size=50, n_users=20))
     ids = set(corpus.doc_ids)
     assert {d for _, d, _ in corpus.interactions} <= ids
@@ -935,19 +1000,24 @@ def test_every_interaction_names_a_document_in_the_corpus() -> None:
 
 
 def test_the_tiny_dataset_is_the_tiny_spec_and_not_the_default_one() -> None:
-    """`synthetic_tiny` exists so tests and CI have a corpus that generates in
-    under a second. Falling back to the default spec gives 2000 documents under
-    the same name -- a slow suite and, worse, a different corpus behind a name
-    that other results were recorded against."""
+    """`synthetic_tiny` resolves to the tiny spec, not the default one.
+
+    The tiny spec generates in under a second. The default spec gives 2000
+    documents under the same name: a slow suite and a different corpus behind
+    a name that other results are recorded against.
+    """
     data = load_dataset("synthetic_tiny")
     assert data.n_documents == 120
     assert len(data.doc_ids) == 120
 
 
 def test_an_explicit_spec_overrides_the_registered_one() -> None:
-    """The `spec` argument is the documented way to vary the generator without
-    inventing a dataset name. Ignoring it would silently return the registered
-    corpus, so an experiment sweeping the spec would sweep nothing."""
+    """An explicit `spec` argument overrides the registered spec.
+
+    The argument is the documented way to vary the generator without a new
+    dataset name. Ignoring it would return the registered corpus, so an
+    experiment sweeping the spec would sweep nothing.
+    """
     custom = synthetic.SyntheticSpec(
         n_docs=30, vocab_size=60, n_users=3, n_exact_duplicates=2, n_twin_pairs=2
     )
@@ -960,23 +1030,83 @@ def test_an_explicit_spec_overrides_the_registered_one() -> None:
 # ---------------------------------------------------------------------------
 # The generator as a fixed artefact
 # ---------------------------------------------------------------------------
+
 #: Digests of `synthetic_tiny` as this generator produces it. Recorded rather
-#: than recomputed, because "the same spec gives the same corpus" is satisfied by
-#: any deterministic generator including a broken one -- which is exactly what
-#: mutation testing demonstrated, walking changes through the twin source index,
-#: the attribute ranges and the interaction sampler with every other test green.
-#:
-#: Safe to pin: the generator draws only from `random.Random.getrandbits`, whose
-#: Mersenne Twister stream CPython promises to keep stable, and every weight and
-#: comparison on the way is integer. That is the reason the module is written the
-#: way it is, and this is the assertion that holds it to it.
-#:
-#: If a deliberate change to the generator moves these, update them in the same
-#: commit and re-run anything that quotes a number from this corpus. They are
-#: meant to be a speed bump, not a wall.
+#: than recomputed: "the same spec gives the same corpus" holds for a broken
+#: generator too. A generator change that moves these updates them in the
+#: same commit. Rationale: docs/engineering_notes.md#pinned-tiny-corpus-digests
 _TINY_CORPUS_DIGEST = "bc098582b26cc92840efb7cf8ca97a56ff9d81cfa79ce74d05e07bdf17be75c2"
 _TINY_SPEC_DIGEST = "f760dab267bfac16066245fc0aae8fdb3c5859fac7d798f1d7dd4d044e274e8a"
 _TINY_INTERACTIONS_DIGEST = "7dae269fb86344965a833f583305947e9121188bc0d6fcb13026f478b80b4e00"
+
+#: Each synthetic dataset's provenance block. Only `synthetic_tiny`'s digest is
+#: pinned; `synthetic_small` is checked against the default spec's own digest.
+_SYNTHETIC_PROVENANCE = {
+    "synthetic_small": {
+        "kind": "synthetic",
+        "spec": {
+            "seed": 20260811,
+            "n_docs": 2000,
+            "vocab_size": 4000,
+            "zipf_exponent": 1.0,
+            "len_min": 3,
+            "len_max": 40,
+            "n_users": 200,
+            "max_interactions_per_user": 12,
+            "n_exact_duplicates": 20,
+            "n_twin_pairs": 40,
+            "twin_extra_token_df": [1, 2, 4, 8, 16, 32, 64, 128],
+        },
+        "spec_digest": synthetic.SyntheticSpec().digest(),
+        "n_documents": 2000,
+        "n_twin_pairs": 40,
+        "n_exact_duplicate_pairs": 20,
+        "redistributable": True,
+    },
+    "synthetic_tiny": {
+        "kind": "synthetic",
+        "spec": {
+            "seed": 20260811,
+            "n_docs": 120,
+            "vocab_size": 300,
+            "zipf_exponent": 1.0,
+            "len_min": 3,
+            "len_max": 40,
+            "n_users": 20,
+            "max_interactions_per_user": 12,
+            "n_exact_duplicates": 4,
+            "n_twin_pairs": 6,
+            "twin_extra_token_df": [1, 2, 4, 8, 16, 32, 64, 128],
+        },
+        "spec_digest": _TINY_SPEC_DIGEST,
+        "n_documents": 120,
+        "n_twin_pairs": 6,
+        "n_exact_duplicate_pairs": 4,
+        "redistributable": True,
+    },
+}
+
+
+@pytest.mark.parametrize("name", list(_SYNTHETIC_PROVENANCE))
+def test_each_synthetic_dataset_records_exactly_its_provenance(name: str) -> None:
+    """Each synthetic name records its own provenance, key for key.
+
+    The block reaches every report as ``data_provenance``, which no result
+    digest covers, so a dropped key or a swapped spec would go unnoticed.
+    """
+    data = load_dataset(name)
+
+    assert data.name == name
+    assert data.provenance == _SYNTHETIC_PROVENANCE[name]
+    assert data.provenance["redistributable"] is True, "a bool, not merely equal to one"
+
+
+def test_an_archive_given_for_a_synthetic_dataset_is_ignored() -> None:
+    """A synthetic load ignores ``archive``, even a path that does not exist."""
+    data = load_dataset("synthetic_tiny", archive="no/such/archive.zip")
+
+    assert data.digest() == _TINY_CORPUS_DIGEST
+    assert data == load_dataset("synthetic_tiny"), "an archive changes nothing a load returns"
 
 
 def test_the_tiny_corpus_is_byte_for_byte_what_it_has_always_been() -> None:
@@ -992,9 +1122,10 @@ def test_the_tiny_corpus_is_byte_for_byte_what_it_has_always_been() -> None:
 
 
 def test_the_tiny_interaction_set_is_fixed_too() -> None:
-    """Digested separately because the corpus digest is taken over the records
-    alone -- deliberately, so two loads producing identical documents agree
-    however they got there. The interactions therefore need their own.
+    """The interactions are digested separately from the records.
+
+    The corpus digest is taken over the records alone, so two loads producing
+    identical documents agree; the interactions therefore need their own.
     """
     data = load_dataset("synthetic_tiny")
     payload = canonical_json([list(i) for i in data.interactions], indent=None)
@@ -1003,10 +1134,11 @@ def test_the_tiny_interaction_set_is_fixed_too() -> None:
 
 
 def test_the_spec_defaults_are_the_ones_every_recorded_result_assumed() -> None:
-    """The spec is hashed into every manifest, so its defaults are part of the
-    identity of any run that did not override them. The Zipf exponent in
-    particular selects between the exact integer path and the platform one --
-    which the module docstring warns makes the files, not the spec, the artefact.
+    """The spec defaults are part of the identity of every run that keeps them.
+
+    The spec is hashed into every manifest. The Zipf exponent selects between
+    the exact integer path and the platform one, which makes the files rather
+    than the spec the artefact.
     """
     spec = synthetic.SyntheticSpec()
     assert spec.zipf_exponent == 1.0, "the exact integer path"
@@ -1017,21 +1149,22 @@ def test_the_spec_defaults_are_the_ones_every_recorded_result_assumed() -> None:
 
 
 def test_the_twin_frequency_grid_doubles() -> None:
-    """A grid of near-tie magnitudes rather than a single value: the extra
-    token's document frequency is what controls how far a twin pair separates,
-    so the grid spacing is the resolution of the whole near-tie study."""
+    """The twin df grid is the eight powers of two from 1 to 128.
+
+    The extra token's document frequency controls how far a twin pair
+    separates, so the grid spacing is the resolution of the near-tie study.
+    """
     grid = synthetic.SyntheticSpec().twin_extra_token_df
     assert list(grid) == [2**i for i in range(len(grid))]
     assert len(grid) == 8
 
 
 def test_an_inverted_document_length_range_is_refused_rather_than_hanging() -> None:
-    """`_uniform_int` rejection-samples until a draw lands below `high - low + 1`.
+    """An inverted length range is refused rather than hanging the generator.
 
-    With `len_max < len_min` that bound is non-positive, `bit_length()` still
-    returns 1, and every draw from `{0, 1}` fails the test -- so the generator
-    spins forever. A hang is worse than a crash: it cannot be caught by a test
-    that has to finish, and in CI it presents as a timeout with no stack.
+    `_uniform_int` rejection-samples until a draw lands below `high - low + 1`.
+    With `len_min=5, len_max=3` that bound is -1, `(-1).bit_length()` is 1,
+    and every draw from `{0, 1}` fails, so the generator spins forever.
     """
     with pytest.raises(ValueError, match="len_max=3 is below len_min=5"):
         synthetic.generate(_spec(n_docs=12, vocab_size=30, len_min=5, len_max=3))
@@ -1039,16 +1172,22 @@ def test_an_inverted_document_length_range_is_refused_rather_than_hanging() -> N
 
 @pytest.mark.parametrize("len_min", [0, -1])
 def test_a_document_length_below_one_is_refused(len_min: int) -> None:
-    """Zero reaches the same non-terminating loop through `_pick`, which is
-    called `length` times; a negative one produces documents of no tokens at
-    all, which the vocabulary builder would then reject far from the cause."""
+    """A `len_min` below one is refused.
+
+    Zero reaches the same non-terminating loop through `_pick`, called `length`
+    times; a negative one gives documents of no tokens, which the vocabulary
+    builder would reject far from the cause.
+    """
     with pytest.raises(ValueError, match=f"len_min must be at least 1, got {len_min}"):
         synthetic.generate(_spec(n_docs=12, vocab_size=30, len_min=len_min))
 
 
 def test_the_length_range_is_checked_before_the_document_budget() -> None:
-    """Both are spec errors; the length range is the one that would hang, so it
-    is reported first even when the budget is also wrong."""
+    """The length range is checked before the document budget.
+
+    Both are spec errors; the length range is the one that would hang, so it
+    is reported first even when the budget is also wrong.
+    """
     with pytest.raises(ValueError, match="len_max"):
         synthetic.generate(
             _spec(
@@ -1060,9 +1199,8 @@ def test_the_length_range_is_checked_before_the_document_budget() -> None:
 class _BoundedRandom:
     """A random source that refuses to be asked forever.
 
-    The samplers below reject-and-redraw, so a degenerate range never terminates
-    and a real `Random` would hang the suite rather than fail it. A sound call
-    rejects before drawing at all, or succeeds within a handful of draws, so a
+    The samplers reject-and-redraw, so a degenerate range never terminates;
+    a sound call rejects before drawing or succeeds within a few draws, so a
     draw past the limit is a fault. Local by house convention.
     """
 
@@ -1084,22 +1222,11 @@ class _BoundedRandom:
 def test_a_range_with_no_integer_in_it_is_refused_by_the_sampler_itself(
     low: int, high: int
 ) -> None:
-    """The guard above protects `generate`; this protects `_uniform_int`.
+    """`_uniform_int` refuses a range with no integer in it before any draw.
 
-    The tests above reach the sampler only through `generate`, which validates
-    the one spec field feeding it. The sampler itself is safe only because every
-    call site passes a range derived from an already-checked count, and that is
-    an invariant a new caller can break.
-
-    Both degenerate shapes are covered, because they fail to terminate for
-    different reasons and a guard written for one can miss the other. At
-    `span == 0`, `(0).bit_length()` is 0, so `getrandbits(0)` returns 0 and
-    `0 < 0` is false. At `span < 0`, `(-1).bit_length()` is 1, so the draw is 0
-    or 1 and never below -1. `(5, 4)` is the first shape; the rest are the
-    second.
-
-    Driven by `_BoundedRandom` so that a weakened guard fails here rather than
-    hanging the suite.
+    `generate` validates the one spec field feeding the sampler; a new caller
+    can pass an unchecked range. The two degenerate shapes fail to terminate
+    for different reasons. Rationale: docs/engineering_notes.md#degenerate-range-guards
     """
     source = _BoundedRandom()
 
@@ -1110,13 +1237,11 @@ def test_a_range_with_no_integer_in_it_is_refused_by_the_sampler_itself(
 
 
 def test_a_distribution_with_no_mass_is_refused_rather_than_sampled_forever() -> None:
-    """`_pick`'s own version of the same hang, which no spec guard reaches.
+    """`_pick` refuses a distribution with no mass before any draw.
 
-    `_pick` rejection-samples below `cumulative[-1]`. At a total of zero the same
-    `bit_length()` of 0 applies: `getrandbits(0)` is 0, `0 < 0` is false, and the
-    loop never leaves. It is reachable whenever every Zipf weight rounds to zero,
-    which the spec cannot rule out because the weights are computed rather than
-    given. Bounded for the same reason as the test above.
+    At a total of zero `getrandbits(0)` is 0, `0 < 0` is false, and the loop
+    never leaves. No spec field sets the total, so `_pick` guards it itself.
+    Rationale: docs/engineering_notes.md#degenerate-range-guards
     """
     source = _BoundedRandom()
 
@@ -1129,9 +1254,8 @@ def test_a_distribution_with_no_mass_is_refused_rather_than_sampled_forever() ->
 def test_an_empty_vocabulary_names_the_field_rather_than_indexing_off_the_end() -> None:
     """`vocab_size=0` is refused by name rather than by an `IndexError`.
 
-    Unguarded it fails two calls down in `_cumulative`, as `IndexError: list
-    index out of range`, which does not say which spec field was wrong. Every
-    sibling guard here names its field.
+    Unguarded it fails two calls down in `_cumulative` with an error that does
+    not say which spec field is wrong. Every sibling guard names its field.
     """
     with pytest.raises(ValueError, match="vocab_size must be at least 1, got 0"):
         synthetic.generate(_spec(n_docs=12, vocab_size=0))
@@ -1140,16 +1264,19 @@ def test_an_empty_vocabulary_names_the_field_rather_than_indexing_off_the_end() 
 # ---------------------------------------------------------------------------
 # Parallel arrays: a short one is a loud failure, never a shortened corpus
 # ---------------------------------------------------------------------------
+
+
 # Both corpus types keep documents as several tuples indexed in step, and both
 # zip them under `strict=True`. Without it `zip` stops at the shortest and the
-# corpus silently loses its tail: `N` shrinks, and `N` is inside the idf of every
-# term, so every weight in the corpus moves. The failure would surface as a set
-# of plausible numbers rather than as an error.
+# corpus loses its tail: `N` shrinks, `N` is inside every idf, so every weight
+# moves. The failure would surface as plausible numbers, not as an error.
 def _movielens_corpus(
     *, n_texts: int = 2, n_attributes: int = 2, n_fields: int = 2
 ) -> movielens.MovieLensCorpus:
-    """Two documents, with the parallel arrays independently sized so a test can
-    make one short. Local by house convention."""
+    """Two documents whose parallel arrays are sized independently.
+
+    A test can make one array short. Local by house convention.
+    """
     return movielens.MovieLensCorpus(
         archive_sha256="0" * 64,
         doc_ids=("m1", "m2"),
@@ -1165,8 +1292,11 @@ def _movielens_corpus(
 
 
 def test_a_movielens_corpus_with_arrays_in_step_renders_every_document() -> None:
-    """The passing side, so the refusals below are shown to be about the
-    mismatch rather than about the constructor."""
+    """Arrays in step render every document.
+
+    The passing side, so the refusals below are about the mismatch rather
+    than the constructor.
+    """
     records = _movielens_corpus().records()
 
     assert [r["doc_id"] for r in records] == ["m1", "m2"]
@@ -1187,15 +1317,17 @@ def test_a_movielens_corpus_with_arrays_in_step_renders_every_document() -> None
 def test_a_movielens_corpus_whose_arrays_disagree_is_refused(
     label: str, kwargs: dict[str, int]
 ) -> None:
-    """`strict=True`. Truncating instead would drop `m2` from a two-film corpus
-    and report `n_documents = 2` beside a one-row record set."""
+    """Arrays out of step are refused under `strict=True`.
+
+    Truncating instead would drop `m2` from a two-film corpus and report
+    `n_documents = 2` beside a one-row record set.
+    """
     with pytest.raises(ValueError, match="zip"):
         _movielens_corpus(**kwargs).records()
 
 
 def _synthetic_corpus(*, n_documents: int = 2, n_attributes: int = 2) -> synthetic.SyntheticCorpus:
-    """The generated corpus's counterpart, built by hand rather than generated so
-    the arrays can be put out of step."""
+    """A hand-built synthetic corpus whose arrays can be put out of step."""
     return synthetic.SyntheticCorpus(
         spec=synthetic.SyntheticSpec(),
         doc_ids=("d0", "d1"),
@@ -1208,24 +1340,30 @@ def _synthetic_corpus(*, n_documents: int = 2, n_attributes: int = 2) -> synthet
 
 
 def test_a_synthetic_corpus_whose_attributes_run_short_is_refused() -> None:
-    """The same guard on the generated side. A generator that planted fewer
-    attributes than documents would otherwise emit a corpus one document
-    shorter than the spec it records beside it."""
+    """Attributes shorter than the documents are refused.
+
+    A generator that planted fewer attributes than documents would otherwise
+    emit a corpus one document shorter than the spec recorded beside it.
+    """
     with pytest.raises(ValueError, match="zip"):
         _synthetic_corpus(n_attributes=1).records()
 
 
 def test_a_synthetic_corpus_whose_documents_run_short_is_refused() -> None:
-    """`features_by_doc` pairs ids with documents and nothing else, so it has its
-    own use of the same guard."""
+    """`features_by_doc` has its own `strict=True` guard.
+
+    It pairs ids with documents and nothing else.
+    """
     with pytest.raises(ValueError, match="zip"):
         _synthetic_corpus(n_documents=1).features_by_doc()
 
 
 def test_a_synthetic_corpus_in_step_pairs_each_id_with_its_own_features() -> None:
-    """The passing side, and the property the mapping exists for: the pairing is
-    positional, so an off-by-one would silently attribute one document's tokens
-    to its neighbour."""
+    """Arrays in step pair each id with its own features.
+
+    The pairing is positional, so an off-by-one would attribute one document's
+    tokens to its neighbour.
+    """
     by_doc = _synthetic_corpus().features_by_doc()
 
     assert by_doc == {"d0": ("w",), "d1": ("w", "w")}
@@ -1235,13 +1373,11 @@ def test_a_synthetic_corpus_in_step_pairs_each_id_with_its_own_features() -> Non
 # The Zipf exponent selects between two arithmetics, and both ends must hold
 # ---------------------------------------------------------------------------
 def test_an_exponent_of_zero_is_a_flat_vocabulary_not_a_zipf_one() -> None:
-    """`if exponent == 1.0` picks the exact integer path; everything else goes
-    through `pow`. At exponent 0 that yields `scale / 1` for every rank -- a
-    uniform vocabulary, the ablation with no skew at all.
+    """Exponent zero gives a flat vocabulary, not a Zipf one.
 
-    Pinned because the branch is on a float equality: routing exponent 0 into
-    the integer path would silently substitute the 1/rank distribution and the
-    ablation would measure the baseline twice.
+    `if exponent == 1.0` picks the integer path; everything else goes through
+    `pow`, which at exponent 0 gives `scale / 1` for every rank. Routing 0 into
+    the integer path would make the no-skew ablation measure the baseline twice.
     """
     flat = synthetic._zipf_weights(6, 0.0)
 
@@ -1250,9 +1386,11 @@ def test_an_exponent_of_zero_is_a_flat_vocabulary_not_a_zipf_one() -> None:
 
 
 def test_a_larger_exponent_concentrates_the_vocabulary_harder() -> None:
-    """The parameter's direction, so the two arithmetics are shown to agree
-    about what the exponent means. Only the head is fixed; every later rank
-    falls away faster."""
+    """A larger exponent makes every rank past the head fall away faster.
+
+    The two arithmetics are shown to agree about what the exponent means;
+    only the head is fixed.
+    """
     gentle = synthetic._zipf_weights(6, 1.0)
     steep = synthetic._zipf_weights(6, 2.0)
 
@@ -1261,14 +1399,11 @@ def test_a_larger_exponent_concentrates_the_vocabulary_harder() -> None:
 
 
 def test_the_exact_and_platform_arithmetics_agree_over_a_full_vocabulary() -> None:
-    """Exponent 1 is computed in integers so the corpus regenerates identically
-    on any interpreter; `pow` would reach the platform libm, which
-    `docs/spec_addenda.md#g13` shows disagrees across systems.
+    """The integer and `pow` paths agree over 8000 ranks, twice the default.
 
-    They happen to agree numerically at double the default vocabulary size, so
-    the integer path is chosen for its provenance rather than for its answer --
-    which is worth recording, since a reader comparing the two branches would
-    otherwise wonder what the difference buys.
+    Exponent 1 is computed in integers so the corpus regenerates identically on
+    any interpreter; `pow` reaches the platform libm, which disagrees across
+    systems (`docs/spec_addenda.md#g13`). The integer path is chosen for provenance.
     """
     exact = synthetic._zipf_weights(8000, 1.0)
     via_pow = [max(1, int((1 << 40) / (rank + 1) ** 1.0)) for rank in range(8000)]
@@ -1277,12 +1412,11 @@ def test_the_exact_and_platform_arithmetics_agree_over_a_full_vocabulary() -> No
 
 
 def test_a_document_length_of_exactly_one_is_accepted() -> None:
-    """The boundary the guard is written around. `len_min = 1` is the shortest
-    document `_uniform_int` can be asked for and is a legitimate corpus: a
-    one-token document has `L = 1`, so `tf = count / L` is exactly 1 and its
-    weights are the idf alone.
+    """`len_min = 1` is accepted.
 
-    Rejecting it would refuse the very corpus a length sweep starts from.
+    It is the shortest document `_uniform_int` can be asked for and a
+    legitimate corpus: with `L = 1`, `tf = count / L` is exactly 1 and the
+    weights are the idf alone. A length sweep starts from it.
     """
     corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30, len_min=1, len_max=4))
 
@@ -1292,13 +1426,11 @@ def test_a_document_length_of_exactly_one_is_accepted() -> None:
 
 
 def test_a_single_length_range_is_accepted_and_fixes_every_document_length() -> None:
-    """`len_max < len_min` is the guard; `len_max == len_min` is a degenerate
-    but valid range, and a useful one -- with every document the same length,
-    `tf = count / L` has a common denominator and a margin sweep isolates the
-    document-frequency effect from the length effect.
+    """`len_max == len_min` is a valid range that fixes every document length.
 
-    Twins carry one extra token by construction, so they are the one documented
-    exception to the fixed length.
+    With a common `L`, `tf = count / L` has a common denominator and a margin
+    sweep isolates the document-frequency effect from the length effect. Twins
+    carry one extra token by construction, the one exception.
     """
     corpus = synthetic.generate(_spec(n_docs=12, vocab_size=30, len_min=5, len_max=5))
     twin_bs = {b for _, b, _ in corpus.twins}
@@ -1309,17 +1441,11 @@ def test_a_single_length_range_is_accepted_and_fixes_every_document_length() -> 
 
 
 def test_a_twin_token_too_frequent_for_the_vocabulary_falls_back_to_its_head() -> None:
-    """`vocabulary[min(vocab_size - 1, max(0, vocab_size // target_df - 1))]`.
+    """A `target_df` above `vocab_size` clamps the twin token to rank zero.
 
-    The extra token is picked by Zipf rank so its document frequency is intended
-    rather than incidental. Asking for a df the vocabulary cannot supply --
-    `target_df` above `vocab_size`, so the rank computes to -1 -- clamps to rank
-    zero, the most frequent term available and the closest the vocabulary gets
-    to what was asked for.
-
-    Without the lower clamp the rank is negative and Python reads from the far
-    end, so the *rarest* term would stand in for the most frequent one and the
-    twin pair would separate by the opposite of the intended amount.
+    The rank is `min(vocab_size - 1, max(0, vocab_size // target_df - 1))`.
+    Without the lower clamp the rank is -1 and Python reads from the far end,
+    so the rarest term would stand in for the most frequent one.
     """
     spec = synthetic.SyntheticSpec(
         n_docs=40, vocab_size=30, n_users=0, n_exact_duplicates=2, n_twin_pairs=8
@@ -1335,20 +1461,11 @@ def test_a_twin_token_too_frequent_for_the_vocabulary_falls_back_to_its_head() -
 
 
 def test_the_twin_token_rank_is_clamped_at_the_rare_end_too() -> None:
-    """The rank chosen for each target df, pinned per pair.
+    """The rank chosen for each target df is pinned per pair.
 
-    The extra token is `vocabulary[min(V - 1, max(0, V // target_df - 1))]`.
-    Asserting only that the token is somewhere in the vocabulary holds for any
-    index, including a wrong one, so the whole expression goes unchecked.
-
-    On a 30-word vocabulary the default df grid gives ranks 29, 14, 6, 2 and
-    then 0 four times: once `target_df` exceeds `V`, `V // target_df` is 0 and
-    the `max(0, ...)` clamp is what keeps the index off `vocabulary[-1]`, which
-    is the head of the Zipf distribution and the opposite of the rare token the
-    pair is meant to carry.
-
-    The `min(V - 1, ...)` clamp never binds: `V // target_df - 1 <= V - 1` for
-    every `target_df >= 1`, with equality at 1.
+    On a 30-word vocabulary the default df grid gives ranks 29, 14, 6, 2 and then 0
+    four times: once `target_df` exceeds `V`, `max(0, ...)` keeps the index off
+    `vocabulary[-1]`. `min(V - 1, ...)` never binds, as `V // target_df - 1 <= V - 1`.
     """
     spec = synthetic.SyntheticSpec(
         n_docs=40, vocab_size=30, n_users=0, n_exact_duplicates=2, n_twin_pairs=8
@@ -1372,17 +1489,11 @@ def test_the_twin_token_rank_is_clamped_at_the_rare_end_too() -> None:
 
 
 def test_find_near_ties_skips_exact_ties_unless_asked_for_them() -> None:
-    """`strictly_positive` defaults to True, and the default is what every
-    caller that does not think about it gets.
+    """`strictly_positive` defaults to True.
 
-    G22 measured the regime: at tau = 1e-9 essentially every within-tau pair has
-    a gap of exactly zero, and 17.2% of adjacent gaps are zero outright. A
-    "closest pairs" list that included them would be a list of zeros on any real
-    corpus -- it would report that exact ties exist, which is already known, and
-    nothing about the near-tie structure section 7.4 is looking for.
-
-    Both existing exact-tie tests pass the flag explicitly, so the default was
-    the one path never taken.
+    At tau = 1e-9 nearly every within-tau pair has a gap of exactly zero (G22),
+    so a "closest pairs" list that included them would be a list of zeros on
+    any real corpus and say nothing about the near-tie structure.
     """
     scores = [1.0, 1.0, 0.5, 0.0, 0.0]
 
@@ -1398,6 +1509,8 @@ def test_find_near_ties_skips_exact_ties_unless_asked_for_them() -> None:
 # ---------------------------------------------------------------------------
 # scripts/fetch_data.py: a bad download must not destroy a good archive
 # ---------------------------------------------------------------------------
+
+
 # The archive is not re-obtainable: GroupLens replaces ml-latest-small.zip in
 # place, so a contributor holding the pinned copy holds the only copy the
 # published numbers were computed against. `_download` therefore verifies the
@@ -1483,7 +1596,7 @@ def test_the_rejected_download_is_kept_rather_than_discarded(
 def test_a_download_matching_the_pin_is_placed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Contrastive with the two above, so neither passes by refusing everything."""
+    """A matching download is placed, so the two above cannot pass by refusing."""
     fetch = _fetch_script()
     dest = tmp_path / "ml-latest-small.zip"
     payload = b"the archive upstream still serves"
@@ -1561,9 +1674,8 @@ def test_a_rating_that_is_not_a_plain_decimal_is_refused(label: str, text: str) 
     """Only a plain decimal spelling of a rating is accepted.
 
     `int()` would take PEP 515 underscores and any Unicode decimal digit, so
-    "1_0" reads as ten. The archive is pinned, so the parser takes the forms
-    `d`, `d.0`, `d.00`, `d.5` and `d.50`, and refuses the rest with
-    `DataIntegrityError`.
+    "1_0" reads as ten. The archive is pinned, so the parser takes only the forms
+    `d`, `d.0`, `d.00`, `d.5` and `d.50`, and refuses the rest with `DataIntegrityError`.
     """
     with pytest.raises(DataIntegrityError, match="not a plain decimal number"):
         movielens._double_rating(text)

@@ -1,14 +1,13 @@
 # Specification Addenda
 
 `README.md` (equivalently `docs/main.pdf`) is the normative specification for this
-repository. Implementing it end to end surfaced a number of points that are
-**underspecified**: places where two faithful readings of the text produce
-different numbers, or where a quantity the paper names is not actually
-well-defined in the case that matters.
+repository. This page records the points at which it is **underspecified**:
+places where two faithful readings of the text produce different numbers, or
+where a quantity the paper names is not well-defined in the case that matters.
 
 Each is recorded here with a stable identifier, the ambiguity, and the resolution
-adopted. Code that depends on one of these decisions cites its identifier in the
-docstring, so the reasoning is one grep away.
+adopted. Code that depends on one of these decisions cites its identifier in its
+docstring.
 
 Nothing here contradicts the paper. Where the paper is definite, the paper wins;
 these entries only fill gaps or make an abstract quantity concrete.
@@ -70,7 +69,7 @@ quoted sentence is not strictly true as written.
    gaps are all `≤ τ` (single-linkage). `O(N)`. This *is* an equivalence relation
    and is the correct object wherever a partition is required.
 3. **`tie_cliques(τ)`**: maximal intervals of *diameter* `≤ τ` (complete
-   linkage), i.e. the sets in which every pair really is mutually
+   linkage), i.e. the sets in which every pair is mutually
    indistinguishable. `O(N)`, overlapping.
 
 Report ball statistics (paper-faithful) alongside chain statistics (partition),
@@ -105,7 +104,7 @@ same set. Plain normalised Kendall τ distance applies:
 `O(|G| log |G|)`.
 
 **(b) Restricted to top-*k* where `topk(π) ≠ topk(π′)`.** Ill-posed as stated,
-and this is the interesting case. Adopt the **Fagin-Kumar-Sivakumar generalised
+and this is the case that matters. Adopt the **Fagin-Kumar-Sivakumar generalised
 Kendall distance** (*Comparing Top k Lists*, SIAM J. Discrete Math. 17(1), 2003).
 Over the union `U = topk(π) ∪ topk(π′)`, each unordered pair `{a,b} ⊆ U`
 contributes:
@@ -163,7 +162,7 @@ max K^(1/2) = k²  (case 3)  +  2·C(k,2)·½  (case 4)  =  k(3k − 1)/2
 ```
 
 so report `K̄ = K^(1/2) / (k(3k−1)/2) ∈ [0,1]`. Computed by direct `O(k²)` pair
-enumeration; at `k ≤ 50` that is ≤ 1225 pairs, and obvious correctness matters
+enumeration over the union of the two lists; at `k ≤ 50` that is ≤ C(100, 2) = 4950 pairs, and obvious correctness matters
 more here than asymptotics. Cross-checked in tests against an `O(k log k)`
 merge-sort implementation.
 
@@ -235,11 +234,12 @@ vectors as defined in §2.2:
 
 Therefore **`C ≤ √( max nnz )`** over the documents and queries involved. This
 also makes §6's qualitative claim ("cosine similarity becomes unstable for
-low-norm vectors") quantitative, and localises it to *short documents*.
+low-norm vectors") quantitative, and localises it to *vectors with many
+distinct terms*: only a large `nnzᵢ` permits a low norm.
 
 **Verification.** A Hypothesis property test asserts the bound is never violated
-over randomised non-negative sparse inputs, evaluated under exact summation, plus
-a tightness search reporting the empirical `lhs/rhs` ratio.
+over randomised non-negative sparse inputs under the default naive summation, and
+a witness, `u` moved towards an orthogonal `v`, attains the tight form within 1%.
 
 ---
 
@@ -294,10 +294,10 @@ document order**, which would destroy the determinism guarantee.
 
 Criterion (1) is the statistic the paper already privileges; (3) makes the rule a
 *total* order, so the retained set is unique and order-invariant. A
-`max_features_policy` option additionally offers `"sklearn_compat"` purely so the
+`max_features_policy` option additionally offers `"sklearn_compat"` solely so that the
 scikit-learn differential test can be run with a matching rule.
 
-**Bonus experiment this unlocks.** A token sitting exactly at the truncation
+**Follow-on experiment.** A token sitting exactly at the truncation
 boundary being kept or dropped is *itself* a decision discontinuity of the kind
 §4.5 studies, but upstream of scoring. Sweeping `max_features ± 1` and measuring
 top-*k* disagreement gives a **vocabulary-boundary sensitivity** result extending
@@ -321,10 +321,10 @@ neither ports to C++.
 - **Tier 0 `none`**: identity.
 - **Tier 1 `porter2`** *(default)*: the Snowball English stemmer. A complete
   published algorithmic specification, no data files, portable bit-identically to
-  both languages, and, decisively, with an official ~29 000-word
+  both languages, and, as the deciding factor, with an official 42 649-word
   `voc.txt`/`output.txt` test-vector pair. Vendored with a recorded SHA-256, so
   the preprocessing step is itself machine-verified.
-  *Honesty requirement:* Porter2 is a **stemmer** rather than a lemmatiser. The
+  *Naming requirement:* Porter2 is a **stemmer** rather than a lemmatiser. The
   paper should read "lemmatisation (implemented as Snowball English stemming;
   see G7)".
 - **Tier 2 `lookup`**: a bundled, hash-verified `surface⇥lemma` table consulted
@@ -334,7 +334,7 @@ neither ports to C++.
   model version, and input/output hashes. The external tool is never invoked
   inside a reproducible run.
 
-**Also pinned here, all previously unspecified:** Unicode normalisation is
+**Also pinned here:** Unicode normalisation is
 **NFKC**, applied first; case folding is `str.lower()` (not `casefold()`, which
 needs ICU to reproduce in C++); the tokeniser pattern is a pinned regex hashed
 into the manifest; the stopword list is frozen, versioned and hash-verified;
@@ -351,11 +351,10 @@ form, and tokenises as `("i", "stanbul")`. Scripts that write their marks as
 separate code points split the same way. Making the pattern mark-aware would
 change a value the manifest hashes, and Python's `re` offers no `\p{M}`, so it
 would need either hand-listed Unicode blocks or a dependency this project does
-not carry. Recorded here so the current behaviour is a decision rather than an
-accident.
+not carry. The current behaviour is therefore a recorded decision.
 
 **Which control characters are deleted.** `Cc`, `Cf`, `Co` and `Cs`, before
-tokenisation. `Cn` (unassigned) is excluded deliberately: which code points are
+tokenisation. `Cn` (unassigned) is excluded: which code points are
 unassigned changes with the Unicode version, so deleting them would make the
 token stream depend on the interpreter's `unicodedata` rather than on the text.
 A `Cn` code point is not a letter or a digit, so it separates tokens where
@@ -401,9 +400,8 @@ materially changes the margin distribution:
 2. **Does the held-out item stay in the corpus?** **Yes.** It must remain
    scoreable; it is the target.
 3. **Are the user's remaining profile items excluded from the candidate set?**
-   **Yes.** Otherwise they trivially occupy the top ranks, since they literally
-   contributed the query text, and dominate the margin distribution. *This is the
-   single most consequential unstated choice in §7.1.*
+   **Yes.** Otherwise they occupy the top ranks, since they contributed the
+   query text, and dominate the margin distribution.
 4. **Eligibility.** Users with ≥ 5 qualifying interactions; resulting counts
    recorded (see G14).
 5. **What counts as an interaction.** For MovieLens, `rating ≥ 4.0`, pinned in
@@ -420,7 +418,7 @@ standard embedding.
 
 The consequence should be stated in the paper: concatenation makes `tf` a
 *length-weighted* average, so verbose items dominate the profile. That is itself
-an interesting stability axis, so `"vector_mean"` and `"vector_sum"` are also
+a stability axis in its own right, so `"vector_mean"` and `"vector_sum"` are also
 implemented and offered as an ablation.
 
 ---
@@ -436,8 +434,6 @@ here only because it is asserted explicitly in code rather than left implicit.
 
 <a id="g13"></a>
 ## G13. `log` is not correctly rounded
-
-**This is the most consequential finding in the implementation.**
 
 **Measured on this project's reference machine**, comparing the platform
 `math.log` against the correctly-rounded value (`decimal.Decimal.ln()` at 60
@@ -458,8 +454,9 @@ Both are quoted so neither is mistaken for the other.
 and UCRT, glibc, Apple libm and the various libstdc++ combinations each round
 differently. CPython's `math.log` delegates to the platform libm. So `idf` values
 differ by ~1 ulp across platforms in ~15% of entries, and that propagates into
-every weight, every norm and every score. **Cross-platform bit-reproducibility is
-broken by default, by the only transcendental function in the entire pipeline.**
+every weight, every norm and every score. **The logarithm is the only
+transcendental function in the pipeline, and by default it breaks cross-platform
+bit-reproducibility.**
 
 **Resolution: two decisions, both cheap.**
 
@@ -475,8 +472,7 @@ broken by default, by the only transcendental function in the entire pipeline.**
    differ in the expected ~15% of entries so the distinction stays visible.
 
 Together these make the whole system **bit-reproducible across Linux, macOS and
-Windows**, which turns the cross-platform snapshot test into a hard CI gate
-rather than an aspiration.
+Windows**, which makes the cross-platform snapshot test a hard CI gate.
 
 **Also pinned:** the expression is `log((1+N)/(1+df))`, division **first**.
 Measured: `log(a/b) ≠ log(a) − log(b)` in **94.53%** of cases at `N = 9742`.
@@ -517,15 +513,14 @@ determines a published result.
 > `π` = (popularity, rating, engagement) → `π_alt` = (engagement, rating, popularity)
 
 The reversal is the antipode, maximally distant from `π` in the space of priority
-orderings, so it is the choice that best exposes the sensitivity §4.5 is looking
-for. The full six-way sweep is available as an ablation in
-`configs/ablations.yaml` for anyone who wants the whole picture.
+orderings, so it is the choice that best exposes the sensitivity §4.5 studies.
+The full six-way sweep is available as an ablation in `configs/ablations.yaml`.
 
 The identifier is **not** part of the permutable priority. It terminates every
-key implicitly, and moving it would stop the ordering being total, which would
-invalidate the uniqueness of the sorted permutation and with it every
-reproducibility claim in the ranking layer. `ranking/sort_keys.py` rejects a
-priority that names it.
+key implicitly, which is what makes the ordering total. Being unique, it decides
+every comparison it reaches: named last in a priority it only repeats itself, and
+named ahead of an attribute it leaves that attribute unconsulted.
+`ranking/sort_keys.py` rejects a priority that names it.
 
 ---
 
@@ -538,7 +533,7 @@ priority that names it.
 
 **Resolution.** `NaN` plus `defined = False`, consistent with G3's treatment of
 every other undefined margin. `+inf`, the conventional value for an empty
-minimum, would be actively harmful here: it reads as "no constraint on
+minimum, would be harmful here: it reads as "no constraint on
 stability", the opposite of "the quantity does not apply", and it would propagate
 into percentile summaries as a finite-looking extreme.
 
@@ -578,24 +573,24 @@ The onset agrees with `sqrt(DBL_MIN)` to the digit.
 
 **Resolution: none, since this is correct behaviour.** A hypot-style rescaled norm
 would avoid it entirely, and §6 forbids that class of stabilising transformation.
-The implementation is right; what needed fixing was a *test* that asserted scale
-invariance without excluding the regime in which the specification's own stated
-limitation applies.
+The implementation is correct; a *test* that asserts scale invariance must
+exclude the regime in which the specification's own stated limitation applies.
 
 §6 should state this as the concrete form of its own claim. Real TF-IDF norms are
 bounded below by `1/sqrt(nnz)` (see [G4](#g4)), far above the threshold, so this
-bites only on synthetic inputs and never on the corpora this project studies.
+applies only to synthetic inputs and never to the corpora this project studies.
 
 ### Refinement: scaling moves a vector *across* the threshold
 
-The test fix described above was applied to only half of what needed it, and a
-100k-example search later found the other half.
+The guard must cover every vector in the comparison, because scaling moves a
+vector across the threshold.
 
 A scale-invariance test compares `cos(k·u, v)` against `cos(u, v)`. The guard
-excluded the underflow regime for the **scaled** vector alone; multiplying by
-`k > 1` moves a vector *out* of the regime, so the original `u` can sit below the
+that excludes the underflow regime for the **scaled** vector alone is
+incomplete: multiplying by `k > 1` moves a vector *out* of the regime, so the
+original `u` can sit below the
 threshold while `k·u` sits above it. Both cosines appear in the assertion, so
-guarding one endpoint is not enough. The falsifying example:
+guarding one endpoint is insufficient. A falsifying example:
 
     u = 8.389842684852489e-160     (below 1.49e-154)
     k = 177795.0
@@ -604,17 +599,17 @@ guarding one endpoint is not enough. The falsifying example:
     cos(k·u, v) = 1.0
     cos(u,   v) = 0.9999994865255848
 
-They differ by 5e-7 against a 1e-12 tolerance, and the implementation is right in
-both cases: it is exhibiting the instability tabulated above. The correct guard
+They differ by 5e-7 against a 1e-12 tolerance, and the implementation is correct
+in both cases: it is exhibiting the instability tabulated above. The correct guard
 excludes the regime for **every vector the assertion touches**.
 
-**Why it stayed hidden.** The three `assume()` calls reject about 41% of
-generated examples (measured: 697 invalid of 1697 at `max_examples=1000`), which
-sits close enough to Hypothesis's `filter_too_much` threshold that the health
-check fired on the CI runner while staying silent locally. The health check was
-therefore masking a real defect; suppressing it, which the intended filtering
-justifies, is what exposed the counterexample. A health check that fires
-intermittently is a symptom to be investigated.
+**Health check.** The three `assume()` calls reject about 41% of generated
+examples (697 invalid of 1697 at `max_examples=1000`). That rate sits close to
+Hypothesis's `filter_too_much` threshold, so the health check fires on the CI
+runner and not locally. A firing health check aborts the run before it reaches
+counterexamples such as the one above. The test suppresses the check, which the
+intended filtering justifies. A health check that fires intermittently is a
+symptom to be investigated.
 
 ---
 
@@ -632,7 +627,7 @@ there is `TauExceedsScoreRangeWarning`, because the range is zero.
 
 **To G8: the justification rather than the resolution.** G8 argues that a mean
 stored as `sum/count` in binary64 "can make two genuinely equal means compare
-unequal in a platform-dependent way". That does not survive contact with the
+unequal in a platform-dependent way". That claim is false for this
 data: with 0.5-quantised ratings and counts below 2^53 the sum is computed
 *exactly*, and IEEE-754 mandates correctly-rounded division, so equal means
 produce bit-identical doubles on every conforming platform.
@@ -640,9 +635,9 @@ produce bit-identical doubles on every conforming platform.
 The hazard that *is* real is the opposite one: two genuinely **different** means
 colliding onto the same double. `1/3` and `(10^17+1)/(3·10^17)` differ as reals
 and round to the same binary64; cross-multiplication separates them, and the
-products involved stay comfortably inside `int64`. That is information the
-tie-break is entitled to and the float path destroys. The resolution stands; the
-reason needs restating.
+products involved stay inside `int64`. That is information the
+tie-break is entitled to and the float path destroys. The resolution stands, with
+this as its reason.
 
 *Implementation note.* The overflow guard must bound `num_i * den_j` over
 **distinct** documents. Bounding by `max(num) * max(den)` across the column gives
@@ -768,16 +763,16 @@ ablation rather than adopted silently.
 > inert. `build_profile` joins *preprocessed feature streams*, by which point the
 > n-grams already exist and no pass runs over the join. Measured, and recorded in
 > full at [G27's sibling, G28](#g28). The canonicalisation resolved here is still
-> worth keeping, since it makes the feature *tuple* reproducible and the profile
+> retained, since it makes the feature *tuple* reproducible and the profile
 > digest depends on that, but it is not what keeps scores stable, because nothing
-> was destabilising them.
+> destabilises them.
 
 ---
 
 <a id="g21"></a>
 ## G21. `vector_sum` and `vector_mean` are indistinguishable by similarity
 
-Measured while implementing [G11](#g11)'s ablations. Summing a user's item
+This concerns [G11](#g11)'s ablations. Summing a user's item
 vectors and averaging them differ by the positive scalar `1/n`, and cosine
 similarity is invariant under positive per-vector scaling, so the two
 aggregations produce **identical similarity scores and identical rankings**.
@@ -801,9 +796,8 @@ are therefore retained, and the choice is recorded in the manifest.
 **Where:** §7.4 ("Case Study: Near-Tie Sensitivity"), §7.3 (stratification by margin).
 
 §7.4 says: *"Two documents A and B are **identified** such that |s_A − s_B| ≤ τ."*
-The word *identified* carries the weight here, and this addendum records why: the
-natural reading, that one **constructs** such a pair by editing document text, is
-not achievable.
+The word *identified* matters: the natural reading, that such a pair is
+**constructed** by editing document text, is not achievable.
 
 ### Why editing text cannot produce a fine near-tie
 
@@ -826,7 +820,7 @@ consequence of the normalisation in §2.2 rather than a limitation of the
 generator, and no choice of extra token can escape it. **The single-token edit is
 the finest text-level perturbation that exists**, so `1/L` is a floor.
 
-This is a real distinction from §5's perturbation model, which injects noise
+This differs from §5's perturbation model, which injects noise
 directly into scores or IDF weights and *can* reach any magnitude. Text-level and
 score-level perturbations are not interchangeable at fine scales.
 
@@ -848,39 +842,35 @@ adjacent pairs of the sorted score vector:
 Smallest strictly-positive gap: **1.575e−08**. 2524 of 3000 documents score above
 zero, so the exact-tie mass is not merely the zero block.
 
-The spec is now written out in full, and the query as the expression that
-produces it, because the previous wording was not enough to reproduce the table.
-It said "seed as specified" and "the first six tokens of document 0". Document 0
-is `w00002 w00006 w00076 w00046 w00001` — five words, which become nine features
-once bigrams are added — so "six tokens" cannot mean six words, and the two
-readings give different tables. The seed is the one every other experiment here
-uses, and it is the only one of the seeds tried that reproduces `exactly 0 = 553`
-and `2524 of 3000` — the two figures that came out the same under every reading
-of the query, which is what identifies the corpus independently of it.
+The spec is written out in full, and the query is given as the expression that
+produces it; both are needed to reproduce the table. Document 0 is
+`w00002 w00006 w00076 w00046 w00001`: five words, which become nine features
+once bigrams are added, so "the first six tokens of document 0" means six
+features rather than six words, and the two readings give different tables. The seed is the one every
+other experiment here uses. It is the only seed tried that reproduces
+`exactly 0 = 553` and `2524 of 3000`, the two figures that are the same under
+every reading of the query and therefore identify the corpus independently of it.
 
-**The shares are configuration-dependent, and so, it turns out, is the empty
-interval.** Repeating this with a different corpus size, vocabulary or query
-moves every row of that table by a few percent.
+**The shares are configuration-dependent, and so is the empty interval.** A
+different corpus size, vocabulary or query moves every row of that table by a
+few percent.
 
-Three of the rows above were previously recorded as 104, 2323 and 19, with a
-smallest positive gap of 2.0e−08, and they no longer reproduce; the values in the
-table are the measured ones. What did not move is the part the section rests on:
-`exactly 0 = 553`, `2524 of 3000` above zero, and the `(0, 1e−9)` row at **0**,
-which holds at every seed and under every reading of the query that was tried.
-Those first two fix the corpus — no other seed reproduces either — so the drift
-is in the scoring path between the corpus and the gaps, not in the generator.
-The lesson is the one this repository applies everywhere else and did not apply
-here: a hand-maintained table of measured numbers with nothing recomputing it
-will drift, and only the rows nobody re-derives will drift silently. The table is
-now recomputed by
+Earlier editions of this table recorded 104, 2323 and 19 with a smallest
+positive gap of 2.0e−08; the values above supersede them. The part the section
+rests on is stable: `exactly 0 = 553`, `2524 of 3000` above zero, and the
+`(0, 1e−9)` row at **0**, which holds at every seed and under every reading of
+the query tried. The first two fix the corpus, since no other seed reproduces
+either, so the change from the superseded values lies in the scoring path
+between the corpus and the gaps, not in the generator. A hand-maintained table
+of measured numbers with nothing recomputing it drifts, so the table is
+recomputed by
 `tests/test_datasets.py::test_the_gap_table_g22_publishes_is_the_one_this_corpus_produces`,
-which fails on any cell that moves and says to change the addendum and the test
-together.
+which fails on any cell that moves and directs that the addendum and the test
+change together.
 
-An earlier version of this addendum went further and claimed the *middle* row was
-invariant: that no run had ever placed an adjacent pair in (0, 1e−9), and that
-the claim was safe enough to assert as a regression test. **That was an
-over-generalisation from synthetic data, and MovieLens falsifies it.**
+The empty *middle* row is observed on synthetic data only and is not an
+invariant to assert as a regression test: MovieLens places adjacent pairs in
+(0, 1e−9).
 
 ### What MovieLens actually shows
 
@@ -979,7 +969,7 @@ The factor 2 is exact, and it is the same 2 as in §4.4's `ε_k^flip = m_k / 2`.
 `Reduction.{NAIVE, NEUMAIER, PAIRWISE}` against `Reduction.EXACT`
 (Shewchuk/`math.fsum`) as correctly-rounded ground truth.
 
-**A trap worth naming.** `TfidfModel.norms` is precomputed under the model's own
+**Norms and the reduction policy.** `TfidfModel.norms` is precomputed under the model's own
 reduction, so varying only the policy passed to the scorer holds the norms fixed
 and measures the dot product alone. That understates `η` by about **threefold**:
 a query dot product runs over a handful of shared terms (1 to 5 in the measured
@@ -992,14 +982,14 @@ same 1500-document corpus × 25 queries:
 | dot product only (**wrong**) | 9.25% | 5.551e−17 |
 | dot product and norms (**correct**) | 42.54% | 1.665e−16 |
 
-`Reduction.NEUMAIER` was **exactly correctly-rounded** on every one of the 37,500
-comparisons, and `PAIRWISE` was bit-identical to `NAIVE`: the pairwise block is
+`Reduction.NEUMAIER` is **exactly correctly-rounded** on every one of the 37,500
+comparisons, and `PAIRWISE` is bit-identical to `NAIVE`: the pairwise block is
 128 and no summation here is that long, so a reduction-policy sweep over short
 queries measures nothing, though such a sweep looks informative.
 
 ### The upper endpoint is the score lattice
 
-The smallest strictly-positive adjacent gap actually observed, `g_min`. Below it
+The smallest strictly-positive adjacent gap observed, `g_min`. Below it
 no pair of *distinctly* scored documents is within τ of each other.
 
 ### The band can be *proved* invariant rather than merely sampled
@@ -1065,12 +1055,13 @@ corpus-edit perturbation   1e-4 .. 1e-1
 ```
 
 Twelve to thirteen orders of magnitude separate the numerical-error regime from
-the corpus-perturbation regime. **Numerical error never came within six orders of
-magnitude of closing a real score gap.** A1's "bounded perturbations" are
+the corpus-perturbation regime. **In these measurements, numerical error stays
+more than six orders of
+magnitude below the smallest real score gap.** A1's "bounded perturbations" are
 therefore entirely about semantic/corpus perturbation; floating-point error is
-not a threat to ranking at any scale this system operates at. That is a positive
-result for §6's design, and it is what makes A1 and A2 cleanly separable
-questions rather than two names for one effect.
+not a threat to ranking at any scale this system operates at. This supports §6's
+design, and it makes A1 and A2 separable questions rather than two names for one
+effect.
 
 ---
 
@@ -1092,10 +1083,10 @@ over 40,000 random non-negative sparse vectors (2 to 40 non-zeros, values in
 | largest excess in this sample | 6.661e−16 (3 ulp) |
 
 Every figure in that table is a **sample maximum over 40,000 trials, not a
-bound**. Resampling with a different generator reproduced `max cos(v, v) =
+bound**. A resample with a different generator reproduces `max cos(v, v) =
 1.0000000000000002` exactly — self-similarity is pinned by the structure, since
-numerator and denominator are the same sum rounded twice — but reached **4 ulp**
-on the scaled case where this sample reached 3. The rate is stable (27.4% here,
+numerator and denominator are the same sum rounded twice — but reaches **4 ulp**
+on the scaled case where this sample reaches 3. The rate is stable (27.4% here,
 27.9% on the resample); the extreme is not, and nothing here establishes a
 maximum. This is the same caveat the report attaches to η, and for the same
 reason: a maximum over finitely many draws is a lower bound on the worst case.
@@ -1142,15 +1133,13 @@ break down: scale invariance, which fails below `|x| ≈ √DBL_MIN`.
 
 §7.1 specifies that experiments use **user-profile** queries and **leave-one-out**
 folds, with item-as-query implemented but explicitly "not evaluated in the present
-experiments". An earlier version of the experiment runners used **truncated
-document prefixes** instead: a different protocol, and a much easier one.
-
-This addendum records that the substitution is not benign.
+experiments". **Truncated document prefixes** are a different protocol, and a
+much easier one; substituting them for leave-one-out is not benign.
 
 ### Why a document prefix is an easier query
 
 A prefix of document *d* retrieves *d* itself at very high similarity, because it
-is literally a subset of *d*'s own features. The top of the ranking is therefore
+is a subset of *d*'s own features. The top of the ranking is therefore
 dominated by one strongly-separated document, which inflates `m_1` and suppresses
 the exact-tie rate. A leave-one-out fold has to retrieve a *held-out* item from
 the concatenated text of the user's *other* items, so the top of the ranking is a
@@ -1167,8 +1156,8 @@ Same corpus (`synthetic_tiny`, 120 documents), same code, same `k`:
 | π vs π_score disagreement at k=1 | 16.7% | **50.0%** |
 
 Under the specified protocol the **median** boundary margin at rank 1 is exactly
-zero. The shortcut protocol was materially *understating* the phenomenon the
-study exists to measure.
+zero. The prefix protocol materially *understates* the phenomenon the study
+measures.
 
 ### The A2 result the correct protocol produces
 
@@ -1233,26 +1222,26 @@ shifts in total:
 | **interaction** | **0** |
 
 The interaction term is never the largest of the three. The **global** term
-dominates almost everywhere, which is the sensible outcome given §4.1: one edit
+dominates almost everywhere, which is consistent with §4.1: one edit
 moves `df` by at most one per term, but `idf = ln(N/df)` is steeply non-linear at
 small `df`, so a rare term's weight moves far more than the edited document's own
 content does.
 
 ### What may and may not be claimed
 
-- **May**: that the three-term decomposition is a valid upper bound. It was never
-  violated in any measurement here.
+- **May**: that the three-term decomposition is a valid upper bound. No
+  measurement here violates it.
 - **May not**: that the interaction term is the amplification mechanism. On this
   data it is not a mechanism at all. §4.2's sentence should be softened to say the
   interaction term is *bounded* by the product, and that the observed
   amplification is driven by the global IDF shift.
 
 This does not weaken §4.2's inequality; it corrects the informal reading attached
-to it. The bound holds; the attribution does not.
+to it.
 
 ### Verified alongside it
 
-The same adversarial pass confirmed, by execution rather than by reading:
+The same adversarial pass confirms, by execution rather than by reading:
 
 | claim | result |
 | --- | --- |
@@ -1269,19 +1258,17 @@ The same adversarial pass confirmed, by execution rather than by reading:
 | §2.3.3 chains partition; cliques within diameter | 0 failures |
 | §2.3.3 ball non-transitivity | 216 triples found in random data |
 
-The §4.4 attack is the one that matters: it drove the rank-`k` and rank-`(k+1)`
-scores together by the largest amount strictly inside the certified radius, the
-worst case the proof must survive and one that random sampling would essentially
-never find, and the bound held every time. The closest approach reached
-`0.999999999` of the radius.
+The §4.4 attack drives the rank-`k` and rank-`(k+1)` scores together by the
+largest amount strictly inside the certified radius, the worst case the proof
+must survive and one that random sampling would almost never find. The bound
+holds in every trial. The closest approach reaches `0.999999999` of the radius.
 
-**A methodological trap, recorded because the first version of this attack fell
-into it.** The obvious way to get "as close to the radius as possible" is
-`math.nextafter(radius, 0)`. On dyadic scores that value rounds straight back up
-when added, so the *realised* movement lands exactly **on** the boundary, which
-the theorem explicitly excludes, and every trial is silently discarded. The
-first run reported thousands of "certified perturbations" of which **none** were
-actually inside the radius, and its zero-violation result was therefore vacuous.
+**Realised versus requested deltas.** The obvious way to get "as close to the
+radius as possible" is `math.nextafter(radius, 0)`. On dyadic scores that value
+rounds back up when added, so the *realised* movement lands exactly **on** the
+boundary, which the theorem excludes, and every trial is silently discarded. An
+attack built that way reports thousands of "certified perturbations" of which
+**none** is inside the radius, so its zero-violation result is vacuous.
 The guard is to count only perturbations whose realised delta is verified
 strictly less than the radius, and to assert that count is large;
 `tests/test_margins_and_flip_radii.py` does both.
@@ -1295,12 +1282,11 @@ strictly less than the radius, and to assert that count is large;
 arithmetic. Nothing below contradicts it, and `three_term_bound` is a faithful
 transcription of it.
 
-**Finding.** The nightly job at 100,000 examples falsified
-`test_three_term_bound_is_never_violated` three separate times, in three
-unrelated regimes. Each was a defect in *how the inequality was being checked*
-rather than in the inequality. They are recorded because all three are easy to
-reintroduce, and because two of them make the test **silently weaker** instead of
-failing loudly.
+**Finding.** `test_three_term_bound_is_never_violated`, run nightly at 100,000
+examples, needs three preconditions, each in an unrelated regime. Each concerns
+*how the inequality is checked* rather than the inequality. All three are easy to
+omit, and two of them, when omitted, make the test **silently weaker** instead
+of failing loudly.
 
 **1. The perturbation realised is not the perturbation requested.** With
 `‖idf‖_∞ = 10` and `‖Δidf‖_∞ = 1e-15`, the test built `idf′` as
@@ -1312,11 +1298,10 @@ compared against an observation of the realisation:
 observed 1.7015e-12  >  bound 6.8666e-13     (2.5x)
 ```
 
-This is the same trap as the §4.4 vacuous-attack correction above, in the
-opposite direction: there the realised delta was too *large* to certify, here it
-was too large to be *bounded*. The rule is one rule (**assume on the realised
-delta, never the drawn one**) and it applies to every perturbation this project
-generates.
+This is the §4.4 realised-delta issue above, in the opposite direction: there the
+realised delta is too *large* to certify, here it is too large to be *bounded*.
+One rule covers both (**assume on the realised delta, never the drawn one**), and
+it applies to every perturbation this project generates.
 
 **2. Below `sqrt(DBL_MIN)`, `l2_norm` is not a Euclidean norm.** At
 `tf = {1.516e-161}` with `Δtf = 0`, the inequality holds with *equality* in exact
@@ -1327,7 +1312,7 @@ should: the defect lies in the norm rather than in the decomposition.
 
 **3. The difference vector underflows before its inputs do.** The subtlest of
 the three. `w′ − w` is smaller than `tf` by roughly `‖Δidf‖_∞`, so every input
-vector can sit above the threshold while the quantity actually being measured
+vector can sit above the threshold while the quantity being measured
 sits below it. Found at `tf = sqrt(DBL_MIN)` exactly, with `Δidf = 1e-5`, giving
 a difference of `1.5e-159` whose square is subnormal. Guarding the three *input*
 norms is not enough; the **fourth** norm, the one on the left-hand side, needs
@@ -1342,10 +1327,10 @@ observed <= bound*(1 + 1e-9) + u*(‖idf‖_∞ + ‖Δidf‖_∞)*(‖tf‖ + �
 with `u = 2⁻⁵³`, restricted to inputs whose norms (*all four*) are either
 exactly zero or at or above `sqrt(DBL_MIN)`. The absolute slack is derived rather
 than chosen: each `w_i` and `w′_i` carries up to `u|w_i|` of rounding that the
-real-arithmetic inequality does not model, and that is the quantity above. The
-`1e-12` constant it replaces was unrelated to any magnitude in the problem: too
-loose for small vectors, and at ulp-scale perturbations larger than the bound it
-was slackening.
+real-arithmetic inequality does not model, and that is the quantity above. A
+fixed `1e-12` constant is unrelated to any magnitude in the problem: too loose
+for small vectors, and at ulp-scale perturbations larger than the bound it
+slackens.
 
 **Verification.** The assertion is mutation-tested: dropping any one of the
 three terms, halving the bound, or shaving the global term by 1% each still
@@ -1363,8 +1348,9 @@ resulting order-sensitivity by canonicalising item order.
 **Finding.** The implementation does not concatenate text. `build_profile` takes
 `features_by_doc`, streams that have already been through
 `PreprocessingPipeline.preprocess`, so the n-grams exist *before* aggregation and
-no n-gram pass runs over the joined result. Three claims made in G20 and in
-`build_profile`'s own docstring are therefore false of the code:
+no n-gram pass runs over the joined result. Three claims that follow from the
+text-concatenation reading are therefore false of the code. The table gives each
+claim and the behaviour that `build_profile`'s own docstring states:
 
 | claim | reality |
 |---|---|
@@ -1375,21 +1361,21 @@ no n-gram pass runs over the joined result. Three claims made in G20 and in
 Measured on `"quick brown fox"` + `"lazy sleeping dog"`: text aggregation yields
 11 features including the seam bigram `fox|lazi`; this implementation yields the
 10-feature union and nothing spanning the join. The `mini_corpus` fixture hides
-the difference, because its documents happen to abut at boundaries the pipeline
-already breaks, which is why no existing test caught it.
+the difference, because its documents abut at boundaries the pipeline already
+breaks, so a test on that fixture cannot detect it.
 
 **Resolution: documented, never silently changed.** Switching to genuine
 text aggregation is a research decision rather than a repair: it adds one bigram
 per item boundary, changes every profile's length `L`, and therefore moves
-**every number in §7.1**. The behaviour is left as it is and stated accurately
-instead, in G20, in the docstring, and in `configs/default.yaml`. Three tests in
+**every number in §7.1**. The behaviour is kept and stated in G20, in the
+docstring, and in `configs/default.yaml`. Three tests in
 `tests/test_profiles_and_loo.py` pin the actual semantics (no seam n-grams,
 order-insensitivity, and `separate_items` inert), so the gap cannot close in the
 wrong direction unnoticed.
 
 **What G20's canonical ordering is still for.** It makes the feature *tuple*
 reproducible, and the profile digest is taken over the tuple. It is not what
-keeps scores stable, because on this construction nothing was destabilising them.
+keeps scores stable, because on this construction nothing destabilises them.
 
 ---
 
@@ -1399,8 +1385,8 @@ keeps scores stable, because on this construction nothing was destabilising them
 **Where:** `ranking/margins.py`, `ranking/tie_groups.py` and their C++ mirrors,
 reached through `cpp/bindings/module.cpp`.
 
-The reference computes on a non-finite score; the native path refuses it. Both
-layers are deliberate, and the asymmetry is a contract rather than a defect.
+The reference computes on a non-finite score; the native path refuses it. The
+asymmetry is a contract rather than a defect.
 
 **The reference.** `boundary_margin` and the tie-group functions do not
 re-validate finiteness. `rank` rejects a non-finite score before sorting, so the

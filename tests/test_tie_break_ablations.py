@@ -1,15 +1,8 @@
 """Tie-break ablations and margin stratification (README sections 4.5, 7.3).
 
-Research question A2 asks whether ranking outcomes change purely because of the
-secondary ordering rule, with no numerical perturbation at all. Two halves:
-
-* with all scores distinct the three operators coincide, so the ablation has a
-  well-defined null;
-* with ties present they diverge at ``delta s = 0`` bit-for-bit.
-
-Also that the stratification is not circular: grouping an operator comparison by
-``m_k`` is legitimate only because the margin is tie-break independent, which is
-asserted rather than assumed.
+A2 asks whether the secondary ordering rule alone changes a ranking. With
+distinct scores the three operators coincide; with ties they diverge at
+``delta s = 0``. ``m_k`` is asserted tie-break independent, so it can stratify.
 """
 
 from __future__ import annotations
@@ -114,8 +107,11 @@ def test_the_baseline_is_not_compared_against_itself(
 def test_degenerate_query_is_flagged_and_still_ablated(
     mini_attributes: AttributeTable,
 ) -> None:
-    """G3: a zero query is excluded from margin distributions and included in
-    tie-break ablations, where it is the extreme case."""
+    """A zero query (G3) is flagged and still ablated as the extreme case.
+
+    G3 excludes it from margin distributions and includes it in tie-break
+    ablations.
+    """
     result = ablate_query([0.0] * 6, mini_attributes, ks=KS)
     assert result.query_degenerate is True
     assert result.pairs, "the degenerate query must still be compared"
@@ -155,14 +151,9 @@ def test_disagreement_rate_returns_its_denominator() -> None:
 def test_the_disagreement_rate_is_the_share_of_queries_that_differed() -> None:
     """The numerator, pinned to an exact value rather than to a range.
 
-    The tests around this one fix the denominator, the empty case and the
-    all-agree case, so a `disagreement_rate` returning a constant 0.0 satisfies
-    every one of them. Section 7.3 publishes this number, so the fraction itself
-    has to be pinned.
-
-    Query "a" is a four-way exact tie, where pi and pi_alt order by different
-    attributes and the top-2 sets differ; query "b" has distinct scores, where
-    every operator agrees. One of two, so 0.5.
+    Section 7.3 publishes it, and a constant 0.0 passes the denominator, empty
+    and all-agree tests. Query "a" is a four-way exact tie where pi and pi_alt
+    pick different top-2 sets; query "b" has distinct scores. One of two: 0.5.
     """
     table = table_of([3, 2, 1, 0])
     results = ablate_queries(
@@ -202,9 +193,11 @@ def test_margin_bands_bracket_tau() -> None:
 
 
 def test_exact_ties_get_their_own_band() -> None:
-    """``m_k == 0`` differs in kind from "small": the tie-break decides
-    membership outright. On short text most of the mass sits there, so folding
-    it into the smallest numeric band would hide the dominant effect."""
+    """An exact tie, ``m_k == 0``, has a band of its own.
+
+    At an exact tie the tie-break decides membership outright. On short text
+    most of the mass sits there, so a numeric band would hide the main effect.
+    """
     table = table_of([3, 2, 1, 0])
     results = ablate_queries([("a", [0.5, 0.5, 0.5, 0.5])], table, ks=(2,))
     strata = stratify_by_margin(results, tau=1e-9, variant="pi_alt", ks=(2,))
@@ -267,18 +260,9 @@ def test_every_pair_lands_in_exactly_one_band() -> None:
 def test_a_k_larger_than_the_corpus_is_stratified_under_the_k_that_was_asked_for() -> None:
     """Two ``k`` values above ``N`` are two strata, not one stratum counted twice.
 
-    ``ablate_query`` builds each pair from two ``k`` values, not one:
     ``comparison`` is taken at ``k_eff = min(k, N)`` and ``margin`` at the
-    requested ``k``. Above ``N`` those diverge, and ``stratify_by_margin`` reads
-    the margin's band while previously keying the bucket off the comparison --
-    so every ``k`` above ``N`` collapsed onto the single bucket ``N``.
-
-    Ten documents under the default grid is the live case: 20 and 50 both clamp
-    to 10, so the ``k=10`` stratum reported ``n=3`` -- its own pair plus two
-    belonging to other ``k`` values -- while ``k=20`` and ``k=50`` reported
-    ``n=0``. A disagreement rate is ``n_disagree / n``, so that is a denominator
-    inflated threefold by data from a different grid point, and two grid points
-    published as "no evidence" while holding evidence.
+    requested ``k``; strata are keyed by the margin's ``k``. With ten documents
+    20 and 50 clamp to 10, and each of ``k`` = 10, 20, 50 holds one pair.
     """
     table = table_of([9, 3, 7, 1, 8, 2, 6, 4, 5, 0])
     results = ablate_queries([("a", [0.9, 0.9, 0.8, 0.75, 0.6, 0.6, 0.5, 0.4, 0.3, 0.1])], table)
@@ -298,16 +282,11 @@ def test_a_k_larger_than_the_corpus_is_stratified_under_the_k_that_was_asked_for
 
 
 def test_no_pair_is_dropped_when_the_clamped_k_is_absent_from_the_requested_set() -> None:
-    """The silent half of the same defect: a filter, not merely a mislabel.
+    """No pair is dropped when the clamped ``k`` is not a requested grid point.
 
-    The bucket key was also the filter -- ``pair.k not in ks: continue`` -- so
-    where the clamped ``k`` is not itself a requested grid point the pair matched
-    no bucket and was discarded rather than misplaced. Eight documents under
-    ``(5, 10, 20)`` clamp to 8, which is not in that set, and two of the three
-    pairs vanished: the totals reconciled to 1 where the query supplied 3.
-
-    Contrastive with the test above, where the clamped value *was* in ``ks`` and
-    the pairs were silently merged instead. One defect, two ways of losing.
+    Eight documents under ``(5, 10, 20)`` clamp 10 and 20 to 8, which is not in
+    that set; each requested ``k`` still holds its one pair. The test above
+    covers the case where the clamped value is in ``ks``.
     """
     table = table_of([9, 3, 7, 1, 8, 2, 6, 4])
     results = ablate_queries([("a", [0.9, 0.9, 0.8, 0.75, 0.6, 0.6, 0.5, 0.1])], table)
@@ -328,8 +307,11 @@ def test_stratify_rejects_a_negative_tau() -> None:
 
 
 def test_tau_is_never_defaulted() -> None:
-    """Section 7.1 makes every tie-break result conditional on tau, so no call
-    site may inherit one silently."""
+    """``stratify_by_margin`` has no default for ``tau``.
+
+    Section 7.1 makes every tie-break result conditional on tau, so no call
+    site may inherit one silently.
+    """
     import inspect
 
     signature = inspect.signature(stratify_by_margin)
@@ -339,12 +321,11 @@ def test_tau_is_never_defaulted() -> None:
 def test_one_query_is_counted_once_even_when_several_k_clamp_together(
     mini_attributes: AttributeTable,
 ) -> None:
-    """The denominator must be a query count, as the docstring promises.
+    """The denominator is a query count, as the docstring promises.
 
     `ablate_query` clamps k to the candidate count (G3's lenient mode), so on a
-    6-document corpus k in (10, 20, 50) all become 6 and emit three identical
-    pairs for one query. Counting all three reported n = 3 for a single query,
-    inflating the denominator of section 7.3's headline statistic.
+    6-document corpus k in (10, 20, 50) all become 6 and give three pairs at
+    k = 6 for one query, which section 7.3's denominator still counts once.
     """
     result = ablate_query([0.5] * 6, mini_attributes, ks=(5, 10, 20, 50), query_id="q0")
 
@@ -358,10 +339,11 @@ def test_one_query_is_counted_once_even_when_several_k_clamp_together(
 
 
 def test_a_query_with_no_pair_at_that_k_is_left_out_of_the_denominator() -> None:
-    """`ablate_query` clamps k to the candidate count, so a short candidate list
-    never produces a pair at the requested k. Counting it as an agreement would
-    dilute the rate with queries the comparison could not be made on; the count
-    returned beside the rate is what makes that visible.
+    """A query with no pair at the requested ``k`` is left out of the count.
+
+    `ablate_query` clamps k to the candidate count, so a short candidate list
+    has no pair at the requested k. Counting it as an agreement would dilute
+    the rate; the count returned beside the rate makes that visible.
     """
     results = [
         ablate_query([0.5, 0.5, 0.2, 0.0], table_of([3, 2, 1, 0]), query_id="long", ks=(3,)),
@@ -371,15 +353,16 @@ def test_a_query_with_no_pair_at_that_k_is_left_out_of_the_denominator() -> None
     assert n == 1, "only the query with three candidates could be compared at k = 3"
     assert 0.0 <= rate <= 1.0
 
-    # The short query is not lost; it contributed at the k it was clamped to.
+    # The short query is not lost; it contributes at the k it is clamped to.
     _, n_at_two = disagreement_rate(results, "pi", "pi_alt", 2)
     assert n_at_two == 1
 
 
 def test_a_result_can_be_sliced_by_operator_pair_and_by_k() -> None:
-    """The two accessors a report writer reaches for: one comparison across
-    every k, or every comparison at one k. Between them they partition the
-    pairs, which is the property that makes either slice safe to summarise.
+    """``for_pair`` and ``at_k`` slice a result by operator pair and by ``k``.
+
+    One gives a comparison across every k, the other every comparison at one k.
+    Between them they partition the pairs, so either slice is safe to summarise.
     """
     table = table_of([3, 2, 1, 0])
     (result,) = ablate_queries([("a", [0.5, 0.5, 0.2, 0.0])], table, ks=KS)
@@ -399,11 +382,11 @@ def test_a_result_can_be_sliced_by_operator_pair_and_by_k() -> None:
 
 
 def test_a_margin_outside_every_band_is_undefined_rather_than_well_separated() -> None:
-    """The bands cover (0, inf), so only a negative value can miss them all --
-    which a gap between sorted scores cannot be. It stays inside the partition,
-    since dropping it would make the per-k totals stop reconciling with the
-    query count, but it lands in `undefined` rather than the top band, which
-    would report a broken sort as the best-separated queries in the A2 table.
+    """A margin outside every band is undefined rather than well separated.
+
+    The bands cover (0, inf), so only a negative value or NaN misses them all.
+    It stays in the partition, so per-k totals reconcile, and lands in
+    `undefined`, since the top band would report a broken sort as best separated.
     """
     bands = margin_bands(1e-9)
     assert _band_of(-1.0, True, bands) == UNDEFINED_BAND
@@ -418,10 +401,11 @@ def test_a_margin_outside_every_band_is_undefined_rather_than_well_separated() -
 # The banding rule and the statistics it produces, by value
 # ---------------------------------------------------------------------------
 def test_the_bands_are_half_open_at_the_bottom_and_closed_at_the_top() -> None:
-    """`lo < value <= hi`. Which way each end points decides where a margin of
-    exactly tau lands, and section 7.3 reads the transition off the band
-    straddling tau -- so a boundary that leaked one band down would move the
-    reported transition without changing any total.
+    """Each band is `lo < value <= hi`: open below and closed above.
+
+    The ends decide where a margin of exactly tau lands. Section 7.3 reads the
+    transition off the band straddling tau, so a boundary one band too low moves
+    the reported transition without changing any total.
     """
     tau = 1e-9
     bands = margin_bands(tau)
@@ -433,24 +417,30 @@ def test_the_bands_are_half_open_at_the_bottom_and_closed_at_the_top() -> None:
     assert _band_of(tau, True, bands) == "(tau/10, tau]"
     assert _band_of(tau + math.ulp(tau), True, bands) == "(tau, 10*tau]"
 
-    # And the same rule one decade down, so this is the rule and not a fluke of
-    # where tau happens to sit.
+    # The same rule one decade down, so the result does not depend on where tau
+    # sits.
     assert _band_of(tau / 10.0, True, bands) == "(tau/100, tau/10]"
     assert _band_of(tau / 10.0 + math.ulp(tau / 10.0), True, bands) == "(tau/10, tau]"
 
 
 def test_a_tau_of_exactly_zero_is_accepted_as_the_exact_tie_baseline() -> None:
-    """The guard is `not (tau >= 0.0)`, so zero passes. Tightening it to `> 0`
-    would reject the one point every tie-break result is normalised against."""
+    """A tau of exactly zero is accepted as the exact-tie baseline.
+
+    The guard is `not (tau >= 0.0)`, so zero passes. A `> 0` guard would reject
+    the one point every tie-break result is normalised against.
+    """
     strata = stratify_by_margin([], tau=0.0, ks=(2,))
     assert strata, "a tau of zero still produces the full band set"
     assert any(s.label == EXACT_TIE_BAND for s in strata)
 
 
 def test_the_exact_tie_band_is_the_single_point_zero() -> None:
-    """It is reported with bounds like every other band, and those bounds are
-    what a plot's axis is built from. Both ends are zero: the band holds one
-    value, which is why it is separate from the smallest numeric band."""
+    """The exact-tie band has both bounds at zero.
+
+    Its bounds are reported like every other band's and a plot's axis is built
+    from them. The band holds one value, which is why it is separate from the
+    smallest numeric band.
+    """
     stratum = next(
         s for s in stratify_by_margin([], tau=1e-9, ks=(2,)) if s.label == EXACT_TIE_BAND
     )
@@ -458,11 +448,10 @@ def test_the_exact_tie_band_is_the_single_point_zero() -> None:
 
 
 def test_the_disagreement_rate_and_means_are_the_arithmetic_they_claim() -> None:
-    """Four queries, two of which disagree, gives one half.
+    """Both tied queries disagree, so the exact-tie band's rate is exactly 1.0.
 
-    Every existing assertion on these was a bound or a NaN check, so dividing by
-    the wrong thing -- or multiplying instead -- passed. The rate is section
-    7.3's headline number.
+    The rate and both means are pinned to exact values, so dividing by the wrong
+    count, or multiplying instead, fails. The rate is section 7.3's headline.
     """
     table = table_of([3, 2, 1, 0])
     results = ablate_queries(
@@ -484,8 +473,8 @@ def test_the_disagreement_rate_and_means_are_the_arithmetic_they_claim() -> None
 
     assert tied.n_disagree == 2
     assert tied.disagreement_rate == 1.0
-    # Both means are over the band's two members, so a sum that was multiplied
-    # by the count instead of divided by it would read 4.0 here.
+    # Both means are over the band's two members, so a sum multiplied by the
+    # count instead of divided by it reads 4.0 here.
     assert tied.mean_fks == 1.0
     assert tied.mean_jaccard == 1.0
 
@@ -495,10 +484,12 @@ def test_the_disagreement_rate_and_means_are_the_arithmetic_they_claim() -> None
 
 
 def test_a_comparison_nobody_ran_is_empty_rather_than_everything() -> None:
-    """The filter keeps the pairs matching the requested operators. Inverting
-    either test turns it into a filter that keeps everything else, which on a
-    result set holding several variants still fills the bands with a plausible
-    number of pairs -- just the wrong ones."""
+    """A comparison that was not run yields empty bands, not every pair.
+
+    The filter keeps the pairs matching the requested operators. An inverted
+    test keeps everything else, which on a result set holding several variants
+    fills the bands with a plausible number of the wrong pairs.
+    """
     table = table_of([3, 2, 1, 0])
     results = ablate_queries([("a", [0.5, 0.5, 0.2, 0.0])], table, ks=(2,))
     assert any(p.variant == "pi_alt" for r in results for p in r.pairs), "the premise"
@@ -510,8 +501,10 @@ def test_a_comparison_nobody_ran_is_empty_rather_than_everything() -> None:
 
 
 def test_a_rate_over_an_empty_band_is_undefined_rather_than_zero() -> None:
-    """Already asserted for `disagreement_rate`; the two means take the same
-    view, and for the same reason: no evidence is not a measurement of zero."""
+    """Both means over an empty band are NaN, as the disagreement rate is.
+
+    No evidence is not a measurement of zero.
+    """
     empty = next(s for s in stratify_by_margin([], tau=1e-9, ks=(2,)) if s.n == 0)
     assert math.isnan(empty.disagreement_rate)
     assert math.isnan(empty.mean_fks)
@@ -519,10 +512,12 @@ def test_a_rate_over_an_empty_band_is_undefined_rather_than_zero() -> None:
 
 
 def test_the_zero_norm_document_count_is_carried_rather_than_assumed() -> None:
-    """It defaults to zero and is recorded on the result, because a query whose
-    candidate set is padded with all-stopword documents produces an exact-tie
-    block that has nothing to do with the tie-break rule under test. A default
-    of anything but zero would report that block on corpora that have none."""
+    """``n_zero_norm_docs`` defaults to zero and is recorded on the result.
+
+    Padding a candidate set with all-stopword documents produces an exact-tie
+    block unrelated to the tie-break rule under test. A non-zero default would
+    report that block on corpora that have none.
+    """
     table = table_of([3, 2, 1, 0])
     plain = ablate_query([0.9, 0.8, 0.7, 0.6], table, ks=(2,))
     assert plain.n_zero_norm_docs == 0
@@ -532,10 +527,12 @@ def test_the_zero_norm_document_count_is_carried_rather_than_assumed() -> None:
 
 
 def test_the_rate_matches_on_all_three_of_operator_pair_and_k() -> None:
-    """The match is `baseline and variant and k`. Relaxing any one of the three
-    to an inequality picks up a pair from a different comparison, which still
-    yields a number and still yields a denominator -- just not the ones the
-    caller asked for."""
+    """The rate matches on all three of baseline, variant and ``k``.
+
+    Relaxing any one of the three to an inequality picks up a pair from another
+    comparison, which still yields a rate and a denominator, but not the ones
+    requested.
+    """
     table = table_of([3, 2, 1, 0])
     results = ablate_queries([("a", [0.5, 0.5, 0.5, 0.5])], table, ks=(2, 3))
 
@@ -556,16 +553,9 @@ def test_the_rate_matches_on_all_three_of_operator_pair_and_k() -> None:
 def test_a_stratum_cannot_be_edited_after_it_is_measured() -> None:
     """A published cell of table A2, so an editable one is a rewritable result.
 
-    `n` and `n_disagree` are the numerator and denominator of the disagreement
-    rate section 7.3 reports, and a Stratum travels into a run manifest. Nothing
-    downstream re-derives them, so a caller that could assign to either could
-    change a published rate after the fact and leave the digest agreeing with it.
-
-    Both halves of `@dataclass(frozen=True, slots=True)` are asserted, because
-    both are mutable sites a mutation campaign flips and neither was pinned:
-    `frozen=True -> False` and `slots=True -> False` were the only undocumented
-    survivors on this module. Documenting them as equivalent would have been
-    wrong -- they are detectable, which is what this test does.
+    `n` and `n_disagree` give the section 7.3 rate, travel into a run manifest
+    and are not re-derived downstream. Both `frozen=True` and `slots=True` of
+    the dataclass are asserted.
     """
     stratum = Stratum(
         label="(0, tau/100]",

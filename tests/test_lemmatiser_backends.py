@@ -1,23 +1,8 @@
-"""The three lemmatiser backends, and what choosing one commits you to.
+"""Tests for the three lemmatiser backends in `preprocessing/lemmatise.py`.
 
-`preprocessing/lemmatise.py` decides what a token becomes before it ever reaches
-a vocabulary, so the backend is part of the run's identity: swapping it changes
-every feature, every df, and therefore every published number. Only the Porter2
-path was exercised. The identity backend existed as an ablation nobody ran, and
-the lookup backend, whose whole point is that the mapping is recorded provenance
-rather than an ambient property of the machine, had never been constructed.
-
-Two properties carry the weight.
-
-The gap sentinel survives every backend. `tokenise.py` inserts a sentinel where a
-stopword was removed so an n-gram cannot span the hole, and a lemmatiser that
-stemmed the sentinel would destroy that. Each backend's `apply` has to pass it
-through untouched, and only Porter2's did so under test.
-
-A backend that needs configuration says so rather than guessing. `make_lemmatiser`
-builds the two that are self-contained and refuses the lookup backend, because
-inventing an empty table would silently degrade it to the identity backend and
-every feature would quietly stop being lemmatised.
+The backend decides what a token becomes before it reaches a vocabulary, so it
+is part of a run's identity. Every backend passes the gap sentinel from
+`tokenise.py` through untouched, and `make_lemmatiser` refuses the lookup kind.
 """
 
 from __future__ import annotations
@@ -48,8 +33,7 @@ def test_the_identity_backend_returns_every_token_unchanged() -> None:
 
 
 def test_the_identity_backend_leaves_a_token_porter2_would_have_stemmed() -> None:
-    """The premise of having it as an ablation: if the two agreed there would be
-    nothing to ablate."""
+    """The identity backend is an ablation, so it must differ from Porter2."""
     assert porter2_stem("running") != "running"
     assert IdentityLemmatiser()("running") == "running"
 
@@ -69,34 +53,33 @@ def test_a_table_hit_returns_the_recorded_lemma() -> None:
 
 
 def test_a_table_miss_falls_through_to_the_secondary_backend() -> None:
-    """The default fallback is the identity backend, so a miss is a pass-through
-    rather than a dropped token."""
+    """A table miss passes the token through the default identity fallback."""
     lemmatiser = LookupLemmatiser({"mice": "mouse"})
     assert lemmatiser("running") == "running", "a miss must not vanish"
 
 
 def test_an_explicit_fallback_is_used_for_the_tokens_the_table_does_not_cover() -> None:
-    """Table for the irregulars, stemmer for the rest: the configuration the
-    class exists to support."""
+    """A table for the irregulars and a stemmer fallback cover every token."""
     lemmatiser = LookupLemmatiser({"mice": "mouse"}, fallback=Porter2Stemmer())
     assert lemmatiser("mice") == "mouse", "the table wins where it has an entry"
     assert lemmatiser("running") == porter2_stem("running"), "and the stemmer takes the rest"
 
 
 def test_the_table_wins_over_the_fallback_even_where_both_have_an_answer() -> None:
-    """Otherwise the recorded mapping would be advisory rather than normative."""
-    # "better" is a true lemma the stemmer cannot reach: Porter2 is a suffix
-    # stripper, so it leaves irregular comparatives alone. That is exactly the
-    # gap a lookup table exists to fill.
+    """The recorded mapping is normative and overrides the fallback."""
+    # Porter2 is a suffix stripper and leaves the irregular "better" alone, so
+    # the table is the only source of the lemma "good".
     lemmatiser = LookupLemmatiser({"better": "good"}, fallback=Porter2Stemmer())
     assert porter2_stem("better") == "better", "the premise: the stemmer has no answer"
     assert lemmatiser("better") == "good", "the recorded mapping is normative, not advisory"
 
 
 def test_the_lookup_backend_preserves_the_gap_sentinel_rather_than_looking_it_up() -> None:
-    """A table containing the sentinel must not be consulted for it: the sentinel
-    marks a removed stopword, and rewriting it would let an n-gram span the hole
-    that tokenise.py opened precisely to prevent that."""
+    """The sentinel is passed through even when the table has an entry for it.
+
+    The sentinel marks a removed stopword; rewriting it would let an n-gram
+    span the hole that tokenise.py opened.
+    """
     lemmatiser = LookupLemmatiser({GAP: "SHOULD_NEVER_BE_USED", "mice": "mouse"})
     assert lemmatiser.apply(["mice", GAP, "geese"]) == ["mouse", GAP, "geese"]
 
@@ -115,8 +98,7 @@ def test_the_factory_builds_the_two_backends_that_need_no_configuration() -> Non
 
 
 def test_the_factory_accepts_the_string_form_a_config_file_carries() -> None:
-    """These names come out of YAML, so the string and the member must select
-    the same backend or a config would build something else."""
+    """The YAML string form and the enum member select the same backend."""
     assert isinstance(make_lemmatiser("none"), IdentityLemmatiser)
     assert isinstance(make_lemmatiser("porter2"), Porter2Stemmer)
 
@@ -126,8 +108,11 @@ def test_the_default_backend_is_porter2() -> None:
 
 
 def test_the_lookup_backend_is_refused_rather_than_built_with_an_empty_table() -> None:
-    """An invented empty table would degrade silently to the identity backend,
-    and every feature would quietly stop being lemmatised."""
+    """The factory refuses lookup rather than build it with an empty table.
+
+    An empty table degrades silently to the identity backend, and no feature
+    would be lemmatised.
+    """
     with pytest.raises(ValueError, match="needs an explicit table"):
         make_lemmatiser(LemmatiserKind.LOOKUP)
 
@@ -153,8 +138,7 @@ def test_each_backend_reports_the_name_the_manifest_records(backend: object, exp
 
 
 def test_the_three_backend_names_are_distinct() -> None:
-    """A shared name would make two different preprocessing maps indistinguishable
-    in a run manifest."""
+    """Distinct names keep the three preprocessing maps apart in a manifest."""
     names = {IdentityLemmatiser().name, Porter2Stemmer().name, LookupLemmatiser({}).name}
     assert len(names) == 3
 
@@ -163,9 +147,10 @@ def test_the_three_backend_names_are_distinct() -> None:
 # Porter2 memoises, and the cache must not change the answer
 # ---------------------------------------------------------------------------
 def test_stemming_the_same_token_twice_returns_the_same_answer_from_the_cache() -> None:
-    """The stemmer memoises per instance. A cache that returned something else
-    on the second call would make a document's features depend on how often a
-    token had already been seen in the run.
+    """The per-instance memo returns the same answer on the second call.
+
+    A cache that returned something else would make a document's features
+    depend on how often a token had already been seen in the run.
     """
     stemmer = Porter2Stemmer()
     first = stemmer("running")
@@ -180,8 +165,10 @@ def test_a_cached_and_an_uncached_instance_agree() -> None:
 
 
 def test_the_porter2_backend_preserves_the_gap_sentinel() -> None:
-    """The sentinel is not a word, and stemming it would let an n-gram span the
-    hole a removed stopword left."""
+    """The sentinel is not a word and is passed through unstemmed.
+
+    Stemming it would let an n-gram span the hole a removed stopword left.
+    """
     assert Porter2Stemmer().apply(["running", GAP, "cats"]) == [
         porter2_stem("running"),
         GAP,
@@ -197,18 +184,17 @@ def test_every_backend_applies_elementwise_over_an_empty_token_list() -> None:
 # ---------------------------------------------------------------------------
 # Identity: the name says which backend, not which instance of it
 # ---------------------------------------------------------------------------
-# `test_the_three_backend_names_are_distinct` above states the invariant a run
-# manifest depends on -- a shared name makes two different preprocessing maps
-# indistinguishable. It holds across the three kinds and failed within one of
-# them: `name` is a class attribute on `LookupLemmatiser`, whose answers come
-# from a table handed in at construction.
-def test_two_lookup_tables_that_disagree_have_different_identities() -> None:
-    """The within-kind case of the invariant one test up.
 
-    Both instances report ``name == "lookup"``, because the name says which
-    backend and these are the same backend. What differs is the table, and the
-    table is what produces the features -- so the identity a manifest records
-    has to differ too.
+
+# `test_the_three_backend_names_are_distinct` above states the invariant a run
+# manifest depends on across the three kinds. Within one kind `name` is a class
+# attribute on `LookupLemmatiser`, whose answers come from a table handed in at
+# construction, so the name alone cannot identify an instance.
+def test_two_lookup_tables_that_disagree_have_different_identities() -> None:
+    """Two lookup instances with different tables have different identities.
+
+    Both report ``name == "lookup"``. The table is what produces the features,
+    so the identity a manifest records has to differ with it.
     """
     cat = LookupLemmatiser({"cats": "cat"})
     feline = LookupLemmatiser({"cats": "feline"})
@@ -219,11 +205,10 @@ def test_two_lookup_tables_that_disagree_have_different_identities() -> None:
 
 
 def test_the_fallback_is_part_of_the_identity_and_not_only_the_table() -> None:
-    """Two instances with the same table, differing only in what handles a miss.
+    """The fallback is part of the identity, not only the table.
 
     On a real corpus most tokens miss the table, so the fallback decides most
-    features. An identity covering the table alone would be the same defect one
-    constructor argument along.
+    features and two instances that differ only in fallback differ in identity.
     """
     identical_table = {"cats": "cat"}
     passthrough = LookupLemmatiser(identical_table)
@@ -237,12 +222,10 @@ def test_the_fallback_is_part_of_the_identity_and_not_only_the_table() -> None:
 
 
 def test_the_same_table_gives_the_same_identity_whatever_order_it_was_built_in() -> None:
-    """An identity, not a fingerprint of the construction.
+    """The identity covers the sorted mapping, not the insertion order.
 
-    A digest over `dict` insertion order would make a manifest depend on how the
-    table's file happened to be read, so two runs of the same experiment could
-    disagree for no reason a reader could act on. The canonical sorted form is
-    what removes that.
+    A digest over `dict` insertion order would make a manifest depend on how
+    the table's file was read, so two runs of one experiment could disagree.
     """
     forwards = LookupLemmatiser({"cats": "cat", "mice": "mouse", "geese": "goose"})
     backwards = LookupLemmatiser({"geese": "goose", "mice": "mouse", "cats": "cat"})
@@ -252,12 +235,11 @@ def test_the_same_table_gives_the_same_identity_whatever_order_it_was_built_in()
 
 
 def test_a_backend_whose_class_fixes_its_output_is_identified_by_name_alone() -> None:
-    """The contrast, and the reason `digest` is absent from the Protocol.
+    """A backend with no configuration is identified by its name alone.
 
     `IdentityLemmatiser` and `Porter2Stemmer` take no arguments that can change
-    an answer -- Porter2's memo is a cache over a pure function -- so for them
-    the name already is the whole identity, and qualifying it would move every
-    digest this project has recorded for no gain.
+    an answer (Porter2's memo caches a pure function), so neither carries a
+    `digest`. Qualifying their identity would move every recorded digest.
     """
     for backend, expected in ((IdentityLemmatiser(), "none"), (Porter2Stemmer(), "porter2")):
         assert lemmatiser_identity(backend) == expected
@@ -269,8 +251,10 @@ def test_a_backend_whose_class_fixes_its_output_is_identified_by_name_alone() ->
 
 
 def test_an_identity_is_stable_across_two_constructions_of_the_same_table() -> None:
-    """Two processes fitting the same experiment must agree, so the digest cannot
-    depend on anything per-instance such as an object address."""
+    """The digest does not depend on per-instance state such as an address.
+
+    Two processes fitting the same experiment must agree on the identity.
+    """
     first = LookupLemmatiser({"cats": "cat"}, fallback=Porter2Stemmer())
     second = LookupLemmatiser({"cats": "cat"}, fallback=Porter2Stemmer())
 
@@ -281,22 +265,11 @@ def test_an_identity_is_stable_across_two_constructions_of_the_same_table() -> N
 # ---------------------------------------------------------------------------
 # The identity's serialisation is a contract, not an implementation detail
 # ---------------------------------------------------------------------------
-# The tests above compare one identity against another, so they hold whatever
-# canonical form the digest is taken over: change `sort_keys` or `ensure_ascii`
-# in `LookupLemmatiser` and every identity shifts together, leaving all of those
-# assertions true. A mutation campaign said the same thing more precisely --
-# both flags survived every mutant, leaving the module at 60%.
-#
-# They are not free to change. A digest that shifts silently turns every
-# previously recorded identity into a miss: a cache keyed on it re-runs work it
-# already holds, and a manifest compared against an older one reports a
-# difference where the features are identical. That is the same reason
-# `configs/pipeline_digest.txt` holds literals rather than recomputing them.
-#
-# So the literals are pinned here. They are not magic numbers to be refreshed
-# when they fail: a failure means the canonical form moved, and the question to
-# answer is whether every identity this project has recorded was meant to move
-# with it.
+
+# The tests above compare identities against each other, so they hold under any
+# canonical form. The literals below pin the form itself: a failure means the
+# canonical form moved, and every recorded identity moves with it.
+# Rationale: docs/engineering_notes.md#lookup-lemmatiser-digest-literals
 _PINNED_IDENTITIES = {
     "empty table": (
         LookupLemmatiser({}),
@@ -306,10 +279,9 @@ _PINNED_IDENTITIES = {
         LookupLemmatiser({"cats": "cat", "mice": "mouse"}),
         "711ea4ce892d7c4ff0c32863ead450c4ebf833156c7aa5960771d59fa9bdc876",
     ),
-    # Non-ASCII on purpose: it is the only case `ensure_ascii` can be seen from.
-    # Under `ensure_ascii=True` the table serialises as escape sequences instead
-    # of the characters themselves, giving a different digest for the same
-    # mapping -- and every other test in this file would still pass.
+    # The non-ASCII case is the only one `ensure_ascii` is visible from: under
+    # `ensure_ascii=True` the table serialises as escape sequences and gives a
+    # different digest for the same mapping.
     "non-ascii table": (
         LookupLemmatiser({"café": "cafe", "naïve": "naive"}),
         "efa0acd32e054aa157801d0207e75a6460eb201dc96977d5939bf9ad3dfd25d7",
@@ -322,10 +294,10 @@ _PINNED_IDENTITIES = {
 
 
 def test_the_recorded_identity_of_a_known_table_is_the_value_this_repository_pins() -> None:
-    """Four tables, four digests, fixed. See the comment above for why literals.
+    """Each pinned table digests to the literal recorded above.
 
-    The count is asserted outside the loop, so a case quietly dropped from the
-    table fails rather than shrinking the sweep.
+    The count is asserted outside the loop, so a case dropped from the table
+    fails rather than shrinking the sweep.
     """
     checked = 0
     for name, (lemmatiser, expected) in _PINNED_IDENTITIES.items():
@@ -337,13 +309,10 @@ def test_the_recorded_identity_of_a_known_table_is_the_value_this_repository_pin
 
 
 def test_a_table_holding_the_same_mapping_written_differently_digests_the_same() -> None:
-    """The property those literals exist to protect, stated directly.
+    """Insertion order is not part of the digest.
 
-    Insertion order is not part of a mapping, so it must not be part of the
-    identity -- otherwise two runs reading the same table file in a different
-    order would disagree about whether they are the same experiment. This is
-    what `sort_keys=True` buys, and it is asserted here rather than inferred
-    from the flag.
+    Two runs reading the same table file in a different order are the same
+    experiment, so the digest is taken with `sort_keys=True`.
     """
     forwards = LookupLemmatiser({"cats": "cat", "mice": "mouse"})
     backwards = LookupLemmatiser({"mice": "mouse", "cats": "cat"})
@@ -354,14 +323,11 @@ def test_a_table_holding_the_same_mapping_written_differently_digests_the_same()
 
 
 def test_a_non_ascii_table_is_digested_as_its_characters_rather_than_as_escapes() -> None:
-    """`ensure_ascii=False`, asserted rather than assumed.
+    """The digest serialises the table with `ensure_ascii=False`.
 
-    Two tables carrying the same accented key in the two Unicode normal forms
-    are different mappings -- NFC's single code point against NFD's letter plus
-    combining accent -- so they must have different identities. Normalisation is
-    the pipeline's job, upstream of this; the digest reports the table it was
-    handed. Under `ensure_ascii=True` both still differ, which is why the
-    literal above carries the rest of the contract.
+    NFC and NFD spellings of one key are different mappings and digest
+    differently under either flag; normalisation is the pipeline's job
+    upstream. The pinned literal is what detects `ensure_ascii=True`.
     """
     composed = unicodedata.normalize("NFC", "café")
     decomposed = unicodedata.normalize("NFD", "café")
