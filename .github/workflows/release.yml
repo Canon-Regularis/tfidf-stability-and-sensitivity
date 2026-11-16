@@ -61,13 +61,33 @@ jobs:
         # before the release is half-made. --strict also fails on a warning,
         # such as a missing long description or description content type.
         run: python -m twine check --strict dist/*
-      - name: The sdist must build from vendored C++ sources alone
-        # `pip download` unpacks the sdist and asks its build backend for the
-        # metadata. The build requirements (scikit-build-core, nanobind) come
-        # from PyPI, so this step needs network access; the C++ is vendored.
+      - name: The sdist must hold every tracked file it does not exclude
+        # Prints each tracked path the archive lacks. `sdist.exclude` in
+        # pyproject.toml drops .github/ and reports/figures/; git tracks nothing
+        # under its other entries.
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          missing=$(comm -23 \
+            <(git ls-files | grep -vE '^(\.github|reports/figures)/' | sort) \
+            <(tar -tzf dist/*.tar.gz | cut -d/ -f2- | sort))
+          if [ -n "$missing" ]; then
+            echo "::error::the sdist omits tracked files:"
+            echo "$missing"
+            exit 1
+          fi
+      - name: The extension must build from the sdist alone
+        # Builds a wheel from the unpacked sdist, compiling the extension from the
+        # archive's own files, and requires the compiled module in that wheel. The
+        # build requirements come from PyPI, so this step needs network access.
         # Rationale: docs/engineering_notes.md#sdist-vendored-cpp-check
         run: |
-          python -m pip download --no-deps --no-binary :all: --dest /tmp/check dist/*.tar.gz
+          set -euo pipefail
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/sdist-wheel" dist/*.tar.gz
+          if ! python -m zipfile -l "$RUNNER_TEMP"/sdist-wheel/*.whl | grep -E '\.(so|pyd) '; then
+            echo "::error::the wheel built from the sdist holds no compiled extension"
+            exit 1
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: sdist
