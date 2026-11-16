@@ -404,7 +404,7 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "reduce_sum",
         [](const F64Array& a, std::int32_t policy) {
-            return reduce::sum(a.data(), a.shape(0), checked_policy(policy));
+            return reduce::sum(as_span(a), checked_policy(policy));
         },
         nb::arg("values"), nb::arg("policy"),
         "Sum under the given reduction policy. Exposed so the Python and C++\n"

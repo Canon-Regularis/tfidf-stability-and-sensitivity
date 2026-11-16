@@ -47,14 +47,13 @@ src/tfidf_stability/ranking/attributes.py  133  constant  2 -> 1  # src=ed5d525b
 src/tfidf_stability/ranking/attributes.py  143  constant  0 -> 1  # src=251dd565 the raise fires only when worst > _INT64_MAX > 0, which means the loop already assigned it
 src/tfidf_stability/ranking/attributes.py  144  constant  0 -> 1  # src=cf1cab30 likewise worst_pair: never reported with its initial value
 src/tfidf_stability/ranking/attributes.py  147  compare  Gt -> GtE  # src=1e18980f changes only which of two equal-product pairs the message names, not whether the error fires
-src/tfidf_stability/ranking/attributes.py  243  constant  True -> False  # src=197c8ca6 the two strict zips in _build_column run over the same pair of sequences; removing one leaves the other raising
-src/tfidf_stability/ranking/attributes.py  266  constant  True -> False  # src=5ff58930 the second half of that same redundant pair
-src/tfidf_stability/ranking/attributes.py  363  constant  0 -> 1  # src=567b3f00 id_ranks is filled and then every entry overwritten by the loop below
-src/tfidf_stability/ranking/attributes.py  388  constant  0 -> 1  # src=ca15ce49 the missing-ratio placeholder is filtered out by has_value before ordering
-src/tfidf_stability/ranking/attributes.py  388  constant  1 -> 0  # src=ca15ce49 likewise the denominator of that placeholder
-src/tfidf_stability/ranking/attributes.py  390  compare  Lt -> LtE  # src=f0761228 a zero denominator is diverted to the missing branch two lines earlier, so den != 0 here
-src/tfidf_stability/ranking/attributes.py  390  constant  0 -> 1  # src=f0761228 same unreachable boundary from the other side
-src/tfidf_stability/ranking/attributes.py  399  constant  0 -> 1  # src=ce4e4d1b the missing-scalar placeholder, filtered out by has_value
+src/tfidf_stability/ranking/attributes.py  301  constant  True -> False  # src=5ff58930 the strict zip at the top of _build_column runs over the same pair and raises on any length mismatch first, so this one never sees one
+src/tfidf_stability/ranking/attributes.py  398  constant  0 -> 1  # src=567b3f00 id_ranks is filled and then every entry overwritten by the loop below
+src/tfidf_stability/ranking/attributes.py  423  constant  0 -> 1  # src=ca15ce49 the missing-ratio placeholder is filtered out by has_value before ordering
+src/tfidf_stability/ranking/attributes.py  423  constant  1 -> 0  # src=ca15ce49 likewise the denominator of that placeholder
+src/tfidf_stability/ranking/attributes.py  425  compare  Lt -> LtE  # src=f0761228 a zero denominator is diverted to the missing branch two lines earlier, so den != 0 here
+src/tfidf_stability/ranking/attributes.py  425  constant  0 -> 1  # src=f0761228 same unreachable boundary from the other side
+src/tfidf_stability/ranking/attributes.py  434  constant  0 -> 1  # src=ce4e4d1b the missing-scalar placeholder, filtered out by has_value
 
 # --- ranking/ranker.py -----------------------------------------------------
 src/tfidf_stability/ranking/ranker.py  175  compare  Lt -> LtE  # src=59e83664 sort keys terminate in the unique doc id, so no two compare equal and the tie branch is unreachable

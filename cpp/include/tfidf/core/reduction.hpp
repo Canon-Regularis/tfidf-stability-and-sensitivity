@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -210,7 +211,7 @@ template <class Policy>
     return sum_with<Naive>(data, n);  // unreachable; keeps every path defined
 }
 
-[[nodiscard]] inline Real sum(const std::vector<Real>& v, Reduction policy) noexcept {
+[[nodiscard]] inline Real sum(std::span<const Real> v, Reduction policy) noexcept {
     return sum(v.data(), v.size(), policy);
 }
 
