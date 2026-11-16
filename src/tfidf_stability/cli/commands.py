@@ -44,6 +44,8 @@ __all__ = [
     "pipeline_from_config",
     "vectoriser_from_config",
     "write_report",
+    "_DEFAULT_CONFIG",
+    "_resolve_default_config",
 ]
 
 _LOG = get_logger(__name__)
