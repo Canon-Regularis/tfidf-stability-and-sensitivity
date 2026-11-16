@@ -802,6 +802,74 @@ def test_a_linter_stated_as_a_floor_is_rejected(tmp_path: Path) -> None:
     assert any("ruff" in p and "not an exact pin" in p for p in problems)
 
 
+def _pytest_tree(tmp_path: Path, floor: str | None, minversion: str | None) -> Path:
+    """The crafted tree with pytest at `floor` in both files, and a minversion.
+
+    None leaves pytest unnamed or the minversion unset; `minversion` is raw TOML.
+    """
+    pyproject, development = _DEP_PYPROJECT, _DEP_DEV
+    if floor is not None:
+        pyproject = pyproject.replace('dev = ["', f'dev = ["pytest{floor}", "')
+        development += f"pytest{floor}\n"
+    if minversion is not None:
+        pyproject += f"[tool.pytest.ini_options]\nminversion = {minversion}\n"
+    return _dep_tree(tmp_path, pyproject, "numpy>=1.24\n", development)
+
+
+@pytest.mark.parametrize(
+    ("floor", "minversion"),
+    [(">=9.1", '"9.1"'), (">=9.1", "9.1"), (None, None), ("", None)],
+    ids=["floor-and-string", "floor-and-toml-number", "neither", "unpinned-and-unset"],
+)
+def test_a_minversion_restating_the_pytest_floor_agrees(
+    tmp_path: Path, floor: str | None, minversion: str | None
+) -> None:
+    """A minversion agrees with a `>=` floor naming the same version, or with none.
+
+    A TOML number is read as its text, as pytest reads it.
+    """
+    tree = _pytest_tree(tmp_path, floor, minversion)
+
+    assert _script("check_dependencies").check(tree) == []
+
+
+@pytest.mark.parametrize(
+    ("floor", "minversion"),
+    [
+        (">=9.1", '"9.2"'),
+        (">=9.1", None),
+        ("", '"9.1"'),
+        (None, '"9.1"'),
+        ("~=9.1", '"9.1"'),
+        (">=9.1.0", '"9.1"'),
+    ],
+    ids=["raised-alone", "unset", "unpinned", "unnamed", "compatible-release", "written-two-ways"],
+)
+def test_a_minversion_other_than_the_pytest_floor_is_rejected(
+    tmp_path: Path, floor: str | None, minversion: str | None
+) -> None:
+    """A minversion that does not restate the `>=` floor is reported once per file."""
+    tree = _pytest_tree(tmp_path, floor, minversion)
+
+    problems = _script("check_dependencies").check(tree)
+
+    assert len(problems) == 2, problems
+    assert all(p.startswith("minversion: ") for p in problems), problems
+
+
+def test_only_the_file_whose_pytest_floor_moved_is_reported(tmp_path: Path) -> None:
+    """Each file is held to the minversion on its own, so the report names it."""
+    pyproject = _DEP_PYPROJECT.replace('dev = ["', 'dev = ["pytest>=9.1", "')
+    pyproject += '[tool.pytest.ini_options]\nminversion = "9.1"\n'
+    tree = _dep_tree(tmp_path, pyproject, "numpy>=1.24\n", _DEP_DEV + "pytest>=9.2\n")
+
+    problems = _script("check_dependencies").check(tree)
+
+    assert [p for p in problems if p.startswith("minversion: ")] == [
+        "minversion: pytest's minversion is 9.1, but requirements-dev.txt gives pytest >=9.2"
+    ]
+
+
 # ---------------------------------------------------------------------------
 # check_test_vacuity.py
 # ---------------------------------------------------------------------------

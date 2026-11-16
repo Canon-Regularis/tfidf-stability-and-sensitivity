@@ -2,8 +2,8 @@
 """Check that pyproject.toml and requirements*.txt declare the same packages.
 
 Runtime dependencies are compared with requirements.txt, and the extras in
-_DEV_GROUPS plus build requires with requirements-dev.txt. Packages in _EXACT
-must carry an exact pin in both files. Exits non-zero on any disagreement.
+_DEV_GROUPS plus build requires with requirements-dev.txt. _EXACT packages need
+an exact pin in both, and pytest's minversion must equal its floor in both.
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ def _compare(what: str, declared: dict[str, str], installed: dict[str, str]) -> 
 
 
 def check(repo: Path = REPO) -> list[str]:
-    """Return every disagreement between the two dependency declarations."""
+    """Return every disagreement among the declarations and pytest's minversion."""
     pyproject = repo / "pyproject.toml"
     if not pyproject.exists():
         return ["pyproject.toml: not found"]
@@ -115,13 +115,27 @@ def check(repo: Path = REPO) -> list[str]:
 
     development = _from_file(repo / "requirements-dev.txt")
     declared = _from_project(data, _DEV_GROUPS)
+    tables = (("requirements-dev.txt", development), ("pyproject.toml", declared))
     for name in _EXACT:
-        for where, table in (("requirements-dev.txt", development), ("pyproject.toml", declared)):
+        for where, table in tables:
             specifier = table.get(name)
             if specifier is None:
                 problems.append(f"linters: {name} is named nowhere in {where}")
             elif not specifier.startswith("=="):
                 problems.append(f"linters: {name} is {specifier!r} in {where}, not an exact pin")
+
+    # pytest refuses to run below `minversion`, so it restates the pytest floor,
+    # which both files write as `>=`. pytest reads a TOML number as its text.
+    ini = data.get("tool", {}).get("pytest", {}).get("ini_options", {})
+    minversion = str(ini.get("minversion", ""))
+    floor = f">={minversion}" if minversion else ""
+    for where, table in tables:
+        specifier = table.get("pytest", "")
+        if specifier != floor:
+            problems.append(
+                f"minversion: pytest's minversion is {minversion or 'unset'}, "
+                f"but {where} gives pytest {specifier or 'no floor'}"
+            )
 
     if not problems:
         print(
