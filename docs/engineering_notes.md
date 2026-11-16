@@ -2145,7 +2145,7 @@ A scope that includes every test able to reach a module transitively reports no 
 
 Widening a module's scope kills mutants that a narrower scope records as survivors. configs/equivalent_mutants.txt then fails on an entry that matches no survivor. A module is added to the matrix only after its campaign has run and its allowlist entries are reconciled.
 
-tests/test_mutation_gate.py lists the 22 modules that no nightly job re-runs in its `_NOT_YET_SCHEDULED` map, each with a reason. 61 of the 105 entries in configs/equivalent_mutants.txt belong to those modules, and no nightly run rechecks them.
+tests/test_mutation_gate.py lists the 22 modules that no nightly job re-runs in its `_NOT_YET_SCHEDULED` map, each with a reason. 60 of the 104 entries in configs/equivalent_mutants.txt belong to those modules, and no nightly run rechecks them.
 
 test_public_api_surface.py is in every scope because it asserts invariants that every module shares: frozen dataclasses, slots and `__all__`. Without it, a mutated `@dataclass(frozen=True)` survives in every module, and sort_keys.py has two surviving decorator mutants.
 
@@ -2207,7 +2207,13 @@ ASan matters because of the ranking layer. A NaN in a sort key breaks the strict
 
 Source: `.github/workflows/release.yml`.
 
-The step runs `pip download --no-deps --no-binary :all:` on the built sdist, which unpacks the archive and prepares its metadata through the build backend. `[build-system] requires` names scikit-build-core and nanobind, and pip gets both from PyPI. The step therefore needs network access, and a `--no-index` run fails before it reaches any C++. The C++ third-party sources are vendored under cpp/third_party/. The Python build backend is a declared dependency, not a vendored one.
+Two steps check the sdist before it is published. The first compares the archive's file list with `git ls-files` and fails on any tracked file the archive lacks, apart from the two trees `sdist.exclude` in pyproject.toml drops: `.github/` and `reports/figures/`. That covers the Python modules, the tests and the C++ sources vendored under cpp/third_party/, none of which a wheel build reads.
+
+The second runs `pip wheel --no-deps` on the sdist. pip unpacks the archive into a temporary directory and calls the backend's `build_wheel` hook, so scikit-build-core configures and compiles the extension from the unpacked files alone. A frontend that only prepares metadata, such as `pip download`, exercises none of this: scikit-build-core's `prepare_metadata_for_build_wheel` writes the `.dist-info` and returns before CMake configures the project. The step then lists the wheel and fails if it holds no compiled module, so a build that leaves the extension out, for example under `TFIDF_BUILD_NATIVE=OFF`, cannot pass. It checks the extension's build inputs (`cpp/bindings/module.cpp`, the headers under cpp/include/ and the CMake files that configure them) and that each force-included directory exists; the C++ tests and benchmarks are not configured in a wheel build (`TFIDF_BUILD_TESTS` and `TFIDF_BUILD_BENCH` are OFF).
+
+`[build-system] requires` names scikit-build-core and nanobind, and pip installs both from PyPI into an isolated build environment; nanobind supplies its own C++ sources. scikit-build-core adds `cmake` and `ninja` from PyPI only when the runner has no suitable copy, and the compiler is the runner's own. The step therefore needs network access. The Python build backend is a declared dependency, not a vendored one.
+
+build-wheels.yml builds the published wheels from the checkout, so this step is the only build from the sdist before it is published. One interpreter suffices: the sdist's file list does not depend on the Python version. A release ships wheels for CPython 3.11 to 3.13 on the platforms build-wheels.yml covers, so a CPython 3.14 install, or one on a platform without a wheel, builds from this sdist.
 
 ### Signed zeros
 
