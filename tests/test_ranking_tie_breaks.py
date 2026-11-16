@@ -652,6 +652,51 @@ def test_a_bytes_attribute_orders_by_utf8_bytes_not_by_locale() -> None:
     assert [records[i]["label"] for i in order] == ["Apple", "Zebra", "apple"]
 
 
+#: Per dtype, two values in ascending order that a plausible wrong rule reverses:
+#: text order for the numbers, tuple order for ratios, case-folding for text.
+_ORDER_WITNESSES: dict[AttributeDType, tuple[object, object]] = {
+    AttributeDType.INT64: (9, 10),
+    AttributeDType.RATIO_I64: ((1, 3), (1, 2)),
+    AttributeDType.FLOAT64: (9.5, 10.0),
+    AttributeDType.BYTES: ("Z", "a"),
+}
+
+
+@pytest.mark.parametrize("dtype", list(AttributeDType))
+def test_each_dtype_ranks_by_its_own_rule(dtype: AttributeDType) -> None:
+    """Each dtype ranks a pair by its own rule, not a plausible wrong one.
+
+    A dtype with no witness fails on the lookup, so a new member must add one.
+    """
+    low, high = _ORDER_WITNESSES[dtype]
+    spec = AttributeSpec("p", Direction.ASC, dtype)
+
+    assert _build_column(spec, [high, low], [True, True]).ranks == (1, 0)
+
+
+def test_text_that_has_no_utf8_encoding_is_refused_rather_than_ranked() -> None:
+    """Text ranks by its UTF-8 bytes, so a lone surrogate is refused.
+
+    Natural ``str`` order would rank the same column without complaint.
+    """
+    spec = AttributeSpec("p", Direction.ASC, AttributeDType.BYTES)
+
+    with pytest.raises(UnicodeEncodeError, match="surrogates not allowed"):
+        _build_column(spec, ["\ud800", "a"], [True, True])
+
+
+def test_values_and_a_longer_presence_mask_fail_on_their_lengths_first() -> None:
+    """Values and a presence mask of different lengths fail on the lengths.
+
+    The length check runs before any value is checked, so a mismatched input is
+    not reported as a non-finite value it merely happens to hold.
+    """
+    spec = AttributeSpec("x", Direction.DESC, AttributeDType.FLOAT64)
+
+    with pytest.raises(ValueError, match=r"zip\(\) argument 2 is longer than argument 1"):
+        _build_column(spec, [math.nan], [True, True])
+
+
 def test_an_ascending_direction_reverses_the_ranks_a_descending_one_gives() -> None:
     """The ASC arm of the encoder reverses the ranks the DESC arm gives."""
     records = [{"doc_id": f"d{i}", "popularity": v} for i, v in enumerate([10, 30, 20])]
@@ -1752,7 +1797,7 @@ def test_a_truncated_ranking_leaves_the_degenerate_case_on_one_real_score() -> N
 def test_a_spec_built_from_strings_ranks_exactly_as_one_built_from_members() -> None:
     """A spec built from strings ranks as one built from members.
 
-    The enums are `str` enums and every branch selects on `is`, so an uncoerced
+    The enums are `str` enums and the direction branches select on `is`, so an uncoerced
     `"asc"` would take the fall-through arm (ascending, `missing_rank = n_distinct`).
     Both fixtures discriminate between the arms.
     """

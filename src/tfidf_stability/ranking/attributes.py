@@ -10,7 +10,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import itertools
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final
@@ -92,9 +92,9 @@ class AttributeSpec:
     def __post_init__(self) -> None:
         """Normalise the three enums to their members, refusing unknown values.
 
-        All three are ``str`` enums and every branch selects on ``is``, so an uncoerced
-        string such as ``"ratio_i64"`` takes the default arm and changes the rank
-        encoding, and with it top-k membership.
+        All three are ``str`` enums. Branches select on ``is`` but ``_CODECS`` matches a
+        dtype by equality, so an uncoerced string would take two different arms and
+        change the rank encoding, and with it top-k membership.
         """
         object.__setattr__(self, "direction", Direction(self.direction))
         object.__setattr__(self, "dtype", AttributeDType(self.dtype))
@@ -185,12 +185,7 @@ class AttributeColumn:
 def _order_distinct(values: Sequence[Any], spec: AttributeSpec) -> list[Any]:
     """Sort the distinct present values into rank order (earliest first)."""
     distinct = list(dict.fromkeys(values))  # order-preserving unique
-    if spec.dtype is AttributeDType.RATIO_I64:
-        distinct.sort(key=functools.cmp_to_key(_ratio_cmp))
-    elif spec.dtype is AttributeDType.BYTES:
-        distinct.sort(key=lambda s: str(s).encode("utf-8"))
-    else:
-        distinct.sort()
+    distinct.sort(key=_CODECS[spec.dtype].sort_key)
     if spec.direction is Direction.DESC:
         distinct.reverse()
     return distinct
@@ -210,6 +205,51 @@ def _ratio_cmp(a: tuple[int, int], b: tuple[int, int]) -> int:
     return 0
 
 
+def _ratio_equal(a: tuple[int, int], b: tuple[int, int]) -> bool:
+    """Whether two pairs encode the same rational."""
+    return _ratio_cmp(a, b) == 0
+
+
+def _utf8(value: Any) -> bytes:
+    """Sort key for text: its UTF-8 bytes, as ``memcmp`` orders them."""
+    return str(value).encode("utf-8")
+
+
+def _check_floats_finite(present: Sequence[Any], what: str) -> None:
+    """Refuse a non-finite value in a ``FLOAT64`` column."""
+    check_finite([float(v) for v in present], what)
+
+
+@dataclass(frozen=True, slots=True)
+class _Codec:
+    """How one dtype checks, orders and merges its present values.
+
+    ``check`` refuses a column before it is ordered: a non-finite float, or ratios whose
+    cross-products overflow int64. ``sort_key`` orders distinct values ascending, ``None``
+    meaning natural order. ``equivalent`` reports neighbours that encode one value.
+    """
+
+    check: Callable[[Sequence[Any], str], None] | None
+    sort_key: Callable[[Any], Any] | None
+    equivalent: Callable[[Any, Any], bool] | None
+
+
+#: Each dtype's codec; ``_extract`` reads raw values with its own switch. Only a
+#: ratio can hold two ``==``-distinct representations of one value, so only
+#: RATIO_I64 has ``equivalent``; every other dtype was deduplicated by ``==``
+#: under an order consistent with its key.
+_CODECS: Final[dict[AttributeDType, _Codec]] = {
+    AttributeDType.INT64: _Codec(check=None, sort_key=None, equivalent=None),
+    AttributeDType.RATIO_I64: _Codec(
+        check=check_ratio_fits_int64,
+        sort_key=functools.cmp_to_key(_ratio_cmp),
+        equivalent=_ratio_equal,
+    ),
+    AttributeDType.FLOAT64: _Codec(check=_check_floats_finite, sort_key=None, equivalent=None),
+    AttributeDType.BYTES: _Codec(check=None, sort_key=_utf8, equivalent=None),
+}
+
+
 def _dense_positions(ordered: Sequence[Any], spec: AttributeSpec) -> dict[Any, int]:
     """Rank the sorted distinct values by equivalence class rather than identity.
 
@@ -220,15 +260,11 @@ def _dense_positions(ordered: Sequence[Any], spec: AttributeSpec) -> dict[Any, i
     if not ordered:
         return {}
 
-    # Only ratios can have two distinct representations of one value. Every other
-    # dtype was deduplicated by `==` under an ordering consistent with its sort
-    # key, so its survivors are genuinely distinct.
-    ratios = spec.dtype is AttributeDType.RATIO_I64
-
+    equivalent = _CODECS[spec.dtype].equivalent
     positions: dict[Any, int] = {ordered[0]: 0}
     rank = 0
     for previous, current in itertools.pairwise(ordered):
-        if not (ratios and _ratio_cmp(previous, current) == 0):
+        if equivalent is None or not equivalent(previous, current):
             rank += 1
         positions[current] = rank
     return positions
@@ -242,10 +278,9 @@ def _build_column(
     """Rank-encode one column."""
     present = [v for v, ok in zip(values, has_value, strict=True) if ok]
 
-    if spec.dtype is AttributeDType.FLOAT64:
-        check_finite([float(v) for v in present], f"attribute {spec.name!r}")
-    if spec.dtype is AttributeDType.RATIO_I64:
-        check_ratio_fits_int64(present, f"attribute {spec.name!r}")
+    codec = _CODECS[spec.dtype]
+    if codec.check is not None:
+        codec.check(present, f"attribute {spec.name!r}")
 
     ordered = _order_distinct(present, spec)
     position = _dense_positions(ordered, spec)
