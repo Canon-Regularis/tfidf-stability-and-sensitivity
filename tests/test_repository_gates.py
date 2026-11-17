@@ -572,6 +572,25 @@ def test_the_digest_comparison_expects_one_result_per_matrix_leg() -> None:
     )
 
 
+def test_the_fast_math_job_greps_for_the_message_its_guard_prints() -> None:
+    """The fast-math job greps its log for text the `__FAST_MATH__` `#error` prints.
+
+    The build is refused either way, so a reworded message would fail the job
+    with "the build failed for the wrong reason" and nothing at commit time.
+    """
+    workflow = (REPO / ".github" / "workflows" / "determinism.yml").read_text(encoding="utf-8")
+    guard = (REPO / "cpp" / "include" / "tfidf" / "core" / "fp_guard.hpp").read_text(
+        encoding="utf-8"
+    )
+    grepped = re.findall(r'grep -q "([^"]+)" build\.log', workflow)
+    assert len(grepped) == 1, f"the premise: one grep of build.log, found {grepped}"
+
+    block = guard[guard.index("#if defined(__FAST_MATH__)") :]
+    error = block[: block.index("#endif")].replace("\\\n", "")
+    assert "#  error" in error, "the premise: the block holds the guard's #error"
+    assert grepped[0] in error, f"{grepped[0]!r} is not in the __FAST_MATH__ #error"
+
+
 # ---------------------------------------------------------------------------
 # check_python_floor.py
 # ---------------------------------------------------------------------------
