@@ -19,7 +19,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 
-#include <cmath>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -79,24 +79,10 @@ Reduction checked_policy(std::int32_t policy) {
 /// infinity would make `min_adjacent_margin_top` return `inf`, not the reference's `nan`.
 std::span<const double> checked_scores(const F64Array& scores) {
     const std::span<const double> span{scores.data(), scores.shape(0)};
-    for (const double value : span) {
-        if (!std::isfinite(value)) {
-            throw std::invalid_argument("scores must all be finite");
-        }
+    if (!ranking::all_finite(span)) {
+        throw std::invalid_argument("scores must all be finite");
     }
     return span;
-}
-
-/// Reject a tolerance that is negative or NaN.
-///
-/// `!(tau >= 0.0)` rejects NaN, which `tau < 0.0` admits. Mirrors `ranking::checked_tau` at
-/// all four tie-group entry points. Unguarded, a negative tau leaves every chain and clique
-/// one wide, so `chain_inflation_ratio` returns 1.0, its minimum.
-double checked_tau(double tau) {
-    if (!(tau >= 0.0)) {
-        throw std::invalid_argument("tau must be non-negative");
-    }
-    return tau;
 }
 
 /// Reject a selection strategy outside the enum.
@@ -123,18 +109,6 @@ ScoringAlgorithm checked_algorithm(std::int32_t algorithm) {
         throw std::invalid_argument("scoring algorithm out of range");
     }
     return static_cast<ScoringAlgorithm>(algorithm);
-}
-
-/// Reject a k the normative reference would refuse.
-///
-/// `resolve_k` raises `KOutOfRangeError` for k <= 0 in strict and lenient mode,
-/// so a reference Margin never carries a negative `k_effective`.
-/// Rationale: docs/engineering_notes.md#native-k-bounds
-std::int32_t checked_k(std::int32_t k) {
-    if (k <= 0) {
-        throw std::invalid_argument("k must be positive");
-    }
-    return k;
 }
 
 /// Version of this binding surface, checked against `REQUIRED_ABI` on import.
@@ -317,17 +291,15 @@ class NativeRanker {
                                                std::int32_t m,
                                                std::int32_t selection) {
         prepare(scores);
-        // `m` is a k under another name. `Ranking.top_k` refuses a negative `m`
-        // and an `m` past the selection size, so both are errors here rather
-        // than clamped values.
+        // `Ranking.top_k` refuses a negative `m` and an `m` past the documents.
+        // `select_top` takes `std::size_t`, so the sign is checked here; it
+        // refuses the excess itself, and the buffer is capped so an oversized
+        // `m` is not allocated before that refusal.
         if (m < 0) {
             throw std::invalid_argument("m must be non-negative");
         }
-        if (static_cast<std::size_t>(m) > keys_.size()) {
-            throw std::invalid_argument("m exceeds the number of ranked documents");
-        }
         const auto take = static_cast<std::size_t>(m);
-        std::vector<DocId> out(take);
+        std::vector<DocId> out(std::min(take, keys_.size()));
         ranking::select_top(keys_, take, out, checked_selection(selection));
         return to_numpy(std::move(out));
     }
@@ -486,7 +458,7 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "boundary_margin",
         [](const F64Array& sorted_scores, std::int32_t k) {
-            const auto mg = ranking::boundary_margin(checked_scores(sorted_scores), checked_k(k));
+            const auto mg = ranking::boundary_margin(checked_scores(sorted_scores), k);
             return nb::make_tuple(mg.value, mg.defined, mg.k_effective);
         },
         nb::arg("sorted_scores"), nb::arg("k"),
@@ -495,8 +467,7 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "min_adjacent_margin_top",
         [](const F64Array& sorted_scores, std::int32_t k) {
-            const auto mg =
-                ranking::min_adjacent_margin_top(checked_scores(sorted_scores), checked_k(k));
+            const auto mg = ranking::min_adjacent_margin_top(checked_scores(sorted_scores), k);
             return nb::make_tuple(mg.value, mg.defined, mg.k_effective);
         },
         nb::arg("sorted_scores"), nb::arg("k"));
@@ -504,10 +475,6 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "tie_ball_interval",
         [](const F64Array& sorted_scores, std::int32_t j, double tau) {
-            if (j < 0 || j >= static_cast<std::int32_t>(sorted_scores.shape(0))) {
-                throw std::out_of_range("rank index out of range");
-            }
-            checked_tau(tau);
             const auto [lo, hi] =
                 ranking::tie_ball_interval(checked_scores(sorted_scores), j, tau);
             return nb::make_tuple(lo, hi);
@@ -519,7 +486,7 @@ NB_MODULE(_tfidf_native, m) {
         [](const F64Array& sorted_scores, double tau) {
             std::vector<std::int32_t> flat;
             for (const auto& [lo, hi] :
-                 ranking::tie_chains(checked_scores(sorted_scores), checked_tau(tau))) {
+                 ranking::tie_chains(checked_scores(sorted_scores), tau)) {
                 flat.push_back(lo);
                 flat.push_back(hi);
             }
@@ -533,7 +500,7 @@ NB_MODULE(_tfidf_native, m) {
         [](const F64Array& sorted_scores, double tau) {
             std::vector<std::int32_t> flat;
             for (const auto& [lo, hi] :
-                 ranking::tie_cliques(checked_scores(sorted_scores), checked_tau(tau))) {
+                 ranking::tie_cliques(checked_scores(sorted_scores), tau)) {
                 flat.push_back(lo);
                 flat.push_back(hi);
             }
@@ -545,7 +512,7 @@ NB_MODULE(_tfidf_native, m) {
         "chain_inflation_ratio",
         [](const F64Array& sorted_scores, double tau) {
             return ranking::chain_inflation_ratio(checked_scores(sorted_scores),
-                                                  checked_tau(tau));
+                                                  tau);
         },
         nb::arg("sorted_scores"), nb::arg("tau"));
 
@@ -599,12 +566,6 @@ NB_MODULE(_tfidf_native, m) {
     m.def(
         "compare_top_k",
         [](const I32Array& a, const I32Array& b, std::int32_t k) {
-            // Refused rather than clamped: a negative k is a Python slice
-            // counting from the end, which drops from the end rather than
-            // taking a prefix.
-            if (k < 0) {
-                throw std::invalid_argument("k must be non-negative");
-            }
             const auto c = ranking::compare_top_k(as_ids(a), as_ids(b), k);
             return nb::make_tuple(c.k, c.sets_differ, c.fks, c.kendall_intersection,
                                   c.intersection_size, c.jaccard, c.swapped);

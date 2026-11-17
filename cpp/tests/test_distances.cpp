@@ -396,28 +396,19 @@ TEST_CASE("fks: the union is walked in first-appearance order, not sorted") {
     CHECK(kendall_fks(a, b, 0.5, false) == 12.0);
 }
 
-TEST_CASE("compare_top_k: a negative k is an empty prefix here, unlike in Python") {
-    // `prefix` takes `std::max(k, 0)`, so a negative k compares nothing and
-    // `k` carries the negative value through. Both Python entry points refuse
-    // a negative k, so the divergence is unreachable from Python.
+TEST_CASE("compare_top_k: a negative k is refused, as in Python") {
+    // A negative k is a Python slice bound that drops from the end, so neither
+    // side reads it as an empty prefix.
     // Rationale: docs/engineering_notes.md#compare-top-k-negative-k
     const std::vector<DocId> a{1, 2, 3};
     const std::vector<DocId> b{3, 2, 1};
-    const std::vector<DocId> empty{};
 
-    const auto c = compare_top_k(a, b, -1);
-    CHECK(c.k == -1);  // carried through unclamped, so a caller can see what it asked for
-    CHECK_FALSE(c.sets_differ);
-    CHECK(c.intersection_size == 0);
-    CHECK(c.swapped == 0);
-    CHECK(std::isnan(c.kendall_intersection));
-    // Stated as "identical to an empty prefix" rather than as constants: that
-    // is the contract, and it holds whatever value the empty case defines.
-    CHECK(same_bits(c.fks, kendall_fks(empty, empty)));
-    CHECK(same_bits(c.jaccard, jaccard_distance(empty, empty)));
+    for (const std::int32_t k : {-1, std::numeric_limits<std::int32_t>::min()}) {
+        CHECK_THROWS_WITH_AS(static_cast<void>(compare_top_k(a, b, k)), "k must be non-negative",
+                             std::invalid_argument);
+    }
 
-    // The prefix the clamp empties is informative at k = 2, so the divergence
-    // is a difference in answers rather than in presentation.
+    // The prefix is informative at k = 2, so a clamp and a refusal differ.
     const auto two = compare_top_k(a, b, 2);
     CHECK(two.sets_differ);
     CHECK(two.intersection_size == 1);

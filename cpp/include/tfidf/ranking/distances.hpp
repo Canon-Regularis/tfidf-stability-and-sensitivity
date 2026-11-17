@@ -295,12 +295,15 @@ struct TopKComparison {
     std::int32_t swapped = 0;
 };
 
-/// Compare two top-k lists under every measure of G2(b) and G2(c).
+/// Compare two top-k lists by each G2(b) and G2(c) measure; throws for k < 0.
 [[nodiscard]] inline TopKComparison compare_top_k(std::span<const DocId> a,
                                                   std::span<const DocId> b,
                                                   std::int32_t k) {
+    if (k < 0) {
+        throw std::invalid_argument("k must be non-negative");
+    }
     const auto prefix = [k](std::span<const DocId> s) {
-        const auto want = static_cast<std::size_t>(std::max(k, 0));
+        const auto want = static_cast<std::size_t>(k);
         return s.subspan(0, std::min(want, s.size()));
     };
     const std::span<const DocId> pa = prefix(a);

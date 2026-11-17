@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace tfidf::ranking {
@@ -49,10 +50,14 @@ static_assert(sizeof(SortKey) == 32, "SortKey should stay at two per cache line"
 ///
 /// `priority` holds row indices into `table.ranks`; an empty priority is the
 /// score-only operator, whose ties fall straight through to the identifier.
+/// Throws for a priority longer than `kMaxAttributes`, which a key cannot hold.
 inline void build_keys(std::span<const Real> scores,
                        const RankTable& table,
                        std::span<const std::int32_t> priority,
-                       std::span<SortKey> out) noexcept {
+                       std::span<SortKey> out) {
+    if (priority.size() > kMaxAttributes) {
+        throw std::invalid_argument("more attributes than the sort key can carry");
+    }
     const auto n = static_cast<std::size_t>(table.n_docs);
     for (std::size_t i = 0; i < n; ++i) {
         SortKey& k = out[i];
@@ -82,9 +87,9 @@ inline void build_keys(std::span<const Real> scores,
 
 /// Whether every attribute in `priority` fits in a key.
 ///
-/// `build_keys` is `noexcept` and truncates past `kMaxAttributes`, so the key
-/// sorts on a prefix and orders ties differently from the unbounded Python
-/// tuple. The binding raises; this predicate serves callers that cannot raise.
+/// The binding calls this at construction, so a `NativeRanker` with too many
+/// attributes is refused before any scores arrive; `build_keys` throws for the
+/// same priority.
 [[nodiscard]] inline bool priority_fits(std::span<const std::int32_t> priority) noexcept {
     return priority.size() <= kMaxAttributes;
 }

@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <functional>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace tfidf::ranking {
@@ -59,7 +60,7 @@ inline void rank_full(std::span<SortKey> keys,
     }
 }
 
-/// Select the `m` best documents, in order, leaving the rest unspecified.
+/// Select the `m` best documents in order; throws if `m` exceeds the keys.
 ///
 /// `nth_element` leaves the order of `[m, n)` unspecified and the prefix unordered,
 /// so the remainder is never read and the prefix is sorted afterwards.
@@ -68,7 +69,9 @@ inline void select_top(std::span<SortKey> keys,
                        std::size_t m,
                        std::span<DocId> out,
                        Selection how = Selection::NthElement) {
-    m = std::min(m, keys.size());
+    if (m > keys.size()) {
+        throw std::invalid_argument("m exceeds the number of ranked documents");
+    }
     switch (how) {
         case Selection::PartialSort:
             std::partial_sort(keys.begin(), keys.begin() + static_cast<std::ptrdiff_t>(m),

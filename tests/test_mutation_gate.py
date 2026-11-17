@@ -744,7 +744,7 @@ def test_an_entry_whose_expression_changed_is_refused(tmp_path: Path) -> None:
 def test_an_entry_whose_stamp_matches_two_lines_is_refused_as_ambiguous(tmp_path: Path) -> None:
     """A stamp matching two lines is refused as ambiguous.
 
-    Thirteen of the Python entries and five of the C++ ones sit on line text
+    Thirteen of the Python entries and four of the C++ ones sit on line text
     that is not unique in its file, so a stamp alone cannot place an entry.
     """
     entries = _crafted(tmp_path, "a = 1\nif x <= y:\nb = 2\n", 2)

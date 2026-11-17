@@ -482,6 +482,9 @@ def test_a_top_k_past_the_ranked_documents_is_refused_rather_than_clamped() -> N
 
     with pytest.raises(ValueError, match="m exceeds the number of ranked documents"):
         ranker.top_k(native, len(scores) + 1)
+    # Refused before a buffer of that size is allocated.
+    with pytest.raises(ValueError, match="m exceeds the number of ranked documents"):
+        ranker.top_k(native, 2**31 - 1)
     with pytest.raises(ValueError, match="m must be non-negative"):
         ranker.top_k(native, -1)
 
@@ -492,9 +495,9 @@ def test_a_top_k_past_the_ranked_documents_is_refused_rather_than_clamped() -> N
 def test_a_priority_longer_than_the_sort_key_is_refused_by_the_binding() -> None:
     """A priority longer than `kMaxAttributes` is refused by the binding.
 
-    `kMaxAttributes` is 4 and `build_keys` is noexcept, so it truncates a longer
-    priority and sorts on a prefix of the requested operator. The reference
-    tuple has no such bound, so the binding refuses one.
+    `kMaxAttributes` is 4 and the reference tuple has no such bound. The binding
+    refuses at construction, before any scores arrive; `build_keys` would throw
+    later for the same priority.
     """
     ids = np.array([2, 0, 1], dtype=np.int32)
     with pytest.raises(ValueError, match="more attributes than the sort key can carry"):

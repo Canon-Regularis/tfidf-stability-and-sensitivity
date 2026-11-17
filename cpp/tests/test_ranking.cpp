@@ -215,6 +215,21 @@ TEST_CASE("ranker: partial selection matches the full ranking's prefix") {
     }
 }
 
+TEST_CASE("ranker: select_top refuses an m past the keys, for every strategy") {
+    // `Ranking.top_k` refuses such an m; a clamp would answer a different question.
+    const std::vector<Real> scores{0.5, 0.25, 0.75};
+    const RankTable t = make_table({0, 1, 2});
+    const std::vector<std::int32_t> priority{0};
+    for (const auto how : {Selection::FullSort, Selection::StableSort, Selection::PartialSort,
+                           Selection::NthElement, Selection::BoundedHeap}) {
+        std::vector<SortKey> keys(scores.size());
+        build_keys(scores, t, priority, keys);
+        std::vector<DocId> out(scores.size() + 1);
+        CHECK_THROWS_WITH_AS(select_top(keys, scores.size() + 1, out, how),
+                             "m exceeds the number of ranked documents", std::invalid_argument);
+    }
+}
+
 TEST_CASE("ranker: score dominates every attribute") {
     const RankTable t = make_table({9, 0});  // doc 1 has the better attribute
     const auto order = rank_with({1.0, 0.0}, t, {0}, Selection::FullSort);
@@ -497,39 +512,21 @@ TEST_CASE("margins: two scores have one gap, which is the boundary of the guard"
     }
 }
 
-TEST_CASE("margins: k = 0 is undefined rather than a read below the first score") {
-    // `k <= 0` returns undefined. Relaxed to `k < 0`, k = 0 passes the guard,
-    // `k_effective` is 0, the `k_effective >= n` arm is false for any non-empty
-    // input, and the subtraction then indexes `sorted_scores[-1]`. The margin
-    // comes back marked defined either way, so the flag is what a test can see.
+TEST_CASE("margins: k <= 0 is refused, as resolve_k refuses it") {
+    // k = 0 is listed because a guard relaxed to `k < 0` would admit it and
+    // then read `sorted_scores[-1]`.
     const std::vector<Real> s{1.0, 0.75, 0.5};
 
-    const Margin zero = boundary_margin(s, 0);
-    CHECK_FALSE(zero.defined);
-    CHECK(std::isnan(zero.value));
-    CHECK(zero.k == 0);
-
-    const Margin negative = boundary_margin(s, -1);
-    CHECK_FALSE(negative.defined);
-    CHECK(std::isnan(negative.value));
-
-    const Margin zero_top = min_adjacent_margin_top(s, 0);
-    CHECK_FALSE(zero_top.defined);
-    CHECK(std::isnan(zero_top.value));
+    for (const std::int32_t k : {0, -1, -1073741824}) {
+        CHECK_THROWS_WITH_AS(static_cast<void>(boundary_margin(s, k)), "k must be positive",
+                             std::invalid_argument);
+        CHECK_THROWS_WITH_AS(static_cast<void>(min_adjacent_margin_top(s, k)),
+                             "k must be positive", std::invalid_argument);
+    }
 }
 
-TEST_CASE("margins: a refused k reports no effective k rather than a negative one") {
-    // `k_effective` is assigned past the `k <= 0` guard, so a refused k keeps
-    // the default 0. Assigned above it, `std::min(k, n)` would return the
-    // negative k, which `resolve_k` never yields on the Python side. `defined`
-    // is false for every refused k, so `k_effective` is the only field left.
+TEST_CASE("margins: an admitted k clamps to the scores") {
     const std::vector<Real> s{1.0, 0.75, 0.5};
-
-    for (const std::int32_t k : {-1, -5, -1073741824, 0}) {
-        CHECK(boundary_margin(s, k).k_effective == 0);
-        CHECK(min_adjacent_margin_top(s, k).k_effective == 0);
-        CHECK(boundary_margin(s, k).k == k);  // the requested k is still reported
-    }
 
     // A k the guard admits still clamps normally. k = 1 separates the `k <= 0`
     // guard from the `k_effective < 2` test below it. The margin is undefined
@@ -672,11 +669,9 @@ TEST_CASE("attributes: an empty table is vacuously a bijection") {
     CHECK_FALSE(mismatched.id_ranks_are_a_bijection());
 }
 
-TEST_CASE("sort_keys: a priority longer than the key can carry is reported") {
-    // `build_keys` is `noexcept` and stops at `kMaxAttributes`, so a longer
-    // priority is truncated silently and the key breaks ties on a prefix of the
-    // requested operator. The reference tuple has no such bound, so the two
-    // order ties differently. The binding raises; a noexcept function cannot.
+TEST_CASE("sort_keys: a priority longer than the key can carry is refused") {
+    // The reference tuple has no bound, so a key holding only a prefix of a
+    // longer priority would order ties differently; `build_keys` throws instead.
     const std::vector<std::int32_t> three{0, 1, 2};
     const std::vector<std::int32_t> four{0, 1, 2, 3};
     const std::vector<std::int32_t> five{0, 1, 2, 3, 0};
@@ -685,6 +680,15 @@ TEST_CASE("sort_keys: a priority longer than the key can carry is reported") {
     CHECK(priority_fits(four));  // the boundary is inclusive
     CHECK_FALSE(priority_fits(five));
     CHECK(priority_fits(std::vector<std::int32_t>{}));
+
+    // Two documents tied on the first three attributes; the fourth decides.
+    const RankTable t = make_wide_table({{0, 0}, {0, 0}, {0, 0}, {1, 0}});
+    const std::vector<Real> scores{0.5, 0.5};
+    std::vector<SortKey> keys(2);
+    build_keys(scores, t, four, keys);
+    CHECK(key_less(keys[1], keys[0]));
+    CHECK_THROWS_WITH_AS(build_keys(scores, t, five, keys),
+                         "more attributes than the sort key can carry", std::invalid_argument);
 }
 
 TEST_CASE("tie_groups: an out-of-range centre is refused rather than read") {
