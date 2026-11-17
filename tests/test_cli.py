@@ -53,25 +53,15 @@ def test_the_default_config_loads_and_carries_its_digest() -> None:
 
 @pytest.mark.parametrize(
     "name",
-    [
-        "_DEFAULT_CONFIG",
-        "_resolve_default_config",
-        "load_config",
-        "pipeline_from_config",
-        "vectoriser_from_config",
-    ],
+    ["load_config", "pipeline_from_config", "vectoriser_from_config"],
 )
 def test_the_cli_module_serves_each_configuration_name_as_the_same_object(name: str) -> None:
-    """``cli.commands`` and ``configuration.loading`` hold the same objects.
-
-    The public three are in the CLI module's ``__all__``; the two private names
-    are imported from it by ``tests/test_packaged_assets.py``.
-    """
+    """``cli.commands`` re-exports the public configuration API, as the same objects."""
     from tfidf_stability.cli import commands
     from tfidf_stability.configuration import loading
 
     assert getattr(commands, name) is getattr(loading, name)
-    assert (name in commands.__all__) is not name.startswith("_")
+    assert name in commands.__all__
 
 
 def test_the_default_config_matches_the_code_defaults() -> None:

@@ -14,8 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from tfidf_stability.configuration.loading import (
-    _DEFAULT_CONFIG,  # noqa: F401 - re-exported for tests/test_packaged_assets.py
-    _resolve_default_config,  # noqa: F401 - likewise
     load_config,
     pipeline_from_config,
     vectoriser_from_config,
@@ -44,8 +42,6 @@ __all__ = [
     "pipeline_from_config",
     "vectoriser_from_config",
     "write_report",
-    "_DEFAULT_CONFIG",
-    "_resolve_default_config",
 ]
 
 _LOG = get_logger(__name__)

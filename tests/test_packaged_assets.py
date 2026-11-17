@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tfidf_stability.cli.commands import _resolve_default_config
+from tfidf_stability.configuration.loading import _resolve_default_config
 from tfidf_stability.preprocessing.stopwords import _resolve_asset_dir
 
 
@@ -103,7 +103,7 @@ def test_the_default_config_resolves_inside_an_installed_package(tmp_path: Path)
     ``tfidf-stability build-corpus`` with no ``-c`` reads this file, so an
     installed CLI depends on finding it.
     """
-    module = _installed_layout(tmp_path, "cli", "configs")
+    module = _installed_layout(tmp_path, "configuration", "configs")
     packaged = module.resolve().parents[1] / "configs" / "default.yaml"
     packaged.write_text("preprocessing: {}\n", encoding="utf-8")
 
@@ -112,7 +112,7 @@ def test_the_default_config_resolves_inside_an_installed_package(tmp_path: Path)
 
 def test_the_default_config_still_resolves_from_a_checkout(tmp_path: Path) -> None:
     """A checkout resolves to the ``default.yaml`` beside ``src/``."""
-    module = _checkout_layout(tmp_path, "cli", "configs")
+    module = _checkout_layout(tmp_path, "configuration", "configs")
     in_tree = module.resolve().parents[3] / "configs" / "default.yaml"
     in_tree.write_text("preprocessing: {}\n", encoding="utf-8")
 
@@ -125,7 +125,7 @@ def test_the_config_falls_back_when_the_package_holds_no_copy(tmp_path: Path) ->
     A packaged ``configs/`` without ``default.yaml`` does not shadow the
     checkout's copy.
     """
-    module = _installed_layout(tmp_path, "cli", "configs")
+    module = _installed_layout(tmp_path, "configuration", "configs")
     in_tree = module.resolve().parents[3] / "configs" / "default.yaml"
     in_tree.parent.mkdir(parents=True, exist_ok=True)
     in_tree.write_text("preprocessing: {}\n", encoding="utf-8")
@@ -135,7 +135,7 @@ def test_the_config_falls_back_when_the_package_holds_no_copy(tmp_path: Path) ->
 
 def test_the_live_default_config_is_the_normative_one() -> None:
     """The resolver points at this repository's own ``default.yaml``."""
-    from tfidf_stability.cli.commands import _DEFAULT_CONFIG, load_config
+    from tfidf_stability.configuration.loading import _DEFAULT_CONFIG, load_config
 
     assert _DEFAULT_CONFIG.is_file()
     assert _DEFAULT_CONFIG.name == "default.yaml"
@@ -145,7 +145,7 @@ def test_the_live_default_config_is_the_normative_one() -> None:
 @pytest.mark.parametrize("installed", [True, False], ids=["installed", "checkout"])
 @pytest.mark.parametrize(
     ("subpackage", "asset"),
-    [("preprocessing", "data/assets"), ("cli", "configs")],
+    [("preprocessing", "data/assets"), ("configuration", "configs")],
 )
 def test_neither_layout_reaches_outside_the_tree_it_names(
     subpackage: str, asset: str, installed: bool, tmp_path: Path
@@ -162,7 +162,7 @@ def test_neither_layout_reaches_outside_the_tree_it_names(
     resolver = _resolve_asset_dir if subpackage == "preprocessing" else _resolve_default_config
     for root in (tree, outside):
         (root / asset).mkdir(parents=True, exist_ok=True)
-        if subpackage == "cli":
+        if subpackage == "configuration":
             (root / asset / "default.yaml").write_text("{}\n", "utf-8")
 
     resolved = resolver(module)
