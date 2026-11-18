@@ -440,6 +440,13 @@ def _compare(
     return Comparison(name=name, reference=reference, native=native, verified=verified, note=note)
 
 
+def _reference_only(name: str, reference_call: Callable[[], object], repeats: int) -> Comparison:
+    """Time a row whose native backend is absent: the generic reason and no note."""
+    return _compare(
+        name, reference_call=reference_call, native_call=None, verify=None, repeats=repeats
+    )
+
+
 def _fit_comparison(fixture: _Fixture, repeats: int) -> Comparison:
     """Fitting: reference only.
 
@@ -468,13 +475,7 @@ def _index_comparison(fixture: _Fixture, native: _NativeFixture | None, repeats:
         return model.matrix.row_norms(Reduction.NAIVE)
 
     if native is None:
-        return _compare(
-            "build index (row norms)",
-            reference_call=reference_call,
-            native_call=None,
-            verify=None,
-            repeats=repeats,
-        )
+        return _reference_only("build index (row norms)", reference_call, repeats)
 
     module, csr = native.module, native.csr
     policy = int(module.REDUCTION[Reduction.NAIVE.value])
@@ -517,13 +518,7 @@ def _scoring_comparison(
         return [cosine_against_corpus(q, documents, norms, Reduction.NAIVE) for q in queries]
 
     if native is None:
-        return _compare(
-            name,
-            reference_call=reference_call,
-            native_call=None,
-            verify=None,
-            repeats=repeats,
-        )
+        return _reference_only(name, reference_call, repeats)
 
     module, index = native.module, native.index
     algo = int(module.ALGORITHM[algorithm])
@@ -566,9 +561,7 @@ def _reduction_comparison(
         return reduce_sum(values, policy)
 
     if native is None:
-        return _compare(
-            name, reference_call=reference_call, native_call=None, verify=None, repeats=repeats
-        )
+        return _reference_only(name, reference_call, repeats)
 
     module, array = native.module, native.values
     code = int(module.REDUCTION[policy.value])
@@ -601,9 +594,7 @@ def _rank_comparison(fixture: _Fixture, native: _NativeFixture | None, repeats: 
         return rank(scores, table, PI)
 
     if native is None:
-        return _compare(
-            name, reference_call=reference_call, native_call=None, verify=None, repeats=repeats
-        )
+        return _reference_only(name, reference_call, repeats)
 
     module, ranker, array = native.module, native.ranker, native.scores
     selection = int(module.SELECTION["full_sort"])
@@ -649,9 +640,7 @@ def _top_k_comparison(fixture: _Fixture, native: _NativeFixture | None, repeats:
         return rank_top_k(scores, table, PI, k=k)
 
     if native is None:
-        return _compare(
-            name, reference_call=reference_call, native_call=None, verify=None, repeats=repeats
-        )
+        return _reference_only(name, reference_call, repeats)
 
     module, ranker, array = native.module, native.ranker, native.scores
     selection = int(module.SELECTION["bounded_heap"])

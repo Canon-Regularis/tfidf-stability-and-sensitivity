@@ -535,6 +535,15 @@ def test_an_operation_whose_backend_was_simply_absent_uses_the_generic_phrase() 
     assert index.native is None
 
 
+def test_a_reference_only_run_omits_the_notes_about_the_native_call() -> None:
+    """The index and reduction notes describe a native call, which this run skips."""
+    report = run_benchmarks(TINY, repeats=1, use_native=False)
+    rows = [c for c in report.comparisons if c.name.startswith(("build index", "reduce "))]
+
+    assert len(rows) == 5, "the index row and one row per reduction policy"
+    assert all(c.note == "" for c in rows)
+
+
 def test_no_reference_only_comparison_leaves_the_reason_blank() -> None:
     """Every reference-only row carries a non-empty reason.
 
