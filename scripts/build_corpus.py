@@ -1,26 +1,9 @@
 #!/usr/bin/env python3
 """Materialise a registered dataset as JSONL, with a provenance sidecar.
 
-The boundary between "where data comes from" and "what the pipeline consumes":
-upstream knows about zip archives, CSV quirks and seeded generators, downstream
-sees only ``{doc_id, text, ...}`` records.
-
-Three reasons to materialise instead of calling :func:`load_dataset` directly:
-
-1. Parsing MovieLens takes a few seconds; experiments read the corpus many times.
-2. It gives a stable file to point ``build-corpus`` and the notebooks at.
-3. It fixes the corpus. A regenerated corpus is only as reproducible as its
-   generator, which depends on the PRNG, whose selection functions carry no
-   stability promise across CPython versions. Writing the file once moves the
-   reproducibility boundary from "same interpreter" to "same bytes". Same rule as
-   ``datasets/synthetic.py``: the generator writes files, downstream consumes the
-   files.
-
-Usage::
-
-    python scripts/build_corpus.py synthetic_small -o data/interim/synth.jsonl
-    python scripts/build_corpus.py movielens_small \\
-        --archive data/raw/ml-latest-small.zip -o data/interim/movielens.jsonl
+Downstream reads only ``{doc_id, text, ...}`` records; the written file, not
+the generator behind :func:`load_dataset`, is the reproducibility boundary.
+Rationale: docs/engineering_notes.md#materialise-corpus-to-file
 """
 
 from __future__ import annotations
@@ -38,7 +21,7 @@ from tfidf_stability.utils.validation import DataIntegrityError  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("dataset", help=f"one of {', '.join(DATASET_NAMES)}")
     parser.add_argument("-o", "--output", type=Path, required=True, help="destination .jsonl")
     parser.add_argument("--archive", type=Path, default=None, help="MovieLens zip")

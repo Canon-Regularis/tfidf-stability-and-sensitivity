@@ -1,27 +1,9 @@
 #!/usr/bin/env python3
-"""Download MovieLens, verify it, and record the digest.
+"""Download the MovieLens archive, verify its digest, and parse it.
 
-The only code in this repository that opens a network connection, kept in one
-short script outside the library so that "does this package phone home?" is
-answerable by reading one file, and so the library stays usable air-gapped.
-
-The archive lands nowhere git tracks: ``data/raw/`` is gitignored and this script
-refuses to write outside it without ``--output``. The MovieLens licence prohibits
-redistribution, and an accidental ``git add -A`` is how that gets violated.
-
-The pin
--------
-GroupLens replaces ``ml-latest-small.zip`` in place and publishes no digest of
-its own, so on first run there is nothing to check against: the script downloads,
-prints the digest, and tells you to paste it into ``movielens.MOVIELENS_SHA256``.
-Every later run verifies against it and a mismatch is fatal. The pin buys one
-guarantee: the corpus underneath a published number has not moved.
-
-Usage::
-
-    python scripts/fetch_data.py                    # download and verify
-    python scripts/fetch_data.py --print-digest     # digest an existing file
-    python scripts/fetch_data.py --output PATH      # somewhere else
+The only code in the repository that opens a network connection. Without a
+pin the script prints the digest to paste into ``movielens.MOVIELENS_SHA256``.
+Rationale: docs/engineering_notes.md#movielens-digest-pin
 """
 
 from __future__ import annotations
@@ -43,19 +25,11 @@ _CHUNK = 1 << 16
 
 
 def _download(url: str, dest: Path, expected: str | None) -> tuple[str, bool]:
-    """Stream to a temporary file, verify, then rename.
+    """Stream to a temporary file, verify the digest, then rename into place.
 
-    Returns the digest and whether the download was placed at ``dest``.
-
-    An interrupted transfer must not leave a truncated file at the destination,
-    where it would fail the digest check confusingly instead of simply being
-    absent.
-
-    Verification happens before the rename, so a mismatched download never
-    replaces the pinned archive already at ``dest`` -- the archive the mismatch
-    message asks the reader to keep. The rejected download is left beside the
-    destination with a `.rejected` suffix rather than discarded, so it can be
-    inspected.
+    Returns the digest and whether the download was placed at ``dest``. An
+    interrupted transfer leaves nothing at ``dest``. A mismatched download is
+    kept beside ``dest`` with a ``.rejected`` suffix and ``dest`` is untouched.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_suffix(dest.suffix + ".partial")
@@ -86,7 +60,7 @@ def _download(url: str, dest: Path, expected: str | None) -> tuple[str, bool]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--output", type=Path, default=DEFAULT_DEST)
     parser.add_argument("--url", default=movielens.MOVIELENS_URL)
     parser.add_argument("--force", action="store_true", help="re-download if present")

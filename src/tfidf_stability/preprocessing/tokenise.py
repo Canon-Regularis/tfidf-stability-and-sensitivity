@@ -13,12 +13,10 @@ from typing import Final
 
 __all__ = ["GAP", "Token", "TokenisationConfig", "tokenise", "tokenise_with_offsets"]
 
-#: Sentinel marking a position where a token was removed (a stopword) or a hard
-#: boundary occurred (end of a field or sentence). N-grams must never span one.
-#:
-#: Without it, removing the stopword from "king of pop" yields the bigram "king
-#: pop", a feature that appears in no document and is manufactured by the
-#: preprocessing order. See ``docs/spec_addenda.md#g7``.
+#: Sentinel marking a removed token (a stopword) or a hard boundary (end of a
+#: field or sentence). Normative n-grams never span one, so removing "of" from
+#: "king of pop" does not create the bigram "king pop", found in no document.
+#: See ``docs/spec_addenda.md#g7``.
 GAP: Final[str] = "\x00"
 
 #: Unicode word pattern: runs of letters or digits, so "don't" tokenises as
@@ -59,7 +57,10 @@ _CACHE: dict[str, re.Pattern[str]] = {}
 
 
 def _compiled(pattern: str) -> re.Pattern[str]:
-    """Compile and memoise. Compilation is pure, so caching cannot affect results."""
+    """Compile and memoise a pattern.
+
+    Compilation is pure, so caching cannot affect results.
+    """
     p = _CACHE.get(pattern)
     if p is None:
         p = re.compile(pattern, re.UNICODE)
@@ -68,27 +69,11 @@ def _compiled(pattern: str) -> re.Pattern[str]:
 
 
 def tokenise(text: str, config: TokenisationConfig | None = None) -> list[str]:
-    """Split normalised text into tokens.
+    """Split normalised text into tokens in order, applying the length bounds.
 
-    Args:
-        text: Text that has already passed through
-            :func:`~tfidf_stability.preprocessing.normalise.normalise`.
-        config: Pinned options; the normative defaults if omitted.
-
-    Returns:
-        Tokens in order of appearance. Length filters are applied here rather
-        than downstream, so the bounds are part of the tokenisation contract and
-        are hashed with it.
-
-    A length-filtered run leaves no gap sentinel, so an n-gram closes over it:
-    ``"king <66 z's> pop"`` and ``"king pop"`` produce identical features,
-    including the bigram ``king|pop``. Underscores, commas and any other
-    pattern-excluded run behave the same way, since the pattern and the bounds
-    together define what a token is. Only stopword removal inserts a gap
-    (``spec_addenda.md#g7``), because only it deletes something that was already
-    a token. Reachable in configuration: at ``min_token_length: 2``,
-    ``"vitamin c deficiency"`` and ``"vitamin deficiency"`` become the same
-    document.
+    Takes :func:`~tfidf_stability.preprocessing.normalise.normalise` output; ``config`` defaults
+    to the normative options. Stopwords leave a gap (``spec_addenda.md#g7``); filtered runs do not.
+    Rationale: docs/engineering_notes.md#length-filtered-runs-leave-no-gap
     """
     cfg = config or _DEFAULT
     lo, hi = cfg.min_token_length, cfg.max_token_length

@@ -1,19 +1,8 @@
 """Typed exceptions, warnings and validators.
 
-Every condition ``docs/spec_addenda.md#g3`` gives defined behaviour for has a
-named exception or warning here. Two modes run throughout:
-
-``strict``
-    Raise. The default for interactive and CLI use, where an unexpected corpus
-    shape is more likely a mistake than an intention.
-
-``lenient``
-    Emit a diagnostic and return ``NaN``. The default inside experiment sweeps,
-    where degenerate points (``tau`` larger than the score range, say) are
-    legitimate members of the grid and must not abort the run.
-
-The active mode goes into every run manifest: it changes which queries
-contribute to a reported distribution.
+Every condition ``docs/spec_addenda.md#g3`` defines has a named exception or warning here.
+``strict`` mode raises; ``lenient`` flags it and returns ``NaN`` (``resolve_k`` clamps ``k``).
+Rationale: docs/engineering_notes.md#strict-and-lenient-modes
 """
 
 from __future__ import annotations
@@ -42,6 +31,8 @@ __all__ = [
     "UnreproducibleBuildError",
     "check_finite",
     "check_non_negative",
+    "check_prefix_k",
+    "check_tau",
     "check_unique_ids",
     "resolve_k",
 ]
@@ -61,7 +52,7 @@ class StrictMode(str, Enum):
 # Exceptions
 # ---------------------------------------------------------------------------
 class TfidfStabilityError(Exception):
-    """Base class for every error this package raises on purpose."""
+    """Base class for every typed error this package raises."""
 
 
 class EmptyVocabularyError(TfidfStabilityError):
@@ -84,10 +75,9 @@ class DuplicateIdentifierError(TfidfStabilityError, ValueError):
 class KOutOfRangeError(TfidfStabilityError, ValueError):
     """``k`` exceeds the number of rankable documents.
 
-    A ``ValueError`` as well, so one ``except`` catches this and the native
-    side, which raises ``std::invalid_argument`` for the same input and reaches
-    Python as ``ValueError``. The pattern is
-    :class:`~tfidf_stability.persistence.save_load.TfsxFormatError`'s.
+    Also a ``ValueError``, as the native side's ``std::invalid_argument`` for a
+    non-positive ``k`` reaches Python, so one ``except`` catches both. The
+    pattern follows :class:`~tfidf_stability.persistence.save_load.TfsxFormatError`.
     """
 
 
@@ -118,19 +108,16 @@ class NegativeValueError(TfidfStabilityError, ValueError):
 class UnreproducibleBuildError(TfidfStabilityError, RuntimeError):
     """The build cannot produce publishable numbers.
 
-    ``RuntimeError`` as well, so callers written against the previous type keep
-    working, while ``except TfidfStabilityError`` now catches the most
-    consequential refusal in the package.
+    Also a ``RuntimeError``, so both ``except RuntimeError`` and
+    ``except TfidfStabilityError`` catch it.
     """
 
 
 class ConfigError(TfidfStabilityError):
     """A configuration key is unrecognised, or its value is not admissible.
 
-    Unrecognised keys are fatal. Every value in ``configs/default.yaml`` can move
-    a published number and the whole file is hashed into the run manifest, so a
-    key recorded but never read makes the manifest claim something the run did
-    not do: a typo in ``n_max`` would silently take the default.
+    Unrecognised keys are fatal: ``configs/default.yaml`` is hashed into the run manifest,
+    so a key recorded but never read (a typo in ``n_max``) makes the manifest misstate the run.
     """
 
 
@@ -145,11 +132,8 @@ class NativeBackendUnavailableError(TfidfStabilityError):
 class AbiVersionMismatchError(NativeBackendUnavailableError):
     """The compiled extension was built against a different Python-side contract.
 
-    A subclass rather than a sibling: a stale extension *is* a form of the backend
-    being unavailable, so `except NativeBackendUnavailableError` keeps working
-    while a caller that wants to tell "never built" from "built against an older
-    contract" can now do so. Before this it was defined, exported and never
-    raised, and the ABI path reported the generic error instead.
+    A subclass, so ``except NativeBackendUnavailableError`` catches a stale extension,
+    while a caller can still tell "never built" from "built against an older contract".
     """
 
 
@@ -214,6 +198,27 @@ def check_non_negative(values: Sequence[float], what: str) -> None:
             )
 
 
+def check_tau(tau: float) -> None:
+    """Raise ``ValueError`` unless the tie tolerance ``tau`` is non-negative.
+
+    Spelled ``not (tau >= 0.0)`` because every comparison with NaN is false, so
+    ``tau < 0.0`` would admit NaN: tie chains would become one group, cliques all
+    singletons, rho N, and every positive margin would fall into ``undefined``.
+    """
+    if not (tau >= 0.0):
+        raise ValueError(f"tau must be non-negative, got {tau}")
+
+
+def check_prefix_k(k: int, caller: str) -> None:
+    """Raise ``ValueError`` if ``k`` is negative, naming ``caller`` in the message.
+
+    A negative ``k`` is a legal slice bound that drops from the end, so ``seq[:k]``
+    would return something other than a prefix without failing.
+    """
+    if k < 0:
+        raise ValueError(f"{caller}({k}) is not a prefix; k must be non-negative")
+
+
 def check_unique_ids(ids: Sequence[object]) -> None:
     """Raise if identifiers are not unique. See :class:`DuplicateIdentifierError`."""
     seen: dict[object, int] = {}
@@ -229,10 +234,9 @@ def check_unique_ids(ids: Sequence[object]) -> None:
 def resolve_k(k: int, n: int, mode: StrictMode = StrictMode.STRICT) -> int:
     """Validate ``k`` against a corpus of ``n`` rankable documents.
 
-    Returns the effective ``k``. Only a mode equal to ``StrictMode.LENIENT``
-    clamps to ``n``, and the caller then records ``k_effective``. ``StrictMode``
-    is a ``str`` enum, so ``"lenient"`` clamps as well and every other value
-    raises ``KOutOfRangeError``. See ``docs/spec_addenda.md#g3``.
+    Returns the effective ``k``. Only a mode equal to ``StrictMode.LENIENT`` (including the
+    string ``"lenient"``) clamps to ``n``, and the caller records ``k_effective``; every
+    other mode raises ``KOutOfRangeError``. See ``docs/spec_addenda.md#g3``.
     """
     if k <= 0:
         raise KOutOfRangeError(f"k must be positive, got {k}")

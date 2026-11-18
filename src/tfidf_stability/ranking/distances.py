@@ -1,36 +1,8 @@
 """Ordering distances (README sections 4.5 and 7.3, ``spec_addenda.md#g2``).
 
-The paper asks for an ordering distance in two places, and they are different
-problems:
-
-* §4.5 wants "a distance between orderings restricted to **tie groups**";
-* §7.3 wants "**within-top-k** reordering ... restricted to tie-affected subsets".
-
-Conflating them produces a quantity that looks defined and is not.
-
-Restricted to a tie group the problem is easy. A tie group is defined on the
-score vector, which pi, pi_score and pi_alt share, so the two orderings contain
-the same elements; :func:`kendall_tau_distance` is plain normalised Kendall tau
-by merge-sort inversion count, ``O(n log n)``.
-
-Restricted to top-k it is ill-posed. When ``topk(pi) != topk(pi')``, the case
-section 7.3 exists to measure, the two lists rank different sets and "the number
-of discordant pairs" has no meaning. Resolved here with the
-Fagin-Kumar-Sivakumar generalised Kendall distance (*Comparing Top k Lists*,
-SIAM J. Discrete Math. 17(1), 2003) at penalty ``p = 1/2``.
-
-``K^(p)`` is a near-metric. Measured against this module's own implementation the
-triangle inequality fails at every penalty tested, with the violation growing in
-``p``, so ``p = 1/2`` is chosen for being the unbiased contribution when a list
-says nothing about a pair. See ``spec_addenda.md#g2`` for the witness and
-:func:`~tests.test_ordering_distances.test_fks_is_a_near_metric_not_a_metric`
-for the regression guard.
-
-Nothing here should be reported alone. :func:`compare_top_k` returns the whole
-set (the set-disagreement indicator section 7.3 asks for, normalised FKS,
-intersection Kendall with its support size, Jaccard) because each is blind to
-something the others see. ``K_int`` cannot see membership change at all, which is
-the effect under study.
+Tie groups (4.5) use :func:`kendall_tau_distance`; top-k lists (7.3) use :func:`compare_top_k`,
+FKS ``K^(1/2)`` (``spec_addenda.md#g2``). Rationale: docs/engineering_notes.md#fks-distance.
+Near-metric test: :func:`~tests.test_ordering_distances.test_fks_is_a_near_metric_not_a_metric`.
 """
 
 from __future__ import annotations
@@ -41,6 +13,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import combinations
 from typing import Final
+
+from tfidf_stability.utils.validation import check_prefix_k
 
 __all__ = [
     "FKS_PENALTY",
@@ -54,21 +28,10 @@ __all__ = [
     "top_k_disagreement",
 ]
 
-#: The Fagin-Kumar-Sivakumar penalty for a pair that appears in one top-k list
-#: and in neither position of the other.
-#:
-#: ``p = 1/2`` is the neutral choice: knowing nothing about the relative order of
-#: two elements absent from a list, they disagree with probability one half, so
-#: ``1/2`` is the unbiased estimate of the contribution. ``p = 0`` assumes the
-#: unseen pair agrees, biasing every measurement downwards, the wrong direction
-#: for a study of instability; ``p = 1`` biases upwards.
-#:
-#: It does not make ``K^(p)`` a metric. Measured on this project's own
-#: implementation, the triangle inequality is violated at every penalty tested
-#: and the violation grows with ``p`` (``spec_addenda.md#g2``). A near-metric has
-#: bounded distortion without the triangle inequality, which suffices for
-#: reporting disagreement rates and is why this module never clusters on the
-#: quantity or treats it as a norm.
+#: The Fagin-Kumar-Sivakumar case-4 penalty: both elements of a pair in one top-k list, neither in
+#: the other. ``p = 1/2`` is the unbiased estimate for a pair a list says nothing about; ``p = 0``
+#: biases downwards and ``p = 1`` upwards. ``K^(p)`` is a near-metric; the triangle inequality
+#: fails at every penalty tested (G2). Rationale: docs/engineering_notes.md#fks-penalty
 FKS_PENALTY: Final[float] = 0.5
 
 
@@ -78,10 +41,9 @@ FKS_PENALTY: Final[float] = 0.5
 def inversion_count(sequence: Sequence[int]) -> int:
     """Number of pairs ``i < j`` with ``sequence[i] > sequence[j]``.
 
-    Merge sort, ``O(n log n)``. The naive ``O(n^2)`` enumeration would do for a
-    top-k list of 50, but tie groups are not bounded by ``k``: on short-text
-    corpora the zero-score block alone can reach a large fraction of the corpus,
-    so the asymptotics matter here in a way they do not in :func:`kendall_fks`.
+    Merge sort, ``O(n log n)``. Tie groups are not bounded by ``k``: the zero-score
+    block of a short-text corpus can be a large fraction of it, so the asymptotics
+    matter here in a way they do not in :func:`kendall_fks`.
     """
     work = list(sequence)
     buffer = [0] * len(work)
@@ -119,23 +81,14 @@ def inversion_count(sequence: Sequence[int]) -> int:
 def kendall_tau_distance(a: Sequence[int], b: Sequence[int]) -> float:
     """Normalised Kendall tau distance between two orderings of the *same* set.
 
-    Args:
-        a, b: Orderings, best first. Must contain the same elements.
-
-    Returns:
-        ``#discordant / C(n, 2)`` in ``[0, 1]``; ``0.0`` for fewer than two
-        elements, where no pair exists to disagree about.
-
-    Raises:
-        ValueError: If the two orderings do not rank the same set, which signals
-            that :func:`kendall_fks` is the function wanted.
+    ``a`` and ``b`` are orderings, best first, of the same multiset. Returns
+    ``#discordant / C(n, 2)`` in ``[0, 1]``, or ``0.0`` below two elements. Raises
+    ValueError if the multisets differ; :func:`kendall_fks` handles differing membership.
     """
-    # Counter, not set: `set` is blind to multiplicity, so [1, 1, 2] and
-    # [1, 2, 2] passed both halves of the guard -- same length, same set -- and
-    # the position dict below then kept only the last index of each repeat,
-    # counting inversions against a mapping that had lost a document. The
-    # result was 0.0, two orderings reported as identical when one of them is
-    # not an ordering of that multiset at all.
+    # Counter, not set: a set ignores multiplicity, so [1, 1, 2] and [1, 2, 2]
+    # would pass a set check, and the position dict below keeps only the last
+    # index of each repeat, giving 0.0 for inputs that are not orderings of the
+    # same multiset.
     if len(a) != len(b) or Counter(a) != Counter(b):
         raise ValueError(
             "kendall_tau_distance requires two orderings of the same set, with the "
@@ -168,17 +121,9 @@ def _checked_penalty(penalty: float) -> float:
 def fks_max(k: int, penalty: float = FKS_PENALTY) -> float:
     """The maximum value of ``K^(p)`` over two top-k lists, attained when disjoint.
 
-    With disjoint lists the union has ``2k`` elements and every pair falls into
-    case 3 or case 4:
-
-        case 3 (one element from each list): k^2 pairs, contributing 1 each
-        case 4 (both from the same list):    2 * C(k, 2) pairs, contributing p
-
-    so the maximum is ``k^2 + p * k * (k - 1)``, which at ``p = 1/2`` is
-    ``k(3k - 1) / 2``.
-
-    ``k = 1`` is not degenerate: two disjoint singleton lists still contribute
-    one case-3 pair, and the formula gives 1. Only ``k = 0`` has no pairs.
+    Disjoint lists give ``k^2`` case-3 pairs at 1 and ``2 * C(k, 2)`` case-4 pairs
+    at ``p``, so the maximum is ``k^2 + p * k * (k - 1)``, or ``k(3k - 1) / 2`` at
+    ``p = 1/2``. ``k = 1`` gives 1 (one case-3 pair); only ``k = 0`` has no pairs.
     """
     _checked_penalty(penalty)
     if k < 1:
@@ -195,43 +140,9 @@ def kendall_fks(
 ) -> float:
     """Generalised Kendall distance between two top-k lists (G2b).
 
-    Every unordered pair drawn from the union of the two lists contributes
-    according to how it is witnessed:
-
-    ===== ================================================ ============
-    case  condition                                        contribution
-    ===== ================================================ ============
-    1     both elements appear in both lists               1 if oppositely ordered, else 0
-    2     both in one list, exactly one in the other       1 if the list holding both ranks
-                                                       the element the other is missing
-                                                       first, else 0
-    3     one element in each list only                    1
-    4     both in one list, neither in the other           ``p``
-    ===== ================================================ ============
-
-    Cases 2 and 3 carry the generalisation. Both encode the reading that an
-    element present in a list is ranked above one absent from it: case 3 then
-    disagrees unavoidably, and case 2 disagrees when the list holding both puts
-    the absent element first.
-
-    Direct ``O(k^2)`` enumeration over the union: at ``k <= 50`` that is at most
-    4950 pairs, so legibility beats the asymptotics here. The test suite
-    cross-checks it against :func:`kendall_tau_distance` where both apply.
-
-    Args:
-        a, b: Two top-k lists, best first. May rank different sets.
-        penalty: The case-4 penalty ``p``, in ``[0, 1]`` (G2).
-        normalise: Divide by :func:`fks_max` to land in ``[0, 1]``.
-
-    Returns:
-        The distance. ``0.0`` when both lists are empty or identical.
-
-    Raises:
-        ValueError: If ``penalty`` lies outside ``[0, 1]``. The check runs
-            before the enumeration because the division below cannot catch it:
-            ``fks_max`` is NaN for a NaN penalty and negative for a very
-            negative one, ``ceiling > 0.0`` is false in both cases, and the
-            normalisation then reports disjoint lists as being in agreement.
+    ``a``, ``b`` are best first and may rank different sets; union pairs score by FKS cases 1-4,
+    case 4 at ``penalty`` in ``[0, 1]`` (else ValueError). ``normalise`` divides by :func:`fks_max`
+    into ``[0, 1]``; equal lists give 0.0. Rationale: docs/engineering_notes.md#fks-cases
     """
     _checked_penalty(penalty)
     union = list(dict.fromkeys([*a, *b]))
@@ -298,10 +209,9 @@ def jaccard_distance(a: Sequence[int], b: Sequence[int]) -> float:
 class TopKComparison:
     """Every ordering measure for one pair of top-k lists at one ``k``.
 
-    Reported together because each is blind to something the others see:
-    ``kendall_intersection`` restricts to the elements the two lists share and so
-    cannot detect membership change, and quoting it alone would understate the
-    effect section 7.3 measures.
+    Each measure is blind to something the others see: ``kendall_intersection``
+    covers only shared elements, cannot detect membership change, and alone would
+    understate the effect section 7.3 measures.
     """
 
     k: int
@@ -326,13 +236,11 @@ class TopKComparison:
 def compare_top_k(a: Sequence[int], b: Sequence[int], k: int) -> TopKComparison:
     """Compare two top-k lists under every measure of G2(b) and G2(c).
 
-    Raises:
-        ValueError: ``k`` is negative. ``a[:k]`` is then a legal slice that
-            drops from the end rather than taking a prefix, and the native
-            binding refuses the same argument. ``k = 0`` compares nothing.
+    ``k = 0`` compares nothing. A negative ``k`` raises ValueError: ``a[:k]`` would
+    drop from the end instead of taking a prefix, and the native binding refuses it.
+    ``kendall_intersection`` is :func:`kendall_tau_distance` on the shared elements.
     """
-    if k < 0:
-        raise ValueError(f"compare_top_k({k}) is not a prefix; k must be non-negative")
+    check_prefix_k(k, "compare_top_k")
     prefix_a, prefix_b = list(a[:k]), list(b[:k])
     sa, sb = set(prefix_a), set(prefix_b)
     shared = sa & sb

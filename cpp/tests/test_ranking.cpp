@@ -1,9 +1,8 @@
-// The ranking layer: sort keys, selection strategies, margins and tie groups.
+// Tests for the ranking layer: sort keys, selection, margins and tie groups.
 //
-// The central case is that all five selection strategies emit the identical
-// permutation. Like `TAAT == DAAT` in the scoring layer, it pits structurally
-// unrelated algorithms against each other and demands byte equality, which
-// leaves little room for a comparator or indexing bug.
+// The central case requires all five selection strategies to emit the same
+// permutation. Like `TAAT == DAAT` in the scoring layer, it compares unrelated
+// algorithms for byte equality, which exposes comparator and indexing bugs.
 #include <tfidf/ranking/attributes.hpp>
 #include <tfidf/ranking/margins.hpp>
 #include <tfidf/ranking/ranker.hpp>
@@ -14,11 +13,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <numeric>
 #include <random>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -43,9 +46,10 @@ RankTable make_table(const std::vector<std::int32_t>& attr) {
     return t;
 }
 
-/// A table with several attributes, `attrs[a][d]` being document `d`'s rank
-/// under attribute `a`. `make_table` covers the one-attribute case; priority
-/// order cannot be tested with one attribute.
+/// A table with several attributes plus identifier ranks.
+///
+/// `attrs[a][d]` is the rank of document `d` under attribute `a`. Priority
+/// order needs at least two attributes, so `make_table` cannot test it.
 RankTable make_wide_table(const std::vector<std::vector<std::int32_t>>& attrs) {
     RankTable t;
     t.n_docs = static_cast<std::int32_t>(attrs.front().size());
@@ -67,6 +71,16 @@ std::vector<DocId> rank_with(const std::vector<Real>& scores,
     std::vector<DocId> out(scores.size());
     rank_full(keys, out, how);
     return out;
+}
+
+/// Hide a value from the optimiser.
+///
+/// A refused argument is then not carried into the code its guard skips,
+/// where GCC 15 reports an array bound.
+template <class T>
+T opaque(T value) {
+    volatile T held = value;
+    return held;
 }
 
 }  // namespace
@@ -211,6 +225,21 @@ TEST_CASE("ranker: partial selection matches the full ranking's prefix") {
     }
 }
 
+TEST_CASE("ranker: select_top refuses an m past the keys, for every strategy") {
+    // `Ranking.top_k` refuses such an m; a clamp would answer a different question.
+    const std::vector<Real> scores{0.5, 0.25, 0.75};
+    const RankTable t = make_table({0, 1, 2});
+    const std::vector<std::int32_t> priority{0};
+    for (const auto how : {Selection::FullSort, Selection::StableSort, Selection::PartialSort,
+                           Selection::NthElement, Selection::BoundedHeap}) {
+        std::vector<SortKey> keys(scores.size());
+        build_keys(scores, t, priority, keys);
+        std::vector<DocId> out(scores.size() + 1);
+        CHECK_THROWS_WITH_AS(select_top(keys, opaque(scores.size() + 1), out, how),
+                             "m exceeds the number of ranked documents", std::invalid_argument);
+    }
+}
+
 TEST_CASE("ranker: score dominates every attribute") {
     const RankTable t = make_table({9, 0});  // doc 1 has the better attribute
     const auto order = rank_with({1.0, 0.0}, t, {0}, Selection::FullSort);
@@ -225,15 +254,9 @@ TEST_CASE("ranker: an empty priority falls through to the identifier") {
 }
 
 TEST_CASE("ranker: a score tie is broken by the attribute, not by the identifier") {
-    // The case the suite did not have. Every other ranking test either gives
-    // the documents distinct scores, so the attribute is never consulted, or
-    // passes an empty priority, so there is no attribute to consult. Deleting
-    // the whole rank-copying loop from `build_keys` -- leaving every attribute
-    // rank at the zero `fill` puts there, so every tie fell through to the
-    // identifier -- left all 98 cases in this suite passing.
-    //
-    // Section 4.5 is about exactly this ordering, so nothing else in the
-    // repository has more reason to be pinned.
+    // Equal scores and a non-empty priority make the attribute rank decide the
+    // order, so the case fails if `build_keys` leaves every attribute rank at
+    // zero. Section 4.5 specifies this ordering.
     const RankTable t = make_table({9, 0});  // doc 1 has the better attribute
     const std::vector<Real> tied{0.5, 0.5};
 
@@ -460,12 +483,10 @@ TEST_CASE("attributes: ratio_less is a strict order") {
 }
 
 TEST_CASE("margins: an exact tie is a defined margin of zero, not any defined margin") {
-    // `is_exact_tie` is `defined && value == 0.0`. The two cases already tested
-    // agree with `defined || value == 0.0`: a zero margin is defined, and an
-    // undefined one carries NaN, which equals nothing. What separates them is a
-    // margin that is defined and NOT zero, which nothing asserted -- so the
-    // conjunction could be a disjunction and every top-k boundary would report
-    // itself as an exact tie, sending membership to the tie-break.
+    // `is_exact_tie` is `defined && value == 0.0`. A zero margin is defined and
+    // an undefined one is NaN, so only a defined non-zero margin separates `&&`
+    // from `||`. Under `||` every defined boundary reports an exact tie, which
+    // sends top-k membership to the tie-break.
     const std::vector<Real> s{1.0, 0.75, 0.5, 0.5, 0.25};
 
     const Margin gap = boundary_margin(s, 1);
@@ -473,8 +494,7 @@ TEST_CASE("margins: an exact tie is a defined margin of zero, not any defined ma
     REQUIRE(gap.value == 0.25);
     CHECK_FALSE(gap.is_exact_tie());
 
-    // And the two directions that already held, kept together with it so the
-    // three cases read as the truth table they are.
+    // The other two rows of the truth table: a zero margin and an undefined one.
     const Margin tie = boundary_margin(s, 3);
     CHECK(tie.defined);
     CHECK(tie.value == 0.0);
@@ -486,10 +506,8 @@ TEST_CASE("margins: an exact tie is a defined margin of zero, not any defined ma
 }
 
 TEST_CASE("margins: two scores have one gap, which is the boundary of the guard") {
-    // `adjacent_gaps` returns early below two scores. The existing cases use
-    // three, one and none, and every one of them agrees with a guard placed at
-    // three instead of two: the interesting size is exactly two, the smallest
-    // input that has a gap at all.
+    // `adjacent_gaps` returns early below two scores. Two is the smallest input
+    // with a gap, so only it separates a guard at two from a guard at three.
     CHECK(adjacent_gaps(std::vector<Real>{1.0, 0.75}) == std::vector<Real>{0.25});
     CHECK(adjacent_gaps(std::vector<Real>{1.0}).empty());
 
@@ -504,39 +522,21 @@ TEST_CASE("margins: two scores have one gap, which is the boundary of the guard"
     }
 }
 
-TEST_CASE("margins: k = 0 is undefined rather than a read below the first score") {
-    // `k <= 0` returns undefined. Relaxed to `k < 0`, k = 0 passes the guard,
-    // `k_effective` is 0, the `k_effective >= n` arm is false for any non-empty
-    // input, and the subtraction then indexes `sorted_scores[-1]`. The margin
-    // comes back marked defined either way, so the flag is what a test can see.
+TEST_CASE("margins: k <= 0 is refused, as resolve_k refuses it") {
+    // k = 0 is listed because a guard relaxed to `k < 0` would admit it and
+    // then read `sorted_scores[-1]`.
     const std::vector<Real> s{1.0, 0.75, 0.5};
 
-    const Margin zero = boundary_margin(s, 0);
-    CHECK_FALSE(zero.defined);
-    CHECK(std::isnan(zero.value));
-    CHECK(zero.k == 0);
-
-    const Margin negative = boundary_margin(s, -1);
-    CHECK_FALSE(negative.defined);
-    CHECK(std::isnan(negative.value));
-
-    const Margin zero_top = min_adjacent_margin_top(s, 0);
-    CHECK_FALSE(zero_top.defined);
-    CHECK(std::isnan(zero_top.value));
+    for (const std::int32_t k : {0, -1, -1073741824}) {
+        CHECK_THROWS_WITH_AS(static_cast<void>(boundary_margin(s, k)), "k must be positive",
+                             std::invalid_argument);
+        CHECK_THROWS_WITH_AS(static_cast<void>(min_adjacent_margin_top(s, k)),
+                             "k must be positive", std::invalid_argument);
+    }
 }
 
-TEST_CASE("margins: a refused k reports no effective k rather than a negative one") {
-    // `k_effective` is assigned past the `k <= 0` guard, so a refused k keeps
-    // the default 0. Assigned above it, `std::min(k, n)` would return the
-    // negative k, which `resolve_k` never yields on the Python side. `defined`
-    // is false for every refused k, so `k_effective` is the only field left.
+TEST_CASE("margins: an admitted k clamps to the scores") {
     const std::vector<Real> s{1.0, 0.75, 0.5};
-
-    for (const std::int32_t k : {-1, -5, -1073741824, 0}) {
-        CHECK(boundary_margin(s, k).k_effective == 0);
-        CHECK(min_adjacent_margin_top(s, k).k_effective == 0);
-        CHECK(boundary_margin(s, k).k == k);  // the requested k is still reported
-    }
 
     // A k the guard admits still clamps normally. k = 1 separates the `k <= 0`
     // guard from the `k_effective < 2` test below it. The margin is undefined
@@ -549,35 +549,27 @@ TEST_CASE("margins: a refused k reports no effective k rather than a negative on
 }
 
 TEST_CASE("margins: the minimum runs over the gaps inside the top-k and no further") {
-    // The loop stops at `j + 1 < k_effective`, so it reads the gaps between
-    // ranks 1..k and never the boundary gap at k -> k+1. That is the whole
-    // distinction between this and `boundary_margin`.
-    //
-    // The existing case cannot see it: with {1, .75, .5, .5, .25} at k = 4 the
-    // extra gap the relaxed bound would include is 0.25, and the minimum is
-    // already 0.0, so including it changes nothing. Here the gap just outside
-    // the top-k is the smallest in the list, so reading one too far returns it.
+    // The loop stops at `j + 1 < k_effective`, so it reads the gaps between ranks
+    // 1..k and never the boundary gap at k -> k+1, which `boundary_margin` reads.
+    // Here the gap just outside the top-k is the smallest in the list, so a loop
+    // that reads one gap too far returns it.
     const std::vector<Real> s{1.0, 0.75, 0.5, 0.4999};
 
     const Margin top = min_adjacent_margin_top(s, 3);
     CHECK(top.defined);
     CHECK(top.value == 0.25);  // min(1.0-0.75, 0.75-0.5); NOT 0.5-0.4999
 
-    // The gap the loop must not reach is genuinely smaller, so the case
-    // discriminates rather than happening to agree.
+    // The gap outside the top-k is smaller than the minimum inside it.
     const Margin boundary = boundary_margin(s, 3);
     CHECK(boundary.defined);
     CHECK(boundary.value < top.value);
 }
 
 TEST_CASE("margins: two scores are enough for a minimum over the top") {
-    // The guard is three clauses, and `n < 2` is DEAD in the original: reaching
-    // it needs k_effective = min(k, n) >= 2, which forces n >= 2. The Python
-    // mirror marks its copy "pragma: no cover - defensive" for that reason.
-    // Relaxing it to `n <= 2` resurrects it into a live guard that refuses the
-    // smallest corpus with a gap at all, and no case in this file passes a
-    // two-element span to this function -- the defined cases use five elements
-    // and the undefined case uses three.
+    // The guard's `n < 2` clause is unreachable: k_effective = min(k, n) >= 2
+    // forces n >= 2. A two-element span separates it from `n <= 2`, which
+    // would refuse the smallest corpus with a gap.
+    // Rationale: docs/engineering_notes.md#ranking-tests-two-score-minimum
     const std::vector<Real> two{1.0, 0.75};
 
     const Margin m = min_adjacent_margin_top(two, 2);
@@ -606,16 +598,10 @@ TEST_CASE("margins: a computed minimum is marked defined") {
 }
 
 TEST_CASE("ranker: select_top writes the first slot, not only the rest") {
-    // `select_top` copies the chosen keys with `for (i = 0; i < m; ++i)`. The
-    // existing prefix test does compare out[0], but its caller sizes `out` with
-    // `std::vector<DocId> out(m)`, which zero-initialises it -- and for that
-    // test's seed the top document IS document 0, so a loop starting at 1 left
-    // the right answer in place and the case passed. Fifty documents over four
-    // distinct scores tie heavily at the top, and ties fall to the identifier,
-    // which favours the lowest id.
-    //
-    // Here document 0 has the worst score, so nothing can leave a correct out[0]
-    // behind by accident.
+    // `select_top` copies from i = 0. A zero-initialised `out` already holds
+    // document 0, which wins identifier tie-breaks, so a loop starting at 1 can
+    // leave a correct out[0] in place. Here document 0 has the worst score and
+    // `out` holds a -1 sentinel.
     const std::vector<Real> scores{0.1, 0.9, 0.5};
     const RankTable t = make_table({0, 0, 0});
     const std::vector<std::int32_t> priority{0};
@@ -646,11 +632,10 @@ TEST_CASE("ranker: partition_is_valid can actually say no") {
     REQUIRE(partition_is_valid(keys, 2));
 
     SUBCASE("a violation at the very first key") {
-        // The loop over the prefix starts at i = 0, and m = 1 is what isolates
-        // that: with a one-element prefix there is no other index to catch the
-        // violation, so a loop starting at 1 runs zero iterations and reports a
-        // broken partition as valid. At m = 2 the displaced key lands in the
-        // tail and index 1 fails against it too, which hides the off-by-one.
+        // The prefix loop starts at i = 0. With m = 1 only index 0 can catch the
+        // violation, so a loop starting at 1 reports the broken partition as
+        // valid. At m = 2 a key swapped into the tail also fails against index 1,
+        // which hides that off-by-one.
         std::vector<SortKey> broken = keys;
         std::swap(broken[0], broken[1]);
         CHECK_FALSE(partition_is_valid(broken, 1));
@@ -678,12 +663,9 @@ TEST_CASE("ranker: partition_is_valid can actually say no") {
 }
 
 TEST_CASE("attributes: an empty table is vacuously a bijection") {
-    // `n_docs` defaults to 0, and the last line of `id_ranks_are_a_bijection`
-    // is `id_ranks.size() == n_docs`. Every other case builds the table through
-    // a helper that sets `n_docs`, so the default was never read -- and a
-    // default of 1 makes an empty table report that its (empty) identifier
-    // ranks are not a bijection, which is the one arrangement for which the
-    // question is trivially yes.
+    // `n_docs` defaults to 0 and `id_ranks_are_a_bijection` ends with
+    // `id_ranks.size() == n_docs`, so an empty table is a bijection. The
+    // helpers always set `n_docs`, so only this case reads the default.
     const RankTable empty;
     CHECK(empty.n_docs == 0);
     CHECK(empty.n_attrs == 0);
@@ -697,11 +679,9 @@ TEST_CASE("attributes: an empty table is vacuously a bijection") {
     CHECK_FALSE(mismatched.id_ranks_are_a_bijection());
 }
 
-TEST_CASE("sort_keys: a priority longer than the key can carry is reported") {
-    // `build_keys` is `noexcept` and stops at `kMaxAttributes`, so a longer
-    // priority is truncated silently and the key breaks ties on a prefix of the
-    // requested operator. The reference tuple has no such bound, so the two
-    // order ties differently. The binding raises; a noexcept function cannot.
+TEST_CASE("sort_keys: a priority longer than the key can carry is refused") {
+    // The reference tuple has no bound, so a key holding only a prefix of a
+    // longer priority would order ties differently; `build_keys` throws instead.
     const std::vector<std::int32_t> three{0, 1, 2};
     const std::vector<std::int32_t> four{0, 1, 2, 3};
     const std::vector<std::int32_t> five{0, 1, 2, 3, 0};
@@ -710,6 +690,15 @@ TEST_CASE("sort_keys: a priority longer than the key can carry is reported") {
     CHECK(priority_fits(four));  // the boundary is inclusive
     CHECK_FALSE(priority_fits(five));
     CHECK(priority_fits(std::vector<std::int32_t>{}));
+
+    // Two documents tied on the first three attributes; the fourth decides.
+    const RankTable t = make_wide_table({{0, 0}, {0, 0}, {0, 0}, {1, 0}});
+    const std::vector<Real> scores{0.5, 0.5};
+    std::vector<SortKey> keys(2);
+    build_keys(scores, t, four, keys);
+    CHECK(key_less(keys[1], keys[0]));
+    CHECK_THROWS_WITH_AS(build_keys(scores, t, five, keys),
+                         "more attributes than the sort key can carry", std::invalid_argument);
 }
 
 TEST_CASE("tie_groups: an out-of-range centre is refused rather than read") {

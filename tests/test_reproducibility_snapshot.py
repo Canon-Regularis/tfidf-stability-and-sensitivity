@@ -1,29 +1,8 @@
-"""The reproducibility snapshot: one digest over the whole pipeline.
+"""The reproducibility snapshot: one SHA-256 over every pipeline intermediate.
 
-README section 3 promises that "all stages of the pipeline are deterministic
-given a fixed corpus, configuration, and software environment". This file holds
-that promise to account.
-
-The snapshot is one SHA-256 over every intermediate the pipeline produces
-(vocabulary, document frequencies, IDF, weights, norms, scores, rankings,
-margins), taken from raw binary64 bit patterns rather than any decimal
-rendering. A one-ulp change anywhere moves it, so a change here means a
-published number has moved and the commit should say why.
-
-The digest must stay insensitive to everything that is not a number: working
-directory, time, document arrival order, interpreter hash seed. Those are tested
-separately below.
-
-The value is not hard-coded. A literal digest would fail on any platform whose
-``log`` rounds differently, which before G13 was every platform. Instead the
-digest is recomputed under varied conditions and required to agree.
-
-One constraint on this file: ``pytest`` is imported inside the tests that need
-it, never at module scope. ``test_the_digest_is_stable_across_processes_and_
-hash_seeds`` imports this module from a subprocess whose environment is
-deliberately stripped -- ``PATH`` is emptied so a path cannot reach a digest --
-and a top-level ``import pytest`` fails there. It fails as a CalledProcessError
-from the subprocess rather than as an ImportError naming the cause.
+The digest is taken from raw binary64 bit patterns and recomputed under varied
+conditions rather than compared with a literal. ``pytest`` is imported only
+inside tests. Rationale: docs/engineering_notes.md#reproducibility-snapshot
 """
 
 from __future__ import annotations
@@ -224,8 +203,10 @@ def test_the_manifest_digest_is_taken_over_a_recorded_set_of_bytes() -> None:
 
 
 def test_the_manifest_digest_ignores_volatile_fields() -> None:
-    """Two identical runs at different times on different machines must agree,
-    or the digest could only record a run rather than verify one."""
+    """Two identical runs at different times give the same manifest digest.
+
+    Otherwise the digest could only record a run rather than verify one.
+    """
     base = {
         "run_kind": "stability_profile",
         "parameters": {"tau": 1e-9, "ks": [5, 10]},
@@ -238,19 +219,11 @@ def test_the_manifest_digest_ignores_volatile_fields() -> None:
 
 
 def test_the_manifest_digest_agrees_across_machines_and_not_only_across_clocks() -> None:
-    """The "different machines" half of the sentence above, actually exercised.
+    """The manifest digest agrees across machines as well as across clocks.
 
-    Its sibling builds both manifests in one process, so ``environment_block()``
-    returns byte-identical dictionaries and only the time-varying half is tested.
-    Substituting a foreign environment block is what makes the claim falsifiable,
-    and it did falsify it: ``environment["platform"]`` is ``platform.platform()``
-    including the operating system build number, so the digest moved between any
-    two machines -- and on one machine, across an OS update.
-
-    The substituted block is a real one, a Linux CI leg of the shape
-    ``determinism.yml`` runs. That workflow requires one identical pipeline
-    digest across 18 legs, which is the repository asserting in the strongest
-    form available that these three keys move no number.
+    One process always returns the same ``environment_block()``, so a foreign
+    block from a Linux CI leg is substituted. ``platform``, ``machine`` and
+    ``python`` are stripped. Rationale: docs/engineering_notes.md#manifest-machine-keys
     """
     base = {"run_kind": "stability_profile", "parameters": {"tau": 1e-9, "ks": [5, 10]}}
     here = RunManifest(**base)  # type: ignore[arg-type]
@@ -270,16 +243,11 @@ def test_the_manifest_digest_agrees_across_machines_and_not_only_across_clocks()
 
 
 def test_each_machine_identifying_key_is_stripped_from_the_digest_on_its_own() -> None:
-    """One key at a time, so a partial fix cannot pass by way of the others.
+    """Each machine-identifying key is stripped from the digest on its own.
 
-    The sibling above substitutes all three at once and would still pass if two
-    were stripped and one were not, provided the third happened to match.
-
-    A loop rather than ``parametrize`` because this module imports ``pytest``
-    inside the tests that need it, never at module scope -- see the file
-    docstring -- and a decorator is evaluated at import time. The count is
-    asserted outside the loop, which is what ``check_test_vacuity.py`` requires
-    of a loop carrying the assertions.
+    A joint substitution cannot detect an unstripped key whose value happens to
+    match. A loop stands in for ``parametrize`` since ``pytest`` is not imported at
+    module scope; the count asserted after it shows that every key ran.
     """
     checked = 0
     for key in ("platform", "machine", "python"):
@@ -295,14 +263,11 @@ def test_each_machine_identifying_key_is_stripped_from_the_digest_on_its_own() -
 
 
 def test_the_environment_keys_that_move_numbers_still_move_the_digest() -> None:
-    """The other side of the same edit, and the reason it is three keys and not
-    the whole environment block.
+    """The environment keys that move numbers still move the digest.
 
-    A fast-math or arch-tuned build changes ``native``; a flush-to-zero mode
-    changes ``float``; both change the numbers, so both must change the digest.
-    ``implementation`` stays covered because nothing in this repository claims
-    CPython and PyPy agree bit for bit -- ``determinism.yml`` varies the
-    interpreter *version*, never its implementation.
+    A fast-math or arch-tuned build changes ``native`` and a flush-to-zero mode
+    changes ``float``. ``implementation`` stays covered: no claim is made that
+    CPython and PyPy agree bit for bit, and ``determinism.yml`` never varies it.
     """
     checked = 0
     for key in ("float", "native", "implementation"):
@@ -376,8 +341,10 @@ def test_the_manifest_writes_canonical_json(tmp_path) -> None:  # type: ignore[n
 
 
 def test_strip_volatile_is_recursive() -> None:
-    """A timestamp two levels down breaks a snapshot as effectively as one at
-    the top, so the stripping recurses."""
+    """Volatile keys are stripped at every depth of the payload.
+
+    A timestamp two levels down breaks a snapshot as surely as one at the top.
+    """
     payload = {"a": {"b": {"timestamp": 1, "keep": 2}}, "list": [{"cwd": "/x", "keep": 3}]}
     assert strip_volatile(payload) == {"a": {"b": {"keep": 2}}, "list": [{"keep": 3}]}
 
@@ -393,9 +360,10 @@ def test_model_bytes_are_the_same_object_every_call(mini_model) -> None:  # type
 def test_a_pure_python_run_records_a_null_native_block_rather_than_omitting_it(
     monkeypatch,  # type: ignore[no-untyped-def]
 ) -> None:
-    """An absent key and a null value read the same to a human and differently
-    to a digest. Recording ``None`` makes "there was no native backend" a stated
-    fact about the run rather than something inferred from a missing field.
+    """A pure-Python run records ``native`` as null rather than omitting it.
+
+    An absent key and a null value read the same to a human but differently to
+    a digest. ``None`` states that the run had no native backend.
     """
     monkeypatch.setattr(_native, "native_available", lambda: False)
     block = environment_block()
@@ -408,9 +376,11 @@ def test_a_pure_python_run_records_a_null_native_block_rather_than_omitting_it(
 def test_a_run_with_no_native_backend_counts_as_a_reproducible_build(
     monkeypatch,  # type: ignore[no-untyped-def]
 ) -> None:
-    """The reproducibility question is about compiler flags, and the pure-Python
-    reference has none: it is the normative implementation the native backend is
-    checked against, so refusing it would refuse the standard itself."""
+    """A run with no native backend counts as a reproducible build.
+
+    Reproducibility concerns compiler flags, and the pure-Python reference has
+    none. It is the normative implementation the native backend is checked against.
+    """
     monkeypatch.setattr(_native, "native_available", lambda: False)
     manifest = RunManifest("stability_profile")
     assert manifest.environment["native"] is None
@@ -419,19 +389,22 @@ def test_a_run_with_no_native_backend_counts_as_a_reproducible_build(
 
 
 def test_the_environment_records_the_interpreter_version_not_its_build_banner() -> None:
-    """`sys.version` is "3.12.1 (main, ...) [GCC ...]". Only the first field is
-    the version; the rest is a build banner that differs between two installs of
-    the same interpreter and would make the environment block -- which is inside
-    the manifest digest -- stop matching across machines."""
+    """The environment records the interpreter version without its build banner.
+
+    ``sys.version`` is "3.12.1 (main, ...) [GCC ...]". The banner after the
+    version differs between two installs of the same interpreter.
+    """
     import platform
 
     assert environment_block()["python"] == platform.python_version()
 
 
 def test_a_native_block_that_does_not_say_it_is_reproducible_is_not_assumed_to_be() -> None:
-    """The flag is absent on a build too old to report it. Defaulting to True
-    would let exactly the builds that cannot describe themselves publish
-    numbers."""
+    """A native block without a ``reproducible`` flag is not assumed reproducible.
+
+    The flag is absent on a build too old to report it. Defaulting to True would
+    let the builds that cannot describe themselves publish numbers.
+    """
     import pytest
 
     manifest = RunManifest("stability_profile")
@@ -442,9 +415,11 @@ def test_a_native_block_that_does_not_say_it_is_reproducible_is_not_assumed_to_b
 
 
 def test_the_refusal_names_the_two_flags_that_caused_it() -> None:
-    """The message is the whole remedy: it tells someone which build option to
-    drop. Losing the native block on the way into the message leaves it saying
-    `fast_math=None`, which names nothing."""
+    """The refusal message names the two flags that caused it.
+
+    The message states which build option to drop. Without the native block it
+    would read ``fast_math=None``, which names nothing.
+    """
     import pytest
 
     manifest = RunManifest("stability_profile")

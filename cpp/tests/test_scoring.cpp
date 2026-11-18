@@ -1,10 +1,8 @@
 // Sparse structures and query scoring.
 //
-// The centrepiece is `taat == daat` bit-for-bit. The two share no data
-// structure and no loop nesting: TAAT walks postings lists out of an inverted
-// index into a dense accumulator, DAAT merges each document's row against the
-// query independently. Identical binary64 from both says more than either one
-// matching a recorded expectation.
+// TAAT (postings into a dense accumulator) and DAAT (per-row merge) share no
+// data structure or loop nesting, so bitwise agreement cross-checks both.
+// Rationale: docs/engineering_notes.md#test-scoring-taat-daat-cross-check
 #include <tfidf/core/reduction.hpp>
 #include <tfidf/similarity/scoring.hpp>
 #include <tfidf/vectorisation/sparse.hpp>
@@ -13,9 +11,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <random>
+#include <span>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 using namespace tfidf;
@@ -40,9 +43,11 @@ struct Corpus {
 };
 
 
-/// The first row with any terms in it. A random corpus contains empty rows, and
-/// an empty query takes a shortcut that skips the code most of these tests are
-/// about.
+/// Return the first row with at least two terms, or row 0 if there is none.
+///
+/// A random corpus contains empty rows, and an empty query takes a shortcut
+/// that bypasses the scoring loops under test. Two terms let one document
+/// be reached by more than one posting of the query.
 SparseView first_non_empty_row(const CsrView& csr) {
     for (DocId d = 0; d < csr.n_rows; ++d) {
         if (csr.row(d).nnz() >= 2) {
@@ -115,21 +120,16 @@ TEST_CASE("sparse: canonical-form detection") {
 }
 
 TEST_CASE("sparse: a decreasing indptr is not canonical") {
-    // The normative Python rejects this: `_check_csr` in
-    // persistence/save_load.py raises "indptr decreases at row {i}". This
-    // mirror did not, and the two disagreed on exactly these arrays.
-    //
-    // `front == 0` and `back == nnz` both hold, so the arms `is_canonical()`
-    // already had could not see it. `row(1)` then computes `hi - lo` as
-    // `2 - 3` on `std::size_t`, which wraps to `std::dynamic_extent`, and
-    // `subspan` reads that as "to the end" -- so row 1 silently spanned the
-    // rest of the arrays and overlapped row 2 instead of being refused.
+    // Like `_check_csr` in persistence/save_load.py, `is_canonical()` rejects a decreasing indptr.
+    // `front == 0` and `back == nnz` both hold, so only the monotonicity arm rejects
+    // this input; without it, `row(1)` wraps `2 - 3` to `std::dynamic_extent`.
+    // Rationale: docs/engineering_notes.md#test-scoring-csr-indptr-monotonicity
     const std::vector<Offset> backwards{0, 3, 2, 4};
     const std::vector<TermId> indices{0, 1, 2, 3};
     const std::vector<Real> values{1.0, 2.0, 3.0, 4.0};
 
     const CsrView csr{backwards, indices, values, 3, 4};
-    CHECK(csr.indptr.front() == 0);              // the arms that did exist
+    CHECK(csr.indptr.front() == 0);              // the endpoint arms
     CHECK(csr.indptr.back() == csr.nnz());       // both pass on this input
     CHECK_FALSE(csr.is_canonical());
 }
@@ -264,6 +264,64 @@ TEST_CASE("scoring: reusing scratch across queries changes nothing") {
     }
 }
 
+TEST_CASE("scoring: one scratch serves every policy and corpus size in any order") {
+    // Each run on the shared scratch is compared with a run on a fresh one. The
+    // two corpus sizes force a reset between them, and the rotating policy order
+    // hands each compensated slot to a different document on the next query.
+    const Corpus big = random_corpus(80, 30, 10, 555);
+    const Corpus small = random_corpus(50, 30, 10, 556);
+    const std::vector<std::vector<TermId>> terms{{1, 4, 9}, {0, 4, 20, 21}, {2, 3, 5, 7, 11, 13}};
+    const std::vector<Reduction> policies{Reduction::Naive, Reduction::Neumaier,
+                                          Reduction::Pairwise, Reduction::Exact};
+
+    ScoringScratch shared;
+    for (std::size_t round = 0; round < policies.size(); ++round) {
+        for (const Corpus* c : {&big, &small}) {
+            const CsrView csr = c->view();
+            const Csc csc = transpose(csr);
+            for (std::size_t j = 0; j < policies.size(); ++j) {
+                const Reduction p = policies[(round + j) % policies.size()];
+                const std::vector<Real> norms = row_norms(csr, p);
+                for (const std::vector<TermId>& qi : terms) {
+                    const std::vector<Real> qv(qi.size(), 0.75 + static_cast<Real>(round));
+                    const SparseView q{qi, qv, csr.n_cols};
+                    const Real qn = l2_norm(q, p);
+                    std::vector<Real> fresh(static_cast<std::size_t>(csr.n_rows));
+                    std::vector<Real> reused(static_cast<std::size_t>(csr.n_rows));
+                    ScoringScratch own;
+                    score_taat(q, csc, norms, qn, fresh, own, p);
+                    score_taat(q, csc, norms, qn, reused, shared, p);
+                    for (std::size_t i = 0; i < fresh.size(); ++i) {
+                        CHECK(same_bits(fresh[i], reused[i]));
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("scoring: compensated slot storage follows the touched set, not the corpus") {
+    const Corpus c = random_corpus(200, 60, 6, 9001);
+    const CsrView csr = c.view();
+    const Csc csc = transpose(csr);
+    const std::vector<Real> norms = row_norms(csr, Reduction::Pairwise);
+    const std::vector<TermId> qi{3};
+    const std::vector<Real> qv{1.0};
+    const SparseView q{qi, qv, csr.n_cols};
+    REQUIRE(csc.df(3) > 0);
+
+    ScoringScratch scratch;
+    std::vector<Real> out(static_cast<std::size_t>(csr.n_rows));
+    score_taat(q, csc, norms, l2_norm(q, Reduction::Pairwise), out, scratch,
+               Reduction::Pairwise);
+    CHECK(scratch.touched.size() == csc.df(3));
+    CHECK(scratch.pairwise.size() == scratch.touched.size());
+    CHECK(scratch.pairwise.size() < static_cast<std::size_t>(csr.n_rows));
+    // Only the policy that ran holds storage.
+    CHECK(scratch.neumaier.empty());
+    CHECK(scratch.exact.empty());
+}
+
 TEST_CASE("scoring: the zero-vector convention of section 2.3") {
     const Corpus c = random_corpus(20, 10, 5, 3);
     const CsrView csr = c.view();
@@ -272,19 +330,15 @@ TEST_CASE("scoring: the zero-vector convention of section 2.3") {
     std::vector<Real> out(static_cast<std::size_t>(csr.n_rows));
     ScoringScratch scratch;
 
-    // A zero query scores 0 against everything and must not produce NaN.
-    //
-    // Poisoned first, and compared on bits. `std::vector<Real> out(n)` value-
-    // initialises to 0.0, so the previous form also passed when score_taat wrote
-    // nothing at all: it could not tell "wrote zeros" from "never ran". And
-    // `s == 0.0` is true of -0.0, which this repository treats as a distinct
-    // value everywhere else (ranking/margins.py reasons that -0.0 cannot occur,
-    // and every score comparison elsewhere is bitwise).
+    // A zero query scores +0.0 against everything, never NaN or -0.0.
+    // `out` is filled with NaN first so a kernel that writes nothing fails, and
+    // the sign is checked because `s == 0.0` also holds for -0.0.
+    // Rationale: docs/engineering_notes.md#test-scoring-zero-query-poisoned-output
     std::fill(out.begin(), out.end(), std::numeric_limits<Real>::quiet_NaN());
     const SparseView zero{{}, {}, csr.n_cols};
     score_taat(zero, csc, norms, 0.0, out, scratch, Reduction::Naive);
     for (const Real s : out) {
-        CHECK_FALSE(std::isnan(s));  // fails now if the kernel wrote nothing
+        CHECK_FALSE(std::isnan(s));  // fails if the kernel wrote nothing
         CHECK(s == 0.0);
         CHECK(std::signbit(s) == false);  // +0.0, never -0.0
     }
@@ -361,12 +415,10 @@ TEST_CASE("scoring: TAAT agrees with DAAT under every reduction policy") {
 }
 
 TEST_CASE("sparse: the vector guards are pinned at their boundaries, not past them") {
-    // The case above uses index 99 against dim 8, which is out of range by so
-    // much that relaxing the bound to `> dim` still rejects it; and it puts its
-    // first offending pair at position 2, so restricting the ascent check to
-    // `i > 1` still rejects that too. Both relaxations are real defects -- one
-    // admits an index one past the end, the other stops reading the first pair
-    // -- so each bound is stated here at the value that separates it.
+    // Each bound is tested at the value that separates it from a relaxed bound:
+    // an index equal to dim, and a bad first pair. The canonical-form case above
+    // (index 99, bad pair at position 2) is still rejected under `> dim` or `i > 1`.
+    // Rationale: docs/engineering_notes.md#test-scoring-sparse-guard-boundaries
     const std::vector<Real> v{1.0, 1.0};
 
     SUBCASE("an index equal to dim is out of range") {
@@ -399,11 +451,10 @@ TEST_CASE("sparse: the vector guards are pinned at their boundaries, not past th
 }
 
 TEST_CASE("sparse: each CSR envelope guard rejects on its own") {
-    // The envelope is four separate conditions and a malformed matrix usually
-    // breaks one of them. Written as one test with everything wrong at once,
-    // three of the four could be deleted and it would still pass -- and the
-    // front/back pair is a single `||`, so an input that violates both cannot
-    // tell it from `&&`. One violation per subcase is what distinguishes them.
+    // Each subcase breaks one envelope condition; an input that breaks front and
+    // back at once cannot distinguish their `||` from `&&`. A short `values` also
+    // moves `nnz()`, so the length subcase trips the back arm too; the next case isolates it.
+    // Rationale: docs/engineering_notes.md#test-scoring-csr-envelope-guards
     const std::vector<TermId> indices{0, 1, 2, 3};
     const std::vector<Real> values{1.0, 2.0, 3.0, 4.0};
 
@@ -509,10 +560,9 @@ TEST_CASE("sparse: df is a column length and row_norms starts at row zero") {
 }
 
 TEST_CASE("sparse: a default constructed view is empty rather than one wide") {
-    // The member initialisers. Every test builds these by aggregate
-    // initialisation, which overwrites all of them, so nothing else states what
-    // a default costs: a `dim` of 1 makes an empty vector claim a coordinate it
-    // has no value for, and an `n_rows` of 1 makes an empty matrix claim a row
+    // Pins the member initialisers, which aggregate initialisation elsewhere
+    // always overwrites. A default `dim` of 1 gives an empty vector a coordinate
+    // with no value; a default `n_rows` of 1 makes an empty matrix claim a row
     // whose `indptr` entries do not exist.
     const SparseView vector{};
     CHECK(vector.dim == 0);
@@ -530,12 +580,9 @@ TEST_CASE("sparse: a default constructed view is empty rather than one wide") {
 }
 
 TEST_CASE("score: a query with terms but no weight scores zero rather than NaN") {
-    // The guard is `query_norm == 0.0 || query.empty()`, and every existing
-    // case that reaches it is empty, so the norm arm is never the one that
-    // fires. A query with indices and all-zero values is not empty and has a
-    // zero norm: without the norm arm it reaches the divide, where the
-    // accumulated 0.0 over a query norm of 0.0 is NaN, and section 2.3's
-    // convention says the similarity is zero.
+    // Indices with all-zero values make a query that is not empty but has zero
+    // norm, so only the `query_norm == 0.0` arm of the guard stops 0.0 / 0.0 = NaN.
+    // Section 2.3 defines the similarity as zero. Every other zero query here is empty.
     const Corpus c = random_corpus(30, 20, 6, 4242);
     const CsrView csr = c.view();
     const Csc index = transpose(csr);
@@ -564,11 +611,9 @@ TEST_CASE("score: a query with terms but no weight scores zero rather than NaN")
 }
 
 TEST_CASE("score: nothing is written past the end of the output span") {
-    // `out` is sized by the caller to exactly n_rows, so a loop bound one too
-    // large writes into whatever follows it. The corruption is silent: the
-    // scores themselves stay correct, and only a build with a sanitiser would
-    // otherwise notice. A sentinel immediately after the span makes it visible
-    // in an ordinary build.
+    // `out` is exactly n_rows long, so a loop bound one too large corrupts the
+    // memory after it while the scores stay correct. A sentinel after the span
+    // makes the overrun visible without a sanitiser.
     const Corpus c = random_corpus(25, 15, 5, 606);
     const CsrView csr = c.view();
     const Csc index = transpose(csr);
@@ -589,11 +634,9 @@ TEST_CASE("score: nothing is written past the end of the output span") {
 }
 
 TEST_CASE("score: the algorithm asked for is the algorithm that runs") {
-    // TAAT and DAAT must return identical bits, which is what makes the pair a
-    // check on each other -- and also what makes the dispatch invisible to
-    // every test that only reads `out`. The two differ in what they touch:
-    // TAAT walks the inverted index through the scratch, DAAT merges each row
-    // and never uses it. So the scratch is the evidence of which one ran.
+    // TAAT and DAAT return identical bits, so `out` cannot show which one ran.
+    // TAAT fills the scratch's touched list and DAAT never uses it, so the
+    // scratch identifies the algorithm.
     const Corpus c = random_corpus(30, 12, 6, 31337);
     const CsrView csr = c.view();
     const Csc index = transpose(csr);
@@ -628,13 +671,9 @@ TEST_CASE("score: the algorithm asked for is the algorithm that runs") {
 }
 
 TEST_CASE("score: a document enters the touched list once however many terms hit it") {
-    // The comment at the accumulator says a double push "would only rewrite the
-    // same quotient" and is "asserted in the test suite". It was not. The
-    // compensated path tracks this with a separate `seen` array, and a document
-    // carrying several query terms is pushed once per posting without it.
-    //
-    // The scores stay right either way, so only the list itself shows it, and
-    // `clear_touched` walks that list on every subsequent query.
+    // Each document enters the touched list once, however many query terms hit
+    // it. The compensated policies track this with the scratch's `slot_of` map.
+    // Duplicates leave the scores unchanged but lengthen the next `clear_touched`.
     const Corpus c = random_corpus(40, 10, 8, 8080);
     const CsrView csr = c.view();
     const Csc index = transpose(csr);
@@ -665,5 +704,238 @@ TEST_CASE("score: a document enters the touched list once however many terms hit
             visits += index.df(query.indices[k]);
         }
         CHECK(visits > sorted.size());
+    }
+}
+
+// -----------------------------------------------------------------------------
+// The fitted index
+// -----------------------------------------------------------------------------
+namespace {
+
+/// Hide a value from the optimiser.
+///
+/// A refused argument is then not carried into the code its guard skips,
+/// where GCC 15 reports an array bound.
+template <class T>
+T opaque(T value) {
+    volatile T held = value;
+    return held;
+}
+
+const std::vector<Reduction> kPolicies{Reduction::Naive, Reduction::Neumaier, Reduction::Pairwise,
+                                       Reduction::Exact};
+
+FittedIndex fit(const Corpus& c, Reduction p) {
+    return FittedIndex(c.indptr, c.indices, c.values, c.n_rows, c.n_cols, p);
+}
+
+/// An index with no stored entries, shaped as the Python tests shape it.
+///
+/// A negative row count gets an empty indptr, any other count one zero offset
+/// per row plus one.
+FittedIndex empty_shape(DocId n_docs, TermId n_terms) {
+    std::vector<Offset> indptr;
+    if (n_docs >= 0) {
+        indptr.assign(static_cast<std::size_t>(n_docs) + 1, 0);
+    }
+    return FittedIndex(indptr, {}, {}, opaque(n_docs), opaque(n_terms), Reduction::Naive);
+}
+
+}  // namespace
+
+TEST_CASE("sparse: a negative dimension is never canonical") {
+    // At n_rows = -1 the size_t length n_rows + 1 is 0, which an empty indptr
+    // matches; a negative n_cols admits every empty row.
+    const std::vector<Offset> none;
+    const std::vector<Offset> one_row{0, 0};
+    CHECK_FALSE(CsrView{none, {}, {}, -1, 4}.is_canonical());
+    CHECK_FALSE(CsrView{one_row, {}, {}, 1, -1}.is_canonical());
+    CHECK_FALSE(CsrView{none, {}, {}, -1, -1}.is_canonical());
+}
+
+TEST_CASE("sparse: an empty corpus and an empty vocabulary are canonical") {
+    const std::vector<Offset> zero_rows{0};
+    const std::vector<Offset> two_rows{0, 0, 0};
+    CHECK(CsrView{zero_rows, {}, {}, 0, 4}.is_canonical());
+    CHECK(CsrView{two_rows, {}, {}, 2, 0}.is_canonical());
+}
+
+TEST_CASE("sparse: the indptr scan stops at the end of its view") {
+    // A CsrView may cover a prefix of a longer buffer. The entry after its last
+    // offset is smaller here, so a scan that read one entry too far would call
+    // this matrix not canonical, whatever memory lies past the buffer.
+    const std::vector<Offset> buffer{0, 1, 2, 0};
+    const std::vector<TermId> indices{0, 1};
+    const std::vector<Real> values{1.0, 2.0};
+    CHECK(CsrView{std::span<const Offset>(buffer).first(3), indices, values, 2, 2}.is_canonical());
+}
+
+TEST_CASE("fitted index: construction refuses what the kernels cannot read") {
+    // The five dimension pairs and the messages are the ones the Python suite pins.
+    const std::vector<std::pair<DocId, TermId>> negative{{-1, 4}, {0, -1}, {1, -1}, {-1, -1},
+                                                         {-5, -5}};
+    for (const auto& [n, m] : negative) {
+        CHECK_THROWS_WITH_AS(static_cast<void>(empty_shape(n, m)),
+                             "n_docs and n_terms must be non-negative", std::invalid_argument);
+    }
+    CHECK_THROWS_WITH_AS(
+        static_cast<void>(FittedIndex({0}, {}, {}, opaque<DocId>(5), 4, Reduction::Naive)),
+        "indptr must have length n_docs + 1", std::invalid_argument);
+    const std::vector<Real> short_values(opaque<std::size_t>(1), 1.0);
+    CHECK_THROWS_WITH_AS(
+        static_cast<void>(FittedIndex({0, 2}, {0, 1}, short_values, 1, 4, Reduction::Naive)),
+        "indices and values must be the same length", std::invalid_argument);
+    CHECK_THROWS_WITH_AS(
+        static_cast<void>(FittedIndex({0, 3}, {2, 0, 1}, {1.0, 1.0, 1.0}, 1, 4, Reduction::Naive)),
+        "the CSR matrix is not canonical: indices must be strictly ascending within each row "
+        "and lie in [0, n_terms)",
+        std::invalid_argument);
+}
+
+TEST_CASE("fitted index: an empty corpus or vocabulary is legal") {
+    const std::vector<std::pair<DocId, TermId>> shapes{{0, 4}, {2, 0}, {0, 0}};
+    for (const auto& [n, m] : shapes) {
+        FittedIndex index = empty_shape(n, m);
+        CHECK(index.n_documents() == n);
+        CHECK(index.n_features() == m);
+        CHECK(index.nnz() == 0);
+        REQUIRE(index.norms().size() == static_cast<std::size_t>(n));
+        for (const Real v : index.norms()) {
+            CHECK(v == 0.0);
+        }
+        std::vector<Real> out(static_cast<std::size_t>(n), -1.0);
+        index.score(SparseView{{}, {}, m}, out, ScoringAlgorithm::Taat);
+        for (const Real s : out) {
+            CHECK(s == 0.0);
+        }
+    }
+}
+
+TEST_CASE("fitted index: scores equal the hand-assembled pipeline bit for bit") {
+    const Corpus c = random_corpus(90, 35, 10, 4711);
+    const CsrView csr = c.view();
+    const Csc csc = transpose(csr);
+    const std::vector<std::vector<TermId>> terms{{}, {1, 4, 9}, {0, 2, 3, 5, 8, 13, 21, 34}};
+
+    for (const Reduction p : kPolicies) {
+        FittedIndex index = fit(c, p);
+        CHECK(index.policy() == p);
+        CHECK(index.n_documents() == csr.n_rows);
+        CHECK(index.n_features() == csr.n_cols);
+        CHECK(index.nnz() == csr.nnz());
+        CHECK(index.index().colptr == csc.colptr);
+        CHECK(index.index().rowidx == csc.rowidx);
+        CHECK(index.index().values == csc.values);
+        const std::vector<Real> norms = row_norms(csr, p);
+        REQUIRE(index.norms().size() == norms.size());
+        for (std::size_t i = 0; i < norms.size(); ++i) {
+            CHECK(same_bits(index.norms()[i], norms[i]));
+        }
+
+        for (const auto algorithm : {ScoringAlgorithm::Taat, ScoringAlgorithm::Daat}) {
+            for (const std::vector<TermId>& qi : terms) {
+                const std::vector<Real> qv(qi.size(), 1.25);
+                const SparseView q{qi, qv, csr.n_cols};
+                std::vector<Real> got(static_cast<std::size_t>(csr.n_rows));
+                std::vector<Real> want(static_cast<std::size_t>(csr.n_rows));
+                index.score(q, got, algorithm);
+                ScoringScratch scratch;
+                score(q, csr, csc, norms, l2_norm(q, p), want, scratch, p, algorithm);
+                for (std::size_t i = 0; i < got.size(); ++i) {
+                    CHECK(same_bits(got[i], want[i]));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("fitted index: df is refused outside the vocabulary") {
+    const FittedIndex index({0, 2, 4}, {0, 2, 1, 2}, {3.0, 4.0, 6.0, 8.0}, 2, 3, Reduction::Naive);
+    CHECK(index.df(0) == 1);
+    CHECK(index.df(1) == 1);
+    CHECK(index.df(2) == 2);
+    for (const TermId t : {-1, 3}) {
+        CHECK_THROWS_WITH_AS(static_cast<void>(index.df(opaque(t))), "term identifier out of range",
+                             std::out_of_range);
+    }
+}
+
+TEST_CASE("fitted index: a query is checked before the algorithm") {
+    FittedIndex index = fit(random_corpus(20, 10, 5, 99), Reduction::Naive);
+    std::vector<Real> out(20);
+    const std::vector<TermId> descending{5, 2};
+    const std::vector<TermId> past_end{opaque<TermId>(10)};
+    const std::vector<TermId> ascending{1, 3};
+    const std::vector<Real> two{1.0, 1.0};
+    const std::vector<Real> one{1.0};
+    const SparseView ok{ascending, two, 10};
+    const char* not_canonical =
+        "the query is not canonical: indices must be strictly ascending and lie in "
+        "[0, n_features)";
+
+    CHECK_THROWS_WITH_AS(index.score(SparseView{descending, two, 10}, out, ScoringAlgorithm::Taat),
+                         not_canonical, std::invalid_argument);
+    CHECK_THROWS_WITH_AS(index.score(SparseView{past_end, one, 10}, out, ScoringAlgorithm::Taat),
+                         not_canonical, std::invalid_argument);
+    for (const std::int32_t a : {-1, 2, 999}) {
+        CHECK_THROWS_WITH_AS(index.score(ok, out, static_cast<ScoringAlgorithm>(a)),
+                             "scoring algorithm out of range", std::invalid_argument);
+    }
+    // Wrong in both ways, a query reports its own fault, as the binding always has.
+    CHECK_THROWS_WITH_AS(
+        index.score(SparseView{descending, two, 10}, out, static_cast<ScoringAlgorithm>(2)),
+        not_canonical, std::invalid_argument);
+    CHECK_NOTHROW(index.score(ok, out, ScoringAlgorithm::Taat));
+    CHECK_NOTHROW(index.score(ok, out, ScoringAlgorithm::Daat));
+}
+
+TEST_CASE("fitted index: one index carries nothing from one query to the next") {
+    const Corpus c = random_corpus(60, 25, 8, 321);
+    const std::vector<TermId> q1i{1, 2, 3, 4, 5, 6};
+    const std::vector<TermId> q2i{0, 4, 7};
+    const std::vector<Real> q1v(q1i.size(), 0.5);
+    const std::vector<Real> q2v(q2i.size(), 2.0);
+    const SparseView q1{q1i, q1v, c.n_cols};
+    const SparseView q2{q2i, q2v, c.n_cols};
+    const auto n = static_cast<std::size_t>(c.n_rows);
+
+    for (const Reduction p : kPolicies) {
+        FittedIndex shared = fit(c, p);
+        std::vector<Real> scratch_out(n);
+        shared.score(q1, scratch_out, ScoringAlgorithm::Taat);
+        shared.score(q2, scratch_out, ScoringAlgorithm::Daat);
+        shared.score(q1, scratch_out, ScoringAlgorithm::Taat);
+        std::vector<Real> reused(n);
+        shared.score(q2, reused, ScoringAlgorithm::Taat);
+
+        FittedIndex own = fit(c, p);
+        std::vector<Real> fresh(n);
+        own.score(q2, fresh, ScoringAlgorithm::Taat);
+        for (std::size_t i = 0; i < n; ++i) {
+            CHECK(same_bits(fresh[i], reused[i]));
+        }
+    }
+}
+
+TEST_CASE("fitted index: a copy owns its storage and scores as its source does") {
+    const Corpus c = random_corpus(40, 20, 6, 777);
+    const std::vector<TermId> qi{2, 5, 11};
+    const std::vector<Real> qv{1.0, 0.5, 2.0};
+    const SparseView q{qi, qv, c.n_cols};
+    const auto n = static_cast<std::size_t>(c.n_rows);
+
+    FittedIndex source = fit(c, Reduction::Pairwise);
+    std::vector<Real> warm(n);
+    source.score(q, warm, ScoringAlgorithm::Taat);
+    FittedIndex copy = source;
+    CHECK(copy.csr().indptr.data() != source.csr().indptr.data());
+
+    std::vector<Real> a(n);
+    std::vector<Real> b(n);
+    source.score(q, a, ScoringAlgorithm::Taat);
+    copy.score(q, b, ScoringAlgorithm::Taat);
+    for (std::size_t i = 0; i < n; ++i) {
+        CHECK(same_bits(a[i], b[i]));
+        CHECK(same_bits(a[i], warm[i]));
     }
 }

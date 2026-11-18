@@ -1,9 +1,8 @@
 # The pull-request gate.
-#
-# The pure-Python reference is normative and needs no compiler. So the Python
-# suite runs on every OS and every supported interpreter with no toolchain, and
-# the native jobs are additive. A contributor without a C++ compiler can still
-# run and pass the whole normative suite.
+
+# The pure-Python reference is normative and needs no compiler, so the Python
+# suite runs on every OS and supported interpreter without a toolchain. The
+# native jobs are additive.
 
 name: ci
 
@@ -16,27 +15,10 @@ on:
 permissions:
   contents: read
 
-# What every pytest invocation in this workflow reports, set once.
-#
-# Written as `-o` settings rather than flags because pytest derives verbosity
-# from count(-v) minus count(-q), and every run here passes -q: a `-v` added
-# here would cancel against it and leave the output quieter than before.
-# Measured, not assumed.
-#
-#   verbosity_test_cases=1  names each test as it starts, so the last line of a
-#                           truncated log is the test that hung. A property test
-#                           hung one matrix cell for 47 minutes; the log held
-#                           only progress dots, and finding the cell meant
-#                           comparing job durations across nine legs.
-#   faulthandler_timeout    dumps a stack trace for every thread after 300s in
-#                           one test and, with exit_on_timeout, ends the run
-#                           there. pytest ships this; pytest-timeout is not
-#                           needed, and no dependency is added.
-#   --durations=25          prints the slowest 25, so the outlier is in the log
-#                           rather than reconstructed from the job list.
-#
-# The cap is per test, well under every job-level timeout-minutes, so it fires
-# first and leaves a diagnosis behind instead of a cancelled job.
+# Report settings for every pytest run in this workflow. Verbosity is an `-o`
+# option because each run passes -q and an added -v would cancel it. Each test
+# is named as it starts, a test over 300s dumps all stacks and ends the run, and
+# the slowest 25 print. Rationale: docs/engineering_notes.md#ci-pytest-report-settings
 env:
   PYTEST_ADDOPTS: >-
     -o verbosity_test_cases=1
@@ -45,23 +27,17 @@ env:
     --durations=25
 
 # bash on every runner, including Windows, where the default is pwsh.
-#
-# GitHub runs bash with `set -eo pipefail`, so a failed command aborts the step.
-# Its pwsh wrapper sets `$ErrorActionPreference` (which governs cmdlets) and
-# then checks `$LASTEXITCODE` only at the end of the block, so a native command
-# failing mid-block is ignored. In the `native` job that combines badly with a
-# suite whose native tests are skipif-guarded: a failed `pip install -e .`
-# leaves the extension unimportable, every differential test skips, pytest exits
-# 0, and the job reports green having tested nothing. Two multi-line blocks
-# there were exposed.
+
+# bash runs with `set -eo pipefail`, so a failed command aborts the step. The
+# pwsh wrapper checks `$LASTEXITCODE` only at the end of a block, so a native
+# command that fails mid-block does not fail the step.
+# Rationale: docs/engineering_notes.md#ci-bash-default-shell
 defaults:
   run:
     shell: bash
 
 # Every job below carries `timeout-minutes`. A hang is a failure, and an untimed
-# job turns one into a cancelled run hours later with no diagnosis: a property
-# test that hung only on windows py3.13 burned 47 minutes before anyone stopped
-# it, while the same job on every other interpreter finished in three.
+# job turns it into a run cancelled hours later with no diagnosis.
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -76,31 +52,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
-          # The oldest interpreter we support, because [tool.mypy] sets
-          # python_version = "3.11" and the two have to agree. numpy 2.5
-          # requires 3.12 and its stubs use PEP 695 `type` statements, which
-          # mypy refuses to parse while targeting 3.11; on a 3.12 runner the job
-          # then type-checks against a numpy no 3.11 user can install and dies
-          # inside numpy's own .pyi. Resolving the dependencies on 3.11 gets the
-          # numpy a 3.11 user has.
+          # The oldest supported interpreter, to match [tool.mypy] python_version.
+          # numpy 2.5 requires 3.12 and its stubs use PEP 695 `type` statements,
+          # which mypy cannot parse while targeting 3.11. Resolving on 3.11
+          # installs the numpy a 3.11 user has.
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
       # ruff and mypy are pinned in requirements-dev.txt; see the note there.
-      # Installing them by name here reintroduces the drift the pins stop.
+      # Installing them by name here would bypass those pins.
       - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
-      # examples/ is included: it is the first thing a reader runs, so a broken
-      # example is a worse failure than a broken internal module. The documented
-      # local gate covers it; CI did not.
+      # examples/ is included: it is the first code a reader runs, and the
+      # documented local gate covers it too.
       - run: python -m ruff check src tests scripts examples tooling
       - run: python -m ruff format --check src tests scripts examples tooling
       - run: python -m mypy
       - name: The two declarations of every dependency must agree
         # `pyproject.toml` is what an install of the distribution resolves and
-        # `requirements*.txt` is what CI installs. They had drifted in both
-        # directions, so the two commands gave different environments.
+        # `requirements*.txt` is what CI installs. This check keeps them in
+        # agreement, so both give the same environment.
         run: python scripts/check_dependencies.py
       - name: Vendored assets must match their recorded digests
         # Same script pre-commit runs, so a contributor sees this locally first.
@@ -108,18 +80,14 @@ jobs:
       - name: The C++ tree must mirror the Python packages
         run: python scripts/check_layout.py
       - name: Nothing may call a stdlib API newer than requires-python
-        # mypy above runs over src/ only. This defect was in tests/ and
-        # scripts/: `Path.read_text(newline=...)` exists from 3.13, the floor is
-        # 3.11, and it failed five jobs at once while passing every local check
-        # on a newer interpreter. Asks mypy one question at the floor rather
-        # than pointing strict mypy at those trees, which is separate work.
+        # mypy above covers src/ and tooling/ only. This asks mypy, at the
+        # requires-python floor, whether tests/, scripts/ or examples/ call a
+        # newer API such as `Path.read_text(newline=...)`, which exists from 3.13.
         run: python scripts/check_python_floor.py
       - name: C++ must match the style file the repository ships
-        # `.clang-format` sat in the tree with nothing applying it, and five
-        # lines had drifted past its own ColumnLimit. clang-format itself is not
-        # run here because it is not on every contributor's machine and a check
-        # that skips when its tool is missing is no check; this enforces the
-        # subset that needs no tool, reading the limits from the file.
+        # clang-format is not on every contributor's machine, and a check that
+        # skips when its tool is missing checks nothing. This enforces the subset
+        # of `.clang-format` that needs no tool, reading the limits from the file.
         run: python scripts/check_cpp_format.py
       - name: No test may pass without asserting anything
         # The run-level guards elsewhere (ctest --no-tests=error, the executed-test
@@ -192,12 +160,9 @@ jobs:
         run: python -m pytest tests/ -q -k "hash_seed or determinism or reproducib"
         env:
           PYTHONHASHSEED: random
-          # A step's `env:` applies to that step alone. HYPOTHESIS_PROFILE was
-          # set on the step above, so this one saw no profile and conftest.py
-          # fell back to its default of `dev`: 50 examples against the 1,000 the
-          # run above uses. The selection here is 105 tests, several of them
-          # property tests, and they were being searched twenty times less hard
-          # than in the preceding step, silently.
+          # A step's `env:` applies to that step alone, so the profile is set
+          # again here. Without it conftest.py falls back to `dev`, 50 examples
+          # against 1,000, for a selection that includes property tests.
           HYPOTHESIS_PROFILE: ci
 
   native:
@@ -218,12 +183,10 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
-      # Pinned to a commit hash. A tag can be moved; @master cannot be
-      # reproduced at all, and is currently ahead of the v6 release. An unpinned
-      # third-party action also makes a CI run something other than a function
-      # of this repository's contents, which is the one claim this project makes
-      # about everything else it does. It has bitten once already: a determinism
-      # run failed when the action's own download step errored.
+      # Pinned to a commit hash: a tag can be moved and @master cannot be
+      # reproduced. An unpinned third-party action makes a CI run depend on more
+      # than this repository's contents.
+      # Rationale: docs/engineering_notes.md#ci-third-party-action-pins
       - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - name: Build the native backend and its tests
@@ -235,28 +198,14 @@ jobs:
         # set once in CMakePresets.json rather than repeated per workflow.
         run: ctest --preset ci
       - name: Install the extension
-        # Build isolation ON, which is pip's default.
-        #
-        # This step used `--no-build-isolation`, which resolves the build
-        # backend from the ambient environment. On windows-latest it could not:
-        #     BackendUnavailable: Cannot import 'scikit_build_core.build'
-        # Reproduced on a Windows machine where the isolated install succeeds
-        # and the non-isolated one fails, with scikit-build-core installed in
-        # both cases. It had been failing invisibly for a long time: the command
-        # sat at the top of a multi-line block running under pwsh, which does
-        # not abort mid-block, so pytest ran anyway, every native test skipped
-        # on its skipif guard, and the job reported success.
-        #
-        # Isolation is also the more faithful test. pip builds in a clean
-        # environment holding only `[build-system] requires`, which is what
-        # someone installing this package gets; `--no-build-isolation`
-        # exercises a configuration no user has.
+        # Build isolation stays on, as pip's default. pip builds in a clean
+        # environment holding only `[build-system] requires`, as a user's install
+        # does; without isolation, windows-latest cannot import scikit_build_core.
+        # Rationale: docs/engineering_notes.md#ci-build-isolation
         run: python -m pip install -e .
 
-      # Ordered before the import check. This guard is the one that can explain
-      # an import failure: a .pyd linked against a GCC runtime DLL fails to load
-      # with a bare "DLL load failed" and nothing else. It used to run after the
-      # test step, so when the import check fired the diagnosis never ran.
+      # Ordered before the import check, because this guard explains an import
+      # failure that otherwise reports only "DLL load failed".
       - name: The extension must be self-contained (Windows)
         # A MinGW-built .pyd that depends on libwinpthread-1.dll fails to import
         # with a bare "DLL load failed", because CPython's search path does not
@@ -264,24 +213,16 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          # Both preconditions are asserted rather than assumed. The previous
-          # form, `command -v objdump >/dev/null && objdump -p "$pyd" | grep -q`,
-          # reported success in the two cases that matter most: no .pyd built at
-          # all (find matches nothing, objdump errors on the empty path, grep
-          # matches nothing, step exits 0 announcing the extension is
-          # self-contained), and objdump absent from the runner, which
-          # short-circuits the condition to false. A guard that cannot run must
-          # say so instead of passing.
+          # Both preconditions are asserted: a .pyd exists and objdump is on the
+          # runner. A guard that cannot run fails instead of passing.
           pyd=$(find src -name "_tfidf_native*.pyd" | head -1)
           [ -n "$pyd" ] || { echo "::error::no _tfidf_native*.pyd was built"; exit 1; }
           echo "checking $pyd"
           command -v objdump >/dev/null \
             || { echo "::error::objdump unavailable; this guard cannot run"; exit 1; }
-          # Read the import table; a byte scan of the file gives wrong answers.
-          # A -static MinGW build still contains the literal string
-          # "libgcc_s_dw2-1.dll" (the unwinder's runtime LoadLibrary fallback)
-          # while importing nothing of the sort, so scanning the bytes reports a
-          # self-contained extension as broken. Verified against a real build.
+          # Read the import table, not the file's bytes. A -static MinGW build
+          # still contains the string "libgcc_s_dw2-1.dll" (the unwinder's
+          # runtime LoadLibrary fallback) while importing no such DLL.
           deps=$(objdump -p "$pyd" | grep -i "DLL Name:" || true)
           # Every PE imports something (KERNEL32, pythonXY). No names at all
           # means the inspection failed rather than a clean extension.
@@ -293,14 +234,10 @@ jobs:
           fi
 
       - name: The native backend must be importable
-        # Asserted, not hoped for. Every native test is skipif-guarded on
-        # native_available(), and pytest exits 0 when all of them skip, so an
-        # extension that builds but cannot load turns this job into a second run
-        # of the reference suite while still reporting the native backend green.
-        #
-        # The diagnosis on failure -- the reason, both ABIs, and which
-        # extensions are tagged for this interpreter -- belongs to the CLI, so
-        # the five jobs that need this assertion cannot drift apart.
+        # Every native test is skipif-guarded on native_available() and pytest
+        # exits 0 when all of them skip, so the extension's loading is asserted.
+        # The CLI owns the failure diagnosis, so the five jobs that need this
+        # assertion cannot drift apart.
         run: python -m tfidf_stability.cli.main info --require-native
 
       - name: Run the full suite with the native backend present
@@ -315,11 +252,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Install the analyser, and record which one
-        # The version is printed because it is not pinned and cannot easily be:
-        # cppcheck comes from the Ubuntu archive, so the verdict is a function of
-        # the archive on the day as much as of this tree. Recording it is what
-        # lets a finding that appears without a code change be attributed to the
-        # analyser rather than investigated as a regression.
+        # cppcheck comes from the Ubuntu archive and is not pinned. The version
+        # is printed so that a finding without a code change can be attributed
+        # to the analyser rather than treated as a regression.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cppcheck
@@ -349,15 +284,9 @@ jobs:
             requirements-dev.txt
       - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
-      # The compiled backend has to be present for this job to measure what it
-      # claims to. Without it `benchmarks/tfidf_perf.py` loses its 66 statements
-      # of native comparison, `cli/commands.py` its build-info block and
-      # `manifest.py` the arm that records a build -- code that exists, ships and
-      # runs, but cannot execute on a machine with no compiler. Measuring the
-      # subset that happens to be reachable and calling the result 100% would be
-      # the kind of green-but-empty number this project's test suite is built to
-      # refuse. The pure-Python arms stay covered because the tests reach them by
-      # monkeypatching `native_available`, not by the machine lacking a compiler.
+      # The compiled backend is installed so that native-only code is measured.
+      # Tests reach the pure-Python arms by monkeypatching `native_available`.
+      # Rationale: docs/engineering_notes.md#ci-coverage-native-backend
       - name: Install the extension, so every path is reachable
         run: python -m pip install -e .
       - name: The compiled backend must actually have loaded
@@ -367,22 +296,10 @@ jobs:
         # costs one step and saves the misdiagnosis.
         run: python -m tfidf_stability.cli.main info --require-native
       - name: Coverage, with a floor
-        # A coverage number nobody gates on is decoration. The floor ratchets and
-        # is never lowered to make a build pass.
-        #
-        # -m "not slow" is what makes the tiering honest. Because the stress tier
-        # is deselected here, a slow test can never be the only cover for a line:
-        # if it were, this job goes red and asks for a fast sibling. Stress tests
-        # widen the input domain, they never introduce coverage. The full tier
-        # runs in nightly.
-        #
-        # --cov-branch is explicit even though pyproject sets branch = true, so
-        # the intent survives someone editing that setting.
-        #
-        # The floor is 100 on lines and branches both. At that setting the number
-        # stops being a summary and becomes a question about every new line: it
-        # is covered, or it carries a pragma naming the reason. The pragmas in
-        # src/ are countable and each states why the line cannot be reached.
+        # The floor is 100 on lines and branches and is never lowered; a line that
+        # cannot be reached carries a pragma stating why. -m "not slow" keeps a
+        # stress test from being the only cover for a line.
+        # Rationale: docs/engineering_notes.md#ci-coverage-floor
         run: >
           python -m pytest tests/ -q -m "not slow"
           --cov --cov-branch --cov-report=term-missing
@@ -408,8 +325,8 @@ jobs:
       - run: python -m pip install --upgrade pip -r requirements-dev.txt
       - run: python -m pip install -e . -C cmake.define.TFIDF_BUILD_NATIVE=OFF
       - name: The .tfsx parser and the tokeniser must never leak an untyped error
-        # This found a real defect on its first run: one byte set to 0x80 inside
-        # the token block leaked a bare UnicodeDecodeError out of the parser.
+        # A malformed byte, such as 0x80 inside the token block, must raise a
+        # typed parser error rather than a bare UnicodeDecodeError.
         run: python -m pytest tests/test_fuzz_parsers.py -q --hypothesis-profile=ci
 
   notebooks:
@@ -428,9 +345,9 @@ jobs:
       - run: python -m pip install --upgrade pip -r requirements-dev.txt matplotlib
       - run: python -m pip install -e . -C cmake.define.TFIDF_BUILD_NATIVE=OFF
       - name: Every notebook must run top to bottom
-        # A notebook that no longer runs is worse than no notebook: it documents
-        # an API that has moved. nbmake executes them as tests; outputs are not
-        # committed, so this is the only thing keeping them honest.
+        # A notebook that fails to run documents an API that has moved. nbmake
+        # executes each one as a test; outputs are not committed, so this is the
+        # only check on them.
         run: python -m pytest --nbmake notebooks/ -q
 
   docs:
@@ -443,8 +360,8 @@ jobs:
         with:
           python-version: "3.12"
       - name: Relative links in docs/ must point at files that exist
-        # The implementation notes cross-reference the code heavily. A stale link
-        # is a silent lie about where something lives.
+        # The implementation notes cross-reference the code heavily, and a stale
+        # link misstates where something lives.
         run: python scripts/check_docs.py
       - name: The pipeline must still produce the digest this repository records
         # Cheap (one fixed six-document corpus) and it belongs on every PR, not
@@ -452,14 +369,9 @@ jobs:
         # platforms together, which determinism.yml is blind to by construction.
         run: python scripts/snapshot.py --check
       - name: Every place that states the version must agree
-        # Four files name it and nothing made them agree: pyproject.toml and
-        # __init__.py said 0.2.0 while CITATION.cff still said 0.1.0. A citation
-        # carrying the wrong version is a claim about which code produced a
-        # published number, which is the one thing this repository asserts about
-        # everything else it does.
-        #
-        # release.yml passes the tag as well, so a tag that disagrees with the
-        # tree cannot reach the build.
+        # Four files state the version, and a citation with the wrong version
+        # misstates which code produced a published number. release.yml also
+        # passes the tag, so a tag that disagrees with the tree cannot build.
         run: python scripts/check_versions.py
 
   cli:
@@ -533,14 +445,9 @@ jobs:
           python scripts/build_corpus.py movielens_small -o /tmp/ml.jsonl 2>&1 | tee /tmp/ml.log || true
           grep -q "fetch_data.py" /tmp/ml.log
       - name: A reference-only install must work without a compiler
-        # `pip install . -C cmake.define.TFIDF_BUILD_NATIVE=OFF` is the
-        # documented escape hatch; if it breaks, the claim that the reference
-        # backend stands alone is false.
-        #
-        # Both directions. The first command proves the install runs at all; the
-        # second proves it really is reference-only, since a step that merely
-        # printed `native_available()` passed whether the answer was True or
-        # False, and so could not tell this install from an ordinary one.
+        # `pip install . -C cmake.define.TFIDF_BUILD_NATIVE=OFF` is the documented
+        # escape hatch. The first command checks that the install runs; the
+        # second checks that no loadable extension was built.
         run: |
           python -m tfidf_stability.cli.main info
           if python -m tfidf_stability.cli.main info --require-native >/dev/null 2>&1; then

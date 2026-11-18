@@ -1,21 +1,8 @@
 """Stratification of ablation results by margin (README section 7.3).
 
-Section 7.3: "Results are stratified by the boundary margin ``m_k`` relative to
-``tau``, since tie-break effects are expected to concentrate in the near-tie
-regime ``m_k <= tau``." That expectation is research question A2, so the
-stratification tests it: disagreement spread uniformly across bands would falsify
-the claim that tie-breaking is a near-tie phenomenon.
-
-Stratifying by ``m_k`` is legitimate because the margin is tie-break independent,
-depending only on the sorted score multiset and so identical under all three
-operators. Stratifying an operator comparison by an operator-dependent quantity
-would be circular.
-
-Empirical warning for the interpretation: on short-text corpora the ``m_k == 0``
-band is no small tail. Documents with no in-vocabulary tokens all score zero and
-form one large exact-tie block, so the near-tie regime is in practice
-substantially an exact-tie regime. Hence :data:`EXACT_TIE_BAND` stays separate
-from the merely-small band.
+Tests research question A2, that tie-break effects concentrate where ``m_k <= tau``.
+The margin is tie-break independent, and :data:`EXACT_TIE_BAND` is a band of its own.
+Rationale: docs/engineering_notes.md#margin-stratification
 """
 
 from __future__ import annotations
@@ -26,6 +13,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from tfidf_stability.analysis.tie_break_ablations import AblationResult, OperatorPair
+from tfidf_stability.utils.validation import check_tau
 
 __all__ = [
     "EXACT_TIE_BAND",
@@ -111,25 +99,11 @@ def stratify_by_margin(
 ) -> list[Stratum]:
     """Group one operator comparison by margin band, per ``k``.
 
-    Args:
-        results: Ablation results, one per query.
-        tau: The near-tie tolerance the bands are centred on. Explicit and
-            required: nothing in this package supplies a default, because
-            section 7.1 makes every tie-break result conditional on ``tau``.
-        baseline, variant: Which operator comparison to stratify.
-        ks: The k values to report.
-
-    Returns:
-        One :class:`Stratum` per (band, k), empty bands included so a plot's
-        x-axis is complete rather than silently ragged.
+    ``results`` holds one ablation result per query; ``baseline`` and ``variant`` name
+    the comparison. ``tau`` has no default, as section 7.1 makes every tie-break result
+    conditional on it. Returns one :class:`Stratum` per (band, k), empty bands included.
     """
-    # `not (tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is
-    # false, so the second form lets NaN through a guard whose own message says
-    # non-negative. tie_groups.py:104,151,195 already spell it this way for
-    # exactly this reason, and a NaN here would give every band NaN bounds and
-    # drop every pair into the final band via _band_of's fallthrough.
-    if not (tau >= 0.0):
-        raise ValueError(f"tau must be non-negative, got {tau}")
+    check_tau(tau)
 
     bands = margin_bands(tau)
     labels = [EXACT_TIE_BAND, *(b[0] for b in bands), UNDEFINED_BAND]
@@ -142,21 +116,10 @@ def stratify_by_margin(
     buckets: dict[tuple[str, int], list[OperatorPair]] = {
         (label, k): [] for label in labels for k in ks
     }
-    # `pair.margin.k`, not `pair.k`. An OperatorPair carries two k values, not
-    # one: `ablate_query` builds `comparison` at `k_eff = min(k, N)` and `margin`
-    # at the requested `k`, and `pair.k` forwards the former. Above N they
-    # diverge, and `ablate_query`'s own `mode` argument calls a k larger than the
-    # corpus "a legitimate grid point in a sweep rather than a configuration
-    # error", so this is a supported input rather than a misuse.
-    #
-    # The band comes from the margin, so the bucket must too. Reading `pair.k`
-    # lost pairs two ways. Where the clamped value was itself in `ks` they
-    # merged: 10 documents under the default grid put k=10, 20 and 50 all in
-    # bucket 10, which reported n=3 while 20 and 50 reported n=0 -- a
-    # disagreement rate whose denominator is threefold and drawn from other grid
-    # points. Where it was not in `ks` the same expression acted as a filter and
-    # dropped them: 8 documents under (5, 10, 20) clamp to 8, and 2 of 3 pairs
-    # were discarded, so the totals reconciled to 1 where the query supplied 3.
+    # `pair.margin.k`, not `pair.k`: `pair.k` forwards the comparison's clamped
+    # `k_eff = min(k, N)`, while the margin and its band use the requested `k`. A k above
+    # N is a supported grid point; bucketing by `pair.k` would merge or drop such pairs.
+    # Rationale: docs/engineering_notes.md#stratify-bucket-k
     for result in results:
         for pair in result.pairs:
             if pair.baseline != baseline or pair.variant != variant or pair.margin.k not in ks:

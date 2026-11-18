@@ -1,29 +1,8 @@
-"""Distribution summaries, and the experiment-result envelope.
+"""Distribution summaries and the experiment-result envelope.
 
-Two responsibilities under one constraint: everything published must be
-reproducible from what is written down.
-
-Percentiles without a library
------------------------------
-The normative backend is standard-library only, so percentiles are computed here
-rather than taken from NumPy. Nearest-rank on the sorted sample, so ``p50`` of an
-even-length sample is the lower of the two central values.
-
-Interpolation would invent a value no query produced, and every quantity
-summarised here is a measured floating-point observation whose bit pattern
-matters elsewhere in the study (margins, flip radii, score gaps). An interpolated
-``p50`` cannot be looked up in the raw data, cannot be reproduced by inspection,
-and is not ``same_bits``-comparable against it; NumPy's default linear
-interpolation does that. The convention is recorded in the output.
-
-The result envelope
--------------------
-:class:`ExperimentResult` is what every runner script writes: the payload, the
-provenance of the data it was computed from, and the environment. Its
-:meth:`~ExperimentResult.digest` is taken over the payload after volatile fields
-are stripped, so two runs of the same experiment on the same data agree despite
-differing timestamps, and a reader checks a published number by comparing one hex
-string instead of eyeballing a table.
+Percentiles are nearest-rank, so each is an observed value. :class:`ExperimentResult`
+is what every runner writes; :meth:`~ExperimentResult.digest` ignores volatile fields.
+Rationale: docs/engineering_notes.md#nearest-rank-percentiles
 """
 
 from __future__ import annotations
@@ -51,10 +30,9 @@ DEFAULT_PERCENTILES: tuple[int, ...] = (0, 1, 5, 25, 50, 75, 95, 99, 100)
 def _signed_order(value: float) -> tuple[float, float]:
     """Sort key placing ``-0.0`` below ``+0.0``.
 
-    ``sorted`` is stable and ``-0.0 == 0.0``, so sorting on the value alone lets
-    arrival order decide the sign of ``minimum``, ``maximum`` and a zero-valued
-    percentile, breaking bit-exactness. Over finite values the key is IEEE-754
-    ``totalOrder``.
+    ``sorted`` is stable and ``-0.0 == 0.0``, so a value-only key lets arrival order decide
+    the sign of ``minimum``, ``maximum`` and a zero percentile, breaking bit-exactness.
+    Over finite values the key is IEEE-754 ``totalOrder``.
     """
     return (value, math.copysign(1.0, value))
 
@@ -62,20 +40,9 @@ def _signed_order(value: float) -> tuple[float, float]:
 def percentile(sorted_values: Sequence[float], p: float) -> float:
     """Nearest-rank percentile of an already-sorted sample.
 
-    Returns a sample element and never interpolates; the module docstring says
-    why that matters here.
-
-    Args:
-        sorted_values: Non-decreasing sample. Sorting is the caller's job: they
-            already hold a sorted array, and re-sorting per percentile would be
-            the dominant cost.
-        p: Percentile in ``[0, 100]``.
-
-    Example:
-        >>> percentile([1.0, 2.0, 3.0, 4.0], 50)
-        2.0
-        >>> percentile([1.0, 2.0, 3.0, 4.0], 100)
-        4.0
+    ``sorted_values`` is non-decreasing and ``p`` is in ``[0, 100]``. The result
+    is a sample element, never interpolated: ``p50`` of ``[1, 2, 3, 4]`` is 2.
+    The caller sorts once, since re-sorting per percentile dominates the cost.
     """
     n = len(sorted_values)
     if n == 0:
@@ -144,10 +111,9 @@ def summarise_values(
 ) -> Distribution:
     """Summarise a sample, keeping non-finite values out of the statistics.
 
-    NaN marks an undefined quantity (``m_min^top`` at ``k = 1`` (G16), a
-    degenerate query's margin). ``boundary_margin`` returns a defined infinity,
-    which would drive ``mean`` and the upper percentiles to infinity. ``n_nan``
-    and ``n_infinite`` count both kinds in the record.
+    NaN marks an undefined quantity (``m_min^top`` at ``k = 1`` (G16), a degenerate query's
+    margin). ``boundary_margin`` gives a defined infinity for an infinite score, which would
+    make ``mean`` and upper percentiles infinite. ``n_nan`` and ``n_infinite`` count each.
     """
     collected = list(values)
     finite = sorted((v for v in collected if math.isfinite(v)), key=_signed_order)
@@ -185,11 +151,10 @@ class ExperimentResult:
     """One experiment's output, with everything needed to reproduce it."""
 
     experiment: str
-    #: What the experiment measured. Must be JSON-serialisable. One concept
-    #: carries one key across every report: a margin that is exactly zero is
-    #: ``is_exact_tie`` wherever it appears, never ``exact_tie`` in one file and
-    #: ``is_exact_tie`` in another. A band *value* is not a property of a thing,
-    #: so ``stratify.EXACT_TIE_BAND`` stays the string ``"exact_tie"``.
+    #: What the experiment measured; JSON-serialisable. One concept carries one
+    #: key across every report: an exactly-zero margin is always ``is_exact_tie``.
+    #: A band *value* is not a property of a thing, so
+    #: ``stratify.EXACT_TIE_BAND`` stays the string ``"exact_tie"``.
     payload: dict[str, Any]
     #: The dataset's provenance block, verbatim from :class:`LoadedDataset`.
     data_provenance: dict[str, Any] = field(default_factory=dict)

@@ -1,15 +1,9 @@
 # Static analysis of both implementations.
-#
-# The C++ core already gets ASan, UBSan, TSan and cppcheck, and the Python side
-# gets ruff and a strict mypy. All of those are either dynamic -- they report
-# what a particular run did -- or single-file. CodeQL asks a different question:
-# it follows data across call boundaries, which is where a use-after-free in the
-# bindings or an unvalidated path reaching a file read would live.
-#
-# `c-cpp` needs a real build, and the manual mode below is deliberate: autobuild
-# would pick its own CMake invocation, and this project's numerics depend on the
-# flags `CMakePresets.json` sets. Analysing a build with different flags would
-# analyse code this repository never ships.
+
+# CodeQL follows data flow across call boundaries, which the sanitizers and
+# linters do not. `c-cpp` uses manual build mode with the `ci` preset, so the
+# analysis sees the build CI ships, numeric flags from `NumericsFlags.cmake` included.
+# Rationale: docs/engineering_notes.md#codeql-manual-build
 
 name: codeql
 
@@ -59,7 +53,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          # security-and-quality over the default security-extended: this is a
+          # security-and-quality rather than the default suite: this is a
           # numerics library, and the quality suite is where the comparison and
           # conversion queries live.
           queries: security-and-quality
@@ -73,9 +67,9 @@ jobs:
         run: python -m pip install --upgrade pip -r requirements-dev.txt
       - if: matrix.build-mode == 'manual'
         name: Build the core the way this project ships it
-        # The `ci` preset, not autobuild. `CMakePresets.json` pins the numeric
-        # flags every published result depends on; a build without them is not
-        # the code under analysis.
+        # The `ci` preset, not autobuild, so the analysed build is configured
+        # exactly as CI configures it, with the numeric flags from
+        # `cpp/cmake/NumericsFlags.cmake` that every published result depends on.
         run: |
           cmake --preset ci
           cmake --build --preset ci

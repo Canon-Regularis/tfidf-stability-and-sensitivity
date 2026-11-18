@@ -1,36 +1,14 @@
 #!/usr/bin/env python3
 """Emit the pipeline reproducibility digest.
 
-One SHA-256 over every number the pipeline produces on a fixed corpus:
-vocabulary, IDF, weights, norms, scores, rankings and margins, all hashed from
-raw binary64 bit patterns.
-
-Exists so CI can compare the digest across jobs (operating systems, compilers,
-optimisation levels), which no in-process test can do. That comparison is the
-acid test of ``spec_addenda.md#g13``: the platform logarithm differs from the
-correctly-rounded value in about 15% of IDF entries, and before that fix this
-digest differed between Linux and Windows.
-
-Usage::
-
-    python scripts/snapshot.py                 # print the digest
-    python scripts/snapshot.py --verbose       # print each stage's digest too
-    python scripts/snapshot.py --json          # machine-readable
-    python scripts/snapshot.py --check         # compare against the recorded value
-
-``--check`` answers the question the cross-job comparison cannot. That comparison
-proves every platform agrees with every other; it says nothing about whether they
-agree with what was published. A change that moves all of them together -- an
-edited stopword list alters every df, idf and score identically everywhere --
-passes it untouched, and the suite compares runs against each other rather than
-against a recorded value, so it passes there too.
-``configs/pipeline_digest.txt`` is that recorded value.
+One SHA-256 over every number the pipeline produces on a fixed corpus, hashed
+from raw binary64 bit patterns, so CI can compare it across operating systems
+and compilers. ``--check`` compares it against ``configs/pipeline_digest.txt``.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -48,26 +26,14 @@ from tfidf_stability.ranking.margins import margin_profile  # noqa: E402
 from tfidf_stability.ranking.ranker import rank_all_operators  # noqa: E402
 from tfidf_stability.similarity.cosine import cosine_against_corpus  # noqa: E402
 from tfidf_stability.utils.hashing import hash_bytes, hash_floats, hash_text  # noqa: E402
-from tfidf_stability.utils.io import read_jsonl  # noqa: E402
+from tfidf_stability.utils.io import canonical_json, read_jsonl  # noqa: E402
 from tfidf_stability.vectorisation.tfidf import TfidfVectoriser  # noqa: E402
 
 CORPUS = REPO / "tests" / "fixtures" / "mini_corpus.jsonl"
-#: Digest queries as raw text, put through the same preprocessing as the corpus.
-#:
-#: They were tuples of raw English handed straight to `transform_query`, which
-#: takes *features* -- the stemmed, n-grammed form the vocabulary is built from.
-#: So "cosine" was looked up in a vocabulary holding "cosin", and missed. Three
-#: of the four embedded to the zero vector when only `q4` was meant to:
-#:
-#:     q1 ("quick", "brown", "fox")            nnz=3, 2 non-zero scores
-#:     q2 ("numerical", "stability", "sparse") nnz=0   <- vocabulary has numer, stabil, spars
-#:     q3 ("cosine", "similarity", "vectors")  nnz=0   <- cosin, similar, vector
-#:     q4 ("the", "of", "and")                 nnz=0   <- intended: all stopwords
-#:
-#: The `scores`, `rankings` and `margins` stages therefore covered one real
-#: query, and `rankings` was mostly ordering an all-zero vector by attributes
-#: alone. The digests were stable across platforms, so nothing failed; they were
-#: just checking far less than they appeared to.
+#: Digest queries as raw text, put through the same preprocessing as the corpus
+#: so each term is looked up in the form the vocabulary holds. Three queries hit
+#: the vocabulary; ``q4`` is all stopwords and embeds to the zero vector.
+#: Rationale: docs/engineering_notes.md#digest-query-coverage
 QUERIES = (
     ("q1", "quick brown fox"),
     ("q2", "numerical stability sparse"),
@@ -107,8 +73,8 @@ def compute() -> dict[str, str]:
     order_parts: list[str] = []
     margin_parts: list[str] = []
     for _, query_text in QUERIES:
-        # Through the same pipeline the corpus went through, so a query term is
-        # looked up in the form the vocabulary actually holds.
+        # Preprocess the query with the corpus pipeline so each term is looked up
+        # in the form the vocabulary holds.
         query = TfidfVectoriser.transform_query(pipeline.preprocess(query_text), model)
         scores = cosine_against_corpus(query, docs, model.norms)
         score_parts.append(hash_floats(scores))
@@ -132,7 +98,7 @@ PINNED = Path(__file__).resolve().parents[1] / "configs" / "pipeline_digest.txt"
 
 
 def _pinned() -> dict[str, str]:
-    """The recorded digests, in the two-column form ``--check`` writes."""
+    """Read the recorded digests from ``PINNED`` as a stage-to-digest mapping."""
     recorded: dict[str, str] = {}
     for line in PINNED.read_text(encoding="utf-8").splitlines():
         statement, _, _comment = line.partition("#")
@@ -145,17 +111,9 @@ def _pinned() -> dict[str, str]:
 def check() -> list[str]:
     """Compare the computed digests against the recorded ones, stage by stage.
 
-    `determinism.yml` proves the digest is the *same everywhere*; nothing proved
-    it was the *expected value*. Those are different claims, and only the second
-    catches a change that moves every platform together -- editing the stopword
-    list, say, which alters every df, idf and score identically on all of them.
-    The suite could not catch it either: it compares runs against each other
-    rather than against a pinned value.
-
-    Reported per stage rather than on the overall digest alone, because which
-    stage moved says what changed. `idf` alone points at the logarithm (G13),
-    `preprocessing` at the tokeniser or the word list, `norms` onwards at the
-    reduction policy.
+    ``determinism.yml`` proves the digest is the same on every platform; this
+    check proves it is the recorded value, and the stage that moved says what
+    changed. Rationale: docs/engineering_notes.md#pipeline-digest-check
     """
     recorded = _pinned()
     if not recorded:
@@ -167,9 +125,8 @@ def check() -> list[str]:
         for name in sorted(recorded)
         if name in stages and stages[name] != recorded[name]
     ]
-    # A stage appearing or disappearing matters as much as one changing value:
-    # either the pipeline grew a step nobody recorded, or a recorded step is no
-    # longer computed and its digest has been standing unchecked.
+    # A stage present on one side only is also a problem: an unrecorded stage
+    # is unchecked, and a recorded stage that is not computed checks nothing.
     problems += [
         f"{name}: recorded but no longer computed" for name in sorted(recorded - stages.keys())
     ]
@@ -178,7 +135,7 @@ def check() -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--verbose", action="store_true", help="print every stage")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument(
@@ -206,13 +163,12 @@ def main() -> int:
 
     stages = compute()
     if args.json:
+        # `canonical_json` rather than a local `json.dumps`: one canonical
+        # form for every file this project writes, and it carries the trailing
+        # newline, so `print` is told not to add a second.
         print(
-            json.dumps(
-                {"stages": stages, "environment": environment_block()},
-                sort_keys=True,
-                indent=2,
-                default=str,
-            )
+            canonical_json({"stages": stages, "environment": environment_block()}),
+            end="",
         )
     elif args.verbose:
         for name, digest in sorted(stages.items()):

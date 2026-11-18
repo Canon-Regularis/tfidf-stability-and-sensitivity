@@ -1,26 +1,9 @@
 #!/usr/bin/env python3
 """Verify that relative links and code references in the docs resolve.
 
-The implementation notes cross-reference the code heavily, which is what makes
-them rot: a module renamed in `src/` leaves a link in `docs/` pointing nowhere.
-
-Five checks, in increasing order of how often they catch something:
-
-1. Relative links resolve. `[text](path)` and `[text](path#anchor)` must name an
-   existing file.
-2. Anchors exist. A `#g23` fragment must correspond to a heading in the target
-   Markdown file; `spec_addenda.md#g22` and `#g23` are cited throughout and an
-   off-by-one would go unnoticed.
-3. Referenced source files exist. A backticked path like
-   `analysis/noise_floor.py` or `src/tfidf_stability/ranking/margins.py` is
-   checked against the tree.
-4. Source docstrings resolve. The modules cite each other far more densely than
-   `docs/` cites them, and a rename leaves a `:func:` role pointing at nothing.
-   Sphinx would report it; nothing here runs Sphinx.
-5. The CMake presets and the docs agree, in both directions.
-
-External links (http, https, mailto) go unfetched; the build stays hermetic and
-offline.
+Checks that Markdown links and anchors resolve, that backticked source paths
+exist, that `:func:` and similar roles in source docstrings name real objects,
+and that the CMake presets and the docs agree. External links go unfetched.
 """
 
 from __future__ import annotations
@@ -67,7 +50,7 @@ def _anchors(text: str) -> set[str]:
 
 
 def _check_link(document: Path, target: str, text: str, cache: dict[Path, set[str]]) -> str | None:
-    """Validate one Markdown link. Returns a problem description, or None."""
+    """Validate one Markdown link and return a problem description, or None."""
     path_part, _, anchor = target.partition("#")
 
     if not path_part:
@@ -91,10 +74,10 @@ def _check_link(document: Path, target: str, text: str, cache: dict[Path, set[st
 # ---------------------------------------------------------------------------
 # The build presets
 # ---------------------------------------------------------------------------
-# A preset is the documented way to build this project, so the two files drift
-# in both directions: a preset added and never written down is invisible to a
-# reader, and a preset renamed leaves a command in the docs that configures
-# nothing. Both have happened.
+
+# A preset is the documented way to build this project. The check runs in both
+# directions: a preset absent from the docs is invisible to a reader, and a
+# preset named in the docs but absent from the file configures nothing.
 
 PRESETS = REPO / "CMakePresets.json"
 
@@ -112,12 +95,9 @@ _PRESET_GROUPS = ("configurePresets", "buildPresets", "testPresets")
 def check_presets(documents: Sequence[Path]) -> tuple[list[str], int]:
     """Check that the docs name every preset, and name only presets that exist.
 
-    Hidden presets are excluded: they exist to be inherited from, and a reader
-    cannot invoke one.
-
-    An absent file is reported rather than raised, as an absent ``docs/`` is:
-    this runs inside the mutation sandbox, and a traceback there names the
-    exception instead of the file, which is the harder thing to diagnose.
+    Hidden presets are excluded because a reader cannot invoke one. An absent
+    presets file is reported as a finding rather than raised, so a run inside
+    the mutation sandbox names the file instead of an exception.
     """
     if not PRESETS.exists():
         return [f"{PRESETS.name} not found, so no preset could be checked"], 0
@@ -152,14 +132,11 @@ def check_presets(documents: Sequence[Path]) -> tuple[list[str], int]:
 # ---------------------------------------------------------------------------
 # Source docstrings
 # ---------------------------------------------------------------------------
-# The same rot, one directory over. `docs/` is checked because it cites the
-# code; the docstrings cite it far more densely -- 157 cross-references across
-# 63 modules -- and a rename leaves them pointing at nothing with no build step
-# to notice. Sphinx would report these, but nothing here runs Sphinx.
-#
-# Resolution is by import rather than by parsing, because a cross-reference
-# names a runtime object: `Reduction.EXACT` is an enum member, `TauBand.g_min`
-# a dataclass field, and neither is visible to a purely syntactic check.
+
+# Source docstrings cite the code with Sphinx roles, and nothing here runs
+# Sphinx. Targets are resolved by import rather than by parsing, because a
+# role may name a runtime object such as an enum member or a dataclass field.
+# Rationale: docs/engineering_notes.md#docstring-targets-resolve-by-import
 
 #: `:func:`x`` and friends. The tilde in ``:class:`~pkg.mod.Name`` is Sphinx's
 #: "show only the last component" marker and does not affect the target.
@@ -170,12 +147,10 @@ _ADDENDA = re.compile(r"spec_addenda\.md#(g\d+)", re.IGNORECASE)
 
 _SRC = REPO / "src" / "tfidf_stability"
 
-# `src/` on sys.path, for the same reason `tests/conftest.py` does it: this check
-# runs with no install and no compiler. The docs job installs nothing at all --
-# not even requirements-dev.txt -- because until now the check was pure text, and
-# making it depend on `pip install -e .` would drag cmake and ninja into a job
-# that reads Markdown. Resolving a cross-reference needs the package importable,
-# so the script puts it on the path itself rather than asking CI to.
+# `src/` goes on sys.path so the package imports with no install and no
+# compiler, as `tests/conftest.py` arranges for the tests. The docs job
+# installs nothing; the script puts the package on the path itself.
+# Rationale: docs/engineering_notes.md#docs-check-imports-without-install
 if str(REPO / "src") not in sys.path:
     sys.path.insert(0, str(REPO / "src"))
 
@@ -197,9 +172,9 @@ def _reachable(obj: object, attributes: Sequence[str]) -> bool:
 def _defined_in_tests(module: str, name: str) -> bool:
     """Whether ``tests/<module>.py`` defines ``name``.
 
-    A docstring may cite the test that pins its claim. Read rather than
-    imported: importing a test module drags in fixtures and plugins for a
-    question the source text already answers.
+    A docstring may cite the test that pins its claim. The file is parsed
+    rather than imported, since importing a test module drags in fixtures and
+    plugins for a question the source text already answers.
     """
     path = REPO / "tests" / f"{module}.py"
     if not path.exists():
@@ -219,11 +194,9 @@ def _resolves(
 ) -> bool:
     """Whether a cross-reference target names something that exists.
 
-    Five places, in the order a reader would look: the class the docstring is
-    attached to, the module it lives in, the builtins, an importable dotted path
-    (which covers the standard library and fully-qualified package names), and
-    finally any public name the package exports anywhere -- docstrings routinely
-    name a sibling module's class without importing it.
+    Five places are tried in order: the owning class, the enclosing module,
+    the builtins, an importable dotted path (standard library or fully
+    qualified name), and any public name the package exports anywhere.
     """
     head, *rest = target.split(".")
 
@@ -273,8 +246,8 @@ def _import_package(
 ) -> tuple[dict[Path, object], dict[str, object], list[str]]:
     """Import every module once, and collect the public names they export.
 
-    The export map is what lets a docstring name a sibling module's class
-    without importing it, which they do throughout.
+    The export map lets a docstring name a sibling module's class without
+    importing it.
     """
     modules: dict[Path, object] = {}
     exported: dict[str, object] = {}

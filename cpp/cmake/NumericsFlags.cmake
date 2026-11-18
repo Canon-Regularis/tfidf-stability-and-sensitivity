@@ -1,19 +1,16 @@
 # =============================================================================
-# NumericsFlags.cmake: the single source of truth for floating-point policy.
-#
-# This project's subject matter is numerical stability. Every result it publishes
-# is claimed to be bit-reproducible across compilers, optimisation levels and
-# operating systems. That claim is only meaningful if the compiler is forbidden
-# from rewriting the arithmetic. Do not add floating-point flags anywhere else.
-#
-# The three rules:
-#   1. No contraction.   a*b+c must not become fma(a,b,c), which rounds once.
-#   2. No reassociation. (a+b)+c must NOT become a+(b+c).
-#   3. No excess precision. Intermediates are binary64, never x87 80-bit.
-#
-# Anything that violates these is confined to the explicitly non-reproducible
-# `Fast` reduction policy, which is never used for published results.
+# NumericsFlags.cmake: the single source of floating-point policy.
 # =============================================================================
+
+# Published results are bit-reproducible across compilers, optimisation levels
+# and operating systems only if the compiler may not rewrite the arithmetic. All
+# four reduction policies (Naive, Neumaier, Pairwise, Exact) build under these
+# flags. Floating-point flags belong in this file and nowhere else.
+
+# Rules: 1. No contraction: a*b+c never becomes fma(a,b,c), which rounds once.
+#        2. No reassociation: (a+b)+c never becomes a+(b+c).
+#        3. No excess precision: intermediates are binary64, never x87 80-bit.
+# The `fastmath-guard-check` preset breaks them to prove the guards reject it.
 
 add_library(tfidf_numerics_strict INTERFACE)
 add_library(tfidf::numerics_strict ALIAS tfidf_numerics_strict)
@@ -26,16 +23,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
     -fno-reciprocal-math              # x/y must not become x*(1/y)
     -fno-unsafe-math-optimizations
     -fno-finite-math-only             # NaN/Inf semantics must be honoured
-    # -fsigned-zeros, never -fno-signed-zeros. The negative form is a
-    # fast-math sub-option licensing the compiler to ignore the sign of zero,
-    # and it sat in this list of disables reading like one of them. Measured:
-    # with it, (-0.0) + 0.0 compiles to -0.0 (bits 8000000000000000); with
-    # -fsigned-zeros it gives +0.0, as IEEE 754 requires. Every score here is
-    # compared on its raw bit pattern and ranking/margins.py argues that -0.0
-    # cannot occur. fp_guard.hpp refuses a build carrying the relaxed form,
-    # which GCC and Clang report as __NO_SIGNED_ZEROS__. The flag below is the
-    # fix; the header is the second line of defence for a build that bypasses
-    # this file.
+    # -fsigned-zeros, never -fno-signed-zeros: the negative form is a fast-math
+    # sub-option under which (-0.0) + 0.0 may compile to -0.0. fp_guard.hpp also
+    # refuses __NO_SIGNED_ZEROS__, for a build that bypasses this file.
+    # Rationale: docs/engineering_notes.md#signed-zeros
     -fsigned-zeros
   )
   include(CheckCXXCompilerFlag)
@@ -58,21 +49,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
 
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
   target_compile_options(tfidf_numerics_strict INTERFACE
-    # /fp:strict rather than /fp:precise plus /fp:contract-.
-    #
-    # Since VS2022, MSVC contracts to FMA *under /fp:precise* by default, which
-    # would break bit-exactness against the reference. The previous attempt to
-    # switch that off used `/fp:contract-`, which MSVC does not accept: the
-    # compiler answered
-    #     cl : command line warning D9002: ignoring unknown option '/fp:contract-'
-    # and carried on contracting. The flag was inert and the comment beside it
-    # claimed the opposite. Found in a CI log: D9002 is only a warning, so the
-    # build succeeded and nothing was reading the Windows output.
-    #
-    # There is no negative form of /fp:contract. /fp:strict is the documented
-    # way to forbid contraction, and it also pins exception and rounding
-    # semantics, which this project wants anyway. It costs some speed on the
-    # MSVC path; reproducibility is the thing being bought.
+    # /fp:strict, not /fp:precise: some MSVC versions contract to FMA under
+    # /fp:precise, and `/fp:contract-` does not exist (MSVC ignores it, D9002).
+    # /fp:strict forbids contraction and pins exception and rounding semantics.
+    # Rationale: docs/engineering_notes.md#msvc-fp-strict
     /fp:strict
   )
 else()
@@ -81,11 +61,13 @@ else()
 endif()
 
 # -----------------------------------------------------------------------------
-# A violation on purpose, used only to prove the runtime guards fire.
-# `cpp/tests/test_fp_guard.cpp` expects a fast-math build to FAIL to compile;
-# CI additionally builds a shared library this way and asserts the runtime
-# self-test rejects it.
+# TFIDF_FAST_MATH: an unsound build that proves the compile-time guard fires.
 # -----------------------------------------------------------------------------
+
+# The `fastmath-guard-check` preset sets it, and `determinism.yml` asserts that
+# the build fails at the fp_guard.hpp #error (Layer 1). The runtime self-test
+# checks for reassociation and constant folding are therefore not reached in CI.
+# -ffast-math comes after the strict flags, or GCC leaves __FAST_MATH__ unset.
 if(TFIDF_FAST_MATH)
   message(WARNING "tfidf: TFIDF_FAST_MATH=ON, results from this build are NOT trustworthy.")
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -96,10 +78,12 @@ if(TFIDF_FAST_MATH)
 endif()
 
 # -----------------------------------------------------------------------------
-# Architecture tuning. OFF by default: -march=native changes vectorisation, can
-# re-enable FMA contraction despite -ffp-contract=off in some GCC versions, and
-# makes the binary machine-specific. All three are fatal to reproducibility.
+# Architecture tuning. OFF by default.
 # -----------------------------------------------------------------------------
+
+# -march=native changes vectorisation, can re-enable FMA contraction despite
+# -ffp-contract=off in some GCC versions, and makes the binary machine-specific.
+# Each of these breaks reproducibility.
 if(TFIDF_ARCH_TUNE)
   message(WARNING "tfidf: TFIDF_ARCH_TUNE=ON, binary is machine-specific and NOT reproducible.")
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -111,7 +95,7 @@ endif()
 
 # -----------------------------------------------------------------------------
 # Record the exact policy so build_config.hpp, and hence every run manifest,
-# can report what the numbers were actually produced with.
+# can report what produced the numbers.
 # -----------------------------------------------------------------------------
 get_target_property(TFIDF_NUMERIC_FLAGS tfidf_numerics_strict INTERFACE_COMPILE_OPTIONS)
 string(REPLACE ";" " " TFIDF_NUMERIC_FLAGS "${TFIDF_NUMERIC_FLAGS}")

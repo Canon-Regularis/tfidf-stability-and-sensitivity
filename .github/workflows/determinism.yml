@@ -1,19 +1,9 @@
-# The acid test.
-#
-# This repository claims its numbers are bit-reproducible across operating
-# systems, compilers and optimisation levels. No in-process test can check that:
-# a single interpreter cannot tell you what a different libm would have done.
-# This workflow can, and it is the reason `spec_addenda.md#g13` exists.
-#
-# Before the correctly-rounded logarithm, this job would have FAILED. The
-# platform `log` differs from the correctly-rounded value in about 15% of IDF
-# entries, and UCRT, glibc and Apple libm each round differently, so Linux and
-# Windows produced different weights, different norms and different scores. The
-# fix was to compute IDF once in Python via `decimal.Decimal.ln()` and keep
-# `log` out of the native core entirely, leaving only operations IEEE-754
-# requires to be correctly rounded.
-#
-# If this job ever goes red, a published number has moved. That is the point.
+# Cross-platform bit-reproducibility.
+
+# The pipeline digest must be identical across operating systems, compilers
+# and optimisation levels, which one interpreter cannot check. A red run
+# means a published number has moved. See `spec_addenda.md#g13`.
+# Rationale: docs/engineering_notes.md#cross-platform-digest
 
 name: determinism
 
@@ -26,11 +16,8 @@ on:
 permissions:
   contents: read
 
-# One run per ref at a time. Without this every push to a branch leaves its
-# predecessor running to completion against code nobody will merge, which on a
-# matrix this wide is the difference between a queue that drains and one that
-# does not. Scheduled runs are keyed by workflow rather than ref so a nightly
-# cannot cancel a push.
+# One run per ref at a time. A newer run for the same ref cancels the one in
+# progress, so a superseded commit does not hold runners for the full matrix.
 concurrency:
   group: determinism-${{ github.ref }}
   cancel-in-progress: true
@@ -81,9 +68,8 @@ jobs:
           path: digests/
 
   # --------------------------------------------------------------------------
-  # The native backend, built three ways. -O0 and -O3 exercise completely
-  # different instruction selection and vectorisation, so agreeing at both is a
-  # much stronger statement than agreeing at the default.
+  # The native backend at three build types. -O0 and -O3 differ in instruction
+  # selection and vectorisation, so agreement at both is the stronger result.
   # --------------------------------------------------------------------------
   native:
     name: native ${{ matrix.os }} ${{ matrix.build }}
@@ -104,14 +90,12 @@ jobs:
             requirements.txt
             requirements-dev.txt
       - name: Install build dependencies
-        # The full dev set rather than a hand-picked subset: the suite needs pytest,
-        # hypothesis, numpy and pyyaml, and a hand-picked trio kept omitting
-        # one. The build backend is no longer resolved from here (the install
-        # step below uses pip's build isolation), but the test dependencies
-        # still are, so this stays.
+        # The full dev set, since the suite needs pytest, hypothesis, numpy and
+        # pyyaml. The build backend comes from pip's build isolation in the
+        # install step below.
         run: python -m pip install --upgrade pip -r requirements-dev.txt
-      # Ninja must be on PATH before `cmake -G Ninja` runs. Having the configure
-      # step above this one failed every native job on every OS.
+      # Ninja must be on PATH before `cmake -G Ninja` runs, so this step comes
+      # before Configure.
       - uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67  # v6
       - name: Configure
         # The one build here that is not a preset. This matrix is parameterised
@@ -137,29 +121,23 @@ jobs:
       # proves the two agree, so a divergence shows up as a test failure with
       # a precise location rather than as an opaque hash mismatch.
       - name: Differential suite (reference vs native, bit-exact)
-        # The step that stalled a native ubuntu Release job for the full job
-        # budget with no diagnostic: a job-level limit cannot name the step, and
-        # a cancelled job keeps no log. Every long step here is bounded so a
-        # recurrence says where.
+        # A job-level limit cannot name the step that hung, and a cancelled job
+        # keeps no log, so every long step here has its own bound.
         timeout-minutes: 12
         shell: bash
         run: |
-          # Build isolation ON, as in ci.yml: `--no-build-isolation` could not
-          # find the build backend on windows-latest
-          # (BackendUnavailable: Cannot import 'scikit_build_core.build') and
-          # the failure was masked by pwsh not aborting mid-block.
+          # Build isolation on, as in ci.yml: `--no-build-isolation` does not
+          # find scikit_build_core on windows-latest. The step uses bash, which
+          # stops at the first failing command; pwsh carries on past one.
           python -m pip install -e .
-          # The backend must be *importable*, asserted before the suite runs.
-          # Every differential test is skipif-guarded on native_available(), and
-          # pytest exits 0 when every selected test skips. Measured: "2
-          # skipped", exit 0. So a .pyd that built but failed to load (a missing
-          # runtime DLL is the usual cause, and this job builds on three
-          # platforms) would skip the entire comparison and report the native
-          # backend bit-identical to the reference having compared nothing.
+          # Every differential test skips without native_available(), and pytest
+          # exits 0 when all tests skip, so an extension that built but does not
+          # load would pass. The backend is required to import first.
+          # Rationale: docs/engineering_notes.md#differential-requires-native
           python -m tfidf_stability.cli.main info --require-native
           python -m pytest tests/ -q -m "differential or native" --junitxml=diff.xml
-          # Belt and braces: even with the backend present, a marker rename or a
-          # collection error could select nothing. Require real executions.
+          # With the backend present, a marker rename or a collection error can
+          # still select nothing, so a minimum number of executed tests is required.
           python - <<'PY'
           import sys, xml.etree.ElementTree as ET
           suite = ET.parse("diff.xml").getroot()
@@ -208,15 +186,9 @@ jobs:
             printf '  %-46s %s\n' "$(basename "$f" .txt)" "$(cat "$f")"
           done
 
-          # A cross-platform claim needs more than one platform. `unique -ne 1`
-          # is satisfied by a single collected digest, so if every matrix job
-          # but one failed to upload, this would report "all digests identical"
-          # having compared a value with itself.
-          # 18, not 6. The reference matrix is 3 OS x 3 interpreters and the
-          # native matrix 3 OS x 3 build types, and every leg uploads one digest.
-          # At a threshold of 6, twelve legs could fail to upload and the
-          # comparison would still pass on whatever survived -- which is the
-          # same failure the paragraph above describes, one level out.
+          # One digest per matrix leg: 3 OS x 3 interpreters for the reference
+          # and 3 OS x 3 build types for native. A single digest satisfies the
+          # uniqueness check below, so every leg must have uploaded one.
           expected=18
           collected=$(ls collected/*.txt | wc -l)
           if [ "$collected" -ne "$expected" ]; then
@@ -224,16 +196,10 @@ jobs:
             ls collected/*.txt
             exit 1
           fi
-          # `sort -u collected/*.txt`, never `cat ... | sort -u`. Each digest file
-          # holds one line, and a file written without a trailing newline runs
-          # into its neighbour under `cat`: three files holding AAA, AAA and BBB
-          # concatenate to the single line AAABBBAAA, which sorts to one unique
-          # value. `unique` was therefore always 1, and this gate -- the
-          # project's flagship reproducibility claim -- could not fail. Verified
-          # by construction before fixing it.
-          #
-          # `sort` reads each path as its own input and terminates the final line
-          # itself, so this stays correct even if a writer regresses.
+          # `sort -u collected/*.txt`, not `cat ... | sort -u`: `cat` joins a file
+          # that lacks a trailing newline to the next one, so differing digests
+          # can merge into one line. `sort` ends each file's last line itself.
+          # Rationale: docs/engineering_notes.md#digest-compare-sort-not-cat
           unique=$(sort -u collected/*.txt | wc -l)
           if [ "$unique" -ne 1 ]; then
             echo
@@ -249,8 +215,8 @@ jobs:
           echo "All $(ls collected/*.txt | wc -l) builds agree: $(head -1 collected/*.txt | head -1)"
 
   # --------------------------------------------------------------------------
-  # A guard that only matters when it fires: the numeric guard rails must
-  # actually reject an unsound build, or their passing means nothing.
+  # The compile-time guard in fp_guard.hpp must reject a fast-math build, and
+  # the build must fail for that reason.
   # --------------------------------------------------------------------------
   guards-reject-unsound-builds:
     name: fast-math must fail to compile
@@ -270,13 +236,14 @@ jobs:
       - name: A fast-math build must be refused
         run: |
           cmake --preset fastmath-guard-check
-          # Both streams: ninja buffers compiler output and re-emits it on
-          # STDOUT, so capturing stderr alone yields an empty log and the grep
-          # below can never match, which is how this job failed.
+          # Both streams: ninja re-emits compiler output on stdout, so a log of
+          # stderr alone is empty and the grep below cannot match. The grep names
+          # the guard's message: ninja prints each failed command in full, and the
+          # bare -ffast-math would match the command of any failed tfidf compile.
           if cmake --build --preset fastmath-guard-check >build.log 2>&1; then
             echo "::error::a fast-math build compiled; the fp_guard.hpp guard is not working"
             exit 1
           fi
-          grep -q "ffast-math" build.log \
+          grep -q "tfidf: built with -ffast-math" build.log \
             || { echo "::error::the build failed for the wrong reason"; cat build.log; exit 1; }
           echo "The compile-time guard rejected the build, as intended."

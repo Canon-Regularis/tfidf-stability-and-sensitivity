@@ -1,15 +1,8 @@
-"""Deterministic file IO.
+"""Deterministic, atomic file IO.
 
-Everything written here has to be byte-reproducible: the snapshot test hashes
-output files, so a format embedding a timestamp or iterating a dict in insertion
-order fails it for reasons unrelated to the mathematics.
-
-Two rules:
-
-* no ambient state in the bytes: no timestamps, no absolute paths, no hostname,
-  no locale-dependent formatting;
-* atomic writes: an interrupted experiment leaves either the previous file or
-  the new one, never a half-written file a later run would hash happily.
+The snapshot test hashes output files, so written bytes carry no timestamps,
+absolute paths, hostname or locale-dependent formatting. Writes are atomic: an
+interrupted run leaves the previous file or the new one, never a partial file.
 """
 
 from __future__ import annotations
@@ -43,15 +36,10 @@ VOLATILE_KEYS: frozenset[str] = frozenset(
         "hostname",
         "username",
         "cwd",
-        # The key provenance blocks actually write. `datasets/loaders.py` puts a
-        # full absolute path here for a jsonl corpus, so without this a manifest
-        # digest is a function of where the file happened to live: the same run
-        # on two machines gave two digests, which is what `RunManifest.digest`
-        # promises not to do.
-        #
-        # It replaces "output_path", which was in this set and is written
-        # nowhere -- the only occurrence in the repository was the entry itself.
-        # One dead key stripped, one live key kept.
+        # Provenance blocks write this key; `datasets/loaders.py` stores the
+        # corpus file path in it for a jsonl corpus, absolute when given so.
+        # Stripping it keeps a manifest digest independent of the corpus
+        # location, as `RunManifest.digest` requires.
         "path",
         "pid",
     }
@@ -61,17 +49,9 @@ VOLATILE_KEYS: frozenset[str] = frozenset(
 def _json_safe(payload: Any) -> Any:
     """Replace non-finite floats with ``null``, recursively.
 
-    RFC 8259 admits no token for ``NaN`` or ``Infinity``. Python's encoder emits
-    them as a non-standard extension that its own ``json.loads`` reads back and
-    every strict parser (``JSON.parse``, ``jq``, Go, Rust) rejects, document and
-    all. Both experiment result files did contain ``NaN`` (an undefined margin,
-    which G16 requires be reported as undefined rather than coerced) and one
-    contained ``Infinity`` (``g_min`` on a corpus with no strictly-positive score
-    gap), so every published result was unparseable outside Python.
-
-    Nothing is lost by mapping to ``null``: a non-finite float here always means
-    undefined, and the ``defined`` flags, ``n_nan`` counts and ``*_hex`` fields
-    keep "undefined", "not applicable" and "infinite" apart.
+    RFC 8259 has no token for ``NaN`` or ``Infinity``; strict parsers reject both. Non-finite
+    means undefined (G16); ``defined``, ``n_nan`` and ``*_hex`` fields keep undefined,
+    not-applicable and infinite apart. Rationale: docs/engineering_notes.md#non-finite-json
     """
     if isinstance(payload, float):
         return None if not math.isfinite(payload) else payload
@@ -85,13 +65,9 @@ def _json_safe(payload: Any) -> Any:
 def canonical_json(payload: Any, *, indent: int | None = 2) -> str:
     """Render JSON canonically: sorted keys, LF endings, UTF-8 literals.
 
-    ``indent=None`` gives the compact form used for hashing, the default the
-    readable form written to disk; both sort keys, so they differ only in
-    whitespace.
-
-    Non-finite floats become ``null`` (:func:`_json_safe`). ``allow_nan`` keeps
-    its default so a value slipping past the sanitiser is still written rather
-    than raising mid-experiment; ``test_io`` asserts the output parses strictly.
+    ``indent=None`` is the compact hashing form, the default the readable disk form; the two
+    differ only in whitespace. Non-finite floats become ``null`` (:func:`_json_safe`);
+    ``allow_nan`` stays on so a value the sanitiser misses is written, not raised.
     """
     text = json.dumps(
         _json_safe(payload),
@@ -161,14 +137,8 @@ def strip_volatile(payload: Any, extra: Iterable[str] = ()) -> Any:
     Recursive because manifests nest: a timestamp two levels down breaks a
     snapshot as thoroughly as one at the top.
     """
-    # `extra` is materialised once and the frozenset is what recurses. It used
-    # to pass `extra` itself down, which is correct for the tuples this
-    # repository happens to pass and wrong for the `Iterable[str]` the signature
-    # advertises: a generator is exhausted by the `frozenset` at the top level,
-    # so every nested call rebuilt an empty set and stripped nothing below the
-    # first layer. Measured on {"secret": ..., "nested": {"secret": ...}}: the
-    # tuple form removed both, the generator form left the nested one in the
-    # payload and therefore in the digest.
+    # `extra` is materialised once and the frozenset recurses, so a generator
+    # argument, exhausted after one pass, still strips keys at every depth.
     drop = VOLATILE_KEYS | frozenset(extra)
     return _strip(payload, drop)
 

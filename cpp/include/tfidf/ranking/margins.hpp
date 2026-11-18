@@ -1,22 +1,18 @@
 // Score-separation margins (README sections 2.3.2 and 4.4).
 //
-//   m_k        = score(r_k) - score(r_{k+1})
-//   m_min^top  = min over 1 <= j < k of (score(r_j) - score(r_{j+1}))
-//   eps_k^flip = m_k / 2
-//
-// Everything here takes a sorted score array and never a ranking. So m_k depends
-// only on the score multiset and is identical under every tie-break operator,
-// which is what makes research questions A1 (margins) and A2 (tie-breaking)
-// independent. Structural, given the dependency direction, rather than asserted.
+// m_k = score(r_k) - score(r_{k+1}); eps_k^flip = m_k / 2;
+// m_min^top = min over 1 <= j < k of (score(r_j) - score(r_{j+1})).
+// Inputs are sorted scores only. Rationale: docs/engineering_notes.md#margins-sorted-input
 #pragma once
 
 #include <tfidf/core/types.hpp>
 
 #include <algorithm>
-#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace tfidf::ranking {
@@ -32,11 +28,12 @@ struct Margin {
     Real value = std::numeric_limits<Real>::quiet_NaN();
     bool defined = false;
 
-    /// eps_k^flip. Exact: dividing by two only shifts the exponent.
+    /// eps_k^flip, exact unless the result is subnormal: halving shifts the exponent.
     [[nodiscard]] Real flip_radius() const noexcept { return value / 2.0; }
 
-    /// A defined margin of exactly zero: top-k membership then rests entirely
-    /// on the tie-break.
+    /// True for a defined margin of exactly zero.
+    ///
+    /// Top-k membership then rests entirely on the tie-break.
     [[nodiscard]] bool is_exact_tie() const noexcept { return defined && value == 0.0; }
 };
 
@@ -53,17 +50,16 @@ struct Margin {
     return gaps;
 }
 
-/// `m_k`, governing top-k membership. Undefined when `k >= N`.
+/// `m_k`, for top-k membership: undefined for `k >= N`, throws for `k <= 0`.
 [[nodiscard]] inline Margin boundary_margin(std::span<const Real> sorted_scores,
-                                            std::int32_t k) noexcept {
+                                            std::int32_t k) {
     const auto n = static_cast<std::int32_t>(sorted_scores.size());
     Margin m;
     m.k = k;
-    // k_effective is assigned only past this guard. `resolve_k` raises for
-    // k <= 0 in both modes, so the reference can never produce a negative
-    // k_effective, and the binding hands this field straight to Python.
+    // `resolve_k` raises for k <= 0 in strict and lenient mode alike.
+    // Rationale: docs/engineering_notes.md#native-k-bounds
     if (k <= 0) {
-        return m;  // undefined, and k_effective keeps its default 0
+        throw std::invalid_argument("k must be positive");
     }
     m.k_effective = std::min(k, n);
     if (m.k_effective >= n) {
@@ -79,13 +75,14 @@ struct Margin {
 ///
 /// Undefined at `k = 1`: the minimum is over an empty set. G3 does not cover
 /// that case; addendum G16 adopts NaN, where +inf would claim "no constraint".
+/// Throws for `k <= 0`, as `boundary_margin` does.
 [[nodiscard]] inline Margin min_adjacent_margin_top(std::span<const Real> sorted_scores,
-                                                    std::int32_t k) noexcept {
+                                                    std::int32_t k) {
     const auto n = static_cast<std::int32_t>(sorted_scores.size());
     Margin m;
     m.k = k;
     if (k <= 0) {
-        return m;  // as in boundary_margin: no negative k_effective escapes
+        throw std::invalid_argument("k must be positive");
     }
     m.k_effective = std::min(k, n);
     if (m.k_effective < 2 || n < 2) {

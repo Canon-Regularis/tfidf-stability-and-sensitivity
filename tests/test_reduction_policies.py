@@ -1,31 +1,8 @@
-"""The four summation policies, and the environment they assume.
+"""Tests for the four summation policies and the environment they assume.
 
-`utils/numerics.py` is imported by nine test files, but only for `same_bits` as an
-assertion tool: nothing had this module as its *subject*. Its 81% was entirely
-incidental, and the falsifiable claims in its docstrings — that the two pairwise
-formulations first disagree at n = 129, that the block size matching numpy's does
-not buy agreement with numpy, that the correctly-rounded logarithm differs from
-the platform's — were checked by nothing.
-
-Three groups of property.
-
-The policies differ, and differ where the code says. A reduction sweep that never
-produced a disagreement would be measuring nothing, so the cancellation cases here
-are chosen to separate naive from compensated from exact. `Reduction.EXACT` is the
-oracle: `math.fsum` is correctly rounded, so any other policy agreeing with it on a
-hard input is evidence, and disagreeing is expected rather than a defect.
-
-The guards reject what would silently produce a wrong logarithm.
-`correctly_rounded_log_ratio` is how every IDF value in the project is computed, so
-a zero or negative argument reaching it must raise rather than return a NaN that
-propagates into a published weight.
-
-The environment is asserted rather than assumed. `assert_sane_float_environment`
-exists because a BLAS loading behind numpy can set flush-to-zero process-wide,
-which would flush exactly the subnormal margins this project studies. Nothing
-called it, so the guard that protects every measurement was itself unmeasured. Its
-three failure arms are reached by patching `sys.float_info` and the probe — the
-interpreter boundary, not a function inside this package.
+`Reduction.EXACT` (`math.fsum`, correctly rounded) is the oracle; the other
+policies may disagree with it on hard input. The environment guard's failure
+arms are reached by patching `sys.float_info` and the probe.
 """
 
 from __future__ import annotations
@@ -118,8 +95,10 @@ def test_pairwise_agrees_with_naive_below_the_block_size() -> None:
 
 
 def test_the_two_pairwise_formulations_first_disagree_at_the_documented_size() -> None:
-    """The module says n = 129 is where a block-recursive and a strictly binary
-    pairwise sum part company. Checked, rather than left as a claim."""
+    """Pairwise matches naive at 128 elements and differs at some size below 200.
+
+    The module documents n = 129 as the first size at which the binary-counter
+    and split-at-`n // 2` formulations differ; only naive is compared here."""
     values = [1.0 / (i + 1) for i in range(200)]
     assert same_bits(pairwise_sum(values[:128]), naive_sum(values[:128])), (
         "at exactly the block size there is still a single block"
@@ -181,8 +160,10 @@ def test_ulps_between_a_non_finite_value_is_infinite_rather_than_a_number() -> N
 
 
 def test_the_square_root_is_the_platform_one_because_ieee_mandates_it() -> None:
-    """Unlike log, sqrt is correctly rounded on every conforming platform, which
-    is why the native core may call it freely rather than receiving it as data.
+    """The square root matches `math.sqrt` on every value tried.
+
+    IEEE 754 requires sqrt, unlike log, to be correctly rounded, so the native
+    core may call it directly rather than receive it as data.
     """
     for value in (0.0, 1.0, 2.0, 0.25, 1e300, 5e-324):
         assert same_bits(numerics.sqrt(value), math.sqrt(value))
@@ -213,8 +194,9 @@ def test_a_non_positive_numerator_is_rejected_before_any_logarithm() -> None:
 
 
 def test_the_denominator_is_checked_first_when_both_are_invalid() -> None:
-    """Pinned because the message names one of them, and which one is arbitrary
-    until something depends on it."""
+    """The denominator is checked first when both arguments are invalid.
+
+    The error message names only one argument, so the order is pinned."""
     with pytest.raises(ValueError, match="denominator must be positive"):
         correctly_rounded_log_ratio(0, 0)
 
@@ -224,13 +206,14 @@ def test_a_ratio_of_one_gives_exactly_zero() -> None:
 
 
 def test_the_correctly_rounded_logarithm_differs_from_the_platform_somewhere() -> None:
-    """G13's whole reason for existing. If these agreed everywhere the project
-    would not need its own logarithm, and this test would be measuring nothing.
+    """The correctly rounded logarithm differs from the platform one somewhere.
+
+    G13 measures this difference; if the two agreed everywhere the project would
+    not need its own logarithm.
     """
-    # Ratios of the form n/1 are the wrong probe: the platform logarithm is
-    # already correctly rounded for those, and an earlier version of this test
-    # used them and concluded the two never differ. Real IDF arguments are
-    # N over df for a df anywhere in 1..N, which is where the two part company.
+    # Ratios of the form n/1 are not probed: the platform logarithm is already
+    # correctly rounded for those. Real IDF arguments are N over df for any df
+    # in 1..N, which is where the two differ.
     differing = compared = 0
     for n_documents in (100, 610, 2000):
         for df in range(1, n_documents + 1):
@@ -262,9 +245,8 @@ def test_the_environment_block_reports_every_field_the_manifest_records() -> Non
         "max",
         "min_normal",
         "rounds",
-        # What the interpreter was BUILT with, and what it is doing NOW. The
-        # guard reads the second: `sys.float_info.rounds` is a frozen constant,
-        # so the arm that reads it could not fire on any input.
+        # `rounds` is the build-time constant in `sys.float_info`; `rounds_live`
+        # probes the current rounding mode and is the one the guard reads.
         "rounds_live",
         "subnormals_supported",
         "constant_folding_ok",
@@ -279,13 +261,11 @@ def test_this_interpreter_is_a_sane_environment_so_the_guard_stays_silent() -> N
 
 
 def test_a_flush_to_zero_environment_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The case the guard exists for: a BLAS setting MXCSR.FTZ process-wide would
-    flush exactly the subnormal margins under study.
+    """A flush-to-zero environment is rejected.
 
-    The probe is patched, not the guard: `float_environment` is left to run and
-    only its subnormal answer is forced, so the guard's own logic is what is
-    being tested.
-    """
+    A BLAS that sets MXCSR.FTZ process-wide would flush the subnormal margins
+    under study. Only the probe's subnormal answer is forced, so the guard's own
+    logic runs."""
     real = numerics.float_environment
     monkeypatch.setattr(
         numerics, "float_environment", lambda: {**real(), "subnormals_supported": False}
@@ -298,10 +278,9 @@ def test_a_rounding_mode_other_than_to_nearest_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     real = numerics.float_environment
-    # `rounds_live`, not `rounds`. Patching the build-time constant used to raise
-    # because the guard read it; it now reads a probe of the live mode, which is
-    # the only one a BLAS changing the mode after import would move. Patching
-    # `rounds` alone must therefore NOT raise, and this asserts both halves.
+    # The guard reads `rounds_live`, a probe of the live mode that a BLAS changing
+    # the mode after import would move, not the build-time `rounds` constant.
+    # Patching `rounds` alone must not raise; patching `rounds_live` must.
     monkeypatch.setattr(numerics, "float_environment", lambda: {**real(), "rounds": 0})
     numerics.assert_sane_float_environment()
 
@@ -328,14 +307,16 @@ def test_a_mantissa_that_is_not_53_bits_is_rejected(monkeypatch: pytest.MonkeyPa
 def test_several_problems_are_reported_together_rather_than_one_at_a_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A guard that stopped at the first fault would need running repeatedly to
-    describe a broken environment."""
+    """Several faults are reported together in one message.
+
+    A guard that stopped at the first fault would need repeated runs to describe
+    a broken environment."""
     real = numerics.float_environment
     monkeypatch.setattr(
         numerics,
         "float_environment",
-        # `rounds_live` is the flag the guard reads; see the test above for why
-        # patching the build-time `rounds` no longer trips it.
+        # `rounds_live` is the flag the guard reads; the build-time `rounds`
+        # constant does not affect the guard.
         lambda: {**real(), "rounds_live": False, "subnormals_supported": False},
     )
     with pytest.raises(
@@ -360,8 +341,9 @@ def test_subnormal_terms_survive_every_policy_rather_than_flushing(policy: Reduc
 
 @pytest.mark.slow
 def test_summing_near_the_maximum_overflows_to_infinity_rather_than_rescaling() -> None:
-    """Section 6 forbids stabilising transformations, so an overflow must be
-    visible rather than quietly avoided."""
+    """An overflowing naive sum is infinity rather than a rescaled value.
+
+    Section 6 forbids stabilising transformations, so an overflow stays visible."""
     big = sys.float_info.max
     assert naive_sum([big, big]) == math.inf
 
@@ -382,19 +364,19 @@ def test_the_policies_stay_within_a_few_ulps_of_the_exact_sum_over_a_long_sweep(
 # ---------------------------------------------------------------------------
 # Erroneous: what each policy does when the sum cannot be represented
 # ---------------------------------------------------------------------------
-# The four policies are instruments and the spread between them is the
-# measurement, so where they *disagree* matters more than where they agree. At
-# the top of the range they disagree three ways, and only one of the three was
-# pinned -- by a `slow` test on `naive_sum` alone, which the coverage job
-# deselects. A caller sweeping policies over a corpus with one enormous weight
-# gets `inf`, `nan`, or an exception depending on a keyword argument.
+
+# The spread between the policies is the measurement, so where they disagree is
+# pinned. Past the top of the range they disagree three ways: a caller sweeping
+# policies gets `inf`, `nan` or an exception depending on the policy.
 _OVERFLOWING = [sys.float_info.max, sys.float_info.max]
 
 
 @pytest.mark.parametrize("policy", [Reduction.NAIVE, Reduction.PAIRWISE])
 def test_an_uncompensated_sum_past_the_maximum_reports_infinity(policy: Reduction) -> None:
-    """Section 6 forbids stabilising transformations, so an overflow has to be
-    visible rather than quietly rescaled away."""
+    """An uncompensated sum past the maximum reports infinity.
+
+    Section 6 forbids stabilising transformations, so an overflow stays visible
+    rather than being rescaled away."""
     assert reduce_sum(_OVERFLOWING, policy) == math.inf
 
 
@@ -411,38 +393,38 @@ def test_an_uncompensated_sum_past_the_maximum_reports_infinity(policy: Reductio
 def test_compensated_summation_cannot_represent_an_infinite_sum(
     label: str, values: list[float]
 ) -> None:
-    """Neumaier's correction term is `(sum - v) + ...`; once either side is
-    infinite that is `inf - inf`, which is NaN, and the NaN reaches the result.
+    """Compensated summation returns NaN once any term or partial is infinite.
 
-    So it is not an overflow rule but an infinity rule: a single infinite term is
-    enough, and the policy chosen for its *accuracy* is the one that loses the
-    value and the sign together. Pinned rather than repaired -- the corrected sum
-    is what the policy is, and this is the honest statement of where the
-    instrument stops reading.
-    """
+    The correction term `(sum - v) + ...` becomes `inf - inf`, so one infinite
+    term loses both the value and the sign. The behaviour is pinned rather than
+    repaired: it is where the compensated sum stops giving a reading."""
     assert math.isnan(reduce_sum(values, Reduction.NEUMAIER)), label
 
 
 @pytest.mark.parametrize("policy", [Reduction.NAIVE, Reduction.PAIRWISE, Reduction.EXACT])
 def test_the_other_three_policies_carry_an_infinity_through(policy: Reduction) -> None:
-    """The contrast that makes the Neumaier result a divergence rather than a
-    property of the input. Including the oracle: `fsum` returns `inf` here and
-    raises only when the infinities have opposite signs."""
+    """The other three policies carry an infinity through to the result.
+
+    This makes the Neumaier result a divergence between policies, not a property
+    of the input. `fsum` returns `inf` here and raises only when the infinities
+    have opposite signs."""
     assert reduce_sum([1.0, math.inf], policy) == math.inf
     assert reduce_sum([1.0, -math.inf], policy) == -math.inf
 
 
 def test_only_exact_summation_refuses_a_sum_it_cannot_represent() -> None:
-    """`math.fsum` raises rather than returning a value it knows is wrong. It is
-    the oracle the other three are measured against, so a silent `inf` from it
-    would corrupt every error figure computed from the comparison."""
+    """Only exact summation raises on a sum it cannot represent.
+
+    `math.fsum` is the oracle the other three are measured against, so a silent
+    `inf` from it would corrupt every error figure computed from the comparison."""
     with pytest.raises(OverflowError, match="intermediate overflow in fsum"):
         reduce_sum(_OVERFLOWING, Reduction.EXACT)
 
 
 def test_only_exact_summation_refuses_opposite_infinities() -> None:
-    """`inf + -inf` has no answer. The other three return NaN, which propagates;
-    the oracle says so."""
+    """Only exact summation raises on opposite infinities.
+
+    `inf + -inf` has no answer; the other three return NaN, which propagates."""
     with pytest.raises(ValueError, match=r"-inf \+ inf in fsum"):
         reduce_sum([math.inf, -math.inf], Reduction.EXACT)
 
@@ -454,8 +436,10 @@ def test_the_inexact_policies_return_nan_for_opposite_infinities(policy: Reducti
 
 @pytest.mark.parametrize("policy", list(Reduction))
 def test_a_nan_term_reaches_the_result_under_every_policy(policy: Reduction) -> None:
-    """No policy filters or reorders around a NaN. A sum that quietly dropped one
-    would turn an invalid corpus into a plausible number."""
+    """A NaN term reaches the result under every policy.
+
+    No policy filters or reorders around a NaN; a sum that dropped one would turn
+    an invalid corpus into a plausible number."""
     assert math.isnan(reduce_sum([1.0, math.nan, 2.0], policy))
 
 
@@ -479,11 +463,9 @@ def test_a_sum_that_comes_out_zero_is_always_positive_zero(
 ) -> None:
     """Every zero this module can produce is `+0.0`, whatever the route.
 
-    Everything downstream compares on bit patterns, where `-0.0` and `+0.0` are
-    different, so "the sum is zero" has to mean one thing. Each policy reaches
-    zero differently -- a fold from `0.0`, a compensated correction, a tree, and
-    `fsum` -- and they agree; that agreement is the property, not an accident of
-    any one implementation.
+    Downstream comparison is on bit patterns, where `-0.0` and `+0.0` differ.
+    Each policy reaches zero by a different route (a fold from `0.0`, a
+    compensated correction, a tree, `fsum`) and all four agree.
     """
     total = reduce_sum(values, policy)
     assert total == 0.0, label
@@ -492,13 +474,11 @@ def test_a_sum_that_comes_out_zero_is_always_positive_zero(
 
 @pytest.mark.parametrize("n", [255, 256, 257, 383, 384, 385, 511, 512, 513])
 def test_the_tree_shape_changes_do_not_cost_accuracy(n: int) -> None:
-    """The binary-counter merge changes shape at every multiple of the block
-    size, and carries at powers of two times it. 384 is the first size where two
-    levels carry at once, so it is the first that exercises the `while` in the
-    merge more than once.
+    """Pairwise is no further than naive from the exact sum where the tree changes.
 
-    The existing sweep stops at 257. These sizes are the ones where a merge that
-    dropped a partial would still produce a plausible number.
+    The tree changes shape at every multiple of the block size; 384 is the first
+    size that holds two partials, and 512 the first whose merge carries twice.
+    A merge that dropped a partial would still give a plausible number here.
     """
     values = [1.0 / (i + 1) for i in range(n)]
     truth = exact_sum(values)
@@ -507,9 +487,10 @@ def test_the_tree_shape_changes_do_not_cost_accuracy(n: int) -> None:
 
 @pytest.mark.parametrize("n", [128, 256, 384, 512])
 def test_an_exactly_representable_sum_is_identical_under_every_policy(n: int) -> None:
-    """At the block boundaries, on values whose partial sums are all exact, the
-    tree shape cannot matter -- so any disagreement here is a lost or duplicated
-    term rather than rounding."""
+    """An exactly representable sum is identical under every policy.
+
+    On exact partial sums the tree shape cannot matter, so any disagreement at a
+    block boundary is a lost or duplicated term rather than rounding."""
     values = [1.0] * n
     results = {policy: reduce_sum(values, policy) for policy in Reduction}
     assert set(results.values()) == {float(n)}, results
@@ -520,12 +501,11 @@ def test_an_exactly_representable_sum_is_identical_under_every_policy(n: int) ->
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("policy", [None, 0, 1.5, "NAIVE", "", b"naive", ("naive",)])
 def test_a_policy_that_is_not_one_of_the_four_is_refused(policy: object) -> None:
-    """The lookup is a dict keyed on the enum. `Reduction` is a `str` enum, so
-    the *lowercase value* works and is tested elsewhere; everything else -- the
-    member name, a bytestring, a number -- must be refused rather than falling
-    back to a default. Which policy summed a published number is recorded in the
-    manifest, so a silent default would make that record false.
-    """
+    """A policy that is not one of the four is refused.
+
+    `Reduction` is a `str` enum, so members and their lowercase values select a
+    reducer; anything else, such as the member name, bytes or a number, raises.
+    The manifest records which policy summed each published number."""
     with pytest.raises(ValueError, match="unknown reduction policy"):
         reduce_sum([1.0], policy)  # type: ignore[arg-type]
 
@@ -534,17 +514,11 @@ def test_a_policy_that_is_not_one_of_the_four_is_refused(policy: object) -> None
 # The correctly-rounded logarithm: where it beats the platform outright
 # ---------------------------------------------------------------------------
 def test_the_exact_logarithm_survives_a_ratio_the_platform_cannot_form() -> None:
-    """The headline reason the Decimal path is not merely more accurate.
+    """The exact logarithm survives a ratio the platform path cannot form.
 
-    `platform_log_ratio` divides first in binary64, so a ratio above the largest
-    representable double raises before `log` is reached. The exact path divides
-    in `Decimal`, where the ratio is a rational and the logarithm is taken of a
-    number that never has to fit in a double -- only the answer does.
-
-    Not reachable from a real vocabulary, where the ratio is `(1+N)/(1+df)`. It
-    is the demonstration that the two are different computations rather than the
-    same one at different precisions.
-    """
+    `platform_log_ratio` divides in binary64 first and raises above the largest
+    double; the exact path divides in `Decimal`, so only the answer must fit. A
+    real vocabulary, with ratio `(1+N)/(1+df)`, does not reach this case."""
     assert correctly_rounded_log_ratio(10**400, 1) == pytest.approx(math.log(10) * 400)
 
     with pytest.raises(OverflowError, match="integer division result too large"):
@@ -552,8 +526,9 @@ def test_the_exact_logarithm_survives_a_ratio_the_platform_cannot_form() -> None
 
 
 def test_the_exact_logarithm_of_a_huge_ratio_is_finite_and_correct() -> None:
-    """`ln(10**400)` is about 921, comfortably inside binary64. The intermediate
-    is what overflows, not the result."""
+    """The exact logarithm of a huge ratio is finite and correct.
+
+    `ln(10**400)` is about 921, inside binary64; only the intermediate overflows."""
     got = correctly_rounded_log_ratio(10**400, 1)
     assert math.isfinite(got)
     assert 921.0 < got < 921.1
@@ -561,32 +536,37 @@ def test_the_exact_logarithm_of_a_huge_ratio_is_finite_and_correct() -> None:
 
 @pytest.mark.parametrize("denominator", [1, 2, 3, 9743, 10**50])
 def test_a_ratio_of_one_is_exactly_positive_zero_at_every_scale(denominator: int) -> None:
-    """`ln(1) == 0` has to be exact and signed positive: idf is `log(ratio) + 1`,
-    so a `-0.0` here would put `-0.0` into the smoothing and a bit-exact
-    comparison downstream would see it."""
+    """A ratio of one gives exactly `+0.0` at every scale.
+
+    idf is `log(ratio) + 1`, so a `-0.0` here would enter the smoothing and be
+    visible to a bit-exact comparison downstream."""
     got = correctly_rounded_log_ratio(denominator, denominator)
     assert same_bits(got, 0.0), f"ln(1) came out as {got!r} at denominator {denominator}"
 
 
 def test_the_working_precision_is_the_recorded_sixty_digits() -> None:
-    """Quoted in the module docstring as agreeing with a 120-digit evaluation on
-    every ratio this project produces. It is a published claim about the
-    numbers, so the constant behind it is pinned."""
+    """The Decimal working precision is the recorded sixty digits.
+
+    The constant's documentation states that this precision agrees with a
+    120-digit evaluation on every ratio the project produces, so it is pinned."""
     assert DECIMAL_LOG_PRECISION == 60
 
 
 def test_the_logarithm_leaves_the_callers_decimal_context_alone() -> None:
-    """It raises the working precision inside a `localcontext`. Leaking that
-    would silently change the precision of any Decimal arithmetic a caller did
-    afterwards -- and this function is called once per vocabulary entry."""
+    """The logarithm leaves the caller's Decimal context unchanged.
+
+    It raises the working precision inside a `localcontext`; leaking that would
+    change the precision of later Decimal arithmetic in the caller."""
     before = getcontext().prec
     correctly_rounded_log_ratio(9743, 2)
     assert getcontext().prec == before
 
 
 def test_a_caller_holding_its_own_decimal_context_is_not_clobbered() -> None:
-    """The nested case, which is the one a `localcontext` gets wrong if it is
-    written as a bare `getcontext().prec = ...`."""
+    """A caller's own local Decimal context keeps its precision.
+
+    This nested case fails if the precision is set with a bare
+    `getcontext().prec = ...` rather than inside a `localcontext`."""
     with localcontext() as ctx:
         ctx.prec = 5
         correctly_rounded_log_ratio(9743, 2)
@@ -594,11 +574,11 @@ def test_a_caller_holding_its_own_decimal_context_is_not_clobbered() -> None:
 
 
 def test_the_arguments_are_documented_as_integers_but_floats_are_accepted() -> None:
-    """`Decimal(1.5)` is exact, so a float ratio computes rather than raising.
-    Pinned as a precondition: every caller passes `1 + N` and `1 + df`, both
-    integers, and an accidental float would silently take the binary
-    approximation of the value the caller meant.
-    """
+    """Float arguments are accepted although integers are documented.
+
+    `Decimal(1.5)` is exact, so a float ratio computes rather than raising. Every
+    caller passes the integers `1 + N` and `1 + df`; a float would take the
+    binary approximation of the intended value."""
     assert correctly_rounded_log_ratio(1.5, 2) == pytest.approx(math.log(0.75))  # type: ignore[arg-type]
 
 
@@ -614,22 +594,26 @@ def test_boolean_arguments_are_the_integers_they_equal() -> None:
     "value", [0.0, -0.0, 5e-324, -5e-324, 1.0, -1.0, math.inf, -math.inf, math.nan]
 )
 def test_every_float_encodes_to_exactly_eight_bytes(value: float) -> None:
-    """binary64 is 8 bytes for every value including the non-finite ones, so a
-    differential comparison never has to special-case one."""
+    """Every float, including the non-finite ones, encodes to eight bytes.
+
+    A differential comparison therefore needs no special case for any value."""
     assert len(bits_of(value)) == 8
 
 
 def test_the_sign_bit_is_the_top_bit_of_the_last_byte() -> None:
-    """Little-endian, so the sign lives at the end. Spelled out because every
-    `-0.0` assertion in the suite rests on this encoding."""
+    """The sign bit is the top bit of the last byte.
+
+    The encoding is little-endian, and every `-0.0` assertion in the suite
+    rests on it."""
     assert bits_of(0.0) == b"\x00" * 8
     assert bits_of(-0.0) == b"\x00" * 7 + b"\x80"
 
 
 def test_two_nans_of_opposite_sign_are_not_the_same_bits() -> None:
-    """`same_bits` calls a NaN equal to itself, which equality does not. It does
-    *not* call every NaN equal to every other: the sign bit still differs, and a
-    differential test comparing bytes would see that."""
+    """Two NaNs of opposite sign are not the same bits.
+
+    `same_bits` calls a NaN equal to itself but compares bytes, so the sign bit
+    still separates two NaNs."""
     assert same_bits(math.nan, math.nan)
     assert not same_bits(math.nan, -math.nan)
 
@@ -639,8 +623,10 @@ def test_two_nans_of_opposite_sign_are_not_the_same_bits() -> None:
     [(0.0, 5e-324), (-0.0, 5e-324), (5e-324, 5e-324), (1.0, 2.220446049250313e-16)],
 )
 def test_the_spacing_at_a_value_is_the_step_to_its_neighbour(value: float, expected: float) -> None:
-    """At zero the spacing is the smallest subnormal, not zero -- which is what
-    makes `ulps_between` usable down at the underflow boundary."""
+    """The spacing at a value is the step to its neighbour.
+
+    At zero the spacing is the smallest subnormal, not zero, which makes
+    `ulps_between` usable at the underflow boundary."""
     assert ulp(value) == expected
 
 
@@ -654,8 +640,9 @@ def test_the_spacing_at_nan_is_nan() -> None:
 
 
 def test_the_smallest_positive_value_is_one_ulp_from_zero() -> None:
-    """The boundary the underflow study lives at: the gap from nothing to the
-    smallest something is one unit, not an infinity of them."""
+    """The smallest positive value is one ulp from zero.
+
+    This is the boundary at which the underflow study works."""
     assert ulps_between(0.0, 5e-324) == 1.0
     assert ulps_between(5e-324, 0.0) == -1.0
 
@@ -681,26 +668,28 @@ def test_the_distance_between_the_extremes_stays_finite() -> None:
 # Square root: the G18 underflow boundary
 # ---------------------------------------------------------------------------
 def test_the_square_root_of_the_smallest_normal_is_the_g18_threshold() -> None:
-    """`sqrt(DBL_MIN)` is where cosine similarity starts to lose its guarantees:
-    below it, squaring a coordinate underflows and the norm loses precision the
-    similarity cannot recover.
+    """The square root of the smallest normal is the G18 threshold.
 
-    Defined here once, in the module that owns `sqrt`, so the vector and geometry
-    suites can quote the constant rather than each deriving it.
-    """
+    Below `sqrt(DBL_MIN)` squaring a coordinate underflows and cosine similarity
+    loses its guarantees. The constant is pinned here, in the module that owns
+    `sqrt`, so the vector and geometry suites quote it rather than derive it."""
     assert sqrt(sys.float_info.min) == 1.4916681462400413e-154
 
 
 def test_the_square_root_keeps_the_sign_of_a_negative_zero() -> None:
-    """IEEE-754 says `sqrt(-0.0)` is `-0.0`, not `+0.0` and not an error. It is
-    the one negative input with an answer."""
+    """The square root keeps the sign of a negative zero.
+
+    IEEE 754 defines `sqrt(-0.0)` as `-0.0`, the one negative input with an
+    answer."""
     assert same_bits(sqrt(-0.0), -0.0)
 
 
 @pytest.mark.parametrize("value", [-1.0, -5e-324, -sys.float_info.max])
 def test_a_negative_square_root_is_refused_however_small(value: float) -> None:
-    """A magnitude test in place of a sign test would let the subnormal through
-    and return a NaN norm from a vector that merely had a rounding error."""
+    """A negative square root is refused however small the input.
+
+    A magnitude test in place of a sign test would let the subnormal through and
+    return a NaN norm from a vector with only a rounding error."""
     # CPython 3.13 and earlier raise "math domain error"; 3.14 names the input
     # instead. Matched either way, so this pins the refusal and not the
     # interpreter version.
@@ -709,8 +698,10 @@ def test_a_negative_square_root_is_refused_however_small(value: float) -> None:
 
 
 def test_the_square_root_of_the_smallest_subnormal_is_representable() -> None:
-    """Underflow is one-way: the root of a subnormal is comfortably normal, so
-    the norm of a vanishing vector is still a usable number."""
+    """The square root of the smallest subnormal is representable.
+
+    The root of a subnormal is a normal number, so the norm of a vanishing
+    vector is still usable."""
     assert sqrt(5e-324) == pytest.approx(2.2227587494850775e-162)
 
 
@@ -722,24 +713,18 @@ def test_the_square_root_carries_the_non_finite_values_through(value: float, che
 # ---------------------------------------------------------------------------
 # The pairwise tree, against an independent implementation of the same scheme
 # ---------------------------------------------------------------------------
-# `pairwise_sum` is a streaming binary counter: blocks of 128 accumulate, and a
-# completed block merges with any stored partial of equal weight, doubling as it
-# goes. The shape of that tree *is* the specification -- the C++ core must build
-# the identical one, bit for bit, from n = 1 to 10,000.
-#
-# Comparing against `exact_sum` cannot pin it: many different trees land within a
-# few ulps of the correctly-rounded answer, which is why mutation testing could
-# reverse the carry comparison and drop the weight doubling with every existing
-# assertion still passing. So the oracle here is a second implementation of the
-# same scheme, written from the description rather than from the code, and the
-# comparison is on bits.
+
+
+# The tree shape of `pairwise_sum` is part of the specification, shared bit for
+# bit with the C++ core. The oracle is a second implementation of the same
+# binary-counter scheme, and the comparison is on bits.
+# Rationale: docs/engineering_notes.md#pairwise-tree-oracle
 def _pairwise_oracle(values: list[float], block_size: int) -> float:
     """The binary-counter scheme again, structured as a list of levels.
 
-    Deliberately not the module's formulation: this one keeps `(weight, value)`
-    pairs together and merges by scanning, where the module keeps two parallel
-    stacks and merges by popping. Same tree, different bookkeeping, so a defect
-    in either shows up as a disagreement rather than being reproduced twice.
+    It keeps `(weight, value)` pairs in one stack and derives each new weight
+    from the stored one; the module keeps two parallel stacks and doubles a
+    running weight. A defect in either shows up as a disagreement.
     """
     levels: list[tuple[int, float]] = []
     block = 0.0
@@ -771,7 +756,7 @@ def _pairwise_oracle(values: list[float], block_size: int) -> float:
 def test_the_pairwise_tree_matches_an_independent_binary_counter(n: int) -> None:
     """Bit-for-bit, across every size where the tree changes shape.
 
-    384 is the first size at which two levels carry in one merge, and 512 the
+    512 is the first size at which two levels carry in one merge, and 1024 the
     first at which three do, so these sizes reach the `while` in the merge to
     depths nothing else does.
     """
@@ -797,7 +782,9 @@ def test_the_two_formulations_disagree_somewhere_if_the_tree_is_altered() -> Non
 
 
 def test_the_block_size_is_the_recorded_one_hundred_and_twenty_eight() -> None:
-    """It selects the tree, so it is part of the format of every published sum
+    """The pairwise block size is the recorded 128.
+
+    It selects the tree, so it is part of the format of every published sum
     rather than a tuning parameter."""
     assert _PAIRWISE_BLOCK == 128
 
@@ -806,42 +793,39 @@ def test_the_block_size_is_the_recorded_one_hundred_and_twenty_eight() -> None:
 # The behavioural probes, which have to actually probe something
 # ---------------------------------------------------------------------------
 def test_the_compiler_did_not_constant_fold_the_probe_away() -> None:
-    """`0.1 + 0.2 != 0.3` in binary64. If it ever compared equal, the expression
-    had been folded at higher precision and every other probe in the block would
-    be reporting on an environment that is not the one doing the arithmetic.
+    """The constant-folding probe reports `True`.
 
-    Asserted as `True` rather than merely present: the field is a claim, and a
-    probe inverted to `==` would record `False` into every manifest without
-    changing the key set.
-    """
+    `0.1 + 0.2 != 0.3` in binary64; equality would mean the expression was folded
+    at higher precision. The value is asserted, not only the key, because an
+    inverted probe would record `False` without changing the key set."""
     assert float_environment()["constant_folding_ok"] is True
     assert 0.1 + 0.2 != 0.3, "the premise, stated where a reader can see it"
 
 
 def test_the_interpreter_did_not_reassociate_the_probe() -> None:
-    """`(1.0 + 1e-17) - 1.0` is `0.0`, because `1e-17` is far below the spacing
-    at 1.0 and is absorbed. Under reassociation to `1.0 - 1.0 + 1e-17` it would
-    be `1e-17`, and a sum that reassociates would break the left-to-right fold
-    the whole specification rests on.
-    """
+    """The reassociation probe reports `True`.
+
+    `(1.0 + 1e-17) - 1.0` is `0.0` because `1e-17` is absorbed at 1.0.
+    Reassociated to `1.0 - 1.0 + 1e-17` it would be `1e-17`, which breaks the
+    left-to-right fold the specification rests on."""
     assert float_environment()["no_reassociation"] is True
     assert (1.0 + 1e-17) - 1.0 == 0.0
 
 
 def test_the_subnormal_probe_reaches_a_subnormal() -> None:
-    """Halving the smallest normal has to land below it and stay positive, or
-    the probe is not testing flush-to-zero at all."""
+    """The subnormal probe reaches a subnormal.
+
+    Halving the smallest normal lands below it and stays positive, so the probe
+    tests flush-to-zero."""
     halved = sys.float_info.min / 2.0
     assert 0.0 < halved < sys.float_info.min
     assert float_environment()["subnormals_supported"] is True
 
 
-#: Magnitudes spanning 32 decades, drawn from a fixed seed. Smooth input detects
-#: a changed merge tree only at some lengths: on `1/(i+1)` the terms are near
-#: enough in magnitude that many regroupings land on identical bits, and
-#: mutation testing found the reversed carry comparison surviving every size the
-#: oracle originally swept. An irregular mix of huge and tiny terms makes the
-#: association observable at any length that carries.
+#: Magnitudes spanning 32 decades, drawn from a fixed seed. On smooth input such
+#: as `1/(i+1)` many regroupings land on identical bits, so a changed merge tree
+#: shows only at some lengths. This irregular mix of huge and tiny terms makes
+#: the association observable at any length that carries.
 _ADVERSARIAL_MAGNITUDES = [
     random.Random(38).choice([1e16, 1.0, -1e16, 1e-16, -1.0]) for _ in range(1280)
 ]
@@ -861,12 +845,11 @@ def test_the_pairwise_tree_matches_the_oracle_on_adversarial_magnitudes() -> Non
 
 
 def _pairwise_from_the_wrong_end(values: list[float]) -> float:
-    """The counter with its carry compared against the *bottom* of the weight
-    stack instead of the top.
+    """The counter with its carry compared against the bottom of the stack.
 
-    A specimen, not an alternative: the stack is ordered largest-first, so this
-    merges once and then never again, appending a flat list of unmerged blocks.
-    It exists to show what the oracle comparison is sensitive to.
+    The stack is ordered largest-first, so this merges once and then appends a
+    flat list of unmerged blocks. It is a wrong tree for the oracle comparison
+    to detect, not an alternative formulation.
     """
     partials: list[float] = []
     weights: list[int] = []
@@ -894,10 +877,9 @@ def _pairwise_from_the_wrong_end(values: list[float]) -> float:
 def test_the_oracle_comparison_detects_a_reversed_carry_comparison() -> None:
     """What makes the oracle above evidence rather than a coincidence.
 
-    The specimen builds a genuinely different tree, so the comparison has to be
-    able to see it. On adversarial magnitudes it does at any length that carries;
-    on smooth values it depends on the length, which is why the sweep alone was
-    not enough and this input exists.
+    The specimen builds a different tree. On adversarial magnitudes the
+    comparison sees it at any length that carries; on smooth values only at
+    some lengths.
     """
     assert not same_bits(
         pairwise_sum(_ADVERSARIAL_MAGNITUDES),

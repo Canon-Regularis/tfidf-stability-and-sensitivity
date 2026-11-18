@@ -1,36 +1,8 @@
 """Secondary sort attributes (README section 2.3.1, ``spec_addenda.md#g8``).
 
-Score ties are resolved lexicographically on a fixed attribute tuple: popularity,
-rating, engagement, identifier. Every attribute is converted to a dense integer
-rank at construction time, an ``int32`` in which smaller means earlier, with
-direction (``desc``/``asc``) and missing-value placement folded into the rank.
-
-Consequences:
-
-1. The comparator degenerates to a plain ascending lexicographic comparison of
-   ``(float, int, int, int, int)``: no direction branch, no missing-value branch,
-   no rational arithmetic inside the sort.
-2. No floating point survives in the tie-break, which is G8's requirement. The
-   only ``double`` in the key is the similarity score.
-3. A NaN cannot enter through an attribute, as a type-level guarantee rather
-   than a runtime check. A NaN in a sort key destroys the strict weak ordering,
-   which is undefined behaviour in ``std::sort`` and shows up as an
-   out-of-bounds write.
-4. The C++ mirror receives the rank matrix as data and never re-derives it, so
-   the cross-language question becomes the integer equality
-   ``py_ranks == cpp_ranks``. Same move ``spec_addenda.md#g13`` makes for
-   ``idf``.
-
-Why not ``fractions.Fraction`` in the sort key
-----------------------------------------------
-It has no C++ counterpart, so the two languages would run structurally different
-algorithms over a result the test suite asserts is identical: the drift that
-produced this project's ``pairwise_sum`` bug, where two legitimate formulations
-agreed on every input until n = 129. It also runs ``math.gcd`` and allocates an
-object per element, and ``Fraction(0, 0)`` raises, so an absent rating still
-needs a separate ``has_value`` bit. Cross-multiplication is the right rule; it
-belongs in the rank construction, evaluated once over the distinct values,
-rather than inside a sort that runs per query.
+Score ties resolve on popularity, rating, engagement, identifier, each a dense ``int32`` rank
+(smaller earlier), direction and missing placement folded in; the C++ mirror receives them
+as data, like idf (``spec_addenda.md#g13``). Rationale: docs/engineering_notes.md#rank-encoding
 """
 
 from __future__ import annotations
@@ -38,7 +10,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import itertools
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final
@@ -120,10 +92,9 @@ class AttributeSpec:
     def __post_init__(self) -> None:
         """Normalise the three enums to their members, refusing unknown values.
 
-        All three are ``str`` enums: ``"ratio_i64"`` equals the member without
-        being it, and every branch reading them selects on ``is``. An uncoerced
-        string takes the default arm, changing the rank encoding that the
-        tie-break sorts on and so top-k membership.
+        All three are ``str`` enums. Branches select on ``is`` but ``_CODECS`` matches a
+        dtype by equality, so an uncoerced string would take two different arms and
+        change the rank encoding, and with it top-k membership.
         """
         object.__setattr__(self, "direction", Direction(self.direction))
         object.__setattr__(self, "dtype", AttributeDType(self.dtype))
@@ -145,13 +116,9 @@ DEFAULT_SPECS: Final[tuple[AttributeSpec, ...]] = (
 def ratio_less(a_num: int, a_den: int, b_num: int, b_den: int) -> bool:
     """``a_num/a_den < b_num/b_den``, exactly, by cross-multiplication (G8).
 
-    Both denominators must be strictly positive, which the column invariant
-    guarantees: a zero denominator means "no rating", is carried by the
-    ``has_value`` bit, and never reaches here.
-
-    Python ints are arbitrary precision, so this cannot overflow. The C++ mirror
-    uses ``__int128``, and :func:`check_ratio_fits_int64` guards it at
-    construction, so the native inner loop needs no checked multiply.
+    Both denominators must be strictly positive; a zero denominator means no rating, is carried
+    by ``has_value`` and never reaches here. Python ints cannot overflow; the C++ mirror uses
+    ``__int128`` where available and :func:`check_ratio_fits_int64` keeps products in int64.
     """
     return a_num * b_den < b_num * a_den
 
@@ -159,15 +126,9 @@ def ratio_less(a_num: int, a_den: int, b_num: int, b_den: int) -> bool:
 def check_ratio_fits_int64(pairs: Sequence[tuple[int, int]], what: str) -> None:
     """Reject ratio data whose cross-products would overflow the C++ mirror.
 
-    The products that occur are ``num_i * den_j`` for distinct ``i != j``, since
-    nothing is compared with itself. Bounding by ``max(num) * max(den)`` over the
-    whole column is therefore too conservative: when the largest numerator and
-    the largest denominator belong to the same document, which is the usual case,
-    that product never arises and rejecting on it would be a false positive.
-
-    The exact maximum over ``i != j`` comes from the two largest numerators and
-    the two largest denominators: a maximising pair must draw from those, and at
-    least one such combination avoids the index collision. O(n), and exact.
+    Only ``num_i * den_j`` with ``i != j`` occurs, so ``max(num) * max(den)`` is too
+    conservative when both maxima belong to one document. The exact maximum over ``i != j``
+    comes from the two largest numerators and the two largest denominators, in O(n).
     """
     if len(pairs) < 2:
         return  # nothing is ever compared with itself
@@ -202,15 +163,9 @@ def check_ratio_fits_int64(pairs: Sequence[tuple[int, int]], what: str) -> None:
 class AttributeColumn:
     """One attribute's values for every document, plus its integer ranks.
 
-    Attributes:
-        spec: The pinned semantics.
-        has_value: Per document. Absence is an explicit bit, never NaN.
-        ranks: Dense ``int32``-compatible ranks; smaller sorts earlier. Direction
-            and missing placement are already folded in, so a consumer needs
-            neither.
-        n_distinct: Number of distinct present values.
-        values: The raw values, retained for reporting (section 7.4 prints the
-            tie-break attributes of a near-tie pair).
+    ``has_value`` marks absence per document, never as NaN. ``ranks`` are dense, fit ``int32``,
+    sort smaller first, and fold in direction and missing placement. ``n_distinct`` counts
+    distinct present values; ``values`` holds the raw values for reporting (section 7.4).
     """
 
     spec: AttributeSpec
@@ -230,12 +185,7 @@ class AttributeColumn:
 def _order_distinct(values: Sequence[Any], spec: AttributeSpec) -> list[Any]:
     """Sort the distinct present values into rank order (earliest first)."""
     distinct = list(dict.fromkeys(values))  # order-preserving unique
-    if spec.dtype is AttributeDType.RATIO_I64:
-        distinct.sort(key=functools.cmp_to_key(_ratio_cmp))
-    elif spec.dtype is AttributeDType.BYTES:
-        distinct.sort(key=lambda s: str(s).encode("utf-8"))
-    else:
-        distinct.sort()
+    distinct.sort(key=_CODECS[spec.dtype].sort_key)
     if spec.direction is Direction.DESC:
         distinct.reverse()
     return distinct
@@ -255,37 +205,66 @@ def _ratio_cmp(a: tuple[int, int], b: tuple[int, int]) -> int:
     return 0
 
 
+def _ratio_equal(a: tuple[int, int], b: tuple[int, int]) -> bool:
+    """Whether two pairs encode the same rational."""
+    return _ratio_cmp(a, b) == 0
+
+
+def _utf8(value: Any) -> bytes:
+    """Sort key for text: its UTF-8 bytes, as ``memcmp`` orders them."""
+    return str(value).encode("utf-8")
+
+
+def _check_floats_finite(present: Sequence[Any], what: str) -> None:
+    """Refuse a non-finite value in a ``FLOAT64`` column."""
+    check_finite([float(v) for v in present], what)
+
+
+@dataclass(frozen=True, slots=True)
+class _Codec:
+    """How one dtype checks, orders and merges its present values.
+
+    ``check`` refuses a column before it is ordered: a non-finite float, or ratios whose
+    cross-products overflow int64. ``sort_key`` orders distinct values ascending, ``None``
+    meaning natural order. ``equivalent`` reports neighbours that encode one value.
+    """
+
+    check: Callable[[Sequence[Any], str], None] | None
+    sort_key: Callable[[Any], Any] | None
+    equivalent: Callable[[Any, Any], bool] | None
+
+
+#: Each dtype's codec; ``_extract`` reads raw values with its own switch. Only a
+#: ratio can hold two ``==``-distinct representations of one value, so only
+#: RATIO_I64 has ``equivalent``; every other dtype was deduplicated by ``==``
+#: under an order consistent with its key.
+_CODECS: Final[dict[AttributeDType, _Codec]] = {
+    AttributeDType.INT64: _Codec(check=None, sort_key=None, equivalent=None),
+    AttributeDType.RATIO_I64: _Codec(
+        check=check_ratio_fits_int64,
+        sort_key=functools.cmp_to_key(_ratio_cmp),
+        equivalent=_ratio_equal,
+    ),
+    AttributeDType.FLOAT64: _Codec(check=_check_floats_finite, sort_key=None, equivalent=None),
+    AttributeDType.BYTES: _Codec(check=None, sort_key=_utf8, equivalent=None),
+}
+
+
 def _dense_positions(ordered: Sequence[Any], spec: AttributeSpec) -> dict[Any, int]:
     """Rank the sorted distinct values by equivalence class rather than identity.
 
-    Only visible for :data:`AttributeDType.RATIO_I64`. ``_order_distinct``
-    deduplicates with ``dict.fromkeys``, which is tuple equality, so ``(14, 2)``
-    and ``(21, 3)`` both survive even though ``_ratio_cmp`` reports them equal
-    (14/2 == 21/3). Numbering the survivors ``enumerate``-style would hand two
-    documents with the same mean rating two different ranks.
-
-    Two guarantees break together if it does: the rating component stops tying
-    where G8 says it must, so the tie-break never falls through to engagement;
-    and since ``dict.fromkeys`` preserves insertion order, which of the two equal
-    representations sorts first depends on the order the records arrived in,
-    making the ranking depend on corpus order, which section 2.3.1's total-order
-    argument forbids.
-
-    Ranks are therefore dense: consecutive entries that compare equal share a
-    rank, and the next class takes the next integer.
+    For :data:`AttributeDType.RATIO_I64`, ``(14, 2)`` and ``(21, 3)`` both survive tuple
+    deduplication yet compare equal, so consecutive equal entries share a rank and the next
+    class takes the next integer. Rationale: docs/engineering_notes.md#ratio-dense-ranks
     """
     if not ordered:
         return {}
 
-    # Only ratios can have two distinct representations of one value. Every other
-    # dtype was deduplicated by `==` under an ordering consistent with its sort
-    # key, so its survivors are genuinely distinct.
-    ratios = spec.dtype is AttributeDType.RATIO_I64
-
+    equivalent = _CODECS[spec.dtype].equivalent
     positions: dict[Any, int] = {ordered[0]: 0}
     rank = 0
     for previous, current in itertools.pairwise(ordered):
-        if not (ratios and _ratio_cmp(previous, current) == 0):
+        if equivalent is None or not equivalent(previous, current):
             rank += 1
         positions[current] = rank
     return positions
@@ -299,10 +278,9 @@ def _build_column(
     """Rank-encode one column."""
     present = [v for v, ok in zip(values, has_value, strict=True) if ok]
 
-    if spec.dtype is AttributeDType.FLOAT64:
-        check_finite([float(v) for v in present], f"attribute {spec.name!r}")
-    if spec.dtype is AttributeDType.RATIO_I64:
-        check_ratio_fits_int64(present, f"attribute {spec.name!r}")
+    codec = _CODECS[spec.dtype]
+    if codec.check is not None:
+        codec.check(present, f"attribute {spec.name!r}")
 
     ordered = _order_distinct(present, spec)
     position = _dense_positions(ordered, spec)
@@ -338,11 +316,9 @@ def _build_column(
 class AttributeTable:
     """Every tie-break attribute for a corpus, rank-encoded.
 
-    ``id_ranks`` is a bijection onto ``0..N-1`` given by UTF-8 byte order of the
-    document identifiers. It terminates every sort key and makes the ordering a
-    strict total order rather than a weak one, which in turn makes the sorted
-    permutation unique and sort stability irrelevant. Identifier uniqueness is
-    validated rather than assumed.
+    ``id_ranks`` is a bijection onto ``0..N-1`` by UTF-8 byte order of the identifiers,
+    which are validated unique. It terminates every sort key, so the ordering is strict
+    total, the sorted permutation is unique, and sort stability is irrelevant.
     """
 
     doc_ids: tuple[str, ...]
@@ -405,15 +381,9 @@ class AttributeTable:
     ) -> AttributeTable:
         """Build from per-document mappings.
 
-        Reads the field names ``tests/fixtures/mini_corpus.jsonl`` already
-        carries. A ``RATIO_I64`` attribute named ``rating`` is assembled from
-        ``rating_sum2`` and ``rating_count``: the fixture was written to G8's
-        exact-pair representation, so it is honoured rather than replaced.
-
-        Raises:
-            DuplicateIdentifierError: If two documents share an identifier.
-            TfidfStabilityError: On non-finite floats, inconsistent ratio pairs,
-                a violated ``FORBID`` policy, or int64 overflow risk.
+        A ``RATIO_I64`` attribute ``x`` is G8's exact pair ``x_sum2``/``x_count``, as in
+        ``tests/fixtures/mini_corpus.jsonl``. Raises DuplicateIdentifierError on a shared id;
+        TfidfStabilityError on non-finite floats, bad ratio pairs, FORBID or int64 overflow risk.
         """
         doc_ids = [str(r[id_field]) for r in records]
         check_unique_ids(doc_ids)

@@ -1,30 +1,9 @@
 #!/usr/bin/env python3
 """Find tests that pass without establishing anything.
 
-A green suite is only evidence if the tests could have failed. This repository
-already guards the run-level version of that: `ctest --no-tests=error` catches an
-empty C++ suite, and determinism.yml counts executed tests because every
-differential test is skipif-guarded and pytest exits 0 when all of them skip.
-Both answer "did anything run". Neither answers "did what ran assert anything",
-which is the same failure one level down.
-
-The checks below are the vacuity modes that have actually appeared here. Two are
-already defended by hand, in comments that say why: test_scoring_kernels.py has a
-test whose name is the guard, and test_perturbation_bounds.py counts the
-documents it examined because "without this the test passes vacuously whenever
-every non-edited document happens to see a zero shift". A hand-written guard
-protects the one test somebody thought about; this protects the rest.
-
-What is deliberately not checked: whether an assertion is *strong*. `assert x ==
-approx(y, rel=1)` is nearly content-free and no parser can tell. Mutation testing
-is the tool for that question and is not wired up here.
-
-Usage::
-
-    python scripts/check_test_vacuity.py [--tests tests/] [-v]
-
-Exits non-zero if any finding is reported, so it can gate CI beside
-check_docs.py and check_layout.py.
+Run-level guards answer whether anything ran; this script answers whether what
+ran asserts anything. Assertion strength is not checked. Exits non-zero when any
+finding is reported. Rationale: docs/engineering_notes.md#test-vacuity-scope
 """
 
 from __future__ import annotations
@@ -39,7 +18,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 
 #: A call whose name contains one of these is treated as establishing something.
-#: Deliberately generous: a false negative here costs one unexamined test, while a
+#: The list is generous: a false negative costs one unexamined test, while a
 #: false positive trains the reader to ignore the whole report.
 _ASSERTING = ("assert", "raises", "warns", "fail", "check", "verify", "expect")
 
@@ -50,13 +29,9 @@ _ASSERTING = ("assert", "raises", "warns", "fail", "check", "verify", "expect")
 _TOO_BROAD = {"Exception", "BaseException", "AttributeError", "NameError", "ImportError"}
 
 #: `pytest.raises(X)` without `match=` asserts only the type, so two guards of
-#: the same class are interchangeable: swapping them, or reaching the second when
-#: the test meant the first, still passes. Most of this package's guards raise the
-#: same handful of project exceptions and differ only in what they say.
-#:
-#: Exempt where there is no message to match. `SystemExit` carries an exit code
-#: rather than prose, and the tests that raise it assert `.code` instead, which is
-#: stricter than any pattern would be.
+#: the same class are interchangeable. Types listed here carry no message to
+#: match and are exempt: `SystemExit` carries an exit code that tests assert
+#: directly. Rationale: docs/engineering_notes.md#unmatched-raises-exemptions
 _NO_MESSAGE = {"SystemExit", "KeyboardInterrupt", "StopIteration", "GeneratorExit"}
 
 
@@ -78,7 +53,7 @@ def _is_test(node: ast.AST) -> bool:
 
 
 def _call_name(node: ast.expr) -> str:
-    """Dotted name of a call target, lowercased. `pytest.raises` -> 'pytest.raises'."""
+    """Return the dotted name of a call target, lowercased."""
     parts: list[str] = []
     while isinstance(node, ast.Attribute):
         parts.append(node.attr)
@@ -127,14 +102,11 @@ def _empty_parametrize(deco: ast.expr) -> str | None:
 
 
 def _unmarked_property(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
-    """A Hypothesis test that does not carry the marker naming it as one.
+    """A Hypothesis test that does not carry the `property` marker.
 
-    `pyproject.toml` registers `property` and runs under `--strict-markers`, so
-    the category is declared; the marker is what makes it selectable. Nightly
-    runs the property tests at a raised example count and currently names the
-    files by hand, which drifts the moment a `@given` lands in a file nobody
-    thought to add. Enforcing the marker here means the selector can become
-    `-m property` and stay correct without anyone maintaining a list.
+    `pyproject.toml` registers `property` under `--strict-markers`; the marker
+    makes the test selectable with `-m property`, so the nightly raised-example
+    run needs no hand-maintained file list.
     """
     names = {
         _call_name(d.func) if isinstance(d, ast.Call) else _call_name(d) for d in fn.decorator_list
@@ -156,11 +128,10 @@ def _broad_raises(node: ast.Call) -> str | None:
 
 
 def _unmatched_raises(node: ast.Call) -> str | None:
-    """A `pytest.raises` that pins the type but not what the guard says.
+    """A `pytest.raises` that pins the type but not the message.
 
-    A tuple of acceptable types is exempt: that form says "any of these", which a
-    single pattern cannot express, and it is used where the failure mode is
-    genuinely several (a fuzzed parser reaching different layers).
+    A tuple of acceptable types is exempt: that form means any of several
+    failure modes, which a single pattern cannot express.
     """
     if "raises" not in _call_name(node.func) or not node.args:
         return None
@@ -188,10 +159,9 @@ _CALL_CHECKS: tuple[tuple[str, Callable[[ast.Call], str | None]], ...] = (
 def _can_be_empty(iterable: ast.expr) -> bool:
     """Whether the loop might run zero times for a reason the test cannot see.
 
-    A loop over a literal, a range, or a fixture is fine: if it were empty the
-    test would be obviously broken. The dangerous iterables are the ones a
-    condition narrows, because the condition can exclude everything while the
-    data still looks healthy.
+    A loop over a literal, a range, or a fixture is not flagged. Iterables that
+    a condition narrows are, because the condition can exclude everything while
+    the data still looks healthy.
     """
     if isinstance(iterable, ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp):
         return any(gen.ifs for gen in iterable.generators)
@@ -201,7 +171,7 @@ def _can_be_empty(iterable: ast.expr) -> bool:
 
 
 def _guarded_asserts(loop: ast.stmt) -> bool:
-    """Every assertion in the loop sits behind an `if`, so an iteration may assert nothing."""
+    """True if every assertion in the loop sits behind an `if`."""
     asserts = [n for n in ast.walk(loop) if isinstance(n, ast.Assert)]
     if not asserts:
         return False
@@ -216,17 +186,11 @@ def _guarded_asserts(loop: ast.stmt) -> bool:
 
 
 def _asserts_only_inside_loop(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
-    """Every assertion is inside a loop that might not reach them.
+    """Every assertion is inside a loop that might not reach it.
 
-    This is the mode test_perturbation_bounds.py guards by hand, counting the
-    documents it examined because "without this the test passes vacuously
-    whenever every non-edited document happens to see a zero shift".
-
-    Looping is not itself suspicious: most of these iterate a fixture that would
-    be obviously broken if empty. What is suspicious is a loop whose iterable is
-    narrowed by a condition, or whose assertions are all behind an `if`, since
-    either can skip every assertion while the data still looks healthy. A count
-    asserted outside the loop is the fix, and its presence is what clears this.
+    A loop whose iterable is narrowed by a condition, or whose assertions all
+    sit behind an `if`, can skip every assertion while the data still looks
+    healthy. An assertion outside every loop, such as a count, clears the check.
     """
     loops = [n for n in ast.walk(fn) if isinstance(n, ast.For | ast.AsyncFor | ast.While)]
     if not loops:
@@ -254,9 +218,9 @@ def _scan_test(path: Path, fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[F
 
     findings: list[Finding] = []
 
-    # A test can legitimately assert by not raising, but only if it says so: the
-    # name is the assertion, and an unnamed one is indistinguishable from a test
-    # somebody forgot to finish.
+    # A test can assert by not raising only when its name says so: the name is
+    # the assertion, and an unnamed one is indistinguishable from an unfinished
+    # test.
     declares_no_raise = any(
         w in fn.name for w in ("not_raise", "no_error", "importable", "smoke", "serialis")
     )
@@ -303,7 +267,7 @@ def scan(path: Path) -> list[Finding]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tests", type=Path, default=REPO / "tests")
     parser.add_argument("-v", "--verbose", action="store_true", help="list every file scanned")
     args = parser.parse_args()

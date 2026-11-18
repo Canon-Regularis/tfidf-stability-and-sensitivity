@@ -1,10 +1,8 @@
 """The preprocessing map is deterministic and fixed (README sections 2 and 3).
 
-Section 3 promises "all stages of the pipeline are deterministic given a fixed
-corpus, configuration, and software environment". Tested at the stricter
-reading: stability within one run is too weak, so the map must also be stable
-across processes and hash seeds. Otherwise the perturbation experiments would
-be measuring interpreter noise.
+Section 3 states that every pipeline stage is deterministic given a fixed
+corpus, configuration and environment. Tested at the strict reading: the map
+must be stable across processes and hash seeds, not only within one run.
 """
 
 from __future__ import annotations
@@ -67,8 +65,10 @@ REPO = Path(__file__).resolve().parents[1]
 @pytest.mark.property
 @given(st.text(max_size=200))
 def test_normalisation_is_idempotent(text: str) -> None:
-    """Otherwise the map depends on how many times it has been applied, which is
-    an irreproducibility that is hard to locate."""
+    """Normalising twice gives the same text as normalising once.
+
+    Otherwise the map depends on how many times it has been applied.
+    """
     once = normalise(text)
     assert normalise(once) == once
 
@@ -89,9 +89,11 @@ def test_normalisation_folds_compatibility_forms() -> None:
 
 
 def test_a_combining_mark_nfkc_cannot_compose_separates_tokens() -> None:
-    """The token pattern admits letters and digits, and a combining mark is
-    neither. Pinned because it decides the vocabulary for every script that
-    writes its marks as separate code points (spec_addenda.md#g7).
+    """A combining mark that NFKC cannot compose splits the token around it.
+
+    The token pattern admits letters and digits, and a combining mark is
+    neither. This decides the vocabulary for every script that writes its marks
+    as separate code points (spec_addenda.md#g7).
     """
     normalised = normalise("\u0130stanbul")
 
@@ -101,15 +103,19 @@ def test_a_combining_mark_nfkc_cannot_compose_separates_tokens() -> None:
 
 
 def test_a_precomposed_mark_is_kept_inside_its_token() -> None:
-    """The contrasting case, without which the test above would read as
-    "accented text is shredded" rather than as a statement about composition."""
+    """A precomposed accented letter stays inside its token.
+
+    This is the contrasting case: the test above concerns composition, not
+    accented text in general.
+    """
     assert tokenise(normalise("caf\u00e9 na\u00efve")) == ["caf\u00e9", "na\u00efve"]
 
 
 def test_an_unassigned_code_point_is_not_stripped_as_a_control() -> None:
-    """``Cn`` membership changes with the Unicode version, so deleting it would
-    tie the token stream to the interpreter's ``unicodedata`` rather than to the
-    text. It separates tokens where deleting it would have joined them.
+    """An unassigned code point is kept and separates the tokens around it.
+
+    ``Cn`` membership changes with the Unicode version, so deleting it would tie
+    the token stream to the interpreter's ``unicodedata`` rather than to the text.
     """
     assert "Cn" not in _CONTROL_CATEGORIES, "adding it makes the map version-dependent"
     assert unicodedata.category("\u0378") == "Cn", "the premise: this one is unassigned"
@@ -135,7 +141,7 @@ def test_porter2_matches_official_snowball_vectors(snowball_vectors) -> None:  #
 
 
 def test_vendored_snowball_matches_its_recorded_digests() -> None:
-    """Provenance check: the vendored bytes are the ones we recorded."""
+    """Provenance check: the vendored bytes match their recorded digests."""
     import hashlib
 
     d = REPO / "src" / "tfidf_stability" / "preprocessing" / "_snowball"
@@ -173,8 +179,10 @@ def test_ngrams_never_span_a_removed_stopword() -> None:
 
 
 def test_an_ngram_cannot_span_the_seam_between_two_fields() -> None:
-    """A document assembled from a title and a genre list has no text running
-    across the seam, so a bigram bridging one is a product of the concatenation
+    """An n-gram does not span the seam between two fields.
+
+    A document assembled from a title and a genre list has no text running
+    across the seam, so a bridging bigram is a product of the concatenation
     order rather than of the data (spec_addenda.md#g7).
     """
     pipeline = PreprocessingPipeline()
@@ -187,8 +195,11 @@ def test_an_ngram_cannot_span_the_seam_between_two_fields() -> None:
 
 
 def test_one_field_is_preprocessed_exactly_as_the_same_text_would_be() -> None:
-    """There is no seam in a single field, so the two entry points must agree.
-    Otherwise splitting a corpus into fields would move every number in it."""
+    """One field preprocesses exactly as the same text does.
+
+    There is no seam in a single field, so the two entry points agree.
+    Otherwise splitting a corpus into fields would move every number in it.
+    """
     pipeline = PreprocessingPipeline()
 
     assert pipeline.preprocess_fields(["heat 1995 action"]) == pipeline.preprocess(
@@ -197,8 +208,11 @@ def test_one_field_is_preprocessed_exactly_as_the_same_text_would_be() -> None:
 
 
 def test_preprocess_records_uses_fields_when_a_record_carries_them() -> None:
-    """Every driver reads a corpus through this, so a dataset that knows its own
-    field boundaries keeps them whichever script loaded it."""
+    """A record that carries fields is preprocessed through those fields.
+
+    Every driver reads a corpus through this function, so a dataset that knows
+    its own field boundaries keeps them whichever script loaded it.
+    """
     pipeline = PreprocessingPipeline()
     parts = ["heat 1995", "action crime"]
 
@@ -208,8 +222,10 @@ def test_preprocess_records_uses_fields_when_a_record_carries_them() -> None:
 
 
 def test_preprocess_records_falls_back_to_text_without_fields() -> None:
-    """A corpus that states no boundaries behaves exactly as it did before the
-    field form existed. An empty list states none, so it falls back too."""
+    """A record without fields, or with an empty list, is preprocessed as text.
+
+    An empty list states no boundaries, so it falls back to the text form too.
+    """
     pipeline = PreprocessingPipeline()
     expected = [pipeline.preprocess("heat 1995 action crime")]
 
@@ -322,10 +338,9 @@ def test_all_stopword_document_yields_no_features(pipeline: PreprocessingPipelin
 def test_map_is_stable_across_processes_and_hash_seeds() -> None:
     """PYTHONHASHSEED must not be able to influence the output.
 
-    Subprocesses, because ``PYTHONHASHSEED`` is fixed at interpreter start-up
-    and cannot be changed from inside a running process. Dict and set iteration
-    order depend on it, and nothing else in the suite would see that order
-    leaking into the feature stream.
+    Subprocesses are used because ``PYTHONHASHSEED`` is fixed at interpreter
+    start-up. Dict and set iteration order depend on it, and no in-process test
+    can observe that order leaking into the feature stream.
     """
     snippet = (
         "import sys; sys.path.insert(0, r'%s');"
@@ -349,15 +364,11 @@ def test_map_is_stable_across_processes_and_hash_seeds() -> None:
 
 
 def test_the_stopword_asset_is_verified_against_its_recorded_digest(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """ "Hash-verified" is asserted in three places; make it true in one.
+    """The stopword asset is verified against its recorded digest at load.
 
-    ``stopwords.py``'s header, the asset's own header and
-    ``configs/default.yaml`` all say the list is verified at load, and nothing
-    verified it: ``data/assets/MANIFEST.sha256`` did not exist, and
-    ``scripts/check_vendored.py`` discovers work by ``rglob("MANIFEST.sha256")``
-    so a directory without one is invisible to it. Editing a single word changed
-    every df, idf and score; the reproducibility snapshot compares runs to each
-    other rather than to a pinned value, so it could not catch that.
+    ``stopwords.py``, the asset header and ``configs/default.yaml`` state that
+    the list is hash-verified. A one-word edit changes every df, idf and score,
+    and the reproducibility snapshot compares runs only to each other.
     """
     import shutil
 
@@ -389,12 +400,9 @@ def test_the_stopword_asset_is_verified_against_its_recorded_digest(tmp_path) ->
 def test_an_injected_lemmatiser_reaches_the_digest() -> None:
     """Two pipelines that produce different features must not share an identity.
 
-    ``digest()`` read the config alone, but the constructor takes a ready-made
-    lemmatiser that bypasses ``config.lemmatiser``. ``PreprocessingPipeline(cfg)``
-    and ``PreprocessingPipeline(cfg, lemmatiser=IdentityLemmatiser())`` turn
-    "running cats" into ``run|cat`` and ``running|cats`` respectively, yet
-    digested to the same string, so a run manifest could not tell them apart. The
-    sibling ``stopwords=`` injection was always bound by content.
+    The constructor takes a ready-made lemmatiser that bypasses
+    ``config.lemmatiser``, so ``digest()`` binds the injected backend as well as
+    the config. The ``stopwords=`` injection is bound by its content.
     """
     from tfidf_stability.preprocessing.lemmatise import LemmatiserKind, make_lemmatiser
     from tfidf_stability.preprocessing.pipeline import (
@@ -409,18 +417,21 @@ def test_an_injected_lemmatiser_reaches_the_digest() -> None:
     assert plain.preprocess("running cats") != injected.preprocess("running cats")
     assert plain.digest() != injected.digest(), "different features, same identity"
 
-    # Injecting the lemmatiser the config already names must NOT move the
-    # digest, or every recorded value in the repository would have churned.
+    # Injecting the lemmatiser the config already names leaves the digest
+    # unchanged, so every recorded value in the repository stays valid.
     agreeing = PreprocessingPipeline(config, lemmatiser=make_lemmatiser(LemmatiserKind.PORTER2))
     assert agreeing.digest() == plain.digest()
 
 
 # ---------------------------------------------------------------------------
-# Offsets, accessors and the wrappers nothing had called
+# Offsets, accessors and convenience wrappers
 # ---------------------------------------------------------------------------
 def test_tokens_carry_the_source_span_they_came_from() -> None:
-    """Provenance: `tfidf inspect` shows where in the text a feature originated,
-    so the span has to index back into the original string."""
+    """Each token carries the span of the source text it came from.
+
+    `tfidf inspect` shows where in the text a feature originated, so the span
+    indexes back into the original string.
+    """
     text = "alpha beta gamma"
     tokens = tokenise_with_offsets(text)
     assert [t.text for t in tokens] == ["alpha", "beta", "gamma"]
@@ -429,8 +440,10 @@ def test_tokens_carry_the_source_span_they_came_from() -> None:
 
 
 def test_offsets_honour_the_same_length_filter_as_plain_tokenisation() -> None:
-    """Two code paths that must agree, or a reported span would point at a token
-    the pipeline discarded."""
+    """Offsets apply the same length filter as plain tokenisation.
+
+    Otherwise a reported span could point at a token the pipeline discarded.
+    """
     config = TokenisationConfig(min_token_length=4)
     text = "a bb cccc ddddd"
     assert [t.text for t in tokenise_with_offsets(text, config)] == tokenise(text, config)
@@ -448,8 +461,11 @@ def test_a_preprocessed_document_reports_how_many_features_it_produced() -> None
 
 
 def test_a_pipeline_exposes_the_two_assets_that_decide_its_identity() -> None:
-    """Both feed digest(), so a report naming one map must be able to show which
-    stopword list and which lemmatiser produced it."""
+    """A pipeline exposes the stopword list and lemmatiser behind its digest.
+
+    Both feed digest(), so a report naming one map can show which stopword list
+    and which lemmatiser produced it.
+    """
     pipeline = PreprocessingPipeline(PreprocessingConfig())
     assert pipeline.stopwords.name
     assert pipeline.lemmatiser.name
@@ -457,8 +473,11 @@ def test_a_pipeline_exposes_the_two_assets_that_decide_its_identity() -> None:
 
 
 def test_the_repr_names_the_parts_a_reader_needs_to_tell_two_pipelines_apart() -> None:
-    """Asserted by content rather than by exact text, so adding a field later
-    does not break this."""
+    """The repr names the parts that tell two pipelines apart.
+
+    Asserted by content rather than by exact text, so adding a field later does
+    not break the test.
+    """
     text = repr(PreprocessingPipeline(PreprocessingConfig()))
     assert "PreprocessingPipeline(" in text
     assert "lemmatiser=" in text
@@ -482,8 +501,10 @@ def test_the_stopword_set_repr_names_its_asset_and_size() -> None:
 
 
 def test_the_convenience_wrapper_agrees_with_building_a_pipeline_by_hand() -> None:
-    """A second entry point that must not drift from the first, or two callers
-    would preprocess the same corpus differently."""
+    """``preprocess_all`` agrees with a pipeline built by hand.
+
+    Otherwise two entry points could preprocess the same corpus differently.
+    """
     texts = ["alpha beta", "gamma the delta"]
     config = PreprocessingConfig()
     assert preprocess_all(texts, config) == [
@@ -507,9 +528,7 @@ def test_a_stopword_asset_missing_from_the_manifest_is_refused(
     """An asset that exists but is unrecorded must not load.
 
     The list decides the vocabulary, so an unverifiable one changes every
-    published number. This is distinct from the digest-mismatch case: here there
-    is nothing to compare against at all, which is the weaker and easier failure
-    to overlook. The asset directory is redirected rather than the loader
+    published number. The asset directory is redirected rather than the loader
     patched, so the loader's own logic runs.
     """
     from tfidf_stability.preprocessing import stopwords as stopwords_module
@@ -528,9 +547,11 @@ def test_a_stopword_asset_missing_from_the_manifest_is_refused(
 
 
 def test_a_missing_stopword_asset_raises_before_any_digest_is_computed() -> None:
-    """A different failure from an unrecorded one, and the two must stay
-    distinct: "the file is not there" and "the file is not vouched for" need
-    different fixes."""
+    """A missing stopword asset fails differently from an unrecorded one.
+
+    "The file is not there" and "the file is not vouched for" need different
+    fixes, so the two failures stay distinct.
+    """
     with pytest.raises(FileNotFoundError, match="No such file or directory"):
         load_stopwords("no_such_asset_v9.txt")
 
@@ -538,8 +559,11 @@ def test_a_missing_stopword_asset_raises_before_any_digest_is_computed() -> None
 def test_the_manifest_parser_skips_blank_lines_and_comments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """sha256sum files carry comments, and a parser that treated one as an entry
-    would either fail to find a real asset or vouch for a comment."""
+    """The manifest parser skips blank lines and comments.
+
+    sha256sum files carry comments, and a parser that treated one as an entry
+    would either fail to find a real asset or vouch for a comment.
+    """
     import hashlib
 
     from tfidf_stability.preprocessing import stopwords as stopwords_module
@@ -569,10 +593,11 @@ def test_the_manifest_parser_skips_blank_lines_and_comments(
 
 
 def test_consecutive_gap_sentinels_open_one_boundary_rather_than_an_empty_segment() -> None:
-    """Two stopwords in a row leave two sentinels side by side, and a leading
-    stopword leaves one at the front. Either would produce an empty segment if
-    the splitter closed a run unconditionally, and an empty segment contributes
-    nothing but changes how many there are.
+    """Adjacent or leading gap sentinels do not produce an empty segment.
+
+    Two stopwords in a row leave two sentinels side by side, and a leading
+    stopword leaves one at the front. An empty segment contributes nothing but
+    changes the segment count.
     """
     assert generate_ngrams(["a", GAP, GAP, "b"], 1, 2) == generate_ngrams(["a", GAP, "b"], 1, 2)
     assert generate_ngrams([GAP, "a", "b"], 1, 2) == generate_ngrams(["a", "b"], 1, 2)
@@ -581,10 +606,11 @@ def test_consecutive_gap_sentinels_open_one_boundary_rather_than_an_empty_segmen
 
 
 def test_every_normalisation_stage_can_be_turned_off_independently() -> None:
-    """The normative configuration has all of them on, which leaves the off
-    paths carrying published numbers on no evidence. They exist so an ablation
-    can attribute a change to one stage, and that only works if each is really
-    separable.
+    """Each normalisation stage can be turned off independently.
+
+    The normative configuration has every stage on. The off paths exist so an
+    ablation can attribute a change to one stage, which requires each stage to
+    be separable.
     """
     text = "  A​B   c  "
 
@@ -602,10 +628,12 @@ def test_every_normalisation_stage_can_be_turned_off_independently() -> None:
 
 
 def test_a_lemmatiser_override_changes_the_config_digest_on_its_own() -> None:
-    """The pipeline accepts a ready-made lemmatiser that bypasses the configured
-    one, so without this two pipelines producing different features would share
-    an identity -- and a cached result computed under one would be served for the
-    other."""
+    """A lemmatiser override changes the config digest on its own.
+
+    The pipeline accepts a ready-made lemmatiser that bypasses the configured
+    one. Without the override in the digest, two pipelines producing different
+    features would share an identity and a cache could serve one for the other.
+    """
     config = PreprocessingConfig()
     plain = config.digest()
 
@@ -622,11 +650,11 @@ def test_a_lemmatiser_override_changes_the_config_digest_on_its_own() -> None:
 
 
 def test_the_default_ngram_orders_are_unigrams_and_bigrams() -> None:
-    """Every call site in the package passes the orders explicitly, so the
-    defaults are only what an examples script or a notebook gets. They are part
-    of the preprocessing map's identity: the config digest covers `n_min` and
-    `n_max`, so a caller relying on the defaults and one passing (1, 2) must be
-    getting the same features.
+    """The default n-gram orders are unigrams and bigrams.
+
+    The config digest covers `n_min` and `n_max`, so a caller relying on the
+    defaults and one passing (1, 2) get the same features. Every call site in
+    the package passes the orders, so the defaults reach only outside callers.
     """
     tokens = ["new", "york", "city"]
     assert generate_ngrams(tokens) == generate_ngrams(tokens, 1, 2)
@@ -644,33 +672,42 @@ def test_the_default_ngram_orders_are_unigrams_and_bigrams() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("length", [1, 2, 63, 64])
 def test_a_token_at_or_inside_the_length_bounds_survives(length: int) -> None:
-    """64 is the documented ceiling and it is inclusive. The bounds are applied
-    during tokenisation rather than downstream precisely so they are hashed with
-    the configuration -- a run that changed them would change its own digest."""
+    """A token of length 1 to 64 survives; the ceiling of 64 is inclusive.
+
+    The bounds are applied during tokenisation so that they are hashed with the
+    configuration, and a run that changes them changes its own digest.
+    """
     assert tokenise("x" * length) == ["x" * length]
 
 
 @pytest.mark.parametrize("length", [65, 200])
 def test_a_token_past_the_ceiling_is_dropped_rather_than_truncated(length: int) -> None:
-    """Truncating would manufacture a feature the document does not contain and
-    could collide two distinct long tokens onto one. The guard exists against
-    pathological input from fuzzing, where a megabyte-long 'word' is ordinary.
+    """A token past the ceiling is dropped rather than truncated.
+
+    Truncating would manufacture a feature the document does not contain and
+    could collide two distinct long tokens onto one. The ceiling guards against
+    pathological input such as a megabyte-long 'word' from fuzzing.
     """
     assert tokenise("x" * length) == []
 
 
 def test_the_two_length_bounds_are_independent() -> None:
-    """Each filters its own end, so a configuration can raise the floor without
-    touching the ceiling."""
+    """The two length bounds are independent.
+
+    Each filters its own end, so a configuration can raise the floor without
+    touching the ceiling.
+    """
     text = "a bb ccc"
     assert tokenise(text, TokenisationConfig(min_token_length=2)) == ["bb", "ccc"]
     assert tokenise(text, TokenisationConfig(max_token_length=2)) == ["a", "bb"]
 
 
 def test_an_inverted_length_range_admits_nothing_rather_than_everything() -> None:
-    """`min > max` is an empty interval. It filters the corpus to nothing, which
-    the vocabulary builder then refuses -- a loud failure rather than a silent
-    inversion of the filter."""
+    """An inverted length range admits no token.
+
+    `min > max` is an empty interval. It filters the corpus to nothing, which the
+    vocabulary builder then refuses: a loud failure, not an inverted filter.
+    """
     assert tokenise("a bb ccc", TokenisationConfig(min_token_length=5, max_token_length=2)) == []
 
 
@@ -686,16 +723,20 @@ def test_an_inverted_length_range_admits_nothing_rather_than_everything() -> Non
 def test_the_pattern_splits_on_everything_that_is_not_a_letter_or_digit(
     text: str, expected: list[str]
 ) -> None:
-    """Apostrophes, hyphens and underscores are all separators. Pinned because
-    the pattern is hashed into the manifest: a run that treated "don't" as one
-    token would have a different vocabulary and a different every-number."""
+    """Apostrophes, hyphens and underscores are all token separators.
+
+    The pattern is hashed into the manifest: a run that kept "don't" as one
+    token would have a different vocabulary and different numbers throughout.
+    """
     assert tokenise(text) == expected
 
 
 def test_the_gap_sentinel_cannot_survive_tokenisation() -> None:
-    """It is a control character, so the word pattern cannot match it. That is
-    what lets the sentinel be inserted afterwards without any risk of a document
-    having contained one."""
+    """The gap sentinel is a control character, so tokenisation cannot emit it.
+
+    The sentinel can therefore be inserted after tokenisation without any risk
+    of a document having contained one.
+    """
     assert GAP not in tokenise("a" + GAP + "b")
 
 
@@ -703,65 +744,88 @@ def test_the_gap_sentinel_cannot_survive_tokenisation() -> None:
 # Stopword removal: where a gap goes, and where it does not
 # ---------------------------------------------------------------------------
 def _stopwords(*words: str) -> StopwordSet:
-    """A set built here rather than loaded, so these tests do not depend on the
-    frozen asset's contents. Local by house convention."""
+    """Build a set in place, independent of the frozen asset's contents.
+
+    Local to this file by house convention.
+    """
     return StopwordSet(words, name="test", digest="0" * 64)
 
 
 def test_an_interior_stopword_leaves_a_gap_behind() -> None:
-    """The whole point of G7's sentinel: without it, removing "of" from
-    "king of pop" yields the bigram "king pop", a feature that appears in no
-    document and is manufactured by the preprocessing order."""
+    """An interior stopword leaves a gap sentinel behind (G7).
+
+    Without it, removing "of" from "king of pop" yields the bigram "king pop",
+    a feature that appears in no document.
+    """
     assert remove_stopwords(["king", "of", "pop"], _stopwords("of")) == ["king", GAP, "pop"]
 
 
 def test_consecutive_stopwords_collapse_to_a_single_gap() -> None:
-    """One boundary, however many tokens were removed at it. A gap per stopword
-    would leave empty segments between them, which changes how many segments the
-    n-gram splitter sees without changing where the boundaries are."""
+    """Consecutive stopwords collapse to a single gap.
+
+    A gap per stopword would leave empty segments between them, which changes
+    the segment count the n-gram splitter sees without moving any boundary.
+    """
     removed = remove_stopwords(["a", "of", "the", "b"], _stopwords("of", "the"))
     assert removed == ["a", GAP, "b"]
 
 
 def test_a_leading_or_trailing_stopword_leaves_no_gap() -> None:
-    """There is nothing on the far side for an n-gram to span to, so a boundary
-    marker there would be a segment separator with one empty side."""
+    """A leading or trailing stopword leaves no gap.
+
+    There is nothing on the far side for an n-gram to span to, so a boundary
+    marker there would separate a segment from an empty one.
+    """
     assert remove_stopwords(["of", "a", "the"], _stopwords("of", "the")) == ["a"]
 
 
 def test_a_document_of_nothing_but_stopwords_becomes_empty() -> None:
-    """Not a list of gaps. This is the all-stopword document that embeds to the
-    zero vector -- the degenerate case G3 names and the corpus fixture plants."""
+    """A document of only stopwords becomes empty, not a list of gaps.
+
+    This is the all-stopword document that embeds to the zero vector, the
+    degenerate case G3 names and the corpus fixture plants.
+    """
     assert remove_stopwords(["of", "the"], _stopwords("of", "the")) == []
 
 
 def test_removal_can_be_asked_not_to_mark_the_boundary() -> None:
-    """The ablation G7 offers. Kept so the seam-bigram effect can be measured
-    rather than only asserted."""
+    """Removal can skip marking the boundary, the ablation G7 offers.
+
+    This lets the seam-bigram effect be measured rather than only asserted.
+    """
     kept = remove_stopwords(["king", "of", "pop"], _stopwords("of"), insert_gaps=False)
     assert kept == ["king", "pop"]
 
 
 def test_an_empty_stopword_set_removes_nothing_at_all() -> None:
-    """The configuration that disables stopword removal, which must be a
-    pass-through rather than a special case downstream."""
+    """An empty stopword set removes nothing.
+
+    This is the configuration that disables stopword removal, and it is a
+    pass-through rather than a special case downstream.
+    """
     assert remove_stopwords(["a", "b"], StopwordSet.empty()) == ["a", "b"]
     assert len(StopwordSet.empty()) == 0
     assert StopwordSet.empty().name == "none"
 
 
 def test_membership_is_exact_and_expects_an_already_normalised_token() -> None:
-    """No case folding here -- normalisation has already run. A set that
-    lowercased on lookup would silently work on un-normalised input and then
-    disagree with the vocabulary."""
+    """Membership is exact and expects an already normalised token.
+
+    No case folding happens here because normalisation has already run. A set
+    that lowercased on lookup would accept un-normalised input and then disagree
+    with the vocabulary.
+    """
     stopwords = _stopwords("of")
     assert stopwords.is_stopword("of")
     assert not stopwords.is_stopword("OF")
 
 
 def test_iterating_a_stopword_set_is_sorted_so_a_manifest_is_stable() -> None:
-    """The set is a frozenset internally, whose iteration order is not promised
-    stable across runs. Anything writing the list out needs the sort."""
+    """Iterating a stopword set yields sorted words, so a manifest is stable.
+
+    The set is a frozenset internally, whose iteration order is not guaranteed
+    across runs. Anything writing the list out needs the sort.
+    """
     assert list(_stopwords("z", "a", "m")) == ["a", "m", "z"]
 
 
@@ -769,12 +833,11 @@ def test_iterating_a_stopword_set_is_sorted_so_a_manifest_is_stable() -> None:
 # The pipeline end to end
 # ---------------------------------------------------------------------------
 def test_the_gap_is_what_stops_a_seam_bigram_being_manufactured() -> None:
-    """The two configurations side by side, which is the only way to see that
-    the sentinel does anything.
+    """The gap sentinel is what prevents a seam bigram.
 
-    With gaps on, "king of pop" yields no bigram at all -- the two survivors sit
-    either side of a boundary. With gaps off it yields `king<JOINER>pop`, a
-    feature no document contains.
+    With gaps on, "king of pop" yields no bigram: the two survivors sit either
+    side of a boundary. With gaps off it yields `king<JOINER>pop`, a feature no
+    document contains.
     """
     with_gaps = PreprocessingPipeline().preprocess("King of Pop")
     without = PreprocessingPipeline(PreprocessingConfig(insert_gaps=False)).preprocess(
@@ -787,15 +850,20 @@ def test_the_gap_is_what_stops_a_seam_bigram_being_manufactured() -> None:
 
 @pytest.mark.parametrize("text", ["", "   ", "the of a"])
 def test_a_document_with_no_surviving_tokens_preprocesses_to_nothing(text: str) -> None:
-    """Empty, whitespace, and all-stopword all reach the same place. The
-    vocabulary builder counts such a document towards the corpus size while it
-    contributes no features."""
+    """Empty, whitespace-only and all-stopword documents yield no features.
+
+    The vocabulary builder counts such a document towards the corpus size while
+    it contributes no features.
+    """
     assert PreprocessingPipeline().preprocess(text) == []
 
 
 def test_an_inverted_ngram_range_is_refused_by_the_pipeline() -> None:
-    """The guard lives in `generate_ngrams`, so the pipeline surfaces it rather
-    than silently producing no features."""
+    """The pipeline surfaces an inverted n-gram range as an error.
+
+    The guard lives in `generate_ngrams`; the pipeline raises it rather than
+    producing no features.
+    """
     pipeline = PreprocessingPipeline(PreprocessingConfig(n_min=3, n_max=1))
     with pytest.raises(ValueError, match=r"n_max \(1\) must be at least n_min \(3\)"):
         pipeline.preprocess("a b c")
@@ -804,10 +872,9 @@ def test_an_inverted_ngram_range_is_refused_by_the_pipeline() -> None:
 def _bound_stopwords(pipeline: PreprocessingPipeline) -> str:
     """The stopword component of the pipeline identity, as `digest()` binds it.
 
-    Two digests joined: `digest` is provenance (the asset's raw file bytes) and
-    `content_digest` is identity, derived from the words. Reconstructed rather
-    than restated as a literal, so a change to how they are joined fails the
-    pipeline's own tests instead of agreeing with a stale copy here.
+    `digest` is provenance (the asset's raw bytes) and `content_digest` is
+    identity, derived from the words. Reconstructed rather than written as a
+    literal, so a change to how they are joined fails the pipeline's own tests.
     """
     return f"{pipeline.stopwords.digest}:{pipeline.stopwords.content_digest}"
 
@@ -815,17 +882,9 @@ def _bound_stopwords(pipeline: PreprocessingPipeline) -> str:
 def test_a_pipeline_agreeing_with_its_config_digests_as_the_config_alone() -> None:
     """The backward-compatibility half of the override rule, stated absolutely.
 
-    The two assertions in `test_an_injected_lemmatiser_reaches_the_digest` are
-    both relative -- plain differs from injected, agreeing equals plain -- and a
-    rule that recorded the override on exactly the wrong side would satisfy both:
-    it would simply move the key from one pipeline to the other and leave every
-    comparison between them intact.
-
-    What pins it down is that a pipeline using the lemmatiser its config already
-    names must digest exactly as the config does with no override key at all.
-    Otherwise every recorded digest in the repository would have churned when the
-    override was introduced, which is the thing the docstring promises did not
-    happen.
+    Relative assertions alone pass under a rule that puts the override key on
+    the wrong pipeline. A pipeline using its config's lemmatiser must digest
+    exactly as the config does with no override key, so recorded digests hold.
     """
     from tfidf_stability.preprocessing.lemmatise import LemmatiserKind, make_lemmatiser
     from tfidf_stability.preprocessing.pipeline import (
@@ -846,11 +905,11 @@ def test_a_pipeline_agreeing_with_its_config_digests_as_the_config_alone() -> No
 
 
 def test_the_config_digest_is_over_the_canonical_form_not_the_field_order() -> None:
-    """`json.dumps(..., sort_keys=True)`. `to_dict()` returns its fields in
-    declaration order, which is not alphabetical, so a digest taken over the
-    payload as-built would depend on the order the dataclass happens to list its
-    fields in -- and reordering two fields for readability would invalidate every
-    recorded result.
+    """The config digest covers the canonical form, not the field order.
+
+    `to_dict()` returns fields in declaration order, which is not alphabetical,
+    so the digest uses `json.dumps(..., sort_keys=True)`. Reordering two fields
+    for readability then leaves every recorded result valid.
     """
     import hashlib
     import json
@@ -867,12 +926,11 @@ def test_the_config_digest_is_over_the_canonical_form_not_the_field_order() -> N
 
 
 def test_the_config_digest_keeps_a_non_ascii_field_as_itself() -> None:
-    """`ensure_ascii=False`. The token pattern is a regex a caller supplies and
-    may hold non-ASCII; escaping it to `\\uXXXX` before hashing would give the
-    same configuration two identities depending on which serialiser wrote it.
+    """The config digest keeps a non-ASCII field unescaped.
 
-    The character is built with `chr` so the assertion does not depend on how
-    this file's own bytes survive an editor.
+    The digest uses `ensure_ascii=False`: escaping a caller-supplied pattern to
+    `\\uXXXX` would give one configuration two identities. The character is
+    built with `chr` so the test does not depend on this file's encoding.
     """
     import hashlib
     import json
@@ -894,15 +952,11 @@ def test_the_config_digest_keeps_a_non_ascii_field_as_itself() -> None:
 
 
 def test_the_asset_header_does_not_become_part_of_the_stopword_set() -> None:
-    """`if s and not s.startswith("#")`. The frozen list carries a 15-line
-    header explaining why it is frozen, and those lines are not stopwords.
+    """The asset's comment header does not become part of the stopword set.
 
-    Both halves of that condition matter and neither is obviously load-bearing:
-    with `or` in place of `and`, every comment line and every blank one is
-    appended verbatim. Nothing downstream would raise -- `is_stopword` would
-    simply answer True for a handful of strings no tokeniser can produce, and
-    the set would silently grow, changing `len()` and the ablation counts while
-    leaving every score identical.
+    The loader keeps a line only if `s and not s.startswith("#")`. With `or` in
+    place of `and`, comment and blank lines are stored: nothing raises, but
+    `len()` and the ablation counts change while every score stays the same.
     """
     from tfidf_stability.preprocessing import stopwords as module
 
@@ -926,10 +980,9 @@ def test_a_padded_line_is_stripped_before_it_becomes_a_stopword(
 ) -> None:
     """`s = line.strip()`, exercised on an asset that has padding.
 
-    The frozen list carries no padded line, so loading it cannot distinguish
-    stripping from not stripping. A word stored with surrounding whitespace
-    never equals a token, so that stopword would silently stop being removed
-    while every digest and count stayed plausible.
+    The frozen list has no padded line, so it cannot tell stripping from not
+    stripping. A word stored with whitespace never equals a token, so that
+    stopword would stop being removed while every digest and count looks normal.
     """
     from tfidf_stability.preprocessing import stopwords as module
 
@@ -954,9 +1007,11 @@ def test_a_padded_line_is_stripped_before_it_becomes_a_stopword(
 
 
 def test_a_stopword_set_holds_only_stripped_words() -> None:
-    """Each line is stripped before the comment test and before storing, so
-    trailing whitespace in the asset cannot produce a word that never matches a
-    token."""
+    """A loaded stopword set holds only stripped words.
+
+    Each line is stripped before the comment test and before storing, so
+    trailing whitespace in the asset cannot produce a word that never matches.
+    """
     loaded = load_stopwords()
 
     assert all(word == word.strip() for word in loaded)
@@ -966,14 +1021,18 @@ def test_a_stopword_set_holds_only_stripped_words() -> None:
 # ---------------------------------------------------------------------------
 # tokenise_with_offsets selects the same tokens as tokenise
 # ---------------------------------------------------------------------------
+
+
 # The two functions carry independent copies of the length filter. The offsets
-# variant is what README section 1.2's provenance reads, so a variant selecting a
-# different token stream would describe a document that was never scored --
-# and it would do it while every score stayed correct.
+# variant feeds README section 1.2's provenance, so a variant selecting other
+# tokens would describe a document that was never scored, with correct scores.
 @pytest.mark.parametrize("length", [1, 2, 63, 64])
 def test_a_token_at_the_length_bounds_survives_the_offsets_variant(length: int) -> None:
-    """Both bounds are inclusive here as well. `tokenise` is covered at these
-    exact lengths above; this is the second implementation of the same rule."""
+    """Both length bounds are inclusive in the offsets variant too.
+
+    `tokenise` is covered at these lengths above; this is the second
+    implementation of the same rule.
+    """
     text = "x" * length
 
     assert [t.text for t in tokenise_with_offsets(text)] == [text]
@@ -986,9 +1045,11 @@ def test_a_token_past_the_ceiling_is_dropped_by_the_offsets_variant(length: int)
 
 
 def test_the_two_tokenisers_agree_on_a_mixed_document() -> None:
-    """One document holding a token at each bound and one past it, so the two
-    implementations are compared where they could actually diverge rather than
-    on text neither filter touches."""
+    """The two tokenisers agree on a mixed document.
+
+    The document holds a token at each bound and one past the ceiling, so the
+    implementations are compared where they could diverge.
+    """
     text = " ".join(("a", "bb", "x" * 64, "y" * 65, "cc"))
 
     assert [t.text for t in tokenise_with_offsets(text)] == tokenise(text)
@@ -996,8 +1057,10 @@ def test_the_two_tokenisers_agree_on_a_mixed_document() -> None:
 
 
 def test_the_offsets_point_at_the_token_they_describe() -> None:
-    """The reason the variant exists: the span must recover the token from the
-    source text, or the provenance cannot be checked against the document."""
+    """Each offset span recovers the token it describes from the source text.
+
+    Otherwise the provenance cannot be checked against the document.
+    """
     text = "alpha beta gamma"
 
     for token in tokenise_with_offsets(text):
@@ -1010,16 +1073,9 @@ def test_the_offsets_point_at_the_token_they_describe() -> None:
 def test_three_pipelines_producing_three_feature_streams_have_three_digests() -> None:
     """The digest binds what the map does, and the backend name is not that.
 
-    ``PreprocessingPipeline.digest`` already covered the injected-lemmatiser
-    hole, but bound the override to ``Lemmatiser.name``. For
-    ``LookupLemmatiser`` that is the constant ``"lookup"`` on every instance
-    while the output comes from a table handed in at construction, so the fix
-    covered only the case where the *kind* differed.
-
-    Measured before this: the three pipelines below map "the cats running" to
-    ``cat|running``, ``feline|running`` and ``cat|run``, and all three reported
-    ``88ba29504223faaf...``. A cache keyed on that digest serves one run's
-    features for another's, which is the failure the method exists to prevent.
+    The lemmatiser override is bound by content. Every ``LookupLemmatiser`` has
+    the name ``"lookup"`` while its output comes from the table passed at
+    construction, so ``Lemmatiser.name`` alone cannot separate them.
     """
     config = PreprocessingConfig()
     pipelines = {
@@ -1042,13 +1098,11 @@ def test_three_pipelines_producing_three_feature_streams_have_three_digests() ->
 
 
 def test_a_lookup_table_is_bound_even_when_the_config_already_names_that_kind() -> None:
-    """The half the ``==`` short-circuit hid.
+    """A lookup table is bound even when the config names the same kind.
 
-    The override was skipped whenever the injected backend's name matched the
-    config's, which is sound only where the name is the whole identity. With
-    ``LemmatiserKind.LOOKUP`` in the config both sides read ``"lookup"``, so
-    nothing was bound at all and every table shared one digest -- the same
-    defect, reached by the opposite branch.
+    Skipping the override on a name match is sound only where the name is the
+    whole identity. With ``LemmatiserKind.LOOKUP`` in the config both names
+    read ``"lookup"``, so the table itself must still reach the digest.
     """
     config = PreprocessingConfig(lemmatiser=LemmatiserKind.LOOKUP)
     one = PreprocessingPipeline(config, lemmatiser=LookupLemmatiser({"cats": "cat"}))
@@ -1059,12 +1113,11 @@ def test_a_lookup_table_is_bound_even_when_the_config_already_names_that_kind() 
 
 
 def test_the_digest_of_a_config_only_pipeline_is_unmoved_by_binding_content() -> None:
-    """No recorded digest changes, which is what makes this a fix and not a break.
+    """A pipeline built from its config alone digests as the config does.
 
-    The short-circuit still applies to the two backends whose class fixes their
-    output, so a pipeline built from a config alone -- every current caller --
-    digests exactly as it did. Asserted against the config's own digest rather
-    than a literal, so the two cannot drift apart silently.
+    The override is omitted for the two backends whose class fixes their output,
+    so every config-only pipeline keeps its digest. Asserted against the config's
+    own digest rather than a literal, so the two cannot drift apart silently.
     """
     config = PreprocessingConfig()
     from_config = PreprocessingPipeline(config)
@@ -1077,10 +1130,10 @@ def test_the_digest_of_a_config_only_pipeline_is_unmoved_by_binding_content() ->
 
 
 def test_injecting_a_different_kind_still_moves_the_digest_by_its_bare_name() -> None:
-    """The behaviour the previous fix established, kept intact by this one.
+    """Injecting a different kind moves the digest by its bare name.
 
-    ``IdentityLemmatiser`` carries no content, so its override stays the bare
-    ``"none"`` -- not ``"none:<sha>"`` -- and any digest recorded for such a run
+    ``IdentityLemmatiser`` carries no content, so its override is the bare
+    ``"none"``, not ``"none:<sha>"``, and a digest recorded for such a run
     still matches.
     """
     config = PreprocessingConfig()
@@ -1095,6 +1148,8 @@ def test_injecting_a_different_kind_still_moves_the_digest_by_its_bare_name() ->
 # ---------------------------------------------------------------------------
 # The stopword identity is derived, not supplied
 # ---------------------------------------------------------------------------
+
+
 # `StopwordSet.digest` is provenance and is caller-supplied; `content_digest` is
 # identity and is derived from the words. `PreprocessingPipeline` binds both, so
 # two sets holding different words cannot reach one pipeline digest by carrying
@@ -1103,9 +1158,8 @@ def test_two_word_sets_cannot_share_an_identity_by_sharing_a_supplied_digest() -
     """Sharing a provenance string does not make two word sets one set.
 
     The constructor accepts a caller-supplied `digest` because provenance is
-    legitimately supplied: `load_stopwords` sets it from the asset's raw file
-    bytes. `content_digest` is derived from the words, so it separates the two
-    regardless.
+    supplied: `load_stopwords` sets it from the asset's raw bytes.
+    `content_digest` is derived from the words, so it separates the two sets.
     """
     the_and_of = StopwordSet(["the", "of"], name="x", digest="a-supplied-string")
     cat_and_dog = StopwordSet(["cat", "dog"], name="x", digest="a-supplied-string")
@@ -1133,8 +1187,11 @@ def test_the_content_digest_matches_what_from_iterable_derives() -> None:
 
 
 def test_order_and_repetition_do_not_change_the_identity() -> None:
-    """A set is a set. The canonical form is sorted and deduplicated, so the
-    identity cannot depend on how the caller spelled the collection."""
+    """Order and repetition in the input do not change the identity.
+
+    The canonical form is sorted and deduplicated, so the identity cannot depend
+    on how the caller spelled the collection.
+    """
     a = StopwordSet(["the", "of", "the"], name="x", digest="d")
     b = StopwordSet(["of", "the"], name="x", digest="d")
 
@@ -1145,10 +1202,8 @@ def test_the_empty_set_agrees_with_the_factory_on_the_one_form_that_has_no_words
     r"""The degenerate end of the canonical form: a set holding no words.
 
     The derived value joins the sorted words with newlines and appends one, so
-    an empty set hashes the single byte ``b"\n"``, not the empty string. A
-    derivation without the trailing newline, or one special-casing empty to
-    ``b""``, agrees with ``from_iterable`` everywhere except here. Removing no
-    words is a real configuration and has to hash like one.
+    an empty set hashes ``b"\n"``, not the empty string. A derivation without
+    the trailing newline agrees with ``from_iterable`` everywhere except here.
     """
     factory = StopwordSet.from_iterable([])
     direct = StopwordSet([], name="x", digest="irrelevant")
@@ -1166,11 +1221,9 @@ def test_the_empty_set_agrees_with_the_factory_on_the_one_form_that_has_no_words
 def test_an_empty_set_and_a_set_holding_one_empty_string_are_not_the_same_map() -> None:
     r"""The one pair the canonical form cannot separate.
 
-    ``[""]`` canonicalises to ``"" + "\n"``, the same byte string the empty set
-    produces, so the two collide although they are different maps. ``normalise``
-    never yields an empty token, so no pipeline input reaches the collision.
-    Asserted as equal on purpose: making the form injective fails here and is
-    reviewed rather than absorbed.
+    ``[""]`` canonicalises to ``"\n"``, the same bytes as the empty set. No
+    pipeline input yields an empty token, so the collision is unreachable. The
+    equality is asserted so that making the form injective fails here.
     """
     empty = StopwordSet([], name="x", digest="d")
     holds_empty_string = StopwordSet([""], name="x", digest="d")

@@ -1,16 +1,8 @@
-"""The documentation reference checker.
+"""Tests for the documentation reference checker.
 
-``scripts/check_docs.py`` gates CI, and a gate is only evidence if it can fail.
-The `docs/` half has been in place for a while; the docstring half is new and
-resolves runtime objects rather than text, which is where the subtlety is: a
-cross-reference names a class attribute, an enum member, a standard-library
-function or a sibling module's export, and the resolver has to find all four
-without accepting a name that exists nowhere.
-
-The checker's own findings are asserted here rather than only observed passing
-on the current tree, so a resolver that silently answered "yes" to everything --
-the failure mode that would make the whole check worthless -- shows up as a
-test failure instead of a green run.
+``scripts/check_docs.py`` gates CI. Its docstring half resolves runtime
+objects, so the rejections are asserted here and a resolver that accepts
+every name fails this file rather than passing the gate vacuously.
 """
 
 from __future__ import annotations
@@ -28,7 +20,10 @@ SCRIPT = REPO / "scripts" / "check_docs.py"
 
 
 def _checker() -> ModuleType:
-    """Import ``scripts/check_docs.py`` as a module. Local by house convention."""
+    """Import ``scripts/check_docs.py`` as a module.
+
+    The helper is local to this file by house convention.
+    """
     spec = importlib.util.spec_from_file_location("_check_docs_script", SCRIPT)
     assert spec is not None
     assert spec.loader is not None
@@ -41,14 +36,16 @@ def _checker() -> ModuleType:
 # Normal: the tree is clean, and the checker says so in numbers
 # ---------------------------------------------------------------------------
 def test_the_repository_currently_passes_its_own_documentation_check() -> None:
-    """The baseline. Every rejection below is vacuous if this fails."""
+    """The current tree passes the check; the rejections below depend on it."""
     assert _checker().check() == []
 
 
 def test_the_docstring_half_actually_examined_something() -> None:
-    """A checker that found no references to check would pass just as quietly as
-    one that checked them all. The count is the difference, and the modules cite
-    each other densely enough that it cannot legitimately be small.
+    """The docstring scan finds a large number of cross-references.
+
+    A scan that found nothing would pass as quietly as one that checked
+    every reference, and the modules cite each other densely enough that
+    the count cannot be small.
     """
     checker = _checker()
     _problems, n_refs = checker.check_docstrings({})
@@ -60,8 +57,11 @@ def test_the_docstring_half_actually_examined_something() -> None:
 # The resolver: the five places a cross-reference target may live
 # ---------------------------------------------------------------------------
 def test_a_target_naming_nothing_anywhere_is_refused() -> None:
-    """The whole point. A resolver that fell through to True would report a
-    clean tree forever."""
+    """A target that exists nowhere is rejected.
+
+    A resolver that fell through to True would report a clean tree for
+    every input.
+    """
     checker = _checker()
     from tfidf_stability.ranking import margins
 
@@ -81,9 +81,11 @@ def test_a_target_naming_nothing_anywhere_is_refused() -> None:
     ],
 )
 def test_each_place_a_cross_reference_may_point_is_resolved(target: str, why: str) -> None:
-    """Docstrings use all of these forms, so a resolver handling only the local
-    module would reject valid references and train the reader to ignore the
-    report."""
+    """Each form a docstring cross-reference takes resolves.
+
+    A resolver that handled only the local module would reject valid
+    references.
+    """
     checker = _checker()
     from tfidf_stability.ranking import margins
 
@@ -97,9 +99,12 @@ def test_each_place_a_cross_reference_may_point_is_resolved(target: str, why: st
 
 
 def test_an_attribute_of_the_enclosing_class_resolves_without_qualification() -> None:
-    """A method's docstring says ``:attr:`is_conclusive``` meaning its own
-    class's attribute. Without the owner in scope those read as module-level
-    names and every one of them would be reported."""
+    """An unqualified attribute name resolves against the enclosing class.
+
+    A method's docstring writes ``:attr:`is_conclusive``` for its own class's
+    attribute; without the owner in scope the name is a module-level lookup
+    and is rejected.
+    """
     checker = _checker()
     from tfidf_stability.analysis import stability_profile
     from tfidf_stability.analysis.stability_profile import CertificateAudit
@@ -112,9 +117,12 @@ def test_an_attribute_of_the_enclosing_class_resolves_without_qualification() ->
 # Citing a test: read, never imported
 # ---------------------------------------------------------------------------
 def test_a_cited_test_that_exists_resolves() -> None:
-    """`ranking/distances.py` cites the test pinning its near-metric
-    counterexample. Read from the file so the checker never imports a test
-    module and its plugins."""
+    """A cited test that exists in the named module resolves.
+
+    `ranking/distances.py` cites the test pinning its near-metric
+    counterexample. The lookup reads the file, so the checker never imports
+    a test module and its plugins.
+    """
     assert _checker()._defined_in_tests(
         "test_ordering_distances", "test_fks_is_a_near_metric_not_a_metric"
     )
@@ -128,7 +136,7 @@ def test_a_cited_test_that_exists_resolves() -> None:
     ],
 )
 def test_a_cited_test_that_does_not_exist_is_refused(module: str, name: str) -> None:
-    """Both halves: a missing file and a missing function inside a real one."""
+    """A missing module and a missing function in a real module are refused."""
     assert not _checker()._defined_in_tests(module, name)
 
 
@@ -136,9 +144,12 @@ def test_a_cited_test_that_does_not_exist_is_refused(module: str, name: str) -> 
 # Anchors into the addenda
 # ---------------------------------------------------------------------------
 def test_every_g_number_in_the_addenda_is_reachable_as_an_anchor() -> None:
-    """The docstrings cite ``spec_addenda.md#g13`` and the like. The anchor form
-    is a lowercased first word, so a heading renamed from "G13 ..." to something
-    else silently breaks every citation of it."""
+    """Every G-number heading in the addenda is reachable as an anchor.
+
+    Docstrings cite ``spec_addenda.md#g13`` and the like. The anchor form is
+    the lowercased first word of the heading, so a renamed heading breaks
+    every citation of it.
+    """
     checker = _checker()
     anchors = checker._anchors((REPO / "docs" / "spec_addenda.md").read_text(encoding="utf-8"))
 
@@ -166,8 +177,11 @@ def _document(directory: Path, body: str) -> Path:
 
 
 def test_the_preset_half_actually_examined_something() -> None:
-    """A checker that found no presets would pass as quietly as one that checked
-    them all, and this project defines a dozen."""
+    """The preset scan finds the project's presets.
+
+    A checker that found no presets would pass as quietly as one that checked
+    them all, and the project defines a dozen.
+    """
     checker = _checker()
     _problems, n_presets = checker.check_presets(sorted((REPO / "docs").glob("*.md")))
 
@@ -177,8 +191,10 @@ def test_the_preset_half_actually_examined_something() -> None:
 def test_a_preset_that_no_document_names_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The direction that catches a preset added and never written down. A
-    reader cannot invoke what the documentation does not mention."""
+    """A preset that no document names is a finding.
+
+    A reader cannot invoke a preset the documentation does not mention.
+    """
     checker = _checker()
     monkeypatch.setattr(checker, "PRESETS", _presets_file(tmp_path, ["ci", "bench"]))
 
@@ -190,8 +206,11 @@ def test_a_preset_that_no_document_names_is_reported(
 def test_a_documented_preset_that_does_not_exist_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The other direction. A renamed preset leaves a command that configures
-    nothing, which is how `cpp-only` outlived itself."""
+    """A documented preset that does not exist is a finding.
+
+    A renamed preset leaves a command in the documents that configures
+    nothing.
+    """
     checker = _checker()
     monkeypatch.setattr(checker, "PRESETS", _presets_file(tmp_path, ["ci"]))
 
@@ -205,8 +224,11 @@ def test_a_documented_preset_that_does_not_exist_is_reported(
 def test_a_hidden_preset_need_not_be_documented(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A hidden preset exists to be inherited from and cannot be invoked, so
-    requiring it in the documents would demand prose about nothing."""
+    """A hidden preset is neither required in the documents nor counted.
+
+    A hidden preset exists to be inherited from and cannot be invoked, so
+    requiring it in the documents would demand prose about nothing.
+    """
     checker = _checker()
     monkeypatch.setattr(checker, "PRESETS", _presets_file(tmp_path, ["ci"], hidden=["base"]))
 
@@ -219,12 +241,11 @@ def test_a_hidden_preset_need_not_be_documented(
 def test_an_absent_presets_file_is_reported_rather_than_raised(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The gate runs inside the mutation sandbox, which copies a chosen list of
-    paths rather than the whole tree.
+    """An absent presets file is a finding rather than an exception.
 
-    A file missing from that list would otherwise surface as a
-    `FileNotFoundError` from a nightly job, naming the exception rather than the
-    file. Reported as a finding, the message says which file to add.
+    The gate runs inside the mutation sandbox, which copies a chosen list of
+    paths rather than the whole tree. A finding names the file to add, where
+    a `FileNotFoundError` from a nightly job names only the exception.
     """
     checker = _checker()
     monkeypatch.setattr(checker, "PRESETS", tmp_path / "CMakePresets.json")
@@ -239,8 +260,11 @@ def test_an_absent_presets_file_is_reported_rather_than_raised(
 def test_a_preset_named_only_in_prose_does_not_count_as_documented(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The word has to appear as code. Otherwise a preset called `debug` or
-    `bench` would read as documented by any sentence that happens to use it."""
+    """A preset named only in prose does not count as documented.
+
+    The name has to appear as code; otherwise a preset called `debug` or
+    `bench` would read as documented by any sentence that used the word.
+    """
     checker = _checker()
     monkeypatch.setattr(checker, "PRESETS", _presets_file(tmp_path, ["bench"]))
 

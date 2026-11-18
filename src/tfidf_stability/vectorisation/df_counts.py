@@ -1,15 +1,8 @@
 """Document- and collection-frequency counting (README section 2.1).
 
-    df(t) = |{ i : t appears at least once in d_i }|
-
-``df`` counts documents; ``cf`` counts occurrences. The paper uses only ``df``,
-but ``cf`` is the secondary key of the ``max_features`` truncation rule
-(``spec_addenda.md#g6``) and accumulates in the same pass.
-
-:func:`~tfidf_stability.vectorisation.vocabulary.build_vocabulary` computes both,
-so these functions exist for inspecting intermediates (README section 1.2) and
-for the perturbation analysis of section 4.1, which needs ``df`` before and after
-a corpus edit.
+``df(t) = |{ i : t appears at least once in d_i }|``; ``cf`` counts occurrences, the secondary
+``max_features`` key (``spec_addenda.md#g6``). For README 1.2 intermediates and 4.1 corpus edits;
+:func:`~tfidf_stability.vectorisation.vocabulary.build_vocabulary` computes both itself.
 """
 
 from __future__ import annotations
@@ -49,24 +42,11 @@ def df_after_edit(
     removed: Sequence[str] | None = None,
     added: Sequence[str] | None = None,
 ) -> dict[str, int]:
-    """Document frequency after replacing one document's features.
+    """Document frequency after one document is removed, added or replaced.
 
-    Only the edited document's features can change, so this costs
-    ``O(nnz of the edited document)`` rather than ``O(nnz)``, which is what makes
-    the corpus-perturbation experiments of section 4.1 tractable at scale.
-
-    ``N`` is unchanged by an edit but changes under an addition or removal, and
-    ``idf`` depends on both. Callers pass ``N`` to
-    :func:`~tfidf_stability.vectorisation.idf.smoothed_idf` themselves; this
-    function does not guess.
-
-    Args:
-        df: Document frequencies before the edit. Not mutated.
-        removed: Features of the document being removed or replaced.
-        added: Features of the document being added or substituted in.
-
-    Returns:
-        A new mapping. Features whose frequency falls to zero are dropped.
+    Returns a copy of ``df`` with each distinct ``removed`` feature down 1 and ``added`` one up 1,
+    dropping zeros, in ``O(nnz of the edited document)`` (section 4.1). Callers track ``N``, which
+    an addition or removal changes, for :func:`~tfidf_stability.vectorisation.idf.smoothed_idf`.
     """
     out = dict(df)
     for f in set(removed or ()):

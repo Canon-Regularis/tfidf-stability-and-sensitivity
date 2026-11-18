@@ -1,32 +1,8 @@
-"""One perturbation, measured at every stage of section 4's chain.
+"""One perturbation, measured at every stage of the section 4 chain.
 
-`perturbation/experiments.py` is the module that ties the other four together:
-apply an edit, refit both corpora from scratch, and report the movement at every
-stage of
-
-    corpus edit -> df -> idf -> w -> cos -> ranking
-
-Named for the package rather than the concept, because `tests/test_analysis_harness.py`
-used to be called `test_experiments.py` while testing `analysis/` instead, and the
-module here went untested behind that name for its whole life.
-
-The properties hunted are the ones a report object can get quietly wrong:
-
-Scores keyed by identifier, never by position. An add or a remove shifts every
-index after it, so a report that compared by index would compare two different
-documents across the perturbation and produce a plausible movement for a document
-that never moved. That is the failure this file exists to catch.
-
-The asymmetry of `certified_stable`. `True` is a proof that section 4.4 covers the
-edit; `False` says only that the certificate does not reach, and the ranking may
-be unchanged anyway. A test that treated the two as opposites would license
-reading `False` as "the ranking changed", which the docstring explicitly forbids.
-
-Refitting rather than updating. Both models are fitted from scratch, and the
-module says a partial update sharing state with the baseline is the thing most
-likely to hide a real perturbation effect. That is asserted here rather than
-assumed, by checking a duplicate edit moves IDF for exactly the features it
-touched.
+`perturbation/experiments.py` refits both corpora and reports idf, w, cos and
+top-k certificates. Scores are keyed by identifier, never by position. `True`
+from `certified_stable` is a proof; `False` means only that no proof reaches.
 """
 
 from __future__ import annotations
@@ -77,11 +53,11 @@ def test_a_report_covers_every_document_present_on_both_sides() -> None:
 
 
 def test_scores_are_keyed_by_identifier_so_a_removal_cannot_misalign_them() -> None:
-    """The failure this module's `_score` docstring names.
+    """Scores are compared by identifier, not by position.
 
-    Removing d0 shifts every later document down one index. Comparing by
-    position would pair d1's new score with d0's old one and report movement for
-    documents that did not move.
+    Removing d0 shifts every later document down one index. A comparison by
+    position would pair d1's new score with d0's old one and report movement
+    for documents that did not move.
     """
     corpus = corpus_of(6)
     perturbed, edit = remove_document(corpus, "d0")
@@ -97,7 +73,7 @@ def test_scores_are_keyed_by_identifier_so_a_removal_cannot_misalign_them() -> N
 
 
 def test_a_duplicate_edit_manufactures_an_exact_tie_between_original_and_copy() -> None:
-    """`duplicate_document` exists precisely to produce m_k = 0 without a search."""
+    """`duplicate_document` produces an exact tie, m_k = 0, without a search."""
     corpus = corpus_of(6)
     perturbed, edit = duplicate_document(corpus, "d1", "d1_copy")
     report = run_perturbation(corpus, perturbed, edit, ("alpha", "beta"))
@@ -147,9 +123,8 @@ def test_an_edit_that_changes_nothing_moves_no_score_at_all() -> None:
 def test_emptying_the_corpus_is_refused_rather_than_reported_as_a_perturbation() -> None:
     """Removing the last document leaves nothing to fit.
 
-    The refusal comes from the vectoriser rather than from here, which is the
-    right place for it: a corpus with no documents has no vocabulary, and a
-    report over one would be a measurement of nothing.
+    The refusal is raised by vocabulary construction during the fit: a corpus
+    with no documents has no vocabulary, and a report over one measures nothing.
     """
     corpus = (("only",), (("alpha", "beta"),))
     perturbed, edit = remove_document(corpus, "only")
@@ -161,8 +136,8 @@ def test_max_score_shift_over_no_shared_documents_is_zero_not_an_error() -> None
     """`max(..., default=0.0)` guards a case `run_perturbation` cannot reach.
 
     Every edit kind leaves at least one document on both sides, so the empty
-    intersection is only reachable by constructing the report directly. Pinned
-    anyway: the guard is there, and a bare `max()` over nothing raises.
+    intersection is reachable only by constructing the report directly. A bare
+    `max()` over nothing raises, so the default is pinned here.
     """
     corpus = corpus_of(5)
     perturbed, edit = edit_document(corpus, "d1", ("alpha",))
@@ -189,11 +164,10 @@ def test_adding_a_document_leaves_every_original_present_on_both_sides() -> None
 # certified_stable: True is a proof, False is not its opposite
 # ---------------------------------------------------------------------------
 def test_certified_stable_searches_past_the_certificates_that_do_not_match() -> None:
-    """The lookup is a scan, so it has to survive a miss before a hit.
+    """The lookup is a scan, so it must survive a miss before a hit.
 
     With one certificate the loop body runs once and the "keep looking" arc is
-    never taken, which is how a scan that returned on its first iteration would
-    pass unnoticed.
+    never taken, so a scan that returned on its first iteration would pass.
     """
     corpus = corpus_of(8)
     perturbed, edit = edit_document(corpus, "d1", ("alpha",))
@@ -207,11 +181,11 @@ def test_certified_stable_searches_past_the_certificates_that_do_not_match() -> 
 
 
 def test_certified_stable_returns_none_rather_than_false_when_the_margin_is_undefined() -> None:
-    """The distinction the docstring insists on.
+    """An undefined margin gives `None`, not `False`.
 
     An undefined certificate means "no radius exists here", which is not the
     same claim as "the perturbation exceeded the radius". Collapsing the two
-    would let a reader treat absence of a certificate as evidence of movement.
+    would let absence of a certificate read as evidence of movement.
     """
     corpus = corpus_of(4)
     perturbed, edit = edit_document(corpus, "d0", ("alpha",))
@@ -241,8 +215,11 @@ def test_a_zero_shift_is_certified_stable_wherever_a_radius_exists() -> None:
 
 
 def test_the_certificates_are_taken_before_the_edit_not_after() -> None:
-    """Section 4.4 certifies from the unperturbed margins; using the perturbed
-    ones would be circular, certifying an edit against the state it produced."""
+    """Section 4.4 certifies from the unperturbed margins.
+
+    Using the perturbed margins would be circular, certifying an edit against
+    the state it produced.
+    """
     corpus = corpus_of(9)
     perturbed, edit = edit_document(corpus, "d2", ("zeta", "eta", "theta"))
     report = run_perturbation(corpus, perturbed, edit, ("zeta",), ks=(3,))
@@ -279,7 +256,7 @@ def test_editing_an_unknown_document_is_refused_rather_than_appended() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.slow
 def test_every_bound_holds_across_a_sweep_of_edits_and_corpus_sizes() -> None:
-    """Section 4.2 attacked rather than sampled."""
+    """Every section 4.2 bound holds across three corpus sizes and twelve seeds."""
     checked = 0
     for n in (4, 9, 20):
         for seed in range(12):
@@ -296,8 +273,7 @@ def test_every_bound_holds_across_a_sweep_of_edits_and_corpus_sizes() -> None:
 
 @pytest.mark.slow
 def test_a_corpus_of_identical_documents_moves_every_score_together() -> None:
-    """All-identical is the degenerate corpus: every document is an exact tie,
-    so any edit either moves all of them or none."""
+    """In an all-identical corpus, the untouched copies still tie after an edit."""
     corpus = (tuple(f"d{i}" for i in range(8)), tuple(("alpha", "beta") for _ in range(8)))
     perturbed, edit = edit_document(corpus, "d0", ("gamma", "delta"))
     report = run_perturbation(corpus, perturbed, edit, ("alpha",))
@@ -308,18 +284,15 @@ def test_a_corpus_of_identical_documents_moves_every_score_together() -> None:
 
 
 # ---------------------------------------------------------------------------
-# An edit that changes the corpus size has no certificate at any k
+# An edit that changes the corpus size has no certificate at any k.
+# Rationale: docs/engineering_notes.md#certified-stable-size-changing-edits
 # ---------------------------------------------------------------------------
-# Section 4.4 bounds how far the scores of *existing* documents move, and
-# `max_score_shift` measures exactly that: the maximum over documents present on
-# both sides. A document that did not exist in the "before" ranking is outside
-# both, so it can take rank 1 however little the survivors moved.
 def _displacing_add() -> tuple[object, object]:
     """A corpus and an added document that matches the query exactly.
 
-    Local by house convention. Five documents on distinct topics so the scores
-    separate cleanly, and the addition is a perfect match, so it outranks the
-    incumbent while the surviving scores move only by the change in N.
+    Local by house convention. Five documents on disjoint topics, so only d0
+    matches the query; the addition is a perfect match, so it outranks d0
+    while the surviving scores move only through the idf shift it causes.
     """
     corpus = (
         ("d0", "d1", "d2", "d3", "d4"),
@@ -335,11 +308,11 @@ def _displacing_add() -> tuple[object, object]:
 
 
 def test_an_added_document_can_take_rank_one_while_every_survivor_barely_moves() -> None:
-    """The premise, measured. Without it the guard below is protecting nothing.
+    """The premise of the size guard: an addition takes rank 1 cheaply.
 
-    The surviving scores move by about 0.06 -- only because N changed, which
-    moves every idf -- and that is well inside the certified radius at k=1. The
-    added document scores 1.0 and takes the rank outright.
+    Only d0's score moves, by about 0.06, through the idf shift from N and the
+    df of alpha and beta; that is inside the k=1 radius of about 0.41. The
+    added document scores 1.0 and takes rank 1 outright.
     """
     corpus, (perturbed, edit) = _displacing_add()
     report = run_perturbation(corpus, perturbed, edit, ("alpha", "beta"), ks=(1, 2))
@@ -363,15 +336,9 @@ def test_an_added_document_can_take_rank_one_while_every_survivor_barely_moves()
 def test_an_edit_that_changes_the_corpus_size_certifies_nothing(label: str, make: object) -> None:
     """`None`, never `True`.
 
-    This returned `True` for the adding case: `max_score_shift` was inside the
-    k=1 radius, so the comparison passed, while the top-1 set went from `{d0}`
-    to the new document. `True` is documented as a proof and section 7.2 uses it
-    as a certificate of stability, so that was a false proof -- worse than no
-    proof, because `False` and `None` both invite a check and `True` ends the
-    enquiry.
-
-    Removal is the same hole from the other side: a document can leave the top-k
-    without any score moving at all.
+    `max_score_shift` is measured over documents present on both sides, so for
+    an addition it can sit inside the k=1 radius while the top-1 set changes.
+    A removal can take a document out of the top-k without any score moving.
     """
     corpus = (
         ("d0", "d1", "d2", "d3", "d4"),
@@ -395,9 +362,8 @@ def test_an_edit_that_keeps_the_corpus_size_still_certifies() -> None:
     """The guard must not swallow the case section 4.4 does cover.
 
     Replacing a document's features perturbs existing scores and leaves the
-    candidate set alone, which is exactly the hypothesis of the theorem, so a
-    verdict is still available here -- otherwise the fix would have removed the
-    certificate rather than corrected it.
+    candidate set alone, which is the hypothesis of the theorem, so a verdict
+    is still available here.
     """
     corpus = corpus_of(10)
     _ids, docs = corpus

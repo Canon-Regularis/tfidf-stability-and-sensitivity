@@ -1,19 +1,8 @@
-// The sort key, and why it is a strict total order.
+// Lexicographic ranking sort key, a strict total order on documents.
 //
-// key = (-score, rank_1, ..., rank_m, id_rank), compared ascending and
-// lexicographically, the tuple the Python reference builds.
-//
-// Negating the score is exact: it flips the sign bit and never rounds.
-// Negation rather than a reversed comparator makes Python's tuple `<` and this
-// `operator<` the same relation, so there is one comparator to reason about
-// instead of two kept in agreement.
-//
-// Identifier ranks are a bijection, so the key is injective and no two
-// documents ever compare equal. Two consequences, both tested:
-//
-//   * the sorted sequence is unique, so every correct sorting algorithm
-//     produces the identical permutation and stability is irrelevant;
-//   * the output does not depend on the input order.
+// key = (-score, rank_1, ..., rank_m, id_rank), compared ascending, as in the Python reference.
+// Identifier ranks are a bijection, so the key is injective and the sorted order is unique.
+// Rationale: docs/engineering_notes.md#sort-key-strict-total-order
 #pragma once
 
 #include <tfidf/core/types.hpp>
@@ -22,13 +11,15 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace tfidf::ranking {
 
-/// One document's position in the ordering. Exactly 32 bytes.
+/// One document's position in the ordering, exactly 32 bytes.
 struct SortKey {
     Score neg_score = 0.0;                                    //  8
     std::array<std::int32_t, kMaxAttributes> ranks{};         // 16
@@ -40,11 +31,9 @@ static_assert(sizeof(SortKey) == 32, "SortKey should stay at two per cache line"
 
 /// Ascending lexicographic comparison.
 ///
-/// Explicit `<` rather than a defaulted `operator<=>`, for correctness rather
-/// than style: a defaulted `<=>` on a struct containing a `double` yields
-/// `std::partial_ordering`, which `std::sort` cannot consume, and forcing
-/// `strong_ordering` would reopen the NaN question the boundary guard settles.
-/// With finiteness guaranteed on entry, plain `<` is a strict total order.
+/// A defaulted `<=>` over a `double` yields `std::partial_ordering`, which `std::sort`
+/// cannot use. With finite scores on entry, plain `<` is a strict total order.
+/// Rationale: docs/engineering_notes.md#sort-key-explicit-less-than
 [[nodiscard]] inline bool key_less(const SortKey& a, const SortKey& b) noexcept {
     if (a.neg_score != b.neg_score) {
         return a.neg_score < b.neg_score;
@@ -61,10 +50,14 @@ static_assert(sizeof(SortKey) == 32, "SortKey should stay at two per cache line"
 ///
 /// `priority` holds row indices into `table.ranks`; an empty priority is the
 /// score-only operator, whose ties fall straight through to the identifier.
+/// Throws for a priority longer than `kMaxAttributes`, which a key cannot hold.
 inline void build_keys(std::span<const Real> scores,
                        const RankTable& table,
                        std::span<const std::int32_t> priority,
-                       std::span<SortKey> out) noexcept {
+                       std::span<SortKey> out) {
+    if (priority.size() > kMaxAttributes) {
+        throw std::invalid_argument("more attributes than the sort key can carry");
+    }
     const auto n = static_cast<std::size_t>(table.n_docs);
     for (std::size_t i = 0; i < n; ++i) {
         SortKey& k = out[i];
@@ -80,10 +73,9 @@ inline void build_keys(std::span<const Real> scores,
 
 /// Whether every score is finite.
 ///
-/// O(N) once per query against an O(N log N) sort, and the only thing between
-/// an arbitrary caller and undefined behaviour: a NaN destroys the strict weak
-/// ordering, and libstdc++'s final insertion pass then walks off the front of
-/// the array, which is a real out-of-bounds write rather than a wrong answer.
+/// O(N) per query against an O(N log N) sort. A NaN breaks the strict weak ordering,
+/// and libstdc++'s final insertion pass then writes out of bounds.
+/// Rationale: docs/engineering_notes.md#sort-key-finiteness-guard
 [[nodiscard]] inline bool all_finite(std::span<const Real> scores) noexcept {
     for (const Real s : scores) {
         if (!std::isfinite(s)) {
@@ -95,9 +87,9 @@ inline void build_keys(std::span<const Real> scores,
 
 /// Whether every attribute in `priority` fits in a key.
 ///
-/// `build_keys` is `noexcept` and truncates past `kMaxAttributes`, so the key
-/// sorts on a prefix and orders ties differently from the unbounded Python
-/// tuple. The binding raises; this predicate serves callers that cannot raise.
+/// The binding calls this at construction, so a `NativeRanker` with too many
+/// attributes is refused before any scores arrive; `build_keys` throws for the
+/// same priority.
 [[nodiscard]] inline bool priority_fits(std::span<const std::int32_t> priority) noexcept {
     return priority.size() <= kMaxAttributes;
 }

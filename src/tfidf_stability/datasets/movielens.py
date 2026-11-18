@@ -1,42 +1,8 @@
-"""MovieLens ``ml-latest-small`` to a corpus, without ever redistributing it.
+"""Parse the MovieLens ``ml-latest-small`` archive into a corpus.
 
-Licence, which shapes the whole module
---------------------------------------
-The MovieLens licence permits research use and prohibits redistribution, so the
-data cannot be committed, cannot be a test fixture and cannot be in CI. What is
-committed is this parser, a pinned SHA-256 and the derived statistics: enough to
-reproduce the numbers given a copy of the archive obtained from GroupLens.
-
-GroupLens updates ``ml-latest-small`` in place at the same URL, so without a pin
-the corpus underneath a published result can change silently. :func:`load`
-verifies the digest and refuses to proceed on a mismatch; a warning would be
-filtered out by the scripts that need to see it.
-
-Determinism on real data
-------------------------
-Three hazards, all handled here rather than downstream:
-
-1. **Row order.** CSV row order is an artefact of GroupLens' export. Everything
-   is sorted by ``movieId`` as an integer, so document indices are a property of
-   the data rather than of the file.
-2. **Ratings are 0.5-quantised**, so ``2 * rating`` is an exact integer. That
-   makes ``docs/spec_addenda.md#g8``'s exact ``(2*sum, count)`` representation
-   available on real data: the mean is never formed as a float, so equal means
-   cannot compare unequal and distinct means cannot collide. Parsed by integer
-   arithmetic on the decimal text; ``float("3.5") * 2`` is exact here, but
-   relying on that is a silent dependence on the input alphabet.
-3. **Unrated films exist.** ``movies.csv`` lists films appearing in no row of
-   ``ratings.csv``, so their mean rating is undefined. They become
-   ``has_value = False`` and sort last, exercising G8's missing-value path on
-   real data. ``scripts/fetch_data.py`` reports the count on first download,
-   since this repository never holds the archive to check against.
-
-Text
-----
-``title``, ``genres`` and the free-text ``tags`` are concatenated. Genres arrive
-pipe-separated (``Action|Sci-Fi``) and the release year is parenthesised in the
-title (``Heat (1995)``); both are split into tokens here, since neither is
-natural language and the tokeniser should not know this dataset's conventions.
+The archive is not redistributed; ``scripts/fetch_data.py`` fetches a copy and :func:`load`
+checks it against a pinned SHA-256. Films sort by integer ``movieId``; ratings sum as doubled
+integers (``docs/spec_addenda.md#g8``). Rationale: docs/engineering_notes.md#movielens-ingestion
 """
 
 from __future__ import annotations
@@ -65,11 +31,9 @@ __all__ = [
 MOVIELENS_URL = "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip"
 
 #: Pinned digest of the archive these results were computed against, recorded
-#: from a verified first download on 2026-08-12. A mismatch is an error rather
-#: than a warning: GroupLens replaces this file in place at a stable URL.
-#:
-#: The archive it identifies: 9742 films, 100836 ratings, 610 users, 18 films
-#: with no rating at all.
+#: on 2026-08-12. A mismatch is an error, since GroupLens replaces the file in
+#: place at a stable URL. The archive holds 9742 films, 100836 ratings, 610
+#: users and 18 films with no rating.
 MOVIELENS_SHA256: str | None = "696d65a3dfceac7c45750ad32df2c259311949efec81f0f144fdfb91ebc9e436"
 
 #: Rating at or above which an interaction counts as positive (G10 item 5).
@@ -106,10 +70,8 @@ class MovieLensCorpus:
     def records(self) -> list[dict[str, Any]]:
         """Corpus rows in the shape :class:`AttributeTable` and the CLI expect.
 
-        ``text`` is the joined form every consumer already reads; ``fields`` is
-        the same content unjoined, which
-        :func:`~tfidf_stability.preprocessing.pipeline.preprocess_records` uses
-        in preference. A reader that knows only ``text`` is unaffected.
+        ``text`` is the joined form; ``fields`` is the same content unjoined, which
+        :func:`~tfidf_stability.preprocessing.pipeline.preprocess_records` prefers.
         """
         return [
             {"doc_id": doc_id, "text": text, "fields": list(parts), **attributes}
@@ -120,13 +82,11 @@ class MovieLensCorpus:
 
 
 def _double_rating(text: str) -> int:
-    """``"3.5"`` to ``7``, in exact integer arithmetic.
+    """Convert ``"3.5"`` to ``7`` in exact integer arithmetic.
 
     MovieLens ratings are quantised to halves, so twice a rating is an integer.
-    Going via ``float`` is exact for this alphabet, but that is a property of the
-    input and stops holding the moment someone points this parser at ``ml-25m``.
-    The raise below catches an input that breaks the assumption instead of
-    rounding it silently.
+    Parsing the decimal text avoids relying on ``float`` being exact for this
+    input; a rating off the half grid raises instead of being rounded.
     """
     stripped = text.strip()
     whole, _, frac = stripped.partition(".")
@@ -163,13 +123,11 @@ def _title_tokens(title: str) -> str:
 
 
 def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> MovieLensCorpus:
-    """Parse the archive bytes. Pure: no network, no filesystem, no clock.
+    """Parse the archive bytes with no network, filesystem or clock access.
 
     Args:
         data: The raw ``ml-latest-small.zip`` bytes.
-        min_weight: Rating at or above which a rating becomes a positive
-            interaction (G10 item 5). Compared in the doubled integer domain, so
-            ``4.0`` means 4.0 with no rounding slack.
+        min_weight: Inclusive positive-rating threshold (G10 item 5), as ``ceil(2 * min_weight)``.
     """
     digest = hash_bytes(data)
 
@@ -218,7 +176,7 @@ def parse_archive(data: bytes, *, min_weight: float = DEFAULT_MIN_WEIGHT) -> Mov
     # Sorted, as the movie rows and the interactions below already are. Tags are
     # concatenated into the document text, so their order decides which
     # tag-to-tag n-grams exist. Under `tags.csv` row order the vocabulary would
-    # be a property of GroupLens' export, not of the data: hazard 1 above.
+    # be a property of GroupLens' export, not of the data.
     for movie in tags:
         tags[movie].sort()
 
@@ -280,17 +238,11 @@ def load(
     expect_sha256: str | None = MOVIELENS_SHA256,
     min_weight: float = DEFAULT_MIN_WEIGHT,
 ) -> MovieLensCorpus:
-    """Load a local archive, verifying its digest.
+    """Load ``ml-latest-small.zip`` from the path ``archive``, verifying its digest.
 
-    Args:
-        archive: Path to ``ml-latest-small.zip``.
-        expect_sha256: Digest to require. ``None`` skips the check, appropriate
-            only on the first download, when the pin is being established.
-        min_weight: Positive-interaction threshold; see :func:`parse_archive`.
-
-    Raises:
-        DataIntegrityError: If the digest does not match, or the archive does not
-            look like ml-latest-small.
+    ``expect_sha256=None`` skips the check (first download only); ``min_weight`` is as
+    in :func:`parse_archive`. Raises ``DataIntegrityError`` if the file or a member is
+    missing, the digest differs or a rating is malformed.
     """
     path = Path(archive)
     if not path.exists():

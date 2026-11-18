@@ -1,22 +1,14 @@
-// Tie groups (README section 2.3.3, `spec_addenda.md#g1`).
+// Tie groups: the ball, single-linkage chains and complete-linkage cliques.
 //
-// Three distinct objects, never conflated:
-//
-//   tie_ball_interval  verbatim section 2.3.3   O(log N)  overlapping
-//   tie_chains         single linkage           O(N)      a partition
-//   tie_cliques        complete linkage         O(N)      overlapping
-//
-// The ball is what the paper defines; the chain is the object with a
-// well-defined "group containing document i"; the clique is the set in which
-// "mutually indistinguishable" holds. The chain-inflation ratio
-// rho = |largest chain| / |largest clique| measures how far the first two have
-// drifted apart.
+// Ball: README section 2.3.3 verbatim, O(log N), overlapping. Chains: single linkage, O(N),
+// a partition. Cliques: complete linkage, O(N), overlapping. See `spec_addenda.md#g1`.
+// Rationale: docs/engineering_notes.md#tie-groups-objects
 #pragma once
 
 #include <tfidf/core/types.hpp>
 
 #include <algorithm>
-#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -28,33 +20,25 @@ namespace tfidf::ranking {
 
 /// Reject a tolerance that is negative or NaN.
 ///
-/// `!(tau >= 0.0)` rather than `tau < 0.0`: every comparison with NaN is false,
-/// so the second form admits NaN. With tau = NaN the ball, the chains and the
-/// cliques answer differently and none raises, so all four entry points call
-/// this guard.
+/// `!(tau >= 0.0)` is used because `tau < 0.0` is false for NaN. With tau = NaN
+/// the ball, the chains and the cliques disagree without raising, so all four
+/// entry points call this guard.
 inline void checked_tau(Real tau) {
     if (!(tau >= 0.0)) {
         throw std::invalid_argument("tau must be non-negative");
     }
 }
 
-/// A half-open `[lo, hi)` range of ranks. Every group here is contiguous in the
-/// sorted order, so an interval is a complete description.
+/// A half-open `[lo, hi)` range of ranks.
+///
+/// Every group here is contiguous in the sorted order, so an interval describes it fully.
 using Interval = std::pair<std::int32_t, std::int32_t>;
 
 /// `{ i : |S[i] - S[j]| <= tau }`, as a rank interval.
 ///
-/// Binary-searching for `S[j] +/- tau` is wrong, and wrong at the boundary,
-/// which is the only place tie groups are interesting: those bounds are
-/// themselves rounded, so the predicate evaluated becomes
-/// `S[i] <= fl(S[j] + tau)`, which differs from `spec_addenda.md#g9`'s pinned
-/// `|s_i - s_j| <= tau`.
-///
-/// So the search runs on the difference itself. On a non-increasing array
-/// `S[i] - S[j]` is non-increasing in i and `S[j] - S[i]` is non-decreasing in
-/// i, so both bounds remain binary-searchable while evaluating the subtraction
-/// G9 specifies. IEEE subtraction is monotone, so the monotonicity holds in
-/// binary64 and not merely in the reals.
+/// Both binary searches evaluate the `spec_addenda.md#g9` difference, not a rounded bound
+/// `fl(S[j] +/- tau)`; on non-increasing input each difference is monotone in i in binary64.
+/// Rationale: docs/engineering_notes.md#tie-groups-ball-difference-search
 [[nodiscard]] inline Interval tie_ball_interval(std::span<const Real> sorted_scores,
                                                 std::int32_t j,
                                                 Real tau) {
@@ -123,11 +107,9 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
 
 /// Maximal intervals of diameter `<= tau`.
 ///
-/// The O(N) sweep is complete as well as cheap: the near-tie graph is an
-/// indifference graph, so every maximal clique is a contiguous interval of the
-/// sorted order and there are at most N of them. `R(a)`, the largest b with
-/// `S[a] - S[b] <= tau`, is non-decreasing, so one two-pointer pass finds all
-/// of them; `[a, R(a)]` is maximal iff `a == 0` or `R(a) > R(a-1)`.
+/// The near-tie graph is an indifference graph, so its at most N maximal cliques are
+/// contiguous; one two-pointer pass keeps `[a, R(a)]` iff `a == 0` or `R(a) > R(a-1)`.
+/// Rationale: docs/engineering_notes.md#tie-groups-clique-sweep
 [[nodiscard]] inline std::vector<Interval> tie_cliques(std::span<const Real> sorted_scores,
                                                        Real tau) {
     checked_tau(tau);
@@ -155,12 +137,9 @@ using Interval = std::pair<std::int32_t, std::int32_t>;
 
 /// `rho(tau) = |largest chain| / |largest clique|`.
 ///
-/// `>= 1` for the non-increasing input this layer requires, because a clique's
-/// adjacent gaps are then all `<= tau` and so it lies inside a chain. The bound
-/// rests on that order and is not checked: on unsorted scores both sides are
-/// computed over intervals that no longer correspond and the ratio falls below
-/// one. The normative Python says the same, and its docstring names
-/// `[0.07, 0.01, 0.84, 0.26, 0.23, 1.0]` at `tau = 0.2`, which gives 0.5.
+/// `rho >= 1` for non-increasing input, since every clique then lies inside a chain.
+/// The order is required and not checked; unsorted scores can give `rho < 1`.
+/// Rationale: docs/engineering_notes.md#tie-groups-chain-inflation-bound
 [[nodiscard]] inline Real chain_inflation_ratio(std::span<const Real> sorted_scores, Real tau) {
     checked_tau(tau);
     const auto chains = tie_chains(sorted_scores, tau);

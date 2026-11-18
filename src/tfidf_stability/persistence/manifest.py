@@ -1,19 +1,8 @@
-"""The run manifest: the reproducibility contract.
+"""The run manifest: what each published number depends on (README section 3).
 
-README section 3 promises that "all stages of the pipeline are deterministic
-given a fixed corpus, configuration, and software environment (including library
-versions)". The manifest makes that checkable: it records everything the numbers
-depend on, so a rerun is verified rather than trusted.
-
-Inclusion follows one test: could changing this move a published number? If yes
-it goes in, however tedious. Hence the compiler's floating-point flags, the
-reduction policy, the stopword list's digest and the ``tau`` in force, none of
-which look like data.
-
-Anything that varies between identical runs (timestamps, paths, hostnames) is
-written for a human and stripped before the digest is taken
-(:func:`~tfidf_stability.utils.io.strip_volatile`), so two identical runs on
-different machines produce the same :meth:`RunManifest.digest`.
+Volatile fields are stripped (:func:`~tfidf_stability.utils.io.strip_volatile`)
+so identical runs on different machines give the same :meth:`RunManifest.digest`.
+Rationale: docs/engineering_notes.md#run-manifest-contents
 """
 
 from __future__ import annotations
@@ -36,10 +25,9 @@ __all__ = ["RunManifest", "environment_block", "is_reproducible_environment"]
 def is_reproducible_environment(environment: Mapping[str, Any]) -> bool:
     """Whether an environment block describes a build that can publish numbers.
 
-    An absent or null ``native`` is the pure-Python reference, reproducible on
-    its own. Refusing it would refuse every result from a machine without a
-    compiler. Any other ``native`` must be a mapping whose ``reproducible`` is
-    true; a non-mapping gives ``False``, not ``AttributeError``.
+    An absent or null ``native`` is the pure-Python reference and is reproducible.
+    Any other ``native`` must be a mapping whose ``reproducible`` is true; a
+    non-mapping gives ``False``, not ``AttributeError``.
     """
     native = environment.get("native")
     if native is None:
@@ -52,10 +40,9 @@ def is_reproducible_environment(environment: Mapping[str, Any]) -> bool:
 def environment_block() -> dict[str, Any]:
     """Interpreter, platform and native-build provenance.
 
-    ``native`` is always present: the build info when the compiled backend
-    loaded, ``None`` otherwise. Its ``reproducible`` flag is how a reader checks
-    that the build was free of fast-math and architecture tuning, either of
-    which can move the numbers.
+    ``native`` is the build info when the compiled backend loaded, else ``None``.
+    Its ``reproducible`` flag records whether the build was free of fast-math and
+    architecture tuning, either of which can move the numbers.
     """
     block: dict[str, Any] = {
         "python": sys.version.split()[0],
@@ -78,26 +65,11 @@ def environment_block() -> dict[str, Any]:
 
 @dataclass(slots=True)
 class RunManifest:
-    """Everything a published number depends on.
+    """Everything a published number depends on; ``notes`` is never hashed.
 
-    Attributes:
-        run_kind: What produced this: ``"stability_profile"``,
-            ``"tie_break_ablation"``, ``"noise_floor"`` and so on.
-        config: The resolved configuration, after defaults and overrides.
-        dataset: Dataset name, source and digests.
-        preprocessing: The preprocessing map's fingerprint, including the
-            stopword list's digest; editing that file moves the vocabulary and
-            every number below it.
-        model: Vocabulary and model digests from
-            :func:`~tfidf_stability.persistence.save_load.save_model`.
-        queries: The query-set provenance, including G19's candidate spread.
-        parameters: Experiment parameters: ``tau``, the ``k`` set, the reduction
-            policy, the operator priorities.
-        results: Digests of the output artefacts.
-        environment: Interpreter, platform and native-build provenance, from
-            :func:`environment_block`. :data:`_MACHINE_KEYS` is stripped before
-            the digest; the keys that move numbers are not.
-        notes: Free text. Never hashed.
+    ``model`` holds digests from :func:`~tfidf_stability.persistence.save_load.save_model`;
+    ``preprocessing`` a fingerprint including the stopword digest; ``queries`` G19's spread.
+    ``environment`` is from :func:`environment_block`, hashed without :data:`_MACHINE_KEYS`.
     """
 
     run_kind: str
@@ -114,40 +86,24 @@ class RunManifest:
     def to_dict(self) -> dict[str, Any]:
         """The full manifest, including the volatile parts.
 
-        Read from the declared fields rather than restated, so a field added
-        above cannot be missing from the written manifest and from
-        :meth:`digest`. Not ``dataclasses.asdict``, which deep-copies and
-        recurses: the values here are shared with the caller's, and the digest
-        would copy the whole manifest on every call.
+        Read from the declared fields, so every field reaches the written manifest
+        and :meth:`digest`. Not ``dataclasses.asdict``, which deep-copies values
+        shared with the caller and would copy the whole manifest on every digest.
         """
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
-    #: Environment keys identifying the machine, not the arithmetic. Stripped
-    #: for the digest, kept in the written JSON, so
-    #: ``.github/workflows/determinism.yml`` gets one pipeline digest across
-    #: runners while ``float`` and ``native`` still move it. ``implementation``
-    #: is deliberately absent: CPython and PyPy are not claimed to agree.
+    #: Environment keys identifying the machine, not the arithmetic. Stripped for
+    #: the digest, kept in the written JSON, so ``.github/workflows/determinism.yml``
+    #: gets one pipeline digest across runners while ``float`` and ``native`` move it.
+    #: ``implementation`` is absent: CPython and PyPy are not claimed to agree.
     _MACHINE_KEYS: ClassVar[tuple[str, ...]] = ("platform", "machine", "python")
 
     def digest(self) -> str:
         """SHA-256 over the manifest with volatile fields stripped.
 
-        Two identical runs on different machines at different times give the
-        same digest. :data:`_MACHINE_KEYS` is stripped alongside
-        :data:`~tfidf_stability.utils.io.VOLATILE_KEYS`, and ``notes`` is
-        excluded. ``environment["platform"]`` is ``platform.platform()``, which
-        carries the OS build number. Without the strip, the digest would move on
-        an operating system update.
-
-        Stripped here rather than added to ``VOLATILE_KEYS`` because that set is
-        shared with every other report this package hashes, and a machine
-        identity is only meaningless to *this* digest.
-
-        Rendered by ``canonical_json``, the same renderer :meth:`write` uses.
-        ``hash_json`` would emit the non-standard ``NaN``/``Infinity`` tokens
-        where the file holds ``null``, so a manifest with a non-finite margin
-        would carry a digest over bytes the file does not contain. The two
-        renderers agree wherever every value is finite.
+        Strips :data:`_MACHINE_KEYS` and :data:`~tfidf_stability.utils.io.VOLATILE_KEYS`
+        and drops ``notes``; renders through ``canonical_json``, as :meth:`write` does.
+        Rationale: docs/engineering_notes.md#manifest-digest
         """
         payload = strip_volatile(self.to_dict(), extra=self._MACHINE_KEYS)
         payload.pop("notes", None)
@@ -157,11 +113,8 @@ class RunManifest:
     def is_reproducible_build(self) -> bool:
         """Whether the native backend, if present, was built for reproducibility.
 
-        ``True`` when no native backend is loaded: the pure-Python reference is
-        reproducible on its own.
-
-        Delegates to ``is_reproducible_environment`` so ``cmd_verify`` answers
-        one block the same way.
+        ``True`` when no native backend is loaded. Delegates to
+        ``is_reproducible_environment`` so ``cmd_verify`` answers one block the same way.
         """
         return is_reproducible_environment(self.environment)
 
@@ -176,11 +129,10 @@ class RunManifest:
         """Refuse to proceed on a build that cannot produce publishable numbers."""
         if self.is_reproducible_build:
             return
-        # Every refusal opens with the same phrase, so a caller matching on it
-        # gets the same answer whichever branch fires. A non-mapping `native`
-        # gets its own clause, since `.get` on it would raise `AttributeError`.
-        # `None` is the reference, and reaches here only under a patched
-        # property, so it takes the flag branch and reports no flags.
+        # Every refusal opens with the same phrase so a caller can match on it.
+        # A non-mapping `native` gets its own clause, since `.get` on it raises
+        # `AttributeError`. `None` reaches here only under a patched property,
+        # so it takes the flag branch and reports no flags.
         native = self.environment.get("native")
         if native is not None and not isinstance(native, Mapping):
             raise UnreproducibleBuildError(

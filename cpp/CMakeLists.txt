@@ -1,22 +1,22 @@
 # =============================================================================
 # cpp/: the native core, its bindings, tests and benchmarks.
-#
-# Every C++ subpackage mirrors a Python one:
-#     cpp/include/tfidf/<sub>/   ->   src/tfidf_stability/<sub>/
-# Not the converse: only the hot paths were ported, so most Python subpackages
-# have no C++ counterpart. `scripts/check_layout.py` asserts the direction that
-# holds, which stops a header appearing here with nothing behind it; it cannot
-# and does not stop the Python tree growing on its own.
 # =============================================================================
+
+# Each C++ subpackage under cpp/include/tfidf/, except core/, mirrors the Python
+# subpackage of the same name under src/tfidf_stability/. Only the hot paths are
+# ported, so most Python subpackages have no C++ counterpart.
+# `scripts/check_layout.py` checks the C++-to-Python direction only.
 include(NumericsFlags)
 include(Warnings)
 include(Sanitizers)
 
 # -----------------------------------------------------------------------------
-# build_config.hpp bakes the compiler, flags and git revision into the
-# binary so `tfidf_stability.build_info()` (and hence every run manifest) can
-# state what produced a given number.
+# Build metadata baked into the binary.
 # -----------------------------------------------------------------------------
+
+# build_config.hpp records the compiler, flags and git revision, so that
+# `tfidf_stability.build_info()` and every run manifest state what produced a
+# given number.
 find_package(Git QUIET)
 set(TFIDF_GIT_SHA "unknown")
 if(GIT_FOUND)
@@ -41,10 +41,11 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/tfidf/core/build_config.hpp.
                @ONLY)
 
 # -----------------------------------------------------------------------------
-# tfidf_core: the mathematics. Header-dominant, template-heavy, and containing
-# NO reference to Python whatsoever, so the core stays independently testable
-# and the binding layer stays swappable.
+# tfidf_core: the mathematics.
 # -----------------------------------------------------------------------------
+
+# Header-dominant and template-heavy, with no reference to Python, so the core
+# is testable on its own and the binding layer is replaceable.
 add_library(tfidf_core INTERFACE)
 add_library(tfidf::core ALIAS tfidf_core)
 
@@ -54,12 +55,10 @@ target_include_directories(tfidf_core INTERFACE
 
 target_compile_features(tfidf_core INTERFACE cxx_std_20)
 
-# Strict floating-point IS a usage requirement: anything that compiles these
-# headers must do so under IEEE-754 semantics, or the results it produces are
-# meaningless. Warnings are not a usage requirement; propagating them through
-# the INTERFACE would force our pedantic style checks onto third-party headers
-# (nanobind, Python.h) that legitimately do not follow them. Each of our own
-# targets opts into tfidf::warnings explicitly instead.
+# Strict floating point is a usage requirement: any target that compiles these
+# headers must use IEEE-754 semantics. Warnings are not: through the INTERFACE
+# they would apply the pedantic style checks to third-party headers (nanobind,
+# Python.h). The tests and benchmarks link tfidf::warnings explicitly.
 target_link_libraries(tfidf_core INTERFACE tfidf::numerics_strict)
 tfidf_apply_sanitizers(tfidf_core INTERFACE)
 
@@ -95,19 +94,10 @@ if(TFIDF_BUILD_NATIVE)
     target_compile_options(_tfidf_native PRIVATE /W3)
   endif()
 
-  # ---------------------------------------------------------------------------
-  # MinGW note (verified empirically on this project's reference machine):
-  #
-  # CPython on Windows is built with MSVC, so a MinGW-produced .pyd must not
-  # depend on any GCC runtime DLL, which is not on the interpreter's DLL
-  # search path and the import fails with a bare, unhelpful
-  # "DLL load failed while importing ...".
-  #
-  # -static-libgcc/-static-libstdc++ alone are NOT sufficient: the posix thread
-  # model also pulls in libwinpthread-1.dll. Plain -static covers all three.
-  # With it the import list reduces to python3xx.dll + KERNEL32 + UCRT, which is
-  # what a self-contained extension should need.
-  # ---------------------------------------------------------------------------
+  # MinGW: GCC runtime DLLs are not on the DLL search path of the MSVC-built
+  # CPython. Plain -static links libgcc, libstdc++ and libwinpthread statically,
+  # so the .pyd imports only python3xx.dll, KERNEL32 and the UCRT.
+  # Rationale: docs/engineering_notes.md#mingw-static-link
   if(MINGW)
     target_link_options(_tfidf_native PRIVATE -static -static-libgcc -static-libstdc++)
   endif()

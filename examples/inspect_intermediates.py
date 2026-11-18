@@ -1,41 +1,9 @@
 #!/usr/bin/env python3
 """Why the raw bit patterns are kept alongside the decimal values.
 
-Section 1.2 asks for intermediate quantities to stay inspectable. This example is
-about the representation they are inspected in: a decimal rendering is a lossy
-summary, and it discards the differences this study is built on.
-
-Three claims, measured on a twelve-document corpus:
-
-1. A single library call makes the pipeline platform-dependent. ``log`` is the
-   only transcendental here and IEEE-754 leaves its rounding to the libm, so the
-   platform value and the exact value disagree on a real vocabulary entry at
-   N = 12, well before any question of scale. ``docs/spec_addenda.md#g13``.
-
-2. The disagreement is invisible in decimal and fatal to a digest. The affected
-   scores print identically at every precision a report would plausibly use and
-   differ in ``float.hex``, so an equality check written against a formatted
-   string reports agreement where ``same_bits`` reports the truth. Hence
-   ``TfidfModel.digest`` hashes ``struct.pack("<d", ...)`` rather than a
-   rendering.
-
-3. Where the bits are measured decides what is measured. Sweeping the reduction
-   policy passed to the scorer, with the model's norms held fixed, finds nothing
-   on this corpus; refitting so the norms move too finds the noise floor
-   immediately. That is the trap named in ``docs/spec_addenda.md#g23``, and the
-   difference between a measured tau_floor and a vacuous one.
-
-The closing sections place the phenomenon in the two research questions.
-Bit-level disturbance is roughly thirteen decades below the smallest real score
-gap, so A1's ranking instability is a story about corpus perturbation rather than
-arithmetic. Exact ties are a bit property, and the block of bit-identical scores
-at the bottom of the ranking is where A2's deterministic tie-break chooses the
-order.
-
-Which vocabulary entry the libm gets wrong depends on the libm, so nothing here
-is hardcoded: the corpus is searched and whatever is found is reported. Run it::
-
-    python examples/inspect_intermediates.py
+Twelve documents show a libm ``log`` error that short decimal output hides, the reduction
+trap of ``docs/spec_addenda.md#g23`` and an exact-tie block. Run with
+``python examples/inspect_intermediates.py``. Rationale: docs/engineering_notes.md#raw-bit-patterns
 """
 
 from __future__ import annotations

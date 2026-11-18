@@ -1,16 +1,8 @@
-"""Cosine similarity (README section 2.3).
+"""Cosine similarity of sparse vectors (README section 2.3).
 
-    cos(u, v) = (u . v) / (||u||_2 ||v||_2),  and 0 if either vector is zero.
-
-TF-IDF coordinates are non-negative, so ``cos(u, v)`` lies in ``[0, 1]``. A
-negative coordinate anywhere upstream would void that silently, so
-:func:`~tfidf_stability.utils.validation.check_non_negative` exists to catch it.
-
-The zero-vector convention drives the study. A document with no in-vocabulary
-tokens is common in short-text corpora (around 17% of documents on a
-MovieLens-shaped corpus) and scores exactly 0 against every query, so they form a
-large block of exact ties at the bottom of every ranking, which is the regime
-section 4.5's tie-break analysis is about.
+cos(u, v) = (u . v) / (||u||_2 ||v||_2), and 0 if either vector is zero. Non-negative
+input (:func:`~tfidf_stability.utils.validation.check_non_negative`) keeps it in ``[0, 1]``.
+Zero vectors tie at 0 (section 4.5). Rationale: docs/engineering_notes.md#zero-vector-convention
 """
 
 from __future__ import annotations
@@ -31,24 +23,11 @@ def cosine(
     u_norm: float | None = None,
     v_norm: float | None = None,
 ) -> float:
-    """Cosine similarity of two sparse non-negative vectors.
+    """Cosine similarity of two sparse non-negative vectors of equal dimension.
 
-    Args:
-        u, v: The vectors. Must share an ambient dimension.
-        policy: Summation policy for the dot product and, if they are not
-            supplied, the norms.
-        u_norm, v_norm: Precomputed norms. Supplying them is purely a
-            performance choice and changes nothing numerically, provided they
-            were computed under the same policy.
-
-    Returns:
-        The similarity, in ``[0, 1]`` for non-negative inputs, or ``0.0`` if
-        either vector is zero.
-
-    Note:
-        The expression is ``dot / (nu * nv)``. The groupings ``(dot / nu) / nv``
-        and ``dot * (1 / (nu * nv))`` are algebraically equal and numerically
-        different, and the native backend reproduces this one bit for bit.
+    Returns ``dot / (nu * nv)`` under ``policy``, in ``[0, 1]`` for non-negative input, or 0.0
+    if either vector is zero. The native backend uses this grouping and matches it bit for bit.
+    Precomputed ``u_norm`` and ``v_norm`` change nothing numerically if computed under ``policy``.
     """
     if u.dim != v.dim:
         raise ValueError(f"dimension mismatch: {u.dim} vs {v.dim}")
@@ -68,12 +47,9 @@ def cosine_against_corpus(
 ) -> list[float]:
     """Score one query against every document: ``s_i = cos(q, w_i)``.
 
-    The query norm is computed once and the document norms are supplied
-    precomputed, so the dot products dominate the cost.
-
-    A zero query vector yields all-zero scores: degenerate but legitimate, since
-    the ranking then depends entirely on the tie-break attributes. Flagged rather
-    than excluded; see ``docs/spec_addenda.md#g3``.
+    The query norm is computed once and ``doc_norms`` are precomputed. A zero query yields
+    all-zero scores, so the ranking depends only on the tie-break attributes; the ranker
+    flags it as ``query_degenerate`` rather than excluding it (``docs/spec_addenda.md#g3``).
     """
     if len(documents) != len(doc_norms):
         raise ValueError(f"{len(documents)} documents but {len(doc_norms)} norms were supplied")

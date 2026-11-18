@@ -1,37 +1,8 @@
-"""A seeded synthetic corpus generator.
+"""A seeded synthetic corpus generator for near-ties, scaling and offline CI.
 
-Why this exists alongside a real dataset
-----------------------------------------
-Real short text gives external validity but no control. This generator gives
-control, and three things MovieLens cannot:
-
-1. **Near-ties at chosen magnitudes.** Section 7.4 asks for a constructed
-   near-tie case; on real data, near-ties in the interesting range are rare
-   enough that finding one is a search problem. Here they are built.
-2. **Scaling.** Sweeping ``N``, ``|V|`` and document length shows how margins
-   scale, which the paper does not currently examine.
-3. **A redistributable corpus.** MovieLens may not be redistributed, so CI
-   cannot use it. This can be committed and runs offline.
-
-Determinism, and a trap
------------------------
-``random.choice``, ``random.sample`` and ``random.shuffle`` are not promised to
-be stable across CPython versions and their implementations have changed, so a
-corpus generated with them would not regenerate identically on another
-interpreter. Only the Mersenne Twister core is stable, so everything here comes
-from :meth:`random.Random.random` and :meth:`random.Random.getrandbits` alone,
-with the selection logic written out.
-
-Transcendentals are avoided for the same reason at one remove: ``pow`` with a
-non-integer exponent goes to the platform libm, which
-``docs/spec_addenda.md#g13`` shows disagrees across systems. The default Zipf
-exponent of 1 is computed in exact integer arithmetic; a non-integer exponent is
-permitted but flagged, since it makes the spec rather than the generated files
-the reproducible artefact.
-
-Hence the design rule: the generator writes files and downstream consumes the
-files. Nothing re-derives a corpus from a spec at experiment time, which keeps
-PRNG portability out of the reproducibility surface.
+Draws use only :meth:`random.Random.random` and :meth:`random.Random.getrandbits`,
+stable across CPython versions; a non-integer Zipf exponent goes through libm
+(``docs/spec_addenda.md#g13``). Rationale: docs/engineering_notes.md#synthetic-prng
 """
 
 from __future__ import annotations
@@ -44,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from tfidf_stability.utils.hashing import hash_text
-from tfidf_stability.utils.io import write_json, write_jsonl
+from tfidf_stability.utils.io import atomic_write_text, write_json, write_jsonl
 
 __all__ = [
     "NearTie",
@@ -158,8 +129,8 @@ def _pick(rng: random.Random, cumulative: list[int]) -> int:
     total = cumulative[-1]
     # A distribution with no mass cannot be sampled, and the rejection loop
     # below cannot say so: `(0).bit_length()` is 0, `getrandbits(0)` returns 0
-    # and `0 < 0` is false, so it spins forever. Reached whenever every weight
-    # rounds to zero.
+    # and `0 < 0` is false, so it spins forever. No current caller reaches it:
+    # every caller floors its weights at 1.
     if total <= 0:
         raise ValueError(
             f"the cumulative distribution carries no mass (total {total}); "
@@ -190,14 +161,10 @@ def _uniform_int(rng: random.Random, low: int, high: int) -> int:
         ValueError: If the range is empty or inverted.
     """
     span = high - low + 1
-    # An empty or inverted range has no integer to return, and the loop below
-    # hangs rather than reporting that: at `span == 0`, `getrandbits(0)` returns
-    # 0 and `0 < 0` is false; at `span == -1`, `(-1).bit_length()` is 1, so the
-    # draw is 0 or 1 and never below -1. Neither case ever exits.
-    #
-    # `generate` checks the one spec field that reaches here (len_min against
-    # len_max, below), and every other call site derives its range from a count
-    # it has just validated. The guard is for the next call site.
+    # An empty or inverted range would hang the loop below: at `span == 0`,
+    # `getrandbits(0)` is 0 and `0 < 0` is false; at `span == -1` the draw is 0
+    # or 1, never below -1. `generate` validates len_min against len_max and the
+    # other call sites derive their range from a validated count.
     if span <= 0:
         raise ValueError(
             f"the range [{low}, {high}] contains no integer, so nothing can be "
@@ -216,17 +183,9 @@ def _uniform_int(rng: random.Random, low: int, high: int) -> int:
 def generate(spec: SyntheticSpec | None = None) -> SyntheticCorpus:
     """Generate a corpus from a spec.
 
-    What each near-tie mechanism buys:
-
-    * **exact duplicates** give ``m_k = 0``: membership decided by the tie-break,
-      and the ``tau = 0`` baseline;
-    * **twins** give graded separation. A copy plus one extra token, whose
-      document frequency sets how far apart the two scores land; sweeping that
-      frequency produces the range of near-tie magnitudes section 7.3's
-      transition plot needs.
-
-    Both are recorded on the result, so an experiment can locate the constructed
-    cases without searching the corpus.
+    Exact duplicates give ``m_k = 0`` and the ``tau = 0`` baseline; twins are a copy plus
+    one token whose df sets the gap, grading the magnitudes section 7.3's transition plot uses.
+    Both are recorded on the result so an experiment can locate them directly.
     """
     spec = spec or SyntheticSpec()
     # Checked before the generator draws anything. `_uniform_int` rejection-samples
@@ -365,10 +324,9 @@ def write_corpus(corpus: SyntheticCorpus, directory: Path | str) -> dict[str, st
         p.name: hash_text(p.read_text(encoding="utf-8"))
         for p in (corpus_path, interactions_path, spec_path)
     }
-    (out / "MANIFEST.sha256").write_text(
+    atomic_write_text(
+        out / "MANIFEST.sha256",
         "".join(f"{d}  {n}\n" for n, d in sorted(digests.items())),
-        encoding="utf-8",
-        newline="\n",
     )
     return digests
 
@@ -393,41 +351,11 @@ class NearTie:
 def find_near_ties(
     sorted_scores: Sequence[float], *, limit: int = 10, strictly_positive: bool = True
 ) -> list[NearTie]:
-    """Find the closest adjacent pairs in a scored ranking.
+    """Return the closest adjacent pairs of a ranking, tightest first (section 7.4).
 
-    Section 7.4 asks for two documents "identified such that ``|s_A - s_B| <=
-    tau``". Identified, because a fine near-tie cannot be manufactured: section
-    2.2 normalises ``tf = count / L``, so adding or removing one token moves
-    every term frequency from ``c/L`` to ``c/(L+1)``, a relative perturbation of
-    ``1/(L+1)``. A separation of ``1e-9`` would need a document of roughly a
-    billion tokens. The twin mechanism in :func:`generate` reaches the ``1e-3``
-    to ``1e-1`` range and no finer, which follows from the specification rather
-    than from the generator.
-
-    What is observed instead, measured on a 3000-document synthetic corpus:
-
-    ==========================  =======
-    adjacent gap                 share
-    ==========================  =======
-    exactly 0                    17.2%
-    in (0, 1e-9)                  0.0%
-    in [1e-9, 1e-6)               1.7%
-    in [1e-6, 1e-3)              79.5%
-    ==========================  =======
-
-    So the near-tie regime is empirically the exact-tie regime: at
-    ``tau = 1e-9`` essentially every within-tau pair has a gap of zero. See
-    ``docs/spec_addenda.md#g22``.
-
-    Args:
-        sorted_scores: Scores in non-increasing order.
-        limit: How many pairs to return.
-        strictly_positive: Skip exact ties. ``False`` finds the exact-tie block,
-            which is the case that dominates.
-
-    Returns:
-        The closest pairs, tightest first. ``rank`` is 1-indexed, so the pair is
-        ``(r_rank, r_{rank+1})`` and ``gap`` is ``m_rank``.
+    ``sorted_scores`` is non-increasing; ``limit`` caps the count; ``strictly_positive`` skips
+    exact ties. ``rank`` is 1-indexed; ``gap`` is ``m_rank``. :func:`generate` twins reach ``1e-3``
+    at finest (``docs/spec_addenda.md#g22``). Rationale: docs/engineering_notes.md#near-tie-floor
     """
     if limit < 0:
         # `pairs[:-1]` is a legal slice: a negative limit drops the widest gap

@@ -1,14 +1,8 @@
 """Tie groups (README section 2.3.3, ``spec_addenda.md#g1``).
 
-G1's central claim: section 2.3.3's tie group is a ball rather than an
-equivalence class, and conflating the two has consequences. The adversarial
-ladder ``s_i = i * 2^-20`` makes the claim executable: every value and every
-difference is representable in binary64, so the tests below carry no
-floating-point content and demonstrate structure rather than rounding.
-
-On that ladder the ball relation is non-transitive, a single chain swallows all
-six documents, and complete linkage sees only adjacent pairs. The three objects
-disagree maximally, which is what the ``rho`` diagnostic exists to flag.
+A tie group is a ball, not an equivalence class. On the exact binary64 ladder
+``s_i = i * 2^-20`` one chain covers all six documents while complete linkage
+sees only adjacent pairs, the disagreement the ``rho`` diagnostic flags.
 """
 
 from __future__ import annotations
@@ -58,9 +52,11 @@ def brute_force_ball(scores, j, tau):  # type: ignore[no-untyped-def]
 # The adversarial ladder: G1's witness
 # ---------------------------------------------------------------------------
 def test_the_ladder_shows_the_ball_relation_is_not_transitive() -> None:
-    """Document 2 is within tau of 1 and 1 is within tau of 0, while 2 is not
-    within tau of 0. The relation is reflexive and symmetric and non-transitive,
-    so tie groups do not partition the corpus."""
+    """The ladder's ball relation is reflexive, symmetric and not transitive.
+
+    Document 2 is within tau of 1 and 1 is within tau of 0, but 2 is not within
+    tau of 0, so tie groups do not partition the corpus.
+    """
     s = ladder(6)
     assert ball_members(s, 1, TAU) == {0, 1, 2}
     assert ball_members(s, 0, TAU) == {0, 1}
@@ -70,7 +66,7 @@ def test_the_ladder_shows_the_ball_relation_is_not_transitive() -> None:
 
 
 def test_the_extremes_of_one_ball_can_differ_by_two_tau() -> None:
-    """Which is why section 2.3.3's "indistinguishable" is too strong as written."""
+    """One ball spans 2 tau, so section 2.3.3's "indistinguishable" overstates."""
     s = ladder(6)
     members = sorted(ball_members(s, 1, TAU))
     spread = s[members[0]] - s[members[-1]]
@@ -160,16 +156,9 @@ def test_binary_search_agrees_with_a_linear_scan(
 ) -> None:
     """Certifies the monotone-difference search against the literal predicate.
 
-    Catches the tempting wrong implementation: binary-searching for
-    ``S[j] +/- tau`` evaluates ``S[i] <= fl(S[j] + tau)``, a different test from
-    G9's ``|s_i - s_j| <= tau``, and the two disagree at the boundary, the only
-    place tie groups are interesting.
-
-    The rank is drawn after the list, from its actual length, rather than drawn
-    independently and filtered. Filtering rejects most examples (a rank up to 39
-    against a list as short as 1) and trips Hypothesis's ``filter_too_much``
-    health check intermittently, since the example database caches successful
-    draws between runs.
+    Searching for ``S[j] +/- tau`` tests ``S[i] <= fl(S[j] + tau)``, not G9's
+    ``|s_i - s_j| <= tau``; the two differ at the boundary. The rank is drawn
+    from the list's length, not filtered, which trips ``filter_too_much``.
     """
     s = sorted_scores_desc(scores)
     j = data.draw(st.integers(min_value=0, max_value=len(s) - 1), label="rank")
@@ -177,11 +166,10 @@ def test_binary_search_agrees_with_a_linear_scan(
 
 
 def test_the_naive_bound_shortcut_would_actually_differ() -> None:
-    """Evidence that the caution above is more than theoretical.
+    """A score exists for which ``s - c <= tau`` and ``s <= c + tau`` disagree.
 
-    A value exists for which ``s - c <= tau`` and ``s <= c + tau`` disagree
-    because ``c + tau`` rounds; the rounded bound would place that document in
-    the wrong group.
+    ``c + tau`` rounds, so the rounded bound places that document in the wrong
+    group.
     """
     c = 0.1
     tau = 0.2
@@ -295,12 +283,10 @@ def test_out_of_range_rank_is_rejected() -> None:
 # Degenerate configurations (G3)
 # ---------------------------------------------------------------------------
 def test_tau_covering_the_score_range_warns_and_does_not_raise() -> None:
-    """A legitimate point at the top of a sweep, so a warning rather than an
-    error.
+    """A tau covering the score range is a sweep point, so it warns, not raises.
 
-    ">=" rather than ">": at tau equal to the range every ball is already the
-    whole corpus, so the degeneracy has begun. An erratum to G3, which says
-    "tau > score range".
+    The test is ">=", not ">": at tau equal to the range every ball is the whole
+    corpus. This corrects G3, which says "tau > score range".
     """
     s = (1.0, 0.6, 0.2)
     span = s[0] - s[-1]
@@ -325,8 +311,10 @@ def test_all_equal_scores_gives_rho_one_not_an_inflation_warning() -> None:
 
 
 def test_zero_range_with_zero_tau_is_the_legitimate_baseline() -> None:
-    """The one exclusion from the ">= range" rule: exact ties at tau = 0 are the
-    intended baseline rather than a degenerate configuration."""
+    """Exact ties at tau = 0 are the intended baseline and raise no warning.
+
+    They are the one exclusion from the ">= range" rule.
+    """
     import warnings
 
     with warnings.catch_warnings():
@@ -373,9 +361,11 @@ def test_the_zero_score_block_is_one_exact_tie_group(mini_model) -> None:  # typ
 # Reporting
 # ---------------------------------------------------------------------------
 def test_report_carries_both_the_ball_and_the_partition_statistics() -> None:
-    """G1 requires them side by side: the ball is what the paper defines, the
-    chain is the object with a well-defined "group containing document i", and
-    rho says how far apart the two have drifted."""
+    """The report carries the ball and the partition statistics side by side.
+
+    G1 requires both: the ball is what the paper defines, the chain has a
+    well-defined "group containing document i", and rho measures their gap.
+    """
     with pytest.warns(ChainInflationWarning):
         report = TieGroupIndex.build(ladder(6), TAU).report()
     assert set(report) == {
@@ -431,13 +421,10 @@ def test_chain_of_returns_the_unique_containing_chain() -> None:
 
 @pytest.mark.parametrize("bad", [-1e-9, float("nan"), float("-inf")])
 def test_an_inadmissible_tau_is_rejected_by_every_tie_group_object(bad: float) -> None:
-    """NaN slipped through a guard whose own message said non-negative.
+    """A negative, NaN or minus-infinity tau is rejected by all four functions.
 
-    The check was ``if tau < 0.0`` and every comparison with NaN is false. With
-    ``tau = NaN`` both ``gap > tau`` and ``gap <= tau`` are false, so
-    ``tie_chains`` returned a single group covering the corpus, ``tie_cliques``
-    returned all singletons and ``rho`` reported N: three contradictory answers
-    to one question, with no error and ``rho`` at its maximum.
+    Every comparison with NaN is false, so a ``tau < 0.0`` guard admits NaN, and
+    a NaN tau makes chains, cliques and ``rho`` give contradictory answers.
     """
     scores = (1.0, 0.9, 0.5, 0.5, 0.1)
     for call in (tie_chains, tie_cliques, chain_inflation_ratio):
@@ -448,9 +435,10 @@ def test_an_inadmissible_tau_is_rejected_by_every_tie_group_object(bad: float) -
 
 
 def test_an_empty_corpus_builds_an_index_without_warning_about_its_score_range() -> None:
-    """A corpus with no documents has no span to compare tau against, so the
-    degeneracy warning has nothing to say. Warning anyway would put a caveat on
-    every empty sweep point and train a reader to ignore the ones that matter.
+    """An empty corpus builds an index without a score-range warning.
+
+    With no documents there is no span to compare tau against. A warning there
+    would mark every empty sweep point and dilute the warnings that matter.
     """
     with warnings.catch_warnings():
         warnings.simplefilter("error")
@@ -462,10 +450,10 @@ def test_an_empty_corpus_builds_an_index_without_warning_about_its_score_range()
 
 
 def test_rho_is_undefined_rather_than_one_on_an_empty_corpus() -> None:
-    """Both the largest chain and the largest clique are zero, and 0/0 is not
-    1.0: an empty corpus is no evidence about chain inflation, and reporting the
-    value that means "no inflation" would put a data point on section 7.3's plot
-    that no corpus produced.
+    """On an empty corpus rho is NaN, since 0/0 is not 1.0.
+
+    An empty corpus is no evidence about chain inflation; 1.0 would add a point
+    to section 7.3's plot that no corpus produced.
     """
     assert math.isnan(TieGroupIndex.build((), tau=1.0).rho)
     assert math.isnan(chain_inflation_ratio((), 1.0))
@@ -476,28 +464,30 @@ def test_rho_is_undefined_rather_than_one_on_an_empty_corpus() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("j", [-1, -7, 2, 99])
 def test_a_rank_outside_the_corpus_names_the_range_it_was_checked_against(j: int) -> None:
-    """The message carries the computed upper bound, not just the index. On a
-    truncated ranking the reader's question is "how many were there", and the
-    bound answers it without a second call.
+    """The rank error names the computed upper bound as well as the index.
 
-    Negative indices matter especially: they are legal Python and would silently
-    address the *worst*-ranked documents rather than raising.
+    On a truncated ranking the bound says how many ranks exist. Negative indices
+    are legal Python and would otherwise address the worst-ranked documents.
     """
     with pytest.raises(IndexError, match=f"rank index {j} out of range 0..1"):
         tie_ball_interval((1.0, 0.5), j, 0.0)
 
 
 def test_an_empty_corpus_reports_an_empty_range_rather_than_a_negative_one() -> None:
-    """`0..-1` is how "there are no valid ranks" renders. Ugly and correct: a
-    message saying `0..0` would claim rank 0 exists."""
+    """An empty corpus renders its range as `0..-1`, meaning no valid ranks.
+
+    A message saying `0..0` would claim that rank 0 exists.
+    """
     with pytest.raises(IndexError, match=r"rank index 0 out of range 0\.\.-1"):
         tie_ball_interval((), 0, 0.0)
 
 
 def test_the_rank_is_checked_before_the_tolerance() -> None:
-    """Both guards fire for an empty corpus with a NaN tau. Which error the
-    caller sees is part of the interface, and the rank is the one they can act
-    on: a bad tau is a sweep parameter, a bad rank is a bug in the caller."""
+    """The rank is checked before the tolerance.
+
+    For an empty corpus with a NaN tau both guards apply, and the rank error is
+    raised: a bad rank is a bug in the caller, a bad tau a sweep parameter.
+    """
     with pytest.raises(IndexError, match="rank index"):
         tie_ball_interval((), 0, math.nan)
 
@@ -512,14 +502,11 @@ def test_the_rank_is_checked_before_the_tolerance() -> None:
     "tau", [-1.0, -5e-324, -math.inf, math.nan, -sys.float_info.max, float("-nan")]
 )
 def test_every_inadmissible_tolerance_is_refused_with_its_value(tau: float) -> None:
-    """The guard is spelled `not (tau >= 0.0)` rather than `tau < 0.0` precisely
-    so NaN is caught: every comparison with NaN is false, so the natural spelling
-    lets it through a guard whose own message says non-negative.
+    """Every inadmissible tolerance, NaN included, raises ``ValueError``.
 
-    A NaN tau is the worst case because it does not fail loudly downstream: it
-    makes `gap > tau` and `gap <= tau` both false, so chains return one group
-    covering the corpus, cliques return all singletons, and rho reports N --
-    three contradictory answers to the same question, with nothing raised.
+    The guard is `not (tau >= 0.0)`, which catches NaN. A NaN tau makes
+    `gap > tau` and `gap <= tau` both false: chains would be one group, cliques
+    all singletons and rho N, three contradictory answers with nothing raised.
     """
     with pytest.raises(ValueError, match="tau must be non-negative"):
         tie_ball_interval((1.0, 0.5), 0, tau)
@@ -527,17 +514,22 @@ def test_every_inadmissible_tolerance_is_refused_with_its_value(tau: float) -> N
 
 @pytest.mark.parametrize("tau", [0.0, -0.0, 5e-324, 1.0, math.inf])
 def test_every_admissible_tolerance_is_accepted_including_both_zeros(tau: float) -> None:
-    """`-0.0 >= 0.0` is true, so a negative zero is a legal tolerance and
-    behaves as zero. Worth stating: it is the one negative-looking value the
-    guard lets through, and the sweep that produced it may have divided."""
+    """Every non-negative tolerance is accepted, including both zeros.
+
+    `-0.0 >= 0.0` is true, so a negative zero is legal and behaves as zero. It
+    is the one negative-looking value the guard admits; a dividing sweep can
+    produce it.
+    """
     lo, hi = tie_ball_interval((1.0, 1.0, 0.5), 0, tau)
     assert lo == 0
     assert hi >= 1
 
 
 def test_a_negative_zero_tolerance_recovers_exact_ties_like_a_positive_zero() -> None:
-    """Not merely accepted -- identical. If the two zeros gave different groups,
-    a tau derived by halving could silently change a tie-group statistic."""
+    """A negative-zero tolerance gives the same groups as a positive zero.
+
+    Otherwise a tau derived by halving could change a tie-group statistic.
+    """
     scores = (1.0, 1.0, 0.5)
     assert tie_ball_interval(scores, 0, -0.0) == tie_ball_interval(scores, 0, 0.0)
     assert tie_chains(scores, -0.0) == tie_chains(scores, 0.0)
@@ -545,10 +537,11 @@ def test_a_negative_zero_tolerance_recovers_exact_ties_like_a_positive_zero() ->
 
 
 def test_the_group_builders_return_nothing_for_an_empty_corpus_before_checking_tau() -> None:
-    """`tie_chains` and `tie_cliques` short-circuit on an empty array, so they
-    accept a tau that `tie_ball_interval` refuses. Pinned as the guard-order
-    difference it is: a sweep reaching tau = NaN on an empty corpus gets three
-    different behaviours from the three entry points.
+    """Chains and cliques of an empty corpus are empty before tau is checked.
+
+    `tie_chains` and `tie_cliques` short-circuit and accept a NaN tau, while
+    `tie_ball_interval` raises its rank error. The guard-order difference is
+    pinned here.
     """
     assert tie_chains((), math.nan) == ()
     assert tie_cliques((), math.nan) == ()
@@ -561,13 +554,11 @@ def test_the_group_builders_return_nothing_for_an_empty_corpus_before_checking_t
 # Boundary: G9's predicate, at the one place it is interesting
 # ---------------------------------------------------------------------------
 def test_the_search_agrees_with_the_predicate_where_the_rounded_bound_would_not() -> None:
-    """G9 pins the test as ``|s_i - s_j| <= tau``. Binary-searching for
-    ``S[j] + tau`` instead evaluates ``S[i] <= fl(S[j] + tau)``, which is a
-    different predicate whenever that addition rounds.
+    """The search matches the predicate where the rounded bound does not.
 
-    The sweep chooses triples where it does round, so the two spellings actually
-    disagree, and checks the interval against the predicate written out
-    literally. A count outside the loop keeps the sweep from passing vacuously.
+    G9's test is ``|s_i - s_j| <= tau``; ``S[i] <= fl(S[j] + tau)`` differs when
+    the addition rounds. The sweep includes cases where it rounds, and its counts
+    keep it from passing vacuously.
     """
     checked = 0
     rounded_cases = 0
@@ -588,8 +579,10 @@ def test_the_search_agrees_with_the_predicate_where_the_rounded_bound_would_not(
 
 
 def test_the_ball_at_exactly_tau_includes_the_boundary_document() -> None:
-    """The comparison is inclusive (G9). One ulp further out it is not, which is
-    the whole content of the choice."""
+    """The ball at exactly tau includes the boundary document (G9).
+
+    One ulp further out it does not.
+    """
     scores = (1.0, 1.0 - 2.0**-30, 1.0 - 2.0**-29)
     assert ball_members(scores, 0, 2.0**-30) == {0, 1}
     assert ball_members(scores, 0, math.nextafter(2.0**-30, 0.0)) == {0}
@@ -604,26 +597,31 @@ def test_an_empty_corpus_has_no_inflation_ratio() -> None:
 
 
 def test_all_equal_scores_give_the_ratio_its_minimum_rather_than_a_warning() -> None:
-    """The errata correct G3 here: when every score is equal, the chain and the
-    clique are both the whole corpus, so rho is 1 -- its *minimum*. It is the
-    range warning that fires in that situation, not the inflation one."""
+    """All-equal scores give rho its minimum of 1, not an inflation warning.
+
+    The errata correct G3 here: chain and clique are both the whole corpus. At
+    a positive tau the range warning fires instead.
+    """
     assert chain_inflation_ratio((0.5,) * 4, 0.0) == 1.0
 
 
 def test_the_ladder_inflates_the_ratio_above_one() -> None:
-    """G1's witness: single-linkage chaining walks the whole ladder while no two
-    ends are within tau of each other."""
+    """The ladder gives rho above one, which is G1's witness.
+
+    Single-linkage chaining walks the whole ladder, while its two ends are not
+    within tau of each other.
+    """
     assert chain_inflation_ratio(ladder(6), TAU) == 3.0
 
 
 # ---------------------------------------------------------------------------
 # The diagnostics: a warn / do-not-warn matrix
 # ---------------------------------------------------------------------------
-# `filterwarnings = ["error"]` means an unexpected warning fails the suite, so
-# the "does not warn" rows are asserted by simply calling `build` -- but that
-# reads as an accident. `catch_warnings(record=True)` states it, and lets the
-# rows that fire *both* diagnostics be checked as a set rather than one at a
-# time, which `pytest.warns` cannot do.
+
+
+# `filterwarnings = ["error"]` already fails on an unexpected warning, but
+# `catch_warnings(record=True)` states the "does not warn" rows explicitly and
+# checks rows that fire both diagnostics as a set, which `pytest.warns` cannot.
 def _diagnostics(scores: tuple[float, ...], tau: float, **kwargs: float) -> list[str]:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -635,47 +633,61 @@ _SPANNING = (1.0, 0.5, 0.0)
 
 
 def test_a_tolerance_below_the_score_range_is_not_degenerate() -> None:
-    """One ulp below the span, nothing fires -- and the groups are still
-    meaningful, which is what makes the warning above it a boundary rather than
-    a blanket."""
+    """One ulp below the span, no diagnostic fires.
+
+    The groups are still meaningful there, so the range warning starts exactly
+    at the span.
+    """
     assert _diagnostics(_SPANNING, math.nextafter(1.0, 0.0)) == []
 
 
 @pytest.mark.parametrize("tau", [1.0, math.nextafter(1.0, math.inf), 2.0, math.inf])
 def test_a_tolerance_at_or_above_the_score_range_is_flagged(tau: float) -> None:
-    """ ">=" rather than ">": at tau equal to the range every ball is already the
-    whole corpus, so the degeneracy has begun rather than being about to."""
+    """A tolerance at or above the score range emits the range warning.
+
+    The test is ">=", not ">": at tau equal to the range every ball is already
+    the whole corpus.
+    """
     assert "TauExceedsScoreRangeWarning" in _diagnostics(_SPANNING, tau)
 
 
 def test_a_zero_range_at_zero_tolerance_is_the_exempted_baseline() -> None:
-    """An all-tied corpus at tau = 0 is the exact-tie baseline the whole
-    tie-break study is normalised against. Warning there would fire on the one
-    configuration that is least degenerate, and under `filterwarnings = error`
-    it would abort every sweep at its first point."""
+    """An all-tied corpus at tau = 0 is exempt from the range warning.
+
+    It is the exact-tie baseline the tie-break study is normalised against.
+    Under `filterwarnings = error` a warning there would abort every sweep at
+    its first point.
+    """
     assert _diagnostics((0.5, 0.5, 0.5), 0.0) == []
 
 
 def test_a_zero_range_at_any_positive_tolerance_reports_an_infinite_ratio() -> None:
-    """`tau / span` is `x / 0`. The errata require `inf` rather than the NaN a
-    naive `0.0 / 0.0` would give, because the message is read by a human
-    deciding whether to trust the point."""
+    """A zero range at positive tau reports `tau/span=inf`, not NaN.
+
+    `tau / span` is `x / 0`. The errata require `inf` because a human reads the
+    message to decide whether to trust the point.
+    """
     with pytest.warns(TauExceedsScoreRangeWarning, match=r"tau/span=inf") as caught:
         TieGroupIndex.build((0.5, 0.5), 5e-324)
     assert "span=0.0" in str(caught[0].message)
 
 
 def test_an_empty_corpus_produces_no_diagnostic_at_all() -> None:
-    """There is no span to compare against and no ratio to inflate. Both
-    diagnostics are guarded on the corpus being non-empty."""
+    """An empty corpus produces neither diagnostic.
+
+    There is no span to compare against and no ratio to inflate: the range
+    warning is guarded on a non-empty corpus, the inflation one on a finite rho.
+    """
     assert _diagnostics((), 1.0) == []
     assert _diagnostics((), 0.0) == []
 
 
 def test_both_diagnostics_can_fire_for_one_index() -> None:
-    """They are independent conditions and neither suppresses the other. At tau
-    equal to the span the corpus is one chain and one clique, so rho is exactly
-    1 -- which a threshold below 1 still exceeds."""
+    """Both diagnostics can fire for one index.
+
+    They are independent. At tau equal to the span the corpus is one chain and
+    one clique, so rho is exactly 1, which a threshold below 1 still exceeds.
+    """
     assert _diagnostics(_SPANNING, 1.0, rho_warn_threshold=0.0) == [
         "ChainInflationWarning",
         "TauExceedsScoreRangeWarning",
@@ -683,10 +695,10 @@ def test_both_diagnostics_can_fire_for_one_index() -> None:
 
 
 def test_a_nan_inflation_threshold_silences_the_diagnostic_rather_than_raising() -> None:
-    """`rho > nan` is false for every rho, so a threshold that arrived as NaN
-    disables the check silently. Pinned: it is the one threshold value that
-    turns a diagnostic off without saying so, and a sweep computing its
-    threshold could produce one.
+    """A NaN inflation threshold disables the diagnostic without raising.
+
+    `rho > nan` is false for every rho, so NaN turns the diagnostic off without
+    saying so, and a sweep computing its threshold can produce it.
     """
     assert "ChainInflationWarning" not in _diagnostics(ladder(6), TAU, rho_warn_threshold=math.nan)
     assert "ChainInflationWarning" in _diagnostics(ladder(6), TAU, rho_warn_threshold=2.0)
@@ -694,8 +706,10 @@ def test_a_nan_inflation_threshold_silences_the_diagnostic_rather_than_raising()
 
 @pytest.mark.parametrize(("threshold", "fires"), [(0.0, True), (2.0, True), (3.0, False)])
 def test_the_inflation_threshold_is_exclusive(threshold: float, fires: bool) -> None:
-    """`rho > threshold`, so a ratio exactly at the threshold does not fire. The
-    ladder's rho is exactly 3, which makes it the witness for both sides."""
+    """The inflation test is `rho > threshold`, so equality does not fire.
+
+    The ladder's rho is exactly 3, which makes it the witness for both sides.
+    """
     assert chain_inflation_ratio(ladder(6), TAU) == 3.0
     assert (
         "ChainInflationWarning" in _diagnostics(ladder(6), TAU, rho_warn_threshold=threshold)
@@ -703,9 +717,10 @@ def test_the_inflation_threshold_is_exclusive(threshold: float, fires: bool) -> 
 
 
 def test_the_diagnostic_is_attributed_to_the_caller_not_to_the_module() -> None:
-    """`stacklevel=2`. Without it every warning points at `tie_groups.py`, and a
-    sweep emitting thousands of them gives the reader one location that is never
-    the one they need. Asserted by filename, since that is what a reader sees.
+    """The range warning is attributed to the caller, not to the module.
+
+    `stacklevel=2` points each warning at the calling line rather than at
+    `tie_groups.py`. Asserted by filename, since that is what a reader sees.
     """
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -720,16 +735,22 @@ def test_the_diagnostic_is_attributed_to_the_caller_not_to_the_module() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("j", [-1, 3, 99])
 def test_asking_which_chain_holds_a_rank_outside_the_corpus_is_refused(j: int) -> None:
-    """The loop falls through rather than returning the last chain, which a
-    negative index would otherwise do silently."""
+    """A rank outside the corpus is refused by `chain_of`.
+
+    The loop falls through rather than returning the last chain, which a
+    negative index would otherwise select silently.
+    """
     index = TieGroupIndex.build((1.0, 0.5, 0.0), 0.0)
     with pytest.raises(IndexError, match=f"rank {j} is outside the corpus"):
         index.chain_of(j)
 
 
 def test_every_rank_belongs_to_exactly_one_chain() -> None:
-    """Chains partition the corpus, so the lookup is total on valid ranks and
-    the intervals it returns are disjoint."""
+    """Every valid rank belongs to exactly one chain.
+
+    Chains partition the corpus, so the lookup is total on valid ranks and the
+    intervals it returns are disjoint.
+    """
     # The threshold is lifted clear of the ladder's rho of 3 so the inflation
     # diagnostic does not fire: `filterwarnings = ["error"]` would turn it into
     # a failure of a test that is not about the diagnostic at all.
@@ -741,14 +762,11 @@ def test_every_rank_belongs_to_exactly_one_chain() -> None:
 
 
 def test_the_inflation_diagnostic_is_also_attributed_to_the_caller() -> None:
-    """The two warnings carry their own `stacklevel`, and testing one says
-    nothing about the other.
+    """The inflation warning is also attributed to the caller.
 
-    The range test above builds a corpus whose tau exceeds its span, which fires
-    only the range warning -- so the inflation warning's attribution went
-    unchecked. The category is selected explicitly here rather than taken as
-    `caught[0]`, so this stays about the inflation warning even if the other one
-    starts firing too.
+    Each warning sets its own `stacklevel`, and the range test above fires only
+    the range warning. The inflation category is selected rather than taken as
+    `caught[0]`, so a range warning cannot stand in for it.
     """
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -760,13 +778,11 @@ def test_the_inflation_diagnostic_is_also_attributed_to_the_caller() -> None:
 
 
 def test_the_range_diagnostic_reports_how_far_past_the_range_the_tolerance_is() -> None:
-    """`tau / span` is the number that tells a reader whether the point is a
-    hair over the edge or far outside it, which decides whether the results are
-    worth reading at all.
+    """The range warning reports how far past the range the tolerance is.
 
-    The span is deliberately not 1.0: at a span of one the ratio equals tau and
-    an assertion on it would pass for any arithmetic that happens to be the
-    identity there.
+    `tau / span` says whether the point is just over the edge or far outside it.
+    The span is 0.5: at a span of 1.0 the ratio equals tau, leaving the
+    division untested.
     """
     with pytest.warns(TauExceedsScoreRangeWarning, match=r"tau/span=4\.0") as caught:
         TieGroupIndex.build((1.0, 0.5), 2.0)
@@ -777,13 +793,11 @@ def test_the_range_diagnostic_reports_how_far_past_the_range_the_tolerance_is() 
 
 
 def test_an_empty_corpus_has_no_largest_group_rather_than_a_group_of_one() -> None:
-    """`max(..., default=0)`. A default of 1 would report a single-document
-    chain in a corpus with no documents, and `rho` would then be 1.0 -- a
-    perfectly-behaved ratio computed from nothing.
+    """An empty corpus has a largest group of 0, not 1.
 
-    All three statistics take the default, and each needs its own assertion:
-    `largest_ball` folds over centres rather than over a stored list, so its
-    `default=` is separate from the two above it.
+    With `max(..., default=0)` no group of one is invented from no documents.
+    Each statistic is asserted separately: `largest_ball` folds over centres
+    and has its own `default=`.
     """
     empty = TieGroupIndex.build((), 1.0)
     assert empty.largest_chain == 0
@@ -796,16 +810,12 @@ def test_an_empty_corpus_has_no_largest_group_rather_than_a_group_of_one() -> No
 # ---------------------------------------------------------------------------
 # Chains and cliques are populated together
 # ---------------------------------------------------------------------------
-# `chain_inflation_ratio` and `TieGroupIndex.rho` both guard with
-# `if not chains or not cliques`, and the two operands never disagree: every
-# score belongs to at least one chain and at least one clique, so both are empty
-# exactly when the score vector is.
-#
-# That invariant is why swapping the `or` for an `and` there cannot be observed,
-# which is recorded in `configs/equivalent_mutants.txt`. The claim rests on this
-# property rather than on the guard's wording, so the property is asserted here:
-# if it ever stopped holding, the recorded argument would become wrong while the
-# guard still looked reasonable.
+
+
+# Every score lies in a chain and in a clique, so both are empty exactly when
+# the input is. This makes `or` versus `and` in the rho guards an equivalent
+# mutant (`configs/equivalent_mutants.txt`); the invariant is asserted here.
+# Rationale: docs/engineering_notes.md#chains-and-cliques-empty-together
 @pytest.mark.parametrize(
     "scores",
     [
@@ -829,16 +839,11 @@ def test_chains_and_cliques_are_empty_together(scores: list[float], tau: float) 
 
 
 def test_every_score_lands_in_a_chain_and_in_a_clique() -> None:
-    """The reason they are empty together: both are covers of the same input, so
-    neither can be empty while the other is not.
+    """Every score lands in a chain and in a clique.
 
-    Enumerated rather than generated. The interesting inputs here are the gap
-    patterns -- all tied, all separated, and every mixture -- and there are few
-    enough to write down, so a sweep states them by name and runs in
-    milliseconds. An earlier `@given` version of this covered the same ground
-    non-deterministically and hung a CI job for 47 minutes on one interpreter
-    while passing on three others; nothing about the property needed random
-    input to express.
+    Both cover the same input, so neither is empty while the other is not. The
+    gap patterns (all tied, all separated, every mixture) are few, so they are
+    enumerated: the sweep is deterministic and runs in milliseconds.
     """
     gaps = (0.0, 0.5, 1.0, 2.0)
     taus = (0.0, 1e-320, 0.5, 1.0, math.inf)
@@ -865,15 +870,11 @@ def test_every_score_lands_in_a_chain_and_in_a_clique() -> None:
 
 
 def test_the_inflation_ratio_falls_below_one_on_unsorted_scores() -> None:
-    """`chain_inflation_ratio` documented itself as "always >= 1" without
-    qualification, and the bound holds only for the non-increasing order the
-    parameter name asks for.
+    """`chain_inflation_ratio` can fall below one on unsorted scores.
 
-    The order is a silent precondition: nothing checks it, and on unsorted input
-    chains and cliques are computed over intervals that no longer correspond, so
-    rho drops below its own floor. Pinned rather than guarded -- the check is
-    O(n) on a function called once per tau per query, and every in-package
-    caller takes its input from `sorted_scores_desc`.
+    The `>= 1` bound holds only for non-increasing input, an unchecked
+    precondition. It is pinned rather than guarded: the check costs O(n) per tau
+    per query, and every in-package caller passes `sorted_scores_desc` output.
     """
     unsorted = [0.07, 0.01, 0.84, 0.26, 0.23, 1.0]
     assert chain_inflation_ratio(unsorted, 0.2) == 0.5

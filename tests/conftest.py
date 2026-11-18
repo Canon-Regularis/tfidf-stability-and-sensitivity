@@ -1,9 +1,8 @@
 """Shared fixtures and test configuration.
 
-Hypothesis profiles, selected by ``HYPOTHESIS_PROFILE`` and defaulting to
-``dev``: ``dev`` 50 examples, ``ci`` 1,000 (the per-PR gate), ``nightly``
-100,000 (adversarial search for violations of the README section 4
-inequalities).
+Hypothesis profiles, selected by ``HYPOTHESIS_PROFILE`` (default ``dev``):
+``dev`` 50 examples, ``ci`` 1,000 (the per-PR gate), ``nightly`` 100,000
+(adversarial search for violations of the README section 4 inequalities).
 """
 
 from __future__ import annotations
@@ -16,20 +15,10 @@ from pathlib import Path
 
 import pytest
 
-# src/ on sys.path, but only when the package cannot be imported without it: the
-# suite runs with no install, and before the native backend has ever been built.
-#
-# The guard matters more than the insertion. Unconditionally prepending `src/`
-# means the suite always tests the source tree, even when it was pointed at an
-# installed distribution on purpose. `release.yml`'s CIBW_TEST_COMMAND runs
-# `pytest {project}/tests` against a freshly built wheel for exactly that
-# purpose, and got the source tree instead -- so nothing in the wheel was ever
-# under test, and a wheel missing its data files would pass.
-#
-# Checked by import rather than by looking for a marker file, because that is
-# the question being asked: can this interpreter import the package as it
-# stands? An editable install resolves back to `src/` anyway, so a developer
-# checkout behaves exactly as before.
+# src/ goes on sys.path only when the package cannot be imported without it.
+# An unconditional insert would shadow an installed wheel, so the wheel test
+# (CIBW_TEST_COMMAND in build-wheels.yml) would test the source tree instead.
+# Rationale: docs/engineering_notes.md#conftest-src-path-guard
 if importlib.util.find_spec("tfidf_stability") is None:  # pragma: no cover
     _SRC = Path(__file__).resolve().parents[1] / "src"
     if str(_SRC) not in sys.path:

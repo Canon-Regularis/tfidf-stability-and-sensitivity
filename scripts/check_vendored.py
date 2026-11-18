@@ -1,22 +1,17 @@
 #!/usr/bin/env python3
 """Verify every vendored file against its recorded digest.
 
-Three vendored trees, each depending on the bytes being what upstream published:
-the Snowball stemmer (Python and C++ backends run implementations generated from
-one source), the doctest and nanobench headers (hermetic offline build), and the
-Snowball test vectors (ground truth for the stemmer). ``THIRD_PARTY_NOTICES.md``
-asserts all three.
-
-Also checks the reverse direction, which is the failure that actually happens: a
-file added to a vendored directory but never added to its manifest. A digest
-check alone passes, since nothing points at the new file.
+Each ``MANIFEST.sha256`` lists the SHA-256 digest of every file in its
+directory. The check also reports a file present in a vendored directory but
+absent from its manifest. ``THIRD_PARTY_NOTICES.md`` asserts the vendored sets.
 """
 
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -33,13 +28,9 @@ _EXEMPT = {"MANIFEST.sha256", "__init__.py", "__pycache__"}
 def _unlisted(manifest: Path, manifests: list[Path], listed: set[str]) -> list[str]:
     """Files under a manifest's directory that the manifest does not name.
 
-    An unlisted file is invisible to the digest comparison, so it ships
-    unverified. Compared on the path relative to the manifest rather than on the
-    bare name, because that is the form the manifest uses:
-    ``cpp/third_party/MANIFEST.sha256`` lists ``doctest/doctest.h``.
-
-    Walked recursively, because every file ``cpp/third_party`` vendors lives one
-    level down, in ``doctest/`` and ``nanobench/``.
+    Paths are compared relative to the manifest directory, the form the
+    manifest uses. The walk is recursive because vendored files live in
+    subdirectories such as ``doctest/`` and ``nanobench/``.
     """
     problems: list[str] = []
     for path in sorted(manifest.parent.rglob("*")):
@@ -60,12 +51,36 @@ def _unlisted(manifest: Path, manifests: list[Path], listed: set[str]) -> list[s
     return problems
 
 
+def _manifests() -> tuple[list[Path], list[str]]:
+    """Return the manifests to verify and any reason the list is incomplete.
+
+    A checkout lists its tracked manifests through git, which leaves out
+    untracked copies such as an editable install's assets in a virtualenv
+    inside it. A tree without ``.git``, such as the mutation sandbox, is walked.
+    """
+    if not (REPO / ".git").exists():
+        return sorted(REPO.rglob("MANIFEST.sha256")), []
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout
+    except (subprocess.CalledProcessError, OSError) as exc:
+        return [], [f"git cannot list the tracked files, so vendoring is unverified: {exc}"]
+    names = sorted({n for n in listed.split("\0") if PurePosixPath(n).name == "MANIFEST.sha256"})
+    present = [REPO / name for name in names if (REPO / name).is_file()]
+    missing = [
+        f"{name}: tracked but absent from the working tree"
+        for name in names
+        if not (REPO / name).is_file()
+    ]
+    return present, missing
+
+
 def check() -> list[str]:
     """Return a list of problems; empty means everything verified."""
-    problems: list[str] = []
-    manifests = sorted(REPO.rglob("MANIFEST.sha256"))
+    manifests, problems = _manifests()
     if not manifests:
-        return ["no MANIFEST.sha256 found anywhere -- vendoring is unverified"]
+        return problems or ["no MANIFEST.sha256 found anywhere -- vendoring is unverified"]
 
     checked = 0
     for manifest in manifests:

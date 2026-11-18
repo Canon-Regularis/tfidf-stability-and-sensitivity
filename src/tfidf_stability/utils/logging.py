@@ -1,37 +1,8 @@
-"""Structured logging for provenance.
+"""Structured logging of the decisions taken while producing a number.
 
-A run manifest records the inputs a number depended on: data, config, build.
-This module records the decisions taken while producing it: backend selected,
-reduction policy in force, degenerate cases hit, diagnostics fired, digests of
-what came out. Between the two, a surprising number can be accounted for without
-rerunning anything. General-purpose tracing is out of scope.
-
-Closed vocabulary. :class:`EventKind` names every recordable kind and
-:func:`log_event` is the only emitter. Lines render as ``kind key=value ...``
-with keys sorted, so two runs that took the same decisions produce the same
-lines whatever order a call site passed its fields, matching the
-canonicalisation :func:`~tfidf_stability.utils.io.canonical_json` applies to
-configs.
-
-Volatile state stays off the reproducibility surface. A
-:class:`logging.LogRecord` carries ``created``, ``msecs``, ``relativeCreated``,
-``process`` and ``thread``, all of which differ between two identical runs; none
-is read here. :data:`DETERMINISTIC_FORMAT` names only ``levelname``, ``name``
-and ``message``, and :class:`EventRecorder` stores the structured payload the
-call site supplied rather than the record it arrived on, so
-:meth:`EventRecorder.digest` covers the decisions alone. Wall-clock timestamps
-are opt-in (``configure(timestamps=True)``) and leave the reproducible set.
-
-Warnings do not route through here. ``pyproject.toml`` sets
-``filterwarnings = ["error"]``, so ``TauExceedsScoreRangeWarning`` and
-``ChainInflationWarning`` are test failures; :func:`logging.captureWarnings`
-would demote them to a line nobody reads. An ``EventKind.DIAGNOSTIC`` event
-records that a diagnostic fired alongside the :func:`warnings.warn` call.
-
-No handler is installed on import, not even a :class:`~logging.NullHandler`:
-with nothing on the chain, records at ``WARNING`` and above still reach stderr
-through :data:`logging.lastResort`, and a degenerate configuration is a genuine
-finding here. :func:`configure` is the opt-in the CLI calls.
+:class:`EventKind` is the closed vocabulary and :func:`log_event` the only emitter. Keys
+sort as in :func:`~tfidf_stability.utils.io.canonical_json`. No handler is installed on
+import; :func:`configure` is the opt-in. Rationale: docs/engineering_notes.md#logging-provenance
 """
 
 from __future__ import annotations
@@ -66,11 +37,13 @@ __all__ = [
 #: :func:`configure` call governs the whole package.
 ROOT_NAME = "tfidf_stability"
 
-#: Reproducible: no ``asctime``, no ``process``, no ``thread``. Two identical
-#: runs emit byte-identical output under this format.
+#: Names only ``levelname``, ``name`` and ``message``. The volatile
+#: :class:`logging.LogRecord` fields (``created``, ``process``, ``thread``) are left out,
+#: so two identical runs emit byte-identical output under this format.
 DETERMINISTIC_FORMAT = "%(levelname)s %(name)s %(message)s"
 
-#: For watching a long sweep from a terminal. Not for anything that gets hashed.
+#: :data:`DETERMINISTIC_FORMAT` with wall-clock time, for watching a long sweep from a
+#: terminal. Output under it is not for hashing.
 TIMESTAMPED_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 
 #: ``LogRecord`` attribute carrying the structured payload. Prefixed because
@@ -84,10 +57,11 @@ _INSTALLED_MARK = "_tfidf_stability_installed"
 
 
 class EventKind(str, Enum):
-    """The closed set of decisions worth recording.
+    """The closed set of decisions a run records.
 
-    Every member answers a question that has been asked of a published number,
-    which keeps the set short enough to state in full.
+    Each member answers a question about how a published number was produced, and
+    the set is short enough to state in full. ``DIAGNOSTIC`` accompanies :func:`warnings.warn`
+    and never replaces it: :func:`logging.captureWarnings` would stop warnings failing tests.
     """
 
     #: Which backend this process selected, and why the other one was not used.
@@ -99,7 +73,9 @@ class EventKind(str, Enum):
     #: that embeds to the zero vector, an undefined margin.
     DEGENERATE = "degenerate"
     #: A warning-worthy diagnostic fired. Records the occurrence alongside the
-    #: :func:`warnings.warn` call; never instead of it.
+    #: :func:`warnings.warn` call; never instead of it. The pytest ``"error"`` filter
+    #: makes each warning a test failure, so :func:`logging.captureWarnings` is not used.
+    #: Rationale: docs/engineering_notes.md#logging-provenance
     DIAGNOSTIC = "diagnostic"
     #: The digest of something produced, so an artefact can be tied to the run
     #: that wrote it without opening either.
@@ -112,8 +88,8 @@ class EventKind(str, Enum):
     def level(self) -> int:
         """Severity, fixed per kind rather than chosen per call site.
 
-        Part of the vocabulary: a reader filtering at ``WARNING`` gets the
-        diagnostics and nothing else, which fails once call sites choose.
+        A reader filtering at ``WARNING`` gets the diagnostics and nothing else;
+        a level chosen per call site would break that.
         """
         return logging.WARNING if self is EventKind.DIAGNOSTIC else logging.INFO
 
@@ -199,8 +175,8 @@ def log_event(logger: logging.Logger, kind: EventKind, /, **fields: Any) -> Even
 class EventRecorder(logging.Handler):
     """Collects events into a run record that can be digested.
 
-    Only structured events are kept: free-text records from other libraries would
-    put whatever they happened to say (paths, addresses, timings) into the digest.
+    Only structured events are kept, so :meth:`EventRecorder.digest` covers decisions
+    alone; free-text records from other libraries would add paths, addresses and timings.
     """
 
     def __init__(self) -> None:
@@ -208,7 +184,11 @@ class EventRecorder(logging.Handler):
         self.events: list[Event] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Store the payload the call site built, never the record itself."""
+        """Store the payload the call site built, never the :class:`logging.LogRecord`.
+
+        The record's ``created``, ``msecs``, ``process`` and ``thread`` differ between
+        two identical runs.
+        """
         event = getattr(record, _EVENT_ATTR, None)
         if isinstance(event, Event):
             self.events.append(event)
@@ -228,13 +208,10 @@ class EventRecorder(logging.Handler):
         return [event.to_dict() for event in self.events]
 
     def digest(self) -> str:
-        """SHA-256 over the recorded decisions.
+        """SHA-256 over the recorded decisions, in emission order.
 
-        Order-sensitive: selecting the native backend after a fallback is a
-        different run from selecting it outright.
-
-        Rendered by ``canonical_json``, so a non-finite field maps to ``null``
-        as it does in every JSON file this package writes.
+        Selecting the native backend after a fallback is a different run from selecting
+        it outright. ``canonical_json`` renders a non-finite field as ``null``.
         """
         return hash_text(canonical_json(self.to_list(), indent=None))
 
@@ -243,9 +220,8 @@ class EventRecorder(logging.Handler):
 def capture(level: int = logging.DEBUG) -> Iterator[EventRecorder]:
     """Collect this package's events for the duration of the block.
 
-    Restores the package logger's previous level and handler set on exit, the
-    raising case included, so a captured section leaves the logging system as it
-    found it.
+    Yields an :class:`EventRecorder` and restores the package logger's previous level
+    and handler set on exit, the raising case included.
     """
     logger = logging.getLogger(ROOT_NAME)
     recorder = EventRecorder()
@@ -265,21 +241,11 @@ def configure(
     stream: IO[str] | None = None,
     timestamps: bool = False,
 ) -> logging.Handler:
-    """Install this package's handler. For applications to call; imports must not.
+    """Install and return the package handler; applications call it, imports do not.
 
-    Touches only the ``tfidf_stability`` logger, so it cannot redirect or silence
-    anything a host application had already set up. Idempotent: a second call
-    replaces the handler the first installed rather than stacking a duplicate, so
-    an entry point invoked twice in one process does not double every line.
-
-    Args:
-        level: Threshold for the package logger.
-        stream: Destination; defaults to ``sys.stderr``.
-        timestamps: Prefix each line with wall-clock time. Off by default: it is
-            the one thing here that makes two identical runs differ.
-
-    Returns:
-        The installed handler, for a caller that wants to adjust it further.
+    Touches only the ``tfidf_stability`` logger and replaces the handler an earlier call
+    installed. ``level`` is the threshold, ``stream`` defaults to ``sys.stderr``, and
+    ``timestamps`` replaces :data:`DETERMINISTIC_FORMAT` with wall-clock lines that differ.
     """
     logger = logging.getLogger(ROOT_NAME)
     reset()
@@ -296,8 +262,8 @@ def configure(
 def reset() -> None:
     """Undo :func:`configure`, returning the package logger to its import state.
 
-    Removes only handlers this module installed; one the host application
-    attached to our logger is its business.
+    Removes only handlers this module installed. No :class:`~logging.NullHandler` is added:
+    with no handler on the chain, ``WARNING`` records reach stderr via :data:`logging.lastResort`.
     """
     logger = logging.getLogger(ROOT_NAME)
     for handler in [h for h in logger.handlers if getattr(h, _INSTALLED_MARK, False)]:

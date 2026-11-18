@@ -1,22 +1,8 @@
-"""Lemmatisation (section 2), implemented as a set of interchangeable backends.
+"""Lemmatisation (section 2), implemented as interchangeable backends.
 
-README section 2 requires lemmatisation inside a "fixed, deterministic
-preprocessing map". NLTK's WordNet lemmatiser needs a downloaded, versioned
-corpus plus a POS tagger; spaCy needs a statistical model whose output moves
-between releases. Neither is reproducible, and neither ports to C++.
-
-The default backend is Porter2 (the Snowball English algorithm): a complete
-published algorithmic specification with no data files, one upstream source
-generating both the Python and the C implementation, and a canonical 42 649-word
-test-vector pair from snowballstem.org, so this step is machine-verified.
-
-The implementation is vendored; see
-:mod:`tfidf_stability.preprocessing._snowball` for reasoning and provenance.
-
-Porter2 is a stemmer, so it produces "happi" from "happy", which is not a word.
-That limitation is recorded in ``docs/spec_addenda.md#g7`` with the proposed
-wording change to the paper. :class:`LookupLemmatiser` serves callers who need
-true lemmas.
+The default is Porter2 (Snowball English), in :mod:`tfidf_stability.preprocessing._snowball`.
+Porter2 is a stemmer (``docs/spec_addenda.md#g7``); :class:`LookupLemmatiser` gives true lemmas.
+Rationale: docs/engineering_notes.md#porter2-default-backend
 """
 
 from __future__ import annotations
@@ -58,14 +44,9 @@ class LemmatiserKind(str, Enum):
 class Lemmatiser(Protocol):
     """The contract every backend satisfies.
 
-    ``name`` says which backend. It is a complete identity only for a
-    backend whose output is fixed by its class -- true of
-    :class:`IdentityLemmatiser` and :class:`Porter2Stemmer`, false of
-    :class:`LookupLemmatiser`, whose answers come from a table handed in at
-    construction. A backend in that position also carries a ``digest``
-    attribute; :func:`lemmatiser_identity` is what callers should read, and
-    ``digest`` is deliberately absent from this Protocol so that adding one to a
-    backend is not a breaking change for the two that need none.
+    ``name`` is the whole identity for :class:`IdentityLemmatiser` and :class:`Porter2Stemmer`,
+    not for :class:`LookupLemmatiser`, which also carries a ``digest`` outside this Protocol.
+    Callers read :func:`lemmatiser_identity`, which combines the two.
     """
 
     #: Which backend this is, recorded in the run manifest. Not necessarily the
@@ -81,13 +62,10 @@ class Lemmatiser(Protocol):
         ...
 
 
-# ---------------------------------------------------------------------------
 # Porter2 / Snowball English
-# ---------------------------------------------------------------------------
-#: One stemmer per thread. ``BaseStemmer.stemWord`` calls ``set_current``, which writes
-#: ``current``, ``cursor``, ``limit``, ``limit_backward``, ``bra`` and ``ket`` on the
-#: instance. Two threads sharing one instance interleave those writes and stem a spliced
-#: word. ``PreprocessingPipeline.preprocess_corpus`` documents this stage as parallelisable.
+#: One stemmer per thread. ``BaseStemmer.stemWord`` writes ``current``, ``cursor``, ``limit``,
+#: ``limit_backward``, ``bra`` and ``ket``; threads sharing an instance stem spliced words.
+#: ``PreprocessingPipeline.preprocess_corpus`` documents this stage as parallelisable.
 _LOCAL = threading.local()
 
 
@@ -105,9 +83,7 @@ def porter2_stem(word: str) -> str:
     return str(stemmer.stemWord(word))
 
 
-# ---------------------------------------------------------------------------
 # Backends
-# ---------------------------------------------------------------------------
 class IdentityLemmatiser:
     """Pass tokens through unchanged. Useful as an ablation baseline."""
 
@@ -144,15 +120,9 @@ class Porter2Stemmer:
 class LookupLemmatiser:
     """Table-driven true lemmatisation, falling back to a secondary backend.
 
-    The table comes from a frozen, hash-verified asset, so the mapping is part of
-    the run's recorded provenance instead of an ambient property of the machine.
-
-    Unlike its two siblings this backend is *stateful in a way that changes
-    results*: ``name`` is the class-level string ``"lookup"`` on every
-    instance, while the output is a function of ``table`` and ``fallback``. So it
-    carries a ``digest`` as well, and the two fields answer different
-    questions -- which backend, and which instance of it. See the class comment
-    on :class:`Lemmatiser` for who reads it.
+    Output depends on ``table`` and ``fallback`` while ``name`` is always ``"lookup"``, so each
+    instance also carries a ``digest``: ``name`` says which backend, ``digest`` which instance.
+    See :class:`Lemmatiser` for who reads it.
     """
 
     name = "lookup"
@@ -198,13 +168,9 @@ def make_lemmatiser(kind: LemmatiserKind | str = LemmatiserKind.PORTER2) -> Lemm
 def lemmatiser_identity(lemmatiser: Lemmatiser) -> str:
     """Everything about ``lemmatiser`` that can change a feature stream.
 
-    ``"porter2"`` for a backend the name fully identifies, ``"lookup:<sha256>"``
-    for one it does not. Callers recording provenance -- the run manifest by way
-    of :meth:`PreprocessingPipeline.digest` -- must use this rather than
-    ``Lemmatiser.name``. Measured before it existed: three pipelines mapping
-    "the cats running" to ``cat|running``, ``feline|running`` and ``cat|run``
-    all reported the digest ``88ba29504223faaf...``, so a cache keyed on it
-    would serve one run's features for another's.
+    The bare ``name`` (``"porter2"``) without a ``digest``, ``"lookup:<sha256>"`` with one.
+    Provenance records, including :meth:`PreprocessingPipeline.digest`, use this, not ``name``.
+    Rationale: docs/engineering_notes.md#lemmatiser-identity
     """
     content = getattr(lemmatiser, "digest", None)
     return lemmatiser.name if content is None else f"{lemmatiser.name}:{content}"

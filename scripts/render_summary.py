@@ -1,22 +1,9 @@
 #!/usr/bin/env python3
 """Render the committed experiment reports as one Markdown document.
 
-The reports are JSON because a digest has to be taken over something canonical,
-and JSON sorts its keys to make that possible. That same sorting is what makes
-them hard to read: `k1, k10, k20, k5, k50` is the order a machine needs and the
-order a person does not. This restores the order a reader expects, and puts the
-tables each driver prints to the console and then discards into a file.
-
-Nothing here recomputes. Every number is read from a report, so the summary
-cannot disagree with the digest it quotes.
-
-Deterministic: no clock, no environment, no paths outside the repository. The
-same reports render the same bytes, which is what lets `--check` exist.
-
-Usage::
-
-    python scripts/render_summary.py              # write reports/summary.md
-    python scripts/render_summary.py --check      # fail if it is out of date
+Every number is read from a report under ``reports/`` and none is recomputed,
+so the summary cannot disagree with the digests it quotes. Nothing outside the
+repository is read, so ``--check`` compares the output byte for byte.
 """
 
 from __future__ import annotations
@@ -28,8 +15,8 @@ from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
-# `tooling` sits at the repository root and the package under `src`, and this
-# script is run from `scripts/`, which is what Python puts on the path.
+# `tooling` sits at the repository root and the package under `src`. Python
+# puts only `scripts/` on the path, so both roots are added here.
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "src"))
 
@@ -56,21 +43,21 @@ _FIGURES = {
 
 
 def _ks(block: dict[str, Any]) -> list[str]:
-    """``k`` keys in numeric order.
+    """Return the ``k`` keys of a block in numeric order.
 
-    ``canonical_json`` sorts keys as strings, so every k-block on disk reads
-    ``k1, k10, k20, k5, k50``. The file cannot help that -- the sort is what the
-    digest rests on -- so the ordering is restored here instead.
+    ``canonical_json`` sorts keys as strings, so a k-block on disk reads
+    ``k1, k10, k20, k5, k50``. The digest rests on that sort, so the numeric
+    order is restored here rather than in the file.
     """
     return sorted(block, key=lambda s: int(s[1:]))
 
 
 def _num(value: Any, places: int = 4) -> str:
-    """A number as the report states it, in the form that reads best.
+    """Format a number as the report states it.
 
-    Exponential below a millionth or above a million, where a decimal expansion
-    would be a run of zeros; a plain decimal otherwise. ``None`` is the JSON
-    spelling of a non-finite value, and is shown as such rather than as 0.
+    Magnitudes below a millionth or above a million use exponential form,
+    where a decimal expansion is a run of zeros; others use a plain decimal.
+    ``None`` is the JSON spelling of a non-finite value and renders as ``n/a``.
     """
     if value is None:
         return "n/a"
@@ -84,10 +71,10 @@ def _num(value: Any, places: int = 4) -> str:
 
 
 def _term(token: str) -> str:
-    """A feature as a reader can see it.
+    """Render a feature so that each token of an n-gram is visible.
 
-    The n-gram joiner is U+001F, chosen because it cannot occur inside a token.
-    It also cannot be seen, so a bigram rendered raw reads as one long token.
+    The n-gram joiner is U+001F, which cannot occur inside a token and has no
+    visible glyph, so it is replaced by a visible separator.
     """
     return "`" + token.replace(JOINER, "` + `") + "`"
 
@@ -97,10 +84,10 @@ def _pct(value: Any, places: int = 2) -> str:
 
 
 def _table(header: list[str], rows: list[list[str]]) -> list[str]:
-    """A Markdown table, padded so the source reads as well as the render does.
+    """Build a Markdown table with columns padded to a common width.
 
-    A column no row fills is dropped: an always-empty cell reads as a value that
-    went missing rather than as one that was never there.
+    A column no row fills is dropped, so an always-empty cell cannot read as a
+    value that is missing.
     """
     keep = [i for i in range(len(header)) if header[i] or any(r[i] for r in rows)]
     header = [header[i] for i in keep]
@@ -143,7 +130,7 @@ def _provenance(loaded: dict[str, dict[str, Any]]) -> list[str]:
 
 
 def _similarity(record: dict[str, Any]) -> list[str]:
-    """The plainest run: what the system returns, and how close the call was."""
+    """Render the similarity section: top document and margin per query."""
     queries = record["payload"]["queries"]
     rows = []
     for query in queries:
@@ -172,7 +159,7 @@ def _similarity(record: dict[str, Any]) -> list[str]:
 
 
 def _stability(record: dict[str, Any]) -> list[str]:
-    """E0, E1 and E2: the band, the margins, and the certified radius."""
+    """Render E0, E1 and E2: the tau band, the margins and the certificate."""
     payload = record["payload"]
     floor = payload["E0_tau_derivation"]["noise_floor"]
     band = payload["E0_tau_derivation"]["band"]
@@ -284,7 +271,7 @@ def _stability(record: dict[str, Any]) -> list[str]:
 
 
 def _ablations(record: dict[str, Any]) -> list[str]:
-    """E3 and E4: what the tie-break alone moves, and one pair in detail."""
+    """Render E3 and E4: tie-break disagreement rates and one pair in detail."""
     payload = record["payload"]
     rates = payload["E3_disagreement_rates"]
     pairs = sorted(rates)
@@ -358,7 +345,7 @@ def _ablations(record: dict[str, Any]) -> list[str]:
 
 
 def _intermediates(record: dict[str, Any]) -> list[str]:
-    """One document, every quantity, with the bit pattern beside the decimal."""
+    """Render every quantity of one document with its hex beside the decimal."""
     payload = record["payload"]
     terms = payload["terms"]
     return [
@@ -401,11 +388,10 @@ def _intermediates(record: dict[str, Any]) -> list[str]:
 
 
 def _figures(loaded: dict[str, dict[str, Any]]) -> list[str]:
-    """Each figure beside the digest it is stamped with.
+    """Pair each figure with the digest it is stamped with.
 
-    The stamp is the tie between an image and the run behind it, so a figure
-    whose digest is absent from this table was rendered from a report that is no
-    longer in the tree.
+    The stamp ties an image to the run behind it, so a figure whose digest is
+    absent from this table comes from a report that is not in the tree.
     """
     rows = []
     for source, names in _FIGURES.items():
@@ -439,7 +425,7 @@ _SECTIONS = {
 
 
 def render(reports: Path) -> str:
-    """The whole document, from whichever reports are present."""
+    """Render the whole document from whichever reports are present."""
     loaded: dict[str, dict[str, Any]] = {}
     for name, filename in _REPORTS:
         path = reports / filename
@@ -463,14 +449,14 @@ def render(reports: Path) -> str:
         if name in loaded:
             lines += section(loaded[name])
     lines += _figures(loaded)
-    # One trailing newline, not two. Every section ends with a blank line so the
-    # sections separate; on the last one that leaves a blank line at end of file,
-    # which `end-of-file-fixer` strips and the next render would restore.
+    # Every section ends with a blank line; on the last one that leaves a blank
+    # line at end of file, which `end-of-file-fixer` strips. Trimming to one
+    # trailing newline keeps the render identical to the committed file.
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--reports", type=Path, default=REPO / "reports")
     parser.add_argument("-o", "--output", type=Path, default=None)
     parser.add_argument("--check", action="store_true", help="fail if the summary is out of date")

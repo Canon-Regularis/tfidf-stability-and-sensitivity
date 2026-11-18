@@ -32,8 +32,8 @@ That opens a channel visible only to the maintainer.
 Do not open a public issue for a suspected vulnerability.
 
 A useful report names the affected version, the platform and interpreter, and
-the input that triggers the behaviour. A crashing file or a short script is
-worth more than a description of one.
+the input that triggers the behaviour. Include a crashing file or a short script
+in preference to a description of one.
 
 Expect an acknowledgement within 14 days. This is maintained alongside other
 work and has no support commitment beyond best effort; `CONTRIBUTING.md` states
@@ -63,9 +63,9 @@ Out of scope:
 
 Wheels are published to PyPI from `.github/workflows/release.yml` using Trusted
 Publishing over OIDC, so no long-lived credential exists to be stolen. Two jobs
-hold write permissions and both run only on a `v*` tag: `testpypi`, which mints
-an OIDC token to rehearse the upload against TestPyPI under the `testpypi`
-environment, and `publish`, which attaches the release assets and uploads to
-PyPI, and which requires approval through the `release` environment. Published
+hold write permissions and both run only on a `v*` tag. `testpypi` mints an
+OIDC token to rehearse the upload against TestPyPI under the `testpypi`
+environment. `publish` attaches the release assets and uploads to PyPI, and
+requires approval through the `release` environment. Published
 distributions carry PEP 740 attestations, and the files attached to the GitHub
 release carry build provenance, so both can be verified against this repository.

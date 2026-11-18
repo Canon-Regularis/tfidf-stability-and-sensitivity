@@ -1,13 +1,12 @@
 # =============================================================================
 # Sanitizers.cmake
-#
-# Usage:  -DTFIDF_SANITIZERS="address;undefined"   or   -DTFIDF_SANITIZERS=thread
-#
-# `float-divide-by-zero` and `float-cast-overflow` are included with UBSan
-# on purpose: in this codebase a division by a zero vector norm is a real
-# logic error (the zero-vector convention of README section 2.3 must be applied
-# *before* the division, never discovered by producing an Inf).
 # =============================================================================
+
+# Usage:  -DTFIDF_SANITIZERS="address;undefined"   or   -DTFIDF_SANITIZERS=thread
+
+# With UBSan, -fsanitize=float-divide-by-zero and -fno-sanitize-recover=all are
+# added. A division by a zero vector norm is a logic error: the zero-vector
+# convention of README section 2.3 applies before the division.
 function(tfidf_apply_sanitizers target scope)
   if(NOT TFIDF_SANITIZERS)
     return()

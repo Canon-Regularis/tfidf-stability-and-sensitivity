@@ -1,24 +1,9 @@
 #!/usr/bin/env python3
-"""E1/E2: derive tau, then measure A1 (margins govern ranking stability).
+"""Derive tau (E0), then measure margins (E1) and stability (E2) in one pass.
 
-Three things in one pass, since they share a corpus fit and a query grid:
-
-E0, the tau derivation. Measures the arithmetic noise floor against exact
-summation, sandwiches tau between it and the smallest observed score gap, and
-verifies the tie structure is invariant across the whole band. See
-``analysis/noise_floor.py`` and ``docs/spec_addenda.md#g23``.
-
-E1, the margin distribution. ``m_k`` across queries at each ``k``. Degenerate
-queries are excluded per G3, with the exclusion count reported.
-
-E2, the stability transition. Empirical top-k flip rate against
-``eps / (m_k / 2)``, plus a soundness/conservatism audit of section 4.4's
-certificate.
-
-Usage::
-
-    python scripts/run_stability_profile.py --dataset synthetic_tiny -o reports/
-    python scripts/run_stability_profile.py --dataset synthetic_small --queries 200
+E0 bounds tau between the noise floor and the smallest score gap (G23). E1
+summarises ``m_k`` across queries at each ``k``. E2 measures the top-k flip
+rate against ``eps / (m_k / 2)`` and audits section 4.4's certificate.
 """
 
 from __future__ import annotations
@@ -61,9 +46,8 @@ from tfidf_stability.vectorisation.tfidf import TfidfVectoriser  # noqa: E402
 DEFAULT_KS = (1, 5, 10, 20, 50)
 
 #: Trials per query for the certificate audit, recorded in the parameters block
-#: under its own key. Separate from `--trials`, which drives the transition
-#: curve: the two sample independently, and one `trials` key describing both
-#: said 40 while this ran at the library default of 20.
+#: under its own key. Independent of `--trials`, which drives the transition
+#: curve: the two sample at different rates.
 _AUDIT_TRIALS = 20
 
 
@@ -83,21 +67,10 @@ def _margin_distributions(
         # neither bounds the other.
         interior = [min_adjacent_margin_top(s, k) for s in sorted_vectors]
 
-        # Undefined margins are excluded here, counted so the exclusion is
-        # auditable. Both lists are counted: the counter once covered the boundary
-        # margins alone, which are defined whenever k < n (guaranteed above), so
-        # it read a structural zero while G16 left m_min^top undefined at k = 1
-        # and all 40 queries dropped out of the interior distribution.
-        #
-        # Undefined, not degenerate. This comment said "G3: degenerate queries
-        # are excluded here", which `m.defined` does not do and does not need to:
-        # a feature-less profile never reaches this function, because `evaluate`
-        # skips it and reports it as `n_degenerate_profiles`. A query whose
-        # features are all out of vocabulary does reach here, with an all-zero
-        # score vector and a boundary margin of exactly 0.0 -- defined, and
-        # counted in the distribution. Whether that belongs in an m_k
-        # distribution is a question for section 7.2; it is not what this filter
-        # decides, and both published runs record `n_zero_vector_queries: 0`.
+        # Undefined margins are excluded and counted, per list: m_k is defined
+        # whenever k < n, while m_min^top is undefined at k = 1 (G16). Degenerate
+        # profiles never reach here; `evaluate` skips and counts them.
+        # Rationale: docs/engineering_notes.md#undefined-margins-not-degenerate-queries
         usable = [m.value for m in margins if m.defined]
         usable_top = [m.value for m in interior if m.defined]
         excluded[f"k{k}"] = {
@@ -128,15 +101,11 @@ def _rank_trajectories(
     n_tracked: int = 12,
     n_steps: int = 80,
 ) -> dict:
-    """Each document's rank as a function of eps, along one fixed direction.
+    """Each document's rank as a function of eps along one fixed direction.
 
-    The direction is drawn once and scaled. Redrawing at every eps would make
-    each column an unrelated sample, and joining them would draw a path no single
-    perturbation ever traced; scaling one direction gives a one-parameter family,
-    so a crossing in the picture is a crossing that happens as eps grows.
-
-    Recorded against ``eps / (m_k / 2)`` so the certified radius sits at 1.0,
-    matching ``fig_transition``: section 4.4 forbids any crossing left of it.
+    One direction is drawn and scaled, giving a one-parameter family in which
+    a crossing happens as eps grows. Ratios are ``eps / (m_k / 2)``, so the
+    certified radius sits at 1.0 and section 4.4 forbids a crossing left of it.
     """
     import random
 
@@ -188,7 +157,7 @@ def _rank_trajectories(
 
 def _parser() -> argparse.ArgumentParser:
     """The command line, kept out of main() so the experiment reads as one."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dataset", default="synthetic_tiny")
     parser.add_argument("--archive", type=Path, default=None, help="MovieLens zip")
     parser.add_argument("-o", "--output", type=Path, default=REPO / "reports")
@@ -218,10 +187,9 @@ def _parser() -> argparse.ArgumentParser:
 def _check_counts(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Refuse a `--trials` or `--k` below 1.
 
-    `--trials` below 1 would empty `range(n_trials)`, so each `TransitionPoint` would
-    carry `n_trials = 0` and a NaN `flip_rate`. `canonical_json` would write null into
-    the `E2_transition` block, and `main` would exit 0. `--k` below 1 would instead
-    raise `KOutOfRangeError` in `resolve_k`. `build_query_grid` guards `--queries`.
+    `--trials` below 1 empties `range(n_trials)`: each `TransitionPoint` carries
+    `n_trials = 0` and a NaN `flip_rate`, written as null, while `main` exits 0.
+    `--k` below 1 raises `KOutOfRangeError`. `build_query_grid` guards `--queries`.
     """
     if args.trials < 1:
         parser.error(f"--trials must be at least 1, got {args.trials}")
@@ -311,18 +279,10 @@ def main() -> int:
     trajectories = _rank_trajectories(
         list(grid.queries[0].scores), grid.queries[0].table, args.k, seed=args.seed + 2
     )
-    # `--trials` is deliberately NOT forwarded here, and the parameters block
-    # records the count this actually runs at under its own key. The audit's
-    # default was already 20 while the transition curve above took `--trials`,
-    # so one report carried a transition curve at 33x40 = 1320 and an audit at
-    # 33x20 = 660 beneath a single `trials: 40`. A reader multiplying the
-    # recorded parameter by the query count could not reconcile it with the 2x2
-    # table, and `--trials` silently did not move the audit at all.
-    #
-    # Recording rather than forwarding, so the published audit does not move:
-    # at 40 it gives 172 certified and 51.39% conservatism against the 81 and
-    # 51.12% in section 7.2 and docs/ranking_stability.md. Forwarding it is a
-    # defensible change, but it is a republication, not a bug fix.
+    # `--trials` is not forwarded here. The audit runs at `_AUDIT_TRIALS` and the
+    # parameters block records that count under `audit_trials`, so the published
+    # audit figures (reports/summary.md, docs/ranking_stability.md) stay fixed.
+    # Rationale: docs/engineering_notes.md#audit-trials-not-forwarded
     audit_trials = _AUDIT_TRIALS
     audit = certificate_audit(
         scores_by_query, table, args.k, seed=args.seed + 1, tables=tables, trials=audit_trials
@@ -347,8 +307,7 @@ def main() -> int:
         )
     elif not audit.is_conclusive:
         # Soundness is "the certified cell holds no failures", which also holds
-        # when the cell is empty. Reporting that as a pass is how a gate comes to
-        # certify a theorem it never exercised.
+        # when the cell is empty. An empty cell is reported as vacuous, not a pass.
         print(
             "\n    THE AUDIT WAS VACUOUS. No perturbation landed inside the certified\n"
             "    radius, so section 4.4 was never exercised and its soundness here is\n"
@@ -363,9 +322,8 @@ def main() -> int:
             "n_queries": len(grid),
             **grid.provenance(),
             "k": args.k,
-            # Two counts, because two things are sampled at different rates.
-            # `trials` drives the transition curve; `audit_trials` the 2x2
-            # certificate table. One key for both said 40 while the audit ran 20.
+            # Two counts, sampled at different rates: `trials` drives the
+            # transition curve; `audit_trials` the 2x2 certificate table.
             "trials": args.trials,
             "audit_trials": audit_trials,
             "seed": args.seed,

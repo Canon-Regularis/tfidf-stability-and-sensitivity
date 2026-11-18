@@ -1,17 +1,9 @@
 # Undefined behaviour and memory safety.
-#
-# Two things here are specific to this project rather than boilerplate.
-#
-# `float-divide-by-zero` is enabled on purpose. A division by a zero vector
-# norm is a real logic error here: README section 2.3 fixes cosine to 0 for a
-# zero vector, and that convention must be applied *before* the division rather
-# than discovered afterwards by producing an Inf.
-#
-# The ranking layer is the reason ASan matters at all. A NaN in a sort key
-# destroys the strict weak ordering, and libstdc++'s final insertion pass then
-# walks off the front of the array: a genuine out-of-bounds write rather than
-# a wrong answer. The finiteness guards exist to prevent that; ASan is what
-# proves they do.
+
+# UBSan includes `float-divide-by-zero`: README section 2.3 sets cosine to 0
+# for a zero vector before any division, so a zero-norm division is a logic
+# error. ASan checks the finiteness guards that keep NaN out of sort keys.
+# Rationale: docs/engineering_notes.md#sanitizer-choices
 
 name: sanitizers
 
@@ -19,11 +11,9 @@ on:
   schedule:
     - cron: "0 3 * * *"
   pull_request:
-    # The root build files are in the filter because the sanitizer option lives
-    # there, not under cpp/: `TFIDF_SANITIZERS` is declared at CMakeLists.txt:42
-    # and set at CMakePresets.json:56. A change that disabled or misspelled it
-    # would not have run this workflow, so the sanitizers would have silently
-    # stopped being applied while the job kept reporting success.
+    # The root build files are in the filter because `TFIDF_SANITIZERS` is
+    # declared in CMakeLists.txt and set in CMakePresets.json. Without them, a
+    # change that disables the option skips this workflow and stays green.
     paths:
       - "cpp/**"
       - "CMakeLists.txt"
@@ -34,11 +24,9 @@ on:
 permissions:
   contents: read
 
-# One run per ref at a time. Without this every push to a branch leaves its
-# predecessor running to completion against code nobody will merge, which on a
-# matrix this wide is the difference between a queue that drains and one that
-# does not. Scheduled runs are keyed by workflow rather than ref so a nightly
-# cannot cancel a push.
+# One run per ref at a time. A new push to a pull request cancels the run it
+# supersedes. Scheduled runs use the default-branch ref, so they do not cancel
+# a pull-request run.
 concurrency:
   group: sanitizers-${{ github.ref }}
   cancel-in-progress: true
@@ -64,12 +52,10 @@ jobs:
           cmake --preset asan
           cmake --build --preset asan
       - name: Native tests under ASan and UBSan
-        # --no-tests=error carries weight here. Plain `ctest` prints
-        # "No tests were found!!!" and exits **0**, so a build that registered
-        # nothing (a renamed target, a dropped add_test, a CMake option that
-        # quietly disabled the suite) reports a green sanitizer run having
-        # executed zero tests under ASan. Measured: exit 0 without the flag,
-        # exit 8 with it. Applied to every ctest call in this repository.
+        # The `base` test preset sets `noTestsAction: error`. Plain ctest prints
+        # "No tests were found!!!" and exits 0, so a build that registered no
+        # tests would pass. Every ctest call in the workflows uses a preset that
+        # inherits `base`, or passes --no-tests=error.
         run: ctest --preset asan
         env:
           ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1

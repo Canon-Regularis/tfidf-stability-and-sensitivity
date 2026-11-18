@@ -1,17 +1,8 @@
-"""Every inequality in README section 4, handed to Hypothesis to break.
+"""Property and example tests for the inequalities of README section 4.
 
-These are adversarial searches for counterexamples rather than examples that
-confirm the bounds.
-
-Four inequalities are under test:
-
-* **section 4.1** ``delta_idf`` is the difference of two exact logarithms, and
-  its sign follows the competing effects of ``N`` and ``df``;
-* **section 4.2** the three-term decomposition bounds ``||w' - w||``;
-* **section 4.3** ``|delta cos| <= C (||du|| + ||dv||)`` with the explicit
-  ``C = 1/L`` of ``spec_addenda.md#g4``;
-* **section 4.4** ``eps < m_k/2`` guarantees the top-k set, and (beyond the
-  paper) is the radius itself rather than a safe under-estimate.
+Section 4.1 covers ``delta_idf`` and its sign, 4.2 the three-term bound on ``||w' - w||``,
+4.3 ``|delta cos| <= C (||du|| + ||dv||)`` with ``C = 1/L`` (``spec_addenda.md#g4``),
+and 4.4 the top-k certificate ``eps < m_k/2``, which is also checked to be the exact radius.
 """
 
 from __future__ import annotations
@@ -82,7 +73,10 @@ def fit(corpus: tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]):  # type: i
 # Corpus edits
 # ---------------------------------------------------------------------------
 def test_edits_do_not_mutate_the_original_corpus() -> None:
-    """A perturbation experiment needs both sides at once."""
+    """Adding, removing and editing leave the original corpus unchanged.
+
+    A perturbation experiment needs the corpus before and after an edit at once.
+    """
     original = (("a", "b"), (("x",), ("y",)))
     add_document(original, "c", ["z"])
     remove_document(original, "a")
@@ -107,7 +101,7 @@ def test_add_and_remove_change_the_corpus_size() -> None:
 
 
 def test_duplicate_produces_an_identical_document() -> None:
-    """The perturbation that manufactures an exact tie."""
+    """A duplicated document is identical to its source, so it ties exactly."""
     corpus = (("a",), (("x", "y"),))
     new_corpus, rec = duplicate_document(corpus, "a", "a_copy")
     assert new_corpus[1][0] == new_corpus[1][1]
@@ -128,7 +122,7 @@ def test_editing_an_unknown_document_raises() -> None:
 # Section 4.1: IDF perturbation
 # ---------------------------------------------------------------------------
 def test_delta_idf_captures_the_two_competing_effects() -> None:
-    """Section 4.1's point: N and df push in opposite directions."""
+    """Section 4.1: N and df move the idf in opposite directions."""
     assert delta_idf(3, 4, 10, 11) < 0, "the token gained a document"
     assert delta_idf(3, 3, 10, 11) > 0, "the corpus grew, the token did not"
     assert delta_idf(3, 3, 10, 10) == 0.0
@@ -263,8 +257,8 @@ def test_a_local_edit_leaves_untouched_documents_moved_only_globally() -> None:
             assert result.bound.dominant_term == "global"
             assert result.bound.local == pytest.approx(0.0, abs=1e-12)
             asserted += 1
-    # Without this the test passes vacuously whenever every non-edited document
-    # happens to see a zero shift.
+    # At least one non-edited document shows a non-zero shift; otherwise the
+    # loop above asserts nothing.
     assert asserted > 0, "no document was actually examined"
 
 
@@ -343,8 +337,10 @@ def test_certificate_is_half_the_margin() -> None:
 
 
 def test_certificate_at_an_exact_tie_is_no_radius_at_all() -> None:
-    """``0`` differs in kind from a small radius: the tie-break already decides
-    membership."""
+    """At an exact tie the set radius is zero and the certificate does not hold.
+
+    The tie-break decides membership, so zero differs in kind from a small radius.
+    """
     cert = certified_radius((0.5, 0.5, 0.1), 1)
     assert cert.exact_tie is True
     assert cert.set_radius == 0.0
@@ -359,15 +355,11 @@ def test_certificate_is_undefined_at_the_end_of_the_ranking() -> None:
 
 
 def test_neither_radius_dominates_the_other() -> None:
-    """The two conditions of section 4.4 constrain disjoint sets of gaps.
+    """The two radii of section 4.4 constrain disjoint sets of gaps.
 
     ``m_min^top`` minimises over the gaps strictly inside the top-k (ranks 1->2
-    through (k-1)->k); ``m_k`` is the boundary gap (k->k+1). Neither radius
-    bounds the other, and rankings where each is the tighter one in turn are
-    easy to build.
-
-    So "preserving the order is harder than preserving the set" is false, and a
-    certificate quoted without naming its invariant is ambiguous.
+    through (k-1)->k) and ``m_k`` is the boundary gap (k->k+1). Neither radius
+    bounds the other, so a certificate quoted without its invariant is ambiguous.
     """
     # Tight cluster at the top, wide boundary -> the order radius binds.
     tight_top = (1.00, 0.99, 0.20)
@@ -379,7 +371,7 @@ def test_neither_radius_dominates_the_other() -> None:
     cert = certified_radius(tight_boundary, 2)
     assert cert.set_radius < cert.order_radius
 
-    # Both orderings occur on random data, so neither is a theorem.
+    # Both orderings occur on random data, so neither inequality is general.
     rng = random.Random(7)
     seen_order_tighter = seen_set_tighter = False
     for _ in range(200):
@@ -407,8 +399,8 @@ def test_the_joint_radius_is_the_minimum_of_the_two() -> None:
                 assert is_top_k_stable(s, k, c.joint_radius * 0.99)
                 assert is_order_stable(s, k, c.joint_radius * 0.99)
                 asserted += 1
-    # Every assertion sits behind that guard, so an undefined or NaN order radius
-    # throughout would leave the whole sweep having checked nothing.
+    # At least one (scores, k) pair has a defined order radius; every assertion
+    # above sits behind that guard.
     assert asserted > 0, "no (scores, k) pair had a defined order radius"
 
 
@@ -425,8 +417,7 @@ def test_a_certified_perturbation_never_changes_the_top_k_set(
 
     The ``assume`` is on the realised deltas rather than the drawn ``eps``: the
     theorem is over the reals, but ``fl(s + d)`` rounds, so the realised
-    perturbation can exceed ``|d|`` by up to half an ulp and assuming on the
-    drawn value makes the test flaky for non-mathematical reasons.
+    perturbation can exceed ``|d|`` by up to half an ulp, enough to reach a small radius.
     """
     n = len(scores)
     assume(k < n)
@@ -519,6 +510,8 @@ def test_a_perturbation_can_preserve_membership_while_reordering_it() -> None:
 # ---------------------------------------------------------------------------
 # Which of the two radii binds, and when neither does
 # ---------------------------------------------------------------------------
+
+
 # Neither radius dominates: m_min^top minimises over the gaps strictly inside the
 # top-k, m_k is the boundary gap, and those sets are disjoint. A certificate
 # quoted without saying which invariant it certifies is ambiguous, so both are
@@ -550,9 +543,11 @@ def test_an_undefined_certificate_binds_nothing_and_has_no_joint_radius() -> Non
 
 
 def test_a_vacuous_order_radius_leaves_the_set_radius_as_the_joint_one() -> None:
-    """At k = 1 the order radius is undefined by G16, since minimising over the
-    gaps strictly inside a one-element top-k is an empty minimum. NaN there must
-    not poison the joint radius into NaN as well."""
+    """At k = 1 the order radius is NaN and the joint radius is the set radius.
+
+    G16 leaves the order radius undefined at k = 1 because the minimum over the
+    interior gaps is empty. That NaN must not propagate into the joint radius.
+    """
     cert = certified_radius((1.0, 0.5, 0.2), 1)
     assert cert.defined
     assert math.isnan(cert.order_radius), "the premise: no interior gap exists at k = 1"
@@ -561,13 +556,11 @@ def test_a_vacuous_order_radius_leaves_the_set_radius_as_the_joint_one() -> None
 
 
 def test_a_perturbation_of_exactly_half_the_margin_ties_rather_than_reversing() -> None:
-    """The last guard in flip_witness, and A1's hinge.
+    """At exactly m/2 the pair ties, so flip_witness returns no witness (A1).
 
-    At exactly ``eps = m/2`` the two scores meet: dyadic values make the
-    construction exact, so the pair becomes equal rather than crossing. A witness
-    is only a witness if it reverses the pair, so the honest answer is that none
-    exists, not a "witness" whose perturbation leaves a tie the tie-break would
-    then decide.
+    Dyadic scores make the construction exact, so at ``eps = m/2`` the two
+    scores meet rather than cross. No witness is returned there or for an excess
+    lost to rounding; the default excess produces one that reverses the pair.
     """
     scores = (0.5, 0.25, 0.1)  # dyadic, so m/2 lands on a representable value
     order = (0, 1, 2)
@@ -588,11 +581,11 @@ def test_a_perturbation_of_exactly_half_the_margin_ties_rather_than_reversing() 
 # ---------------------------------------------------------------------------
 # The degenerate readings the diagnostics have to survive
 # ---------------------------------------------------------------------------
-# Each of these is a ratio whose denominator can legitimately be zero: an edit
-# that moved nothing, or one that moved only tokens the two vocabularies do not
-# share. They are constructed rather than provoked because the interesting part
-# is what the accessor returns, not which corpus edit happens to produce it --
-# and a corpus edit that produces one is exactly what nobody would think to try.
+
+# Each of these is a ratio whose denominator can be zero: an edit that moved
+# nothing, or one that moved only tokens the two vocabularies do not share.
+# The records are constructed directly because the accessor's return value is
+# under test, not the corpus edit that produces it.
 _EMPTY_ALIGNMENT = Alignment(tokens=(), in_before=(), in_after=(), idf_before=(), idf_after=())
 
 
@@ -609,10 +602,11 @@ def _idf_shift(linf: float, linf_shared: float) -> IdfPerturbation:
 
 
 def test_a_shift_confined_to_churned_tokens_reports_infinite_looseness() -> None:
-    """Nothing the two vocabularies share moved, so the section 4.2 bound is
-    driven entirely by tokens that existed on one side only. There is no ratio
-    to report, and reporting 1.0 -- the value that means "as tight as it gets" --
-    would invert the reading.
+    """A shift confined to churned tokens reports infinite looseness.
+
+    No shared token moved, so the section 4.2 bound is driven by tokens on one
+    side only. Reporting 1.0, the value for a maximally tight bound, would
+    invert the reading.
     """
     assert _idf_shift(linf=0.25, linf_shared=0.0).looseness == float("inf")
 
@@ -628,18 +622,20 @@ def test_a_stable_vocabulary_gives_a_looseness_of_one() -> None:
 
 
 def test_a_bound_of_zero_reports_no_tightness_rather_than_dividing_by_it() -> None:
-    """An edit whose three terms all vanish bounds an observed shift of zero.
-    The bound is attained, but "attained" is not a ratio here, and 0/0 has to
-    resolve to a number a percentile summary can hold.
+    """A bound of zero reports a tightness of zero rather than dividing by it.
+
+    All three terms vanish and the observed shift is zero, so 0/0 must resolve
+    to a number a percentile summary can hold.
     """
     assert ThreeTermBound(local=0.0, glob=0.0, interaction=0.0, observed=0.0).tightness == 0.0
 
 
 def test_the_churn_fraction_splits_a_movement_into_shared_and_churned_parts() -> None:
-    """The three parts are supported on disjoint coordinate sets, so the squared
-    movement partitions exactly. The fraction is what turns that identity into a
-    reading: how much of this document's shift was tokens changing weight, and
-    how much was tokens appearing or disappearing.
+    """The churn fraction is the share of squared movement on churned tokens.
+
+    The three parts are supported on disjoint coordinate sets, so the squared
+    movement partitions exactly. The fraction separates tokens changing weight
+    from tokens appearing or disappearing.
     """
     # 0.6^2 + 0.6^2 + 0.52^2 = 0.9904 = 0.99518...^2, so Pythagoras holds.
     moved = VectorPerturbation(
@@ -656,9 +652,10 @@ def test_the_churn_fraction_splits_a_movement_into_shared_and_churned_parts() ->
 
 
 def test_a_document_that_did_not_move_has_no_churn_fraction() -> None:
-    """Churn is measured against the observed shift, so a document the edit left
-    alone divides by zero. Zero is the truthful answer: none of a movement of
-    nothing was due to vocabulary churn.
+    """A document the edit did not move has a churn fraction of zero.
+
+    Churn is measured against the observed shift, so this case divides by zero.
+    Zero is returned because none of a zero movement is due to churn.
     """
     still = VectorPerturbation(
         doc_id="d0",
@@ -676,13 +673,11 @@ def test_a_document_that_did_not_move_has_no_churn_fraction() -> None:
 # Vocabulary churn: what a token absent from one side is worth
 # ---------------------------------------------------------------------------
 def test_a_token_missing_from_a_model_contributes_zero_idf_not_one() -> None:
-    """`align_models` places both models over their union vocabulary, and a
-    token one side never saw has no idf there.
+    """A token absent from one model has an idf of 0.0 there, not 1.0.
 
-    Zero rather than one matters because the smoothed idf floor *is* 1.0: a
-    token present in every document scores exactly 1.0, so treating "absent" as
-    1.0 makes a vanished token indistinguishable from a ubiquitous one and
-    silently shrinks every delta that G5's looseness is measured from.
+    `align_models` places both models over the union vocabulary. The smoothed
+    idf floor is exactly 1.0, so treating absence as 1.0 would make a vanished
+    token indistinguishable from a ubiquitous one and shrink every G5 delta.
     """
     before = TfidfVectoriser().fit([["alpha", "beta"], ["alpha"]])
     after = TfidfVectoriser().fit([["gamma", "delta"], ["gamma"]])
@@ -700,9 +695,10 @@ def test_a_token_missing_from_a_model_contributes_zero_idf_not_one() -> None:
 
 
 def test_a_wholly_replaced_vocabulary_has_no_shared_movement_at_all() -> None:
-    """`linf_shared` is the maximum over the shared tokens, and there are none.
-    Zero is the truthful answer, and it is what makes `looseness` infinite --
-    the reading G5 asks for, that the bound is driven entirely by churn."""
+    """With no shared tokens, `linf_shared` is zero and `looseness` is infinite.
+
+    G5 reads an infinite looseness as a bound driven entirely by churn.
+    """
     before = TfidfVectoriser().fit([["alpha", "beta"], ["alpha"]])
     after = TfidfVectoriser().fit([["gamma", "delta"], ["gamma"]])
 
@@ -718,17 +714,18 @@ def test_a_wholly_replaced_vocabulary_has_no_shared_movement_at_all() -> None:
 # ---------------------------------------------------------------------------
 # The two tolerance comparisons, at the tolerance
 # ---------------------------------------------------------------------------
-# Both `holds` and `pythagoras_holds` are one-sided assertions everywhere else in
-# this file, which is what let mutation testing move the slack around freely:
-# the tolerance could be divided by the scale instead of multiplied, or lose the
-# `max(1.0, ...)` floor, with every existing assertion still passing.
+
+
+# `holds` and `pythagoras_holds` are checked here at the tolerance itself, from
+# both sides. The one-sided assertions elsewhere in this file also pass with a
+# tolerance divided by the scale instead of multiplied, or without the
+# `max(1.0, ...)` floor.
 def _three_term(local: float, glob: float, interaction: float, observed: float) -> ThreeTermBound:
     return ThreeTermBound(local=local, glob=glob, interaction=interaction, observed=observed)
 
 
 def test_the_three_term_bound_admits_its_slack_exactly_and_no_further() -> None:
-    """The slack covers rounding incurred while evaluating the bound, and none
-    in the mathematics."""
+    """The slack covers rounding in evaluating the bound and nothing further."""
     total = 4.0
     limit = total * (1.0 + 1e-12) + 1e-15
     at = _three_term(local=1.0, glob=2.0, interaction=1.0, observed=limit)
@@ -739,9 +736,11 @@ def test_the_three_term_bound_admits_its_slack_exactly_and_no_further() -> None:
 
 
 def test_the_three_term_tightness_is_the_ratio_even_below_one() -> None:
-    """Guarded on `total > 0.0`. Raising that threshold to 1.0 would report a
-    tightness of zero for every bound smaller than one -- which is most of them,
-    since these are norms of small perturbations."""
+    """Tightness is guarded on `total > 0.0`, not on `total > 1.0`.
+
+    A threshold of 1.0 would report zero tightness for every bound below one,
+    which covers most norms of small perturbations.
+    """
     assert _three_term(0.25, 0.25, 0.0, observed=0.25).tightness == 0.5
     assert _three_term(2.0, 1.0, 1.0, observed=2.0).tightness == 0.5
 
@@ -758,12 +757,11 @@ def _pythagoras(observed: float, shared: float, gained: float, lost: float) -> V
 
 
 def test_the_pythagorean_tolerance_has_a_floor_below_one() -> None:
-    """`1e-9 * max(1.0, lhs)`. Without the floor a small movement gets a
-    proportionally tiny tolerance, and the identity -- which is exact in the
-    reals and only approximate in binary64 -- starts failing on sound data.
+    """The Pythagorean tolerance is `1e-9 * max(1.0, lhs)`, floored at 1e-9.
 
-    2**-15 is used so its square is exact and the discrepancy below is the
-    number written here rather than one rounding away from it.
+    Without the floor a small movement gets a proportionally tiny tolerance and
+    the identity, exact in the reals and approximate in binary64, fails on sound
+    data. 2**-15 squares exactly, so the discrepancy here is exactly 2**-30.
     """
     # observed = 0, so lhs = 0 and the floor is doing all the work.
     tiny = _pythagoras(observed=0.0, shared=0.0, gained=2.0**-15, lost=0.0)
@@ -772,8 +770,10 @@ def test_the_pythagorean_tolerance_has_a_floor_below_one() -> None:
 
 
 def test_the_pythagorean_tolerance_scales_with_the_movement_above_one() -> None:
-    """Above the floor it is proportional, so a large movement gets a large
-    tolerance. Dividing by the scale instead of multiplying inverts that."""
+    """Above the floor the tolerance is proportional to the movement.
+
+    Dividing by the scale instead of multiplying inverts that.
+    """
     big = _pythagoras(observed=2.0, shared=2.0, gained=2.0**-15, lost=0.0)
     # lhs = 4, rhs = 4 + 2**-30, tolerance 1e-9 * 4.
     assert 2.0**-30 < 1e-9 * 4.0
@@ -782,8 +782,10 @@ def test_the_pythagorean_tolerance_scales_with_the_movement_above_one() -> None:
 
 
 def test_a_broken_pythagorean_split_is_reported_as_broken() -> None:
-    """The guard's purpose: a misaligned index breaks this identity long before
-    it breaks any inequality."""
+    """A split that violates the identity reports `pythagoras_holds` as False.
+
+    A misaligned index breaks the identity long before it breaks any inequality.
+    """
     assert not _pythagoras(observed=1.0, shared=1.0, gained=1.0, lost=1.0).pythagoras_holds
 
 
@@ -791,10 +793,11 @@ def test_a_broken_pythagorean_split_is_reported_as_broken() -> None:
 # Recovering tf across a churned vocabulary
 # ---------------------------------------------------------------------------
 def test_a_token_only_one_model_knows_contributes_no_term_frequency() -> None:
-    """`w / idf` recovers tf, and idf is 0.0 for a token the model never saw, so
-    that division is guarded. Both the guard's threshold and its fallback matter:
-    the smoothed idf floor is exactly 1.0, so comparing against 1.0 instead of
-    0.0 would zero the tf of every token appearing in every document.
+    """A token known to only one model contributes no term frequency.
+
+    `w / idf` recovers tf and idf is 0.0 for a token the model never saw, so the
+    division is guarded at 0.0. The smoothed idf floor is exactly 1.0, so a
+    guard at 1.0 would zero the tf of every token appearing in every document.
     """
     before = TfidfVectoriser().fit([["alpha", "beta"], ["alpha", "gamma"]], ["d0", "d1"])
     after = TfidfVectoriser().fit([["alpha", "delta"], ["alpha", "gamma"]], ["d0", "d1"])
@@ -812,14 +815,11 @@ def test_a_token_only_one_model_knows_contributes_no_term_frequency() -> None:
 
 
 def test_a_ubiquitous_token_keeps_its_term_frequency() -> None:
-    """The smoothed idf floor is exactly 1.0, reached by a token in every
-    document. `w / idf` is guarded against a zero divisor; guarding against 1.0
-    instead would zero the tf of precisely those tokens, and the global term of
-    the section 4.2 bound is computed from ``||tf||_2``.
+    """A token in every document keeps its tf under the `w / idf` guard.
 
-    Two documents, vocabulary {alpha, beta}. In `d0` both tokens appear once, so
-    ``tf = (1/2, 1/2)`` and ``||tf||_2 = sqrt(1/2)``. Dropping alpha would leave
-    ``1/2``, which is a different number by a factor of sqrt(2).
+    The smoothed idf floor is exactly 1.0, so guarding at 1.0 instead of 0.0
+    would zero the tf of such tokens, and the global term uses ``||tf||_2``. In
+    `d0`, ``tf = (1/2, 1/2)`` gives ``sqrt(1/2)``; dropping alpha gives ``1/2``.
     """
     before = TfidfVectoriser().fit([["alpha", "beta"], ["alpha"]], ["d0", "d1"])
     after = TfidfVectoriser().fit([["alpha", "beta"], ["alpha", "beta"]], ["d0", "d1"])
@@ -836,16 +836,11 @@ def test_a_ubiquitous_token_keeps_its_term_frequency() -> None:
 
 
 def test_a_token_absent_before_starts_from_zero_term_frequency() -> None:
-    """The fallback for a token whose idf is zero on one side, which is what
-    "the model never saw it" means after alignment.
+    """A token absent before the edit starts from a term frequency of zero.
 
-    Zero is the only value that makes ``delta_tf`` the genuine movement. One
-    would say the document used to be entirely that token, and the local term of
-    the bound is ``||delta_tf||_2 * ||idf||_inf``.
-
-    Deliberately asymmetric -- gamma arrives and nothing leaves -- because a
-    corpus edit that adds and removes one token each cancels the error out and
-    leaves the norm unchanged.
+    Zero makes ``delta_tf`` the genuine movement; a start of one gives a wrong local
+    term ``||delta_tf||_2 * ||idf||_inf``. The edit is asymmetric, gamma arriving and
+    nothing leaving, because a paired add and remove cancels the error out.
     """
     before = TfidfVectoriser().fit([["alpha", "beta"], ["alpha"]], ["d0", "d1"])
     after = TfidfVectoriser().fit([["alpha", "beta", "gamma"], ["alpha"]], ["d0", "d1"])
@@ -866,6 +861,7 @@ def test_a_token_absent_before_starts_from_zero_term_frequency() -> None:
 # ---------------------------------------------------------------------------
 # corpus_edits: every edit refuses what would break the ranking
 # ---------------------------------------------------------------------------
+
 # A `Corpus` is `(ids, documents)` and each edit returns the new corpus with an
 # `EditRecord`. The record is what a manifest carries, so an edit that succeeded
 # without describing itself would leave a run unreproducible.
@@ -880,9 +876,11 @@ _CORPUS = (("d0", "d1"), (["a", "b"], ["a"]))
     ],
 )
 def test_an_edit_that_would_duplicate_an_identifier_is_refused(label: str, edit: object) -> None:
-    """Refused here rather than surfacing later as a non-deterministic ordering.
-    The final tie-break key is the identifier, so a duplicate makes the sort
-    order undetermined rather than merely surprising."""
+    """An edit onto an existing identifier raises rather than succeeding.
+
+    The final tie-break key is the identifier, so a duplicate leaves the sort
+    order undetermined.
+    """
     with pytest.raises(ValueError, match="already exists"):
         edit()  # type: ignore[operator]
 
@@ -896,16 +894,20 @@ def test_an_edit_that_would_duplicate_an_identifier_is_refused(label: str, edit:
     ],
 )
 def test_an_edit_naming_an_absent_document_is_refused(label: str, edit: object) -> None:
-    """A `KeyError` naming the identifier, so a sweep over a stale id list says
-    which one it could not find rather than appending a document nobody asked
-    for."""
+    """An edit naming an absent document raises a `KeyError` with the id.
+
+    A sweep over a stale id list then reports which id was not found instead of
+    appending a document.
+    """
     with pytest.raises(KeyError, match="no document with id 'zz'"):
         edit()  # type: ignore[operator]
 
 
 def test_adding_and_removing_change_the_corpus_size_in_opposite_directions() -> None:
-    """`N` is in the idf of every term, so an edit that changed it silently
-    would move every weight in the corpus."""
+    """Adding grows and removing shrinks the corpus by one document.
+
+    `N` is in the idf of every term, so a silent size change moves every weight.
+    """
     grown, _ = add_document(_CORPUS, "d2", ["c"])
     shrunk, _ = remove_document(_CORPUS, "d0")
 
@@ -914,8 +916,11 @@ def test_adding_and_removing_change_the_corpus_size_in_opposite_directions() -> 
 
 
 def test_editing_a_document_leaves_the_corpus_size_alone() -> None:
-    """The perturbation that isolates a change in the document-frequency
-    distribution from a change in `N`, which section 4.1 separates."""
+    """Editing a document leaves the corpus size unchanged.
+
+    This isolates a change in the document-frequency distribution from a change
+    in `N`, which section 4.1 separates.
+    """
     edited, _ = edit_document(_CORPUS, "d0", ["z"])
 
     assert edited[0] == _CORPUS[0]
@@ -924,15 +929,16 @@ def test_editing_a_document_leaves_the_corpus_size_alone() -> None:
 
 
 def test_a_duplicate_scores_identically_and_so_manufactures_an_exact_tie() -> None:
-    """The most useful perturbation for the tie-break analysis: the copy scores
-    identically against every query, so membership at the boundary is decided
-    purely by the tie-break."""
+    """A duplicate is identical to its source, feature for feature.
+
+    The copy scores identically against every query, so membership at the
+    boundary is decided purely by the tie-break.
+    """
     copied, _ = duplicate_document(_CORPUS, "d0", "copy")
 
     assert copied[0] == ("d0", "d1", "copy")
     # The copy is stored as a tuple while the original arrived as a list, so the
-    # comparison is on contents. Worth knowing: an identity or type-sensitive
-    # check here would fail on a copy that is correct.
+    # comparison is on contents.
     assert tuple(copied[1][-1]) == tuple(copied[1][0]), (
         "the copy is the original, feature for feature"
     )
@@ -948,15 +954,20 @@ def test_a_duplicate_scores_identically_and_so_manufactures_an_exact_tie() -> No
     ],
 )
 def test_every_edit_describes_itself_for_the_manifest(edit: object, kind: EditKind) -> None:
-    """The record travels into the run manifest, so an experiment can say which
-    perturbation produced a number without re-deriving it from the corpora."""
+    """Every edit record carries its kind for the run manifest.
+
+    The manifest then says which perturbation produced a number without
+    re-deriving it from the corpora.
+    """
     _, record = edit()  # type: ignore[operator]
     assert record.kind is kind
 
 
 def test_an_edit_leaves_the_original_corpus_untouched() -> None:
-    """They return a new corpus rather than mutating, so a sweep can apply many
-    edits to one baseline without them accumulating."""
+    """Edits return a new corpus and leave the baseline unchanged.
+
+    A sweep can then apply many edits to one baseline without accumulation.
+    """
     before = (_CORPUS[0], tuple(tuple(d) for d in _CORPUS[1]))
     add_document(_CORPUS, "d2", ["c"])
     remove_document(_CORPUS, "d0")
@@ -975,13 +986,11 @@ def test_an_edit_leaves_the_original_corpus_untouched() -> None:
     ],
 )
 def test_the_record_reports_the_corpus_it_came_with(label: str, edit: object, delta: int) -> None:
-    """`n_before` and `n_after` are read off the record, not recomputed, and
-    section 4.2's bounds are stated in terms of both: `N` sits inside the idf of
-    every term, so an edit that misreported the direction of the size change
-    would invert the bound rather than loosen it.
+    """The record carries `n_before` and `n_after` with the correct direction.
 
-    `changes_corpus_size` cannot catch that on its own -- it asks only whether
-    the two differ, which is true whichever way round they are.
+    `N` sits inside the idf of every term, so a misreported direction would
+    invert the section 4.2 bound. `changes_corpus_size` only asks whether the
+    two differ, so it cannot catch the direction on its own.
     """
     (ids, _), record = edit()  # type: ignore[operator]
 
@@ -991,8 +1000,11 @@ def test_the_record_reports_the_corpus_it_came_with(label: str, edit: object, de
 
 
 def test_an_edit_that_leaves_the_size_alone_says_so_rather_than_omitting_it() -> None:
-    """The `delta == 0` row above, stated on its own because it is the case
-    section 4.1 isolates: with `N` fixed, any idf movement comes from `df`."""
+    """An edit that keeps the size reports equal `n_before` and `n_after`.
+
+    With `N` fixed, any idf movement comes from `df`, the case section 4.1
+    isolates.
+    """
     _, record = edit_document(_CORPUS, "d0", ["z"])
 
     assert record.n_before == record.n_after == len(_CORPUS[0])
@@ -1000,14 +1012,11 @@ def test_an_edit_that_leaves_the_size_alone_says_so_rather_than_omitting_it() ->
 
 
 def test_a_discrepancy_exactly_on_the_tolerance_is_accepted() -> None:
-    """`<=`, not `<`. The identity is exact in the reals and approximate only by
-    rounding, so a discrepancy that lands precisely on the permitted bound is
-    sound data at the edge of the allowance, not data outside it.
+    """A discrepancy exactly on the tolerance is accepted: `<=`, not `<`.
 
     `sqrt(1e-9)` squares back to exactly `1e-9` in binary64, so the boundary is
-    reachable rather than a limit that can only be approached: with
-    `observed = 0` the left side is zero and the tolerance is the floor `1e-9`,
-    which the right side then equals to the last bit.
+    reachable: with `observed = 0` the left side is zero, the tolerance is the
+    floor `1e-9`, and the right side equals it to the last bit.
     """
     at_the_edge = _pythagoras(observed=0.0, shared=math.sqrt(1e-9), gained=0.0, lost=0.0)
 
@@ -1016,8 +1025,7 @@ def test_a_discrepancy_exactly_on_the_tolerance_is_accepted() -> None:
 
 
 def test_a_discrepancy_one_ulp_past_the_tolerance_is_refused() -> None:
-    """The other side of the same comparison, one representable step away, so
-    the boundary above is shown to be the boundary rather than a wide margin."""
+    """A discrepancy one representable step past the tolerance is refused."""
     just_over = math.nextafter(math.sqrt(1e-9), math.inf)
     outside = _pythagoras(observed=0.0, shared=just_over, gained=0.0, lost=0.0)
 

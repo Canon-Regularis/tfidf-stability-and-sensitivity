@@ -3,8 +3,8 @@
 Companion to README §4.4 and §7.2/7.3.
 
 **The question.** Under a bounded perturbation of the scores, when does the
-top-k set survive? §4.4 answers with a sufficient condition. This page records
-what was measured, and the two ways that answer is easy to misread.
+top-k set survive? §4.4 answers with a sufficient condition. This page gives
+the measurements and the two ways that answer is easy to misread.
 
 ## The certificate
 
@@ -66,10 +66,10 @@ wrong summary: it would reward a certificate that always said "no".
 - **Sound**: `certified_changed` must be zero. Any other value falsifies §4.4;
   it is a bug or a broken proof, never a statistic. `scripts/run_stability_profile.py`
   **exits non-zero** if it is non-zero, and CI runs it on every push.
-- **Conservative**: 51.1% of *uncertified* cases were unchanged anyway. Reporting
-  this is what stops "not certified" being read as "will break".
+- **Conservative**: 51.1% of *uncertified* cases are unchanged anyway. Reporting
+  this prevents "not certified" being read as "will break".
 
-One subtlety decides whether this is a theorem check or a flaky annoyance: the
+To be a theorem check and not a flaky test, the
 audit compares the **realised** delta rather than the drawn one. `fl(s + d)`
 rounds, so actual movement can exceed `|d|` by half an ulp, and the theorem is
 about the movement that happened.
@@ -80,23 +80,24 @@ Queries with `m_k = 0` are **excluded** from the transition curve and counted
 separately. At an exact tie no perturbation is needed to change the outcome; the
 result is decided entirely by the tie-break, which is A2's regime. Averaging
 them into an A1 curve would let a tie-break effect be read as a
-numerical-stability effect. G3 requires this exclusion for margin distributions;
-the same logic applies here, and `test_exact_tie_queries_are_excluded_from_the_a1_curve`
-enforces it.
+numerical-stability effect. Margin distributions differ: G3 counts exact ties
+there, and `P(m_k = 0)` is a headline statistic.
+`test_exact_tie_queries_are_excluded_from_the_a1_curve` enforces the exclusion
+here.
 
 ## Why numerical error is not the threat
 
 The measured arithmetic noise floor is `η ≈ 1.665e−16`, giving `τ_floor = 2η ≈
 3.3e−16`. The smallest strictly-positive score gap observed is `≈ 7e−10`.
 
-**Six orders of magnitude.** Numerical error never came close to closing a real
+**Six orders of magnitude.** Numerical error is far smaller than the smallest observed
 gap, so it cannot flip the ranking of two distinctly-scored documents. A1's
 "bounded perturbations" are therefore entirely about *semantic* perturbation:
 corpus edits, which produce `|Δs|` in the range 1e−4 to 1e−1, some thirteen
 orders of magnitude above the noise floor.
 
-This is a positive result for §6's design, and it is what makes A1 and A2 cleanly
-separable rather than two names for one effect. ([G23](spec_addenda.md#g23))
+This result supports §6's design and makes A1 and A2
+cleanly separable rather than two names for one effect. ([G23](spec_addenda.md#g23))
 
 ## Reproducing
 

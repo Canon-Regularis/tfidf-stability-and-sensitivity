@@ -1,4 +1,4 @@
-"""The deterministic ranking operator, margins and tie groups (section 2.3.1-2.3.3)."""
+"""Deterministic ranking operator, margins and tie groups (sections 2.3.1-2.3.3)."""
 
 from tfidf_stability.ranking.attributes import (
     DEFAULT_SPECS,

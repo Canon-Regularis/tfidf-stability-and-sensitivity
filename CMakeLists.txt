@@ -1,11 +1,11 @@
 # =============================================================================
 # tfidf-stability, top-level build.
-#
-# The native backend is an OPTIONAL accelerator. The normative implementation is
+# =============================================================================
+
+# The native backend is an optional accelerator. The normative implementation is
 # the pure-Python `reference` backend, which needs no compiler. Configure with
 # -DTFIDF_BUILD_NATIVE=OFF for a fully functional reference-only install on a
 # machine with no C++ toolchain.
-# =============================================================================
 cmake_minimum_required(VERSION 3.20)
 
 project(tfidf_stability

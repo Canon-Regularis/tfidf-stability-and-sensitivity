@@ -1,30 +1,9 @@
 #!/usr/bin/env python3
-"""The whole pipeline of README sections 2 and 3, on seven documents, in one file.
+"""The pipeline of README sections 2 and 3 on seven inline documents.
 
-A ranking is a list of documents together with the margins that say how far it
-stands from being a different list, and those margins are what sections 4.4 and
-4.5 reason about; a top-k printed without them is the artefact this repository
-argues is misleading.
-
-Seven inline documents are enough to contain both regimes the paper separates,
-side by side in a single ranking:
-
-* a boundary with a small but strictly positive margin, which certifies a
-  tolerance: any uniform perturbation below ``m_k / 2`` leaves the top-k set
-  alone (section 4.4, research question A1); and
-* a boundary with a margin of exactly zero, where the scores certify nothing and
-  membership is settled entirely by the deterministic tie-break, with no
-  numerical error involved (section 4.5, research question A2).
-
-The two co-occurring at this scale is why they are studied separately rather than
-as one notion of "stability", and why no dataset is needed to see the phenomenon.
-
-The run also prints every intermediate quantity section 1.2 requires (tf, df,
-idf, weight, norm) for one document.
-
-Nothing is loaded from disk. Run it with::
-
-    python examples/minimal_corpus_demo.py
+The ranking shows a positive boundary margin (A1, section 4.4) beside a zero margin
+settled by the tie-break (A2, section 4.5). Run with ``python examples/minimal_corpus_demo.py``.
+Rationale: docs/engineering_notes.md#minimal-corpus-demo
 """
 
 from __future__ import annotations
@@ -89,11 +68,10 @@ CORPUS: Final[tuple[dict[str, Any], ...]] = (
         "rating_count": 4,
         "engagement": 2,
     },
-    # The last three share no term with the query and score exactly 0, the source
-    # of the exact-tie block; short documents with no in-vocabulary overlap are
-    # the common case in real catalogues. Their attributes disagree: popularity,
-    # identifier and engagement each induce a different order on the three, so the
-    # block exhibits section 4.5 rather than merely permitting it.
+    # The last three share no term with the query and score exactly 0, which forms
+    # the exact-tie block; short documents with no query term in the vocabulary are
+    # common in real catalogues. Popularity, identifier and engagement each order the three
+    # differently, so the block exhibits section 4.5 rather than only permitting it.
     {
         "doc_id": "d5",
         "text": "Ranking documents by cosine similarity scores",
@@ -200,8 +178,8 @@ def print_vocabulary(model: TfidfModel) -> None:
         "constant, so no term is ever annihilated -- not even at df = N."
     )
 
-    # log is the one transcendental in the pipeline and IEEE-754 leaves it free to
-    # round however the libm likes, so the disagreement is measured here.
+    # log is the one transcendental in the pipeline and IEEE-754 leaves its rounding
+    # to the libm, so the disagreement is measured here.
     disagree = [
         df
         for df in range(N + 1)
@@ -323,7 +301,7 @@ def print_reading(model: TfidfModel, rankings: dict[str, Ranking]) -> None:
     )
 
     # The other regime, in the same ranking: an exact tie is the absence of a
-    # margin, and no amount of numerical care recovers one.
+    # margin, and no numerical precision recovers one.
     lowest = ranking.sorted_scores[-1]
     tied = [d for d in range(model.n_documents) if ranking.scores[d] == lowest]
     if len(tied) > 1:

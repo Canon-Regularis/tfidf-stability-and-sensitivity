@@ -1,13 +1,8 @@
 """Model serialisation: round-trip fidelity and byte determinism.
 
-Round-trip fidelity: a loaded model must be bit-identical to the saved one.
-Everything downstream compares floats bitwise, so a format that lost one ulp
-would break every differential test while looking fine.
-
-Byte determinism: saving the same model twice must produce identical bytes.
-Hence the hand-rolled container in place of ``numpy.savez``: a zip embeds a
-per-member modification timestamp, so two saves of one model differ and the
-reproducibility snapshot could not exist.
+A loaded model must be bit-identical to the saved one, and two saves of one
+model must give identical bytes; the container is hand-rolled because a zip
+embeds a per-member timestamp. Rationale: docs/engineering_notes.md#tfsx-container
 """
 
 from __future__ import annotations
@@ -78,7 +73,7 @@ def test_round_trip_is_bit_identical(mini_model, tmp_path) -> None:  # type: ign
 
 
 def test_the_model_digest_survives_a_round_trip(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """The strongest single check: the digest covers every weight bitwise."""
+    """The digest, which covers every weight bitwise, survives a round trip."""
     path = tmp_path / "model.tfsx"
     save_model(mini_model, path)
     assert load_model(path).digest() == mini_model.digest()
@@ -87,8 +82,10 @@ def test_the_model_digest_survives_a_round_trip(mini_model, tmp_path) -> None:  
 
 @pytest.mark.parametrize("policy", list(Reduction))
 def test_the_reduction_policy_round_trips(mini_features, policy, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """The policy is part of the model's identity: the same corpus under a
-    different policy has different norms and is a different model."""
+    """The reduction policy round-trips as part of the model's identity.
+
+    The same corpus under a different policy has different norms.
+    """
     model = TfidfVectoriser(reduction=policy).fit(list(mini_features))
     path = tmp_path / f"{policy.value}.tfsx"
     save_model(model, path)
@@ -97,8 +94,10 @@ def test_the_reduction_policy_round_trips(mini_features, policy, tmp_path) -> No
 
 @pytest.mark.parametrize("impl", list(LogImpl))
 def test_the_log_implementation_round_trips(mini_features, impl, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """G13: which logarithm produced the IDF is part of the provenance, because
-    the two differ in ~15% of entries."""
+    """The log implementation round-trips as part of the provenance.
+
+    G13: the two logarithms differ in about 15% of IDF entries.
+    """
     model = TfidfVectoriser(log_impl=impl).fit(list(mini_features))
     path = tmp_path / f"{impl.value}.tfsx"
     save_model(model, path)
@@ -106,8 +105,11 @@ def test_the_log_implementation_round_trips(mini_features, impl, tmp_path) -> No
 
 
 def test_a_zero_norm_document_round_trips(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """The mini corpus has one (all-stopword d5); an empty CSR row is the case
-    an off-by-one in the row boundaries would corrupt."""
+    """A zero-norm document round-trips as an empty CSR row.
+
+    The mini corpus has one (all-stopword d5); an empty row is the case an
+    off-by-one in the row boundaries corrupts.
+    """
     path = tmp_path / "model.tfsx"
     save_model(mini_model, path)
     restored = load_model(path)
@@ -119,8 +121,11 @@ def test_a_zero_norm_document_round_trips(mini_model, tmp_path) -> None:  # type
 # Byte determinism
 # ---------------------------------------------------------------------------
 def test_saving_twice_gives_identical_bytes(mini_model) -> None:  # type: ignore[no-untyped-def]
-    """The property ``numpy.savez`` cannot provide, and the reason for the
-    hand-rolled container: a zip stores a modification time per member."""
+    """Two saves of one model give identical bytes.
+
+    A zip stores a modification time per member, so ``numpy.savez`` cannot
+    provide this.
+    """
     assert model_bytes(mini_model) == model_bytes(mini_model)
 
 
@@ -170,11 +175,10 @@ def test_save_reports_provenance(mini_model, tmp_path) -> None:  # type: ignore[
 # Rejecting corrupt input
 # ---------------------------------------------------------------------------
 def test_a_truncated_file_is_rejected(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """This parser is the project's only reader of untrusted bytes.
+    """A truncated file raises rather than yielding a model.
 
-    Every length comes from the header and is checked against the file size
-    before any slice is taken, so a truncated file raises rather than yielding a
-    model assembled from adjacent bytes.
+    This parser is the only reader of untrusted bytes. Every length comes from
+    the header and is checked against the file size before any slice is taken.
     """
     path = tmp_path / "model.tfsx"
     save_model(mini_model, path, sidecar=False)
@@ -193,7 +197,7 @@ def test_bad_magic_is_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def
 
 
 def test_an_unsupported_format_version_is_rejected(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """A future file must fail loudly rather than be misread by an older parser."""
+    """A future format version fails loudly rather than being misread."""
     path = tmp_path / "future.tfsx"
     payload = bytearray(model_bytes(mini_model))
     struct.pack_into("<I", payload, len(MAGIC), FORMAT_VERSION + 99)
@@ -203,9 +207,11 @@ def test_an_unsupported_format_version_is_rejected(mini_model, tmp_path) -> None
 
 
 def test_a_newline_in_a_token_is_refused(mini_features) -> None:  # type: ignore[no-untyped-def]
-    """The token block is LF-separated, so a token containing LF makes the
-    encoding ambiguous. Normalisation strips control characters, so real text
-    cannot get here; the format refuses it without relying on that."""
+    """A token containing LF is refused: the token block is LF-separated.
+
+    Normalisation strips control characters, so real text cannot reach this;
+    the format refuses it without relying on that.
+    """
     model = TfidfVectoriser().fit([["ok"], ["also\nbad"]])
     with pytest.raises(TfsxFormatError, match="newline"):
         model_bytes(model)
@@ -228,12 +234,11 @@ def test_overwriting_replaces_cleanly(mini_model, mini_features, tmp_path) -> No
 
 
 def test_an_unknown_flag_bit_is_refused_rather_than_ignored(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """Only one flag is defined, and it selects the correctly-rounded logarithm.
+    """Only one flag is defined: it selects the correctly-rounded logarithm.
 
-    A future writer that sets a second bit is describing a model this build
-    cannot reconstruct. Masking the bit off would produce a plausible model
-    computed under the wrong assumption, which is the failure the whole container
-    format exists to prevent.
+    A future writer that sets a second bit describes a model this build cannot
+    reconstruct; masking the bit off would load a plausible model computed
+    under the wrong assumption.
     """
     payload = bytearray(model_bytes(mini_model))
     struct.pack_into("<I", payload, _FLAGS_OFFSET, _FLAG_MASK | (1 << 17))
@@ -246,49 +251,66 @@ def test_an_unknown_flag_bit_is_refused_rather_than_ignored(mini_model, tmp_path
 # ---------------------------------------------------------------------------
 # The two guards the container format cannot reach
 # ---------------------------------------------------------------------------
+
+
 # `_check_csr`'s length arms and `_decode_block`'s empty-block arms cannot be
 # provoked by a corrupt file: the header fixes every count, and a file whose
-# length disagrees with its header is rejected before the arrays are read. They
-# guard the direct caller instead, which is what `row()`, the reference scorer
-# and the native core rely on when they skip re-checking. Reaching them means
-# calling them, and the alternative -- deleting them -- would leave the assumption
-# unstated.
+# length disagrees with it is rejected first. `row()`, the reference scorer and
+# the native core rely on them without re-checking, so the tests call them.
 def test_an_indptr_of_the_wrong_length_is_rejected() -> None:
-    """One offset per row plus a final one. A short indptr makes the last row's
-    extent depend on whatever the array happens to end with."""
+    """A short indptr is rejected.
+
+    One offset per row plus a final one; a short indptr makes the last row's
+    extent depend on whatever the array ends with.
+    """
     with pytest.raises(TfsxFormatError, match=r"indptr has 2 entries; expected n_docs \+ 1 = 3"):
         _check_csr([0, 1], [0], [1.0], n_rows=2, n_cols=4)
 
 
 def test_a_weight_for_every_column_index_is_required() -> None:
-    """The two arrays are read independently with only their lengths fixed, so a
-    mismatch pairs a weight with the wrong column in every dot product."""
+    """Every column index needs a weight.
+
+    The two arrays are read independently with only their lengths fixed, so a
+    mismatch pairs a weight with the wrong column in every dot product.
+    """
     with pytest.raises(TfsxFormatError, match="1 weights for 2 column indices"):
         _check_csr([0, 2], [0, 1], [1.0], n_rows=1, n_cols=4)
 
 
 def test_a_canonical_matrix_passes_every_arm() -> None:
-    """The negative cases above only mean something if the positive one passes."""
+    """A canonical matrix passes every arm of ``_check_csr``.
+
+    This is the positive control for the rejection cases above.
+    """
     _check_csr([0, 2, 3], [0, 2, 1], [1.0, 2.0, 3.0], n_rows=2, n_cols=4)
 
 
 def test_an_empty_block_decodes_to_no_entries_rather_than_one_empty_string() -> None:
-    """Splitting an empty block yields one empty string, so a zero count has to
-    be settled before the split or an empty model would gain a phantom token."""
+    """An empty block decodes to no entries.
+
+    Splitting an empty block yields one empty string, so a zero count is
+    settled before the split; otherwise an empty model gains a phantom token.
+    """
     assert _decode_block(b"", 0, "token") == ()
 
 
 def test_a_non_empty_block_under_a_zero_count_is_rejected_rather_than_dropped() -> None:
-    """Those bytes cannot be reproduced on the way back out, so silently
-    discarding them would break the model-to-bytes bijection."""
+    """A non-empty block under a zero count is rejected.
+
+    Those bytes cannot be reproduced on the way back out, so discarding them
+    would break the model-to-bytes bijection.
+    """
     with pytest.raises(TfsxFormatError, match="count is 0 but the block holds"):
         _decode_block(b"orphan", 0, "token")
 
 
 def test_a_block_holding_the_wrong_number_of_entries_is_rejected() -> None:
-    """The header states the count and the block carries the bytes; the two are
-    written independently, so a file can satisfy every length check and still
-    decode to the wrong number of tokens."""
+    """A block with the wrong number of entries is rejected.
+
+    The header states the count and the block carries the bytes; the two are
+    written independently, so a file can pass every length check and still
+    decode to the wrong number of tokens.
+    """
     with pytest.raises(TfsxFormatError, match="expected 3 token entries, decoded 2"):
         _decode_block(b"a\nb", 3, "token")
 
@@ -296,19 +318,22 @@ def test_a_block_holding_the_wrong_number_of_entries_is_rejected() -> None:
 # ---------------------------------------------------------------------------
 # The header, field by field
 # ---------------------------------------------------------------------------
+
 # A .tfsx file is read by builds other than the one that wrote it, so the byte
-# layout and the exact rejection boundaries are the contract. Mutation testing
-# found the boundaries unpinned: `column < n_cols` could become `<=`, the
-# reserved-word check could accept a file with one of the two set, and the
-# correctly-rounded flag could move to a different bit, all with the suite green.
+# layout and the exact rejection boundaries are the contract: `column < n_cols`
+# rather than `<=`, both reserved words checked, and the correctly-rounded flag
+# at a fixed bit.
 _RESERVED_A, _RESERVED_B = 52, 56
 _REDUCTION_OFFSET = 32
 
 
 def test_the_correctly_rounded_flag_is_bit_zero(mini_model) -> None:  # type: ignore[no-untyped-def]
-    """The bit position is on-disk format. A build that moved it would write
-    files this one reads as "platform logarithm" -- a model that differs from the
-    normative one in about 15% of its idf entries, loaded without complaint."""
+    """The correctly-rounded flag is bit zero of the flags word.
+
+    The bit position is on-disk format. A build that moved it would write files
+    this one reads as "platform logarithm": a model that differs from the
+    normative one in about 15% of its idf entries, loaded without complaint.
+    """
     payload = model_bytes(mini_model)
     (flags,) = struct.unpack_from("<I", payload, _FLAGS_OFFSET)
     assert flags == 1
@@ -316,9 +341,12 @@ def test_the_correctly_rounded_flag_is_bit_zero(mini_model) -> None:  # type: ig
 
 
 def test_a_file_of_exactly_header_length_is_measured_not_dismissed(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """The guard is `len(data) < header_size`. At exactly the header size the
-    header is complete and readable, so the failure that follows names the real
-    problem -- the body is missing -- rather than blaming the header."""
+    """A file of exactly header length fails on the missing body.
+
+    The guard is `len(data) < header_size`. At exactly the header size the
+    header is complete, so the failure names the missing body rather than the
+    header.
+    """
     path = tmp_path / "headeronly.tfsx"
     path.write_bytes(model_bytes(mini_model)[:60])
     with pytest.raises(TfsxFormatError, match="describes exactly"):
@@ -336,10 +364,11 @@ def test_either_reserved_word_being_set_is_enough_to_refuse_the_file(
     offset: int,
     which: str,
 ) -> None:
-    """Both are checked, not just one. A reserved word carries meaning a future
-    version defines, so a file that sets one is describing something this build
-    cannot honour -- and with `and` in place of `or`, setting exactly one slipped
-    through."""
+    """Both reserved words are checked, not just one.
+
+    A reserved word carries meaning a future version defines, so a file that
+    sets either one describes something this build cannot honour.
+    """
     payload = bytearray(model_bytes(mini_model))
     struct.pack_into("<I", payload, offset, 0xABCD)
     path = tmp_path / f"reserved_{which}.tfsx"
@@ -349,8 +378,11 @@ def test_either_reserved_word_being_set_is_enough_to_refuse_the_file(
 
 
 def test_the_reduction_policy_is_rejected_one_past_the_last_one(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """`0 <= reduction < len(Reduction)`. The first invalid value is the count
-    itself, which is the one an off-by-one in a future writer produces."""
+    """The reduction code is rejected one past the last valid value.
+
+    `0 <= reduction < len(Reduction)`; the count itself is the value an
+    off-by-one in a future writer produces.
+    """
     payload = bytearray(model_bytes(mini_model))
     struct.pack_into("<I", payload, _REDUCTION_OFFSET, len(Reduction))
     path = tmp_path / "reduction.tfsx"
@@ -358,15 +390,18 @@ def test_the_reduction_policy_is_rejected_one_past_the_last_one(mini_model, tmp_
     with pytest.raises(TfsxFormatError, match="out of range"):
         load_model(path)
 
-    # And the last valid one is accepted, so the boundary is a boundary.
+    # The last valid value is accepted.
     struct.pack_into("<I", payload, _REDUCTION_OFFSET, len(Reduction) - 1)
     path.write_bytes(bytes(payload))
     assert load_model(path).matrix.n_rows == mini_model.matrix.n_rows
 
 
 def test_a_column_index_equal_to_the_vocabulary_size_is_out_of_range() -> None:
-    """Columns are 0-based, so `n_cols` is the first invalid one. It is also the
-    value an off-by-one produces, and it would index one past the idf array."""
+    """A column index equal to `n_cols` is out of range.
+
+    Columns are 0-based, so `n_cols` is the first invalid one; it is the value
+    an off-by-one produces, and it would index one past the idf array.
+    """
     with pytest.raises(TfsxFormatError, match=r"outside 0\.\.3"):
         _check_csr([0, 1], [4], [1.0], n_rows=1, n_cols=4)
     # One below is fine.
@@ -374,16 +409,22 @@ def test_a_column_index_equal_to_the_vocabulary_size_is_out_of_range() -> None:
 
 
 def test_a_row_that_repeats_a_column_is_not_strictly_increasing() -> None:
-    """Strict increase makes a row's support a set; a duplicate double-counts
-    that term in every dot product. Equal neighbours are the case a `<` in place
-    of `<=` lets through."""
+    """A row that repeats a column is rejected as not strictly increasing.
+
+    Strict increase makes a row's support a set; a duplicate double-counts that
+    term in every dot product. Equal neighbours are the case `<` in place of
+    `<=` lets through.
+    """
     with pytest.raises(TfsxFormatError, match="not strictly increasing: 1 then 1"):
         _check_csr([0, 2], [1, 1], [1.0, 2.0], n_rows=1, n_cols=4)
 
 
 def test_the_sidecar_is_written_unless_it_is_declined(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """The default carries the digests a manifest quotes, so silently dropping
-    it leaves a model whose provenance has to be recomputed to be checked."""
+    """The sidecar is written by default and omitted only when declined.
+
+    The default carries the digests a manifest quotes, so dropping it leaves a
+    model whose provenance has to be recomputed to be checked.
+    """
     with_sidecar = tmp_path / "a.tfsx"
     save_model(mini_model, with_sidecar)
     assert with_sidecar.with_suffix(".json").is_file()
@@ -394,27 +435,35 @@ def test_the_sidecar_is_written_unless_it_is_declined(mini_model, tmp_path) -> N
 
 
 def test_a_loaded_model_reports_no_discarded_terms(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """`n_discarded` counts what `max_features` dropped at fit time. It is not in
+    """A loaded model reports zero discarded terms.
+
+    `n_discarded` counts what `max_features` dropped at fit time. It is not in
     the file because it is not part of the model's identity, so a load reports
-    zero rather than inventing a count that would then travel into a manifest."""
+    zero rather than a count that would travel into a manifest.
+    """
     path = tmp_path / "model.tfsx"
     save_model(mini_model, path)
     assert load_model(path).vocabulary.n_discarded == 0
 
 
 def test_the_format_version_this_build_writes_is_one(mini_model) -> None:  # type: ignore[no-untyped-def]
-    """It is stamped into every file and compared on every read, so it is the
-    number another build's parser is matched against. Asserted both as the
-    constant and as the bytes actually written, since only the second is what
-    another build sees."""
+    """The format version this build writes is one.
+
+    It is stamped into every file and compared on every read. Asserted both as
+    the constant and as the bytes written, since only the second is what
+    another build sees.
+    """
     assert FORMAT_VERSION == 1
     (written,) = struct.unpack_from("<I", model_bytes(mini_model), len(MAGIC))
     assert written == FORMAT_VERSION
 
 
 def test_a_rejected_indptr_start_and_end_name_the_value_they_found() -> None:
-    """A format error is read by someone holding a file they cannot open. One
-    that quotes the wrong number sends them looking in the wrong place."""
+    """A rejected indptr start or end names the value found.
+
+    A format error is read by someone holding a file they cannot open; one
+    that quotes the wrong number points to the wrong place.
+    """
     with pytest.raises(TfsxFormatError, match="indptr must start at 0, got 1"):
         _check_csr([1, 2], [0, 1], [1.0, 2.0], n_rows=1, n_cols=4)
     with pytest.raises(TfsxFormatError, match="indptr ends at 9 but there are 2 indices"):
@@ -422,8 +471,11 @@ def test_a_rejected_indptr_start_and_end_name_the_value_they_found() -> None:
 
 
 def test_an_out_of_range_reduction_names_the_range_it_checked(mini_model, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """`0..len(Reduction) - 1`, computed from the enum rather than written down,
-    so the message stays right as policies are added."""
+    """An out-of-range reduction names the range checked.
+
+    `0..len(Reduction) - 1` is computed from the enum rather than written down,
+    so the message stays right as policies are added.
+    """
     payload = bytearray(model_bytes(mini_model))
     struct.pack_into("<I", payload, _REDUCTION_OFFSET, 99)
     path = tmp_path / "reduction99.tfsx"
@@ -433,10 +485,12 @@ def test_an_out_of_range_reduction_names_the_range_it_checked(mini_model, tmp_pa
 
 
 def test_a_descending_pair_is_reported_in_the_order_it_was_found() -> None:
-    """The duplicate case above cannot tell the two operands apart -- "1 then 1"
-    reads the same whichever index the message quotes. A descending pair can,
-    and getting the order backwards in a format diagnostic is how someone ends
-    up editing the wrong end of a file."""
+    """A descending pair is reported in the order found.
+
+    The duplicate case cannot tell the two operands apart: "1 then 1" reads the
+    same whichever index is quoted. A descending pair can, and a reversed
+    diagnostic points at the wrong end of the file.
+    """
     with pytest.raises(TfsxFormatError, match="not strictly increasing: 3 then 1"):
         _check_csr([0, 2], [3, 1], [1.0, 2.0], n_rows=1, n_cols=4)
 
@@ -444,11 +498,12 @@ def test_a_descending_pair_is_reported_in_the_order_it_was_found() -> None:
 # ---------------------------------------------------------------------------
 # Erroneous: the token block gets the same scrutiny as the document-id block
 # ---------------------------------------------------------------------------
-# `load_model` is, by its own docstring, the only parser here reading untrusted
-# input, and it validated the two identifier blocks unequally: `check_unique_ids`
-# on `doc_ids`, nothing on `tokens`. `Vocabulary` is frozen with no
-# `__post_init__`, so constructing one directly bypassed the `is_sorted` guard
-# that `build_vocabulary` runs.
+
+
+# `load_model` checks `doc_ids` for uniqueness and `tokens` for strict UTF-8
+# byte order. `Vocabulary` is frozen with no `__post_init__`, so a vocabulary
+# built directly skips the `is_sorted` check that `build_vocabulary` runs.
+# Rationale: docs/engineering_notes.md#tfsx-field-validation
 def _three_token_model() -> object:
     """A model whose vocabulary is short enough to locate inside the container.
 
@@ -476,17 +531,11 @@ def _flip_to_duplicate_a_token(payload: bytes) -> tuple[bytes, int]:
 
 
 def test_a_vocabulary_that_repeats_a_token_is_refused_rather_than_loaded() -> None:
-    """One byte, and every score afterwards is against the wrong column.
+    """A vocabulary that repeats a token is refused rather than loaded.
 
-    Measured before the guard existed, on the 301-byte container this builds:
-    flipping the ``b`` of ``ab`` gives the token block ``aa aa cc``, which
-    ``model_from_bytes`` accepted. ``_index`` is built by enumeration, so the
-    later ``aa`` wins and the token maps to column 1. The query ``["aa"]`` then
-    scored ``d0`` -- which contains "aa" twice -- at exactly 0.0, and ``d1``,
-    which contains no "aa" at all, at 0.707.
-
-    Nothing downstream would have caught it: the mutated container re-serialises
-    to itself, so the round-trip property the fuzz suite checks still holds.
+    Flipping the ``b`` of ``ab`` gives the token block ``aa aa cc``. ``_index``
+    is built by enumeration, so the later ``aa`` would take column 1, and the
+    mutated container re-serialises to itself, so a round trip cannot detect it.
     """
     payload = model_bytes(_three_token_model())
     mutated, at = _flip_to_duplicate_a_token(payload)
@@ -498,12 +547,11 @@ def test_a_vocabulary_that_repeats_a_token_is_refused_rather_than_loaded() -> No
 
 
 def test_a_vocabulary_merely_out_of_order_is_refused_too_not_only_a_repeated_one() -> None:
-    """Uniqueness is not the invariant; ascent is.
+    """A vocabulary merely out of order is refused, not only a repeated one.
 
-    A permuted block passes any uniqueness test while breaking the binary
-    searches in ``tf.py`` and the merge in ``align_models``, both of which are
-    correct only on a sorted vocabulary. This is why the guard checks the order
-    rather than reusing ``check_unique_ids`` a second time.
+    A permuted block passes any uniqueness test but breaks the ascending byte
+    order that ``Vocabulary.digest`` and the determinism guarantee rest on, so
+    the guard checks order rather than ``check_unique_ids``.
     """
     payload = model_bytes(_three_token_model())
     mutated = payload.replace(b"aa\nab\ncc", b"ab\naa\ncc", 1)
@@ -515,10 +563,10 @@ def test_a_vocabulary_merely_out_of_order_is_refused_too_not_only_a_repeated_one
 
 
 def test_the_document_id_block_was_already_guarded_which_is_the_asymmetry_closed() -> None:
-    """The contrast that makes the two tests above a fix rather than a new rule.
+    """A repeated document id is rejected, as a repeated token is.
 
-    The equivalent flip one block along -- turning ``d1`` into a second ``d0`` --
-    was always rejected. The parser was not lax; it was inconsistent.
+    The equivalent flip one block along turns ``d1`` into a second ``d0``; both
+    identifier blocks are checked.
     """
     payload = model_bytes(_three_token_model())
     mutated = payload.replace(b"d0\nd1\nd2", b"d0\nd0\nd2", 1)
@@ -530,7 +578,7 @@ def test_the_document_id_block_was_already_guarded_which_is_the_asymmetry_closed
 
 
 def test_an_untouched_container_still_loads_so_the_guard_admits_valid_files() -> None:
-    """The guard's other half: a check that rejects everything is not a check."""
+    """An untouched container loads, so the order check admits valid files."""
     model = _three_token_model()
     payload = model_bytes(model)
 
@@ -554,19 +602,11 @@ def _flip_idf(payload: bytes, model: object, to: float) -> bytes:
 
 
 def test_a_negative_idf_is_refused_rather_than_loaded() -> None:
-    """It cannot come from a fit, and it inverts the ranking if it is let in.
+    """A negative idf is refused rather than loaded.
 
-    Section 2.2 fixes ``idf(t) = log((1 + N) / (1 + df(t))) + 1`` and ``df <= N``
-    always, so the ratio is at least 1 and ``idf`` at least 1. A negative entry
-    is not a value this project can produce; it is a corrupt file.
-
-    The parser checked ``idf`` for finiteness and, unlike the two arrays beside
-    it, not for sign. Measured before the guard: flipping the eight bytes of
-    ``idf[0]`` to ``-5.0`` in a 301-byte container was accepted, and the query
-    ``["aa"]`` scored ``[-0.894, 0.0, -0.707]`` against a genuine
-    ``[+0.894, 0.0, +0.707]``. Every score is outside the ``[0, 1]`` that section
-    2.3 documents, and no error was raised on load, on scoring or on ranking --
-    ``ranker.py`` checks scores for finiteness but not for sign.
+    Section 2.2 fixes ``idf(t) = log((1 + N) / (1 + df(t))) + 1`` with
+    ``df <= N``, so a fitted ``idf`` is at least 1. A negative entry negates the
+    scores of queries on its term, and ``ranker.py`` checks only finiteness.
     """
     model = _three_token_model()
     payload = model_bytes(model)
@@ -578,12 +618,9 @@ def test_a_negative_idf_is_refused_rather_than_loaded() -> None:
 
 
 def test_the_weights_and_norms_were_already_guarded_which_is_the_asymmetry_closed() -> None:
-    """The contrast that makes the test above a fix rather than a new rule.
+    """A negative weight is refused, as a negative idf is.
 
-    ``check_non_negative`` was already applied to the weight and norm arrays. It
-    was the third array of the same kind that went unchecked, so the parser was
-    not lax -- it was inconsistent, the same shape as the token block against the
-    document-id block one field along.
+    ``check_non_negative`` applies to the weight, norm and idf arrays alike.
     """
     model = _three_token_model()
     payload = model_bytes(model)
@@ -597,13 +634,11 @@ def test_the_weights_and_norms_were_already_guarded_which_is_the_asymmetry_close
 
 
 def test_an_idf_of_exactly_one_is_admitted_because_a_full_df_term_produces_it() -> None:
-    """The guard's other half: the boundary a real fit reaches must still load.
+    """An idf of exactly one is admitted, since a term in every document has it.
 
-    A term appearing in every document has ``df == N``, so the ratio is exactly 1
-    and ``idf`` exactly ``1.0``. A guard rejecting that would refuse ordinary
-    corpora. ``cc`` is not in every document here, so the value is constructed
-    rather than fitted, which is the point -- the parser must accept the whole
-    legitimate range, not merely the values this fixture happens to produce.
+    A term with ``df == N`` has ratio exactly 1 and ``idf`` exactly ``1.0``.
+    No term is in every document here, so 1.0 is written into ``idf[0]``:
+    the parser accepts the whole legitimate range, not only fitted values.
     """
     model = _three_token_model()
     payload = model_bytes(model)
@@ -617,18 +652,16 @@ def test_an_idf_of_exactly_one_is_admitted_because_a_full_df_term_produces_it() 
 # ---------------------------------------------------------------------------
 # The integer arrays get the same scrutiny as the float ones
 # ---------------------------------------------------------------------------
-# `model_bytes` writes ten fields. Seven were validated -- the CSR triple, the
-# three float arrays, and both string blocks -- and the three int64 arrays
-# (`lengths`, `df`, `cf`) were not, so values no fit can produce loaded without
-# complaint. Same shape as the token block and the idf sign before them: a
-# sibling treated differently, in the one parser that reads untrusted input.
+
+
+# `model_bytes` writes ten fields and the parser checks each one: the CSR
+# triple, `idf` and `norms`, both string blocks, and `lengths`, `df` and `cf`,
+# the last three against bounds every fit satisfies.
 def _int_offsets(model: object) -> tuple[int, int, int]:
     """Byte offsets of `lengths`, `df` and `cf`, derived from the layout.
 
-    Computed rather than hard-coded, so a field added ahead of them moves these
-    with it. Searching the bytes for a value does not work here: several of
-    these arrays hold the same small integers, and a search finds whichever
-    comes first.
+    A byte search does not work here: several of these arrays hold the same
+    small integers. Computed offsets also move with a field added ahead of them.
     """
     n_docs = model.n_documents  # type: ignore[attr-defined]
     n_terms = len(model.vocabulary.tokens)  # type: ignore[attr-defined]
@@ -653,8 +686,8 @@ def _poke(payload: bytes, at: int, value: int) -> bytes:
 def test_a_document_frequency_outside_one_to_n_is_refused() -> None:
     """`1 <= df[t] <= N`, because a term reaches the vocabulary by appearing.
 
-    Zero would say the term is in the vocabulary and in no document; greater
-    than `N` would say it is in more documents than exist. Both were accepted.
+    Zero would place the term in the vocabulary and in no document; above `N`
+    would place it in more documents than exist.
     """
     model = _three_token_model()
     payload = model_bytes(model)
@@ -686,10 +719,9 @@ def test_the_document_frequency_at_its_upper_bound_is_accepted() -> None:
 def test_a_fitted_corpus_whose_term_is_in_every_document_round_trips() -> None:
     """The same boundary reached by fitting rather than by editing bytes.
 
-    The poke above shows the loader accepts `df == N`; this shows `df == N` is a
-    value the vectoriser emits for an ordinary corpus, from any common word that
-    survives stopword removal. Its IDF is exactly zero, so the round trip is
-    checked on the recorded counts rather than on the weight the term carries.
+    `df == N` is a value the vectoriser emits for an ordinary corpus, from any
+    common word that survives stopword removal. The round trip is checked on the
+    recorded counts.
     """
     model = TfidfVectoriser().fit([["aa", "bb"], ["aa", "cc"], ["aa", "dd"]], ["d0", "d1", "d2"])
     universal = model.vocabulary.tokens.index("aa")
@@ -725,12 +757,9 @@ def test_a_collection_frequency_below_its_document_frequency_is_refused() -> Non
 def test_a_length_below_the_row_it_describes_is_refused() -> None:
     """`lengths[i] >= nnz(row i)`, since each distinct term occurs at least once.
 
-    A lower bound and no more: the exact length cannot be recovered from the
-    container, because a term occurring three times and one occurring once are
-    one non-zero either way. Measured before the guard: `lengths[0]` moved from
-    3 to 7 was accepted and `intermediates(0)` published `count=5, tf=0.714`
-    against the genuine `count=2, tf=0.667`. That value is still accepted, and
-    the test says so rather than pretending otherwise.
+    A lower bound only: a term occurring three times and one occurring once are
+    one non-zero either way, so the exact length cannot be recovered from the
+    container and a length above the row's non-zero count is still accepted.
     """
     model = _three_token_model()
     payload = model_bytes(model)
@@ -750,7 +779,7 @@ def test_a_length_below_the_row_it_describes_is_refused() -> None:
 
 
 def test_an_untouched_container_still_loads_with_its_integer_arrays_intact() -> None:
-    """The guards' other half: three new checks that reject nothing valid."""
+    """An untouched container loads with its integer arrays intact."""
     model = _three_token_model()
 
     restored = model_from_bytes(model_bytes(model))
@@ -763,14 +792,17 @@ def test_an_untouched_container_still_loads_with_its_integer_arrays_intact() -> 
 # ---------------------------------------------------------------------------
 # The schema: an orphan module describing the container above
 # ---------------------------------------------------------------------------
-# `persistence/model.py` had no owning test file. It is the declared shape of a
-# `.tfsx` payload -- the thing `tfidf schema` prints and a reader of the format
-# consults -- so a drift between it and the writer would misdescribe every file
-# this project has produced.
+
+
+# `persistence/model.py` declares the shape of a `.tfsx` payload: what
+# `tfidf schema` prints and what a reader of the format consults. A mismatch
+# with the writer misdescribes every file the project produces.
 def test_the_schema_names_every_array_the_container_carries() -> None:
-    """Ten fields: three CSR arrays, four per-term or per-document vectors, and
-    the two string blocks. A field dropped here would leave a reader believing
-    the format is smaller than it is."""
+    """The schema names every field the container carries, in order.
+
+    Ten fields: three CSR arrays, five per-term or per-document vectors and two
+    string blocks. A dropped field would describe a smaller format.
+    """
     names = [f.name for f in MODEL_FIELDS]
 
     assert names == [
@@ -788,15 +820,20 @@ def test_the_schema_names_every_array_the_container_carries() -> None:
 
 
 def test_every_field_declares_a_type_the_container_actually_writes() -> None:
-    """The reader reaches for `struct` formats from these names, so a dtype the
-    writer never emits would be unimplementable."""
+    """Every field declares a dtype the container writes.
+
+    A reader derives `struct` formats from these names, so a dtype the writer
+    never emits would be unimplementable.
+    """
     assert {f.dtype for f in MODEL_FIELDS} == {"int32", "int64", "float64", "utf-8"}
 
 
 def test_the_csr_arrays_declare_the_lengths_the_format_check_enforces() -> None:
-    """`_check_csr` rejects an `indptr` that is not `n_docs + 1` long and
-    indices that do not match the values. The schema is where those lengths are
-    published, so the two have to agree in words as well as in behaviour."""
+    """The CSR arrays declare the lengths that `_check_csr` enforces.
+
+    `_check_csr` rejects an `indptr` that is not `n_docs + 1` long and indices
+    that do not match the values; the schema publishes those lengths in words.
+    """
     by_name = {f.name: f for f in MODEL_FIELDS}
 
     assert by_name["indptr"].length == "n_docs + 1"
@@ -805,9 +842,11 @@ def test_the_csr_arrays_declare_the_lengths_the_format_check_enforces() -> None:
 
 
 def test_the_per_term_and_per_document_lengths_are_declared_separately() -> None:
-    """Four vectors are sized by the vocabulary and three by the corpus. Getting
-    one wrong is exactly the mistake that reads a file with the arrays
-    transposed and produces a plausible model."""
+    """Per-term and per-document lengths are declared separately.
+
+    Four vectors are sized by the vocabulary and three by the corpus. One wrong
+    size reads a file with the arrays transposed and yields a plausible model.
+    """
     by_name = {f.name: f for f in MODEL_FIELDS}
 
     assert {by_name[n].length for n in ("idf", "df", "cf", "tokens")} == {"n_terms"}
@@ -815,15 +854,20 @@ def test_the_per_term_and_per_document_lengths_are_declared_separately() -> None
 
 
 def test_every_field_says_what_it_is_for() -> None:
-    """The purpose column is what makes the schema readable without the source.
-    An empty one would leave a field named and unexplained."""
+    """Every field states its purpose.
+
+    The purpose column makes the schema readable without the source.
+    """
     assert all(f.purpose for f in MODEL_FIELDS)
     assert all(len(f.purpose) > 5 for f in MODEL_FIELDS)
 
 
 def test_the_schema_renders_as_plain_data_for_the_manifest() -> None:
-    """`describe_schema` is what the CLI prints and what a manifest can embed,
-    so it must be JSON-able rather than a list of dataclasses."""
+    """The schema renders as plain data for the manifest.
+
+    `describe_schema` is what the CLI prints and a manifest can embed, so it is
+    JSON-able rather than a list of dataclasses.
+    """
     described = describe_schema()
 
     assert len(described) == len(MODEL_FIELDS)
@@ -832,8 +876,10 @@ def test_the_schema_renders_as_plain_data_for_the_manifest() -> None:
 
 
 def test_the_rendered_schema_carries_the_same_fields_in_the_same_order() -> None:
-    """Positional agreement, not just set agreement: the printed table is read
-    top to bottom against the byte layout."""
+    """The rendered schema keeps the same fields in the same order.
+
+    The printed table is read top to bottom against the byte layout.
+    """
     assert [row["name"] for row in describe_schema()] == [f.name for f in MODEL_FIELDS]
 
 
@@ -843,10 +889,9 @@ def test_the_rendered_schema_carries_the_same_fields_in_the_same_order() -> None
 def test_the_reduction_wire_values_are_pinned_to_the_format() -> None:
     """Each `Reduction` member has a wire code fixed by the format.
 
-    Deriving the code from `list(Reduction)` order would tie the byte on disk to
-    the member order in `numerics.py`, so reordering a member would reinterpret
-    every existing container. The mapping is restated here, so changing it in
-    `save_load.py` alone fails.
+    Deriving the code from `list(Reduction)` order would let a reordering in
+    `numerics.py` reinterpret every existing container. The mapping is restated
+    here, so changing it in `save_load.py` alone fails.
     """
     # Such a reinterpretation would be silent. `FORMAT_VERSION` and the
     # recorded `container_sha256` do not move, re-encoding a loaded container
@@ -932,10 +977,9 @@ def test_the_sidecar_may_be_declined_for_a_json_path(
 def test_the_header_schema_matches_the_struct_that_writes_it() -> None:
     """`HEADER_FIELDS` describes every scalar `_HEADER` writes.
 
-    `MODEL_FIELDS` covers the arrays alone, so a reader built from
-    `tfidf-stability schema` recovers `flags` and `reduction` only from
-    `HEADER_FIELDS`. The count comes from `_HEADER`, so an undescribed scalar
-    fails.
+    `MODEL_FIELDS` covers only the arrays, so a reader built from
+    `tfidf-stability schema` gets `flags` and `reduction` from `HEADER_FIELDS`.
+    The count comes from `_HEADER`, so an undescribed scalar fails.
     """
     # `flags` is G13's logarithm switch: it changes about 15% of the idf
     # entries and the weights taken from them. `reduction` carries the

@@ -1,15 +1,10 @@
-# Runtime dependencies.
-#
-# Deliberately minimal. The `reference` backend -- which is the NORMATIVE
-# implementation and defines correctness for this project -- imports nothing
-# outside the standard library, so it can be audited without reading any
-# third-party code. numpy is needed only by the native adapter and the analysis
-# layer; pyyaml only by the config loader.
-#
-# For a development environment install `requirements-dev.txt`, which includes
-# this file. The linters there are pinned exactly and everything else is
-# floored; `scripts/check_dependencies.py` holds that file and `pyproject.toml`
-# to the same set.
+# Runtime dependencies. The normative `reference` backend imports only the
+# standard library, so it can be audited without third-party code. numpy serves
+# the native adapter and the analysis layer; pyyaml serves the config loader.
+
+# A development environment installs requirements-dev.txt, which includes this
+# file and pins its linters exactly. `scripts/check_dependencies.py` holds both
+# files and pyproject.toml to the same packages.
 
 numpy>=1.24
 PyYAML>=6.0

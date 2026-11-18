@@ -1,20 +1,8 @@
-// =============================================================================
 // fp_guard.hpp: refuse to produce numbers from an untrustworthy build.
 //
-// One stray compiler flag invalidates every bit-reproducibility claim here, and
-// the code still runs, still looks right, and returns different digits.
-//
-//   Layer 1  compile time: #error on flags known to break IEEE-754 semantics
-//   Layer 2  build time:   the resolved flag string is baked into the binary
-//                          (build_config.hpp) and recorded in every manifest
-//   Layer 3  run time:     selftest() probes for the behaviour the flags were
-//                          meant to prevent
-//
-// Layer 3 catches what the compiler macros cannot. numpy's BLAS (MKL, some
-// OpenBLAS builds) sets flush-to-zero / denormals-are-zero process-wide when it
-// loads, which would flush subnormal score differences to zero, and near-tie
-// margins are the subject of the study.
-// =============================================================================
+// Layer 1, compile time: #error on flags that break IEEE-754 semantics.
+// Layer 2, build time: build_config.hpp compiles in the flags; every manifest records them.
+// Layer 3, run time: selftest(). Rationale: docs/engineering_notes.md#fp-guard-layers
 #pragma once
 
 #include <cfenv>
@@ -33,9 +21,10 @@
 // -----------------------------------------------------------------------------
 // Layer 1: compile time
 // -----------------------------------------------------------------------------
+// determinism.yml greps a refused build's log for this message's opening words.
 #if defined(__FAST_MATH__) && !defined(TFIDF_ALLOW_FAST_MATH)
 #  error "tfidf: built with -ffast-math. Numerical results would not be trustworthy. \
-Define TFIDF_ALLOW_FAST_MATH only in the CI job that deliberately proves this guard fires."
+TFIDF_ALLOW_FAST_MATH disables this check; no build in this repository defines it."
 #endif
 
 #if defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ && !defined(TFIDF_ALLOW_FAST_MATH)
@@ -43,9 +32,9 @@ Define TFIDF_ALLOW_FAST_MATH only in the CI job that deliberately proves this gu
 #endif
 
 // -fno-signed-zeros licenses the compiler to treat -0.0 and +0.0 as
-// interchangeable. Every score here is compared on its raw bit pattern, and
-// `ranking/margins.py` argues that -0.0 cannot occur. The flag does not define
-// __FAST_MATH__; GCC and Clang define __NO_SIGNED_ZEROS__ for it instead.
+// interchangeable. Every score here is compared on its raw bit pattern, so the
+// two must stay distinct. The flag does not define __FAST_MATH__; GCC and Clang
+// define __NO_SIGNED_ZEROS__ for it instead.
 #if defined(__NO_SIGNED_ZEROS__) && !defined(TFIDF_ALLOW_FAST_MATH)
 #  error "tfidf: -fno-signed-zeros is enabled; +0.0 and -0.0 would be interchangeable."
 #endif
@@ -85,25 +74,9 @@ struct SubnormalSurvival {
 
 /// Probe whether subnormals survive this process, on both sides.
 ///
-/// Split out of `selftest()`'s portable fallback so it can be tested on a
-/// machine that can actually set the modes. The fallback is the ONLY detection
-/// on targets without MXCSR -- aarch64, which ships as a macOS wheel -- and it
-/// was untestable there and wrong.
-///
-/// It read `tiny > 0.0 && tiny * 2.0 == 0.0`, which asks whether a subnormal
-/// RESULT collapses. A mode that also zeroes subnormal INPUTS makes `tiny`
-/// itself read as zero, so the `&&` short-circuits and the probe reports a
-/// clean environment. Measured on x86 by setting MXCSR directly:
-///
-///     mode                        subnormals flushed   old probe   this
-///     clean                       no                   no          no
-///     FTZ only                    yes                  YES         yes
-///     DAZ only                    yes                  no          yes
-///     FTZ + DAZ                   yes                  no          yes
-///
-/// The last row is what a BLAS sets, and what AArch64's single FPCR.FZ bit does,
-/// so the one platform relying on this probe was blind to the one mode that
-/// occurs. Both halves are reported, and neither is guarded by the other.
+/// The only detection on targets without MXCSR, such as aarch64. Each half is
+/// computed independently, so a combined FTZ+DAZ mode is reported.
+/// Rationale: docs/engineering_notes.md#subnormal-survival-probe
 [[nodiscard]] inline SubnormalSurvival subnormals_survive() noexcept {
     // `denorm_min()` is the smallest positive subnormal, or `min()` where the
     // type has no subnormals at all -- non-zero either way, so a platform
@@ -112,7 +85,7 @@ struct SubnormalSurvival {
     const bool inputs = (tiny != 0.0);
     // Doubling the smallest subnormal gives another subnormal, so a flushed
     // result collapses to zero. Computed unconditionally: guarding it behind
-    // `inputs` is the short-circuit that hid the combined mode.
+    // `inputs` would hide the combined FTZ+DAZ mode.
     volatile double doubled = tiny * 2.0;
     const bool results = (doubled != 0.0);
     return SubnormalSurvival{inputs, results};
@@ -125,20 +98,9 @@ struct SubnormalSurvival {
 [[nodiscard]] inline std::uint32_t selftest() noexcept {
     std::uint32_t f = kOk;
 
-    // Excess intermediate precision.
-    //
-    // The previous probe, `volatile double a = 0.1, b = 0.2; if (a + b == 0.3)`,
-    // fired under no configuration tested, including `-ffast-math` and
-    // `-mfpmath=387 -fexcess-precision=fast`, the hazard it names. The exact sum
-    // of the doubles 0.1 and 0.2 differs from the double 0.3 at every precision,
-    // so the comparison is false whether or not intermediates are widened;
-    // `kConstantFolding` could never be set and `describe()`'s branch for it was
-    // unreachable.
-    //
-    // FLT_EVAL_METHOD reports the property directly: 0 when each operation is
+    // Excess intermediate precision: FLT_EVAL_METHOD is 0 when each operation is
     // performed in its own type, 2 when everything is evaluated as long double.
-    // Reads 0 under `-mfpmath=sse -fexcess-precision=standard`, 2 under
-    // `-mfpmath=387 -fexcess-precision=fast`.
+    // Rationale: docs/engineering_notes.md#excess-precision-detection
 #if !defined(FLT_EVAL_METHOD) || FLT_EVAL_METHOD != 0
     f |= kConstantFolding;
 #endif
@@ -185,6 +147,7 @@ struct SubnormalSurvival {
 }
 
 /// Clear FTZ/DAZ if a third-party library (typically a BLAS) has set them.
+///
 /// Returns true if a change was made, so the caller can record it.
 inline bool restore_subnormals() noexcept {
 #if TFIDF_HAS_MXCSR

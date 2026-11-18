@@ -1,23 +1,8 @@
 """Backend selection, the ABI guard, and the floating-point self-test.
 
-``src/tfidf_stability/_native/__init__.py`` is this project's own Python -- 44
-statements deciding which backend a process uses and whether the environment it
-runs in can be trusted -- and it was excluded from coverage by ``omit =
-["*/_native/*"]``. That pattern was aimed at the compiled extension and caught
-the hand-written module beside it, so the repository reported 100% while this
-file sat at 69%.
-
-What the exclusion hid is the point. :func:`check_float_environment` exists
-because several BLAS builds set flush-to-zero and denormals-are-zero
-process-wide when loaded, which would flush the subnormal near-tie margins this
-project is a study of. The test suite imports scikit-learn, so that hazard is
-live here. The function was never called from ``src/``, ``tests/`` or
-``scripts/``, is absent from ``__all__``, and had no test.
-
-The two module-level arms that select the backend cannot be reached from a
-process that already imported it, so they are exercised the way
-``test_validation_contracts.py`` reaches the same module: by substituting the
-resolved state rather than by re-importing.
+The selection arms run once at import, so tests substitute the resolved module
+state instead of re-importing. :func:`check_float_environment` is called here
+in-process. Rationale: docs/engineering_notes.md#native-package-coverage
 """
 
 from __future__ import annotations
@@ -41,10 +26,11 @@ from tfidf_stability.utils.logging import EventKind, capture
 # Which backend was selected, and whether the record says so
 # ---------------------------------------------------------------------------
 def test_the_selected_backend_is_recorded_as_native_when_one_loaded() -> None:
-    """The arm that runs on a machine with a build. `log_backend_selection` is
-    called by the CLI once logging is configured, because selection happens at
-    import -- before any application could have installed a handler -- so a
-    record emitted there would reach nobody."""
+    """A loaded native backend is recorded with its ABI tag.
+
+    `log_backend_selection` is called by the CLI once logging is configured,
+    because selection happens at import, before any handler is installed.
+    """
     if not native_available():
         pytest.skip(unavailable_reason() or "no native backend")
 
@@ -59,15 +45,11 @@ def test_the_selected_backend_is_recorded_as_native_when_one_loaded() -> None:
 def test_the_reference_backend_is_recorded_with_the_reason_it_was_chosen(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The other arm, and the one a compiler-free install always takes.
+    """The reference backend is recorded with the reason it was chosen.
 
-    Reached by substituting the resolved module state, as
-    `test_validation_contracts.py` does: the selection itself happens once at
-    import and cannot be replayed in a process that has already done it.
-
-    The reason travels with the record. "reference" alone would say which
-    backend ran but not whether that was a choice or a failure, and those are
-    different findings when a published number is being explained.
+    The resolved module state is substituted, as `test_validation_contracts.py`
+    does, because selection runs once at import. The reason distinguishes a
+    choice from a failure when a published number is being explained.
     """
     monkeypatch.setattr(_native, "_MODULE", None)
     monkeypatch.setattr(_native, "_REASON", "the extension was never compiled")
@@ -86,21 +68,11 @@ def test_the_reference_backend_is_recorded_with_the_reason_it_was_chosen(
 def test_availability_and_its_reason_are_complementary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Exactly one of them is informative at a time: a reason when unavailable,
-    `None` when available. A reason left set alongside a working backend would
-    put a stale explanation into every manifest.
+    """Exactly one of availability and its reason is informative at a time.
 
-    `_REASON` is set to a stale value *before* the backend is declared
-    available, which is the point of the test and was the omission. Setting only
-    `_MODULE` left `_REASON` at whatever this machine's import had produced, so
-    the assertion asked about a different state depending on where it ran:
-    `None` where the extension had been built, a full "could not be imported"
-    string where it had not. It passed all nine native legs of the CI matrix and
-    failed all nine reference legs, for eight consecutive pushes.
-
-    Reproduced before the fix on a machine with the extension present, by
-    setting `_REASON` by hand: `native_available()` returned True beside that
-    explanation.
+    `_REASON` is set to a stale value before `_MODULE` is substituted, so the
+    assertion does not depend on what this machine's import left behind. A
+    reason left set beside a working backend would reach every manifest.
     """
     monkeypatch.setattr(_native, "_REASON", "a reason left over from an earlier attempt")
     monkeypatch.setattr(_native, "_MODULE", object())
@@ -117,16 +89,11 @@ def test_availability_and_its_reason_are_complementary(
 
 
 def test_an_extension_built_for_this_interpreter_must_actually_have_loaded() -> None:
-    """An extension carrying this interpreter's ABI tag must have been selected.
+    """An extension tagged for this interpreter must have been selected.
 
-    Every native suite is guarded by `skipif(not native_available())` and pytest
-    exits 0 when all of them skip, so an extension that is present but unloadable
-    makes the differential tests vanish while the run still reports green.
-    `ci.yml` imports the backend at install time; this holds inside the suite.
-
-    Matched on `importlib.machinery.EXTENSION_SUFFIXES` rather than on
-    `_tfidf_native*`, because a working tree can hold builds for several Pythons
-    at once and only the one tagged for this interpreter is loadable here.
+    Native suites skip when `native_available()` is False, so an extension
+    that is present but unloadable would skip them all while the run stays
+    green. Matching on `EXTENSION_SUFFIXES` ignores builds for other Pythons.
     """
     import importlib.machinery
     from pathlib import Path
@@ -148,14 +115,11 @@ def test_an_extension_built_for_this_interpreter_must_actually_have_loaded() -> 
 
 
 def test_a_backend_that_loaded_records_no_abi_mismatch() -> None:
-    """`_ABI_MISMATCH` is initialised False and set True only on the mismatch arm.
+    """`_ABI_MISMATCH` is False after a successful load.
 
-    That arm is unreachable in-process, so tests of what the flag *causes*
-    substitute it directly and leave the initialiser itself unexercised. Nothing
-    resets the flag on the success path, so a True initialiser would make
-    `require_native()` raise `AbiVersionMismatchError` at a caller whose build is
-    fine, sending them to rebuild against the current contract rather than to
-    build at all.
+    Only the mismatch arm sets it, so a True initialiser would make
+    `require_native()` without a build raise `AbiVersionMismatchError`, not
+    `NativeBackendUnavailableError`. The arm is unreachable in-process.
     """
     if not native_available():
         pytest.skip(unavailable_reason() or "no native backend")
@@ -169,17 +133,11 @@ def test_a_backend_that_loaded_records_no_abi_mismatch() -> None:
 # The floating-point self-test
 # ---------------------------------------------------------------------------
 def test_the_float_environment_is_trustworthy_in_this_process() -> None:
-    """`check_float_environment` returns the self-test bitmask; zero means the
-    environment is sound.
+    """`check_float_environment` returns a zero mask in a sound process.
 
-    This is the guard against the failure this whole project is about. Several
-    BLAS builds set flush-to-zero and denormals-are-zero process-wide when they
-    load, and under those flags a subnormal margin -- the near-tie case section
-    7.4 exists to measure -- silently becomes zero. The suite imports
-    scikit-learn, so a BLAS is loaded in this very process.
-
-    Nothing in `src/`, `tests/` or `scripts/` calls this function, which is the
-    finding: the guard exists and is never invoked.
+    Some BLAS builds set flush-to-zero and denormals-are-zero process-wide
+    when loaded, which would flush the subnormal near-tie margins under study.
+    Rationale: docs/engineering_notes.md#float-environment-self-test
     """
     if not native_available():
         pytest.skip(unavailable_reason() or "no native backend")
@@ -195,9 +153,11 @@ def test_the_float_environment_is_trustworthy_in_this_process() -> None:
 
 
 def test_a_subnormal_survives_arithmetic_in_this_process() -> None:
-    """The same claim without the native backend: an independent check that
-    flush-to-zero is off, so the test above is asserting something true rather
-    than a self-test that agrees with itself."""
+    """A subnormal survives arithmetic without the native backend.
+
+    An independent check that flush-to-zero is off, so the self-test above
+    asserts something true rather than agreeing with itself.
+    """
     import sys
 
     tiny = sys.float_info.min
@@ -208,13 +168,10 @@ def test_a_subnormal_survives_arithmetic_in_this_process() -> None:
 def test_the_self_test_can_report_and_repair_a_bad_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The arm no sound machine reaches. A non-zero mask must warn rather than
-    raise -- the run continues, but its provenance records that the numbers were
-    produced under an untrustworthy environment.
+    """A non-zero mask is repaired and re-read before any warning.
 
-    `restore=True` repairs first and re-reads, so a BLAS that flipped the flags
-    at load does not condemn the whole run; the warning fires only if the repair
-    did not take.
+    `restore=True` repairs first, so a BLAS that flipped the flags at load
+    does not condemn the run; the warning fires only if the repair fails.
     """
     if not native_available():
         pytest.skip(unavailable_reason() or "no native backend")
@@ -241,9 +198,10 @@ def test_the_self_test_can_report_and_repair_a_bad_environment(
 def test_an_unrepairable_environment_warns_rather_than_raising(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When the repair does not take, the mask is returned and a RuntimeWarning
-    names what is wrong. Returning it rather than raising is deliberate: the
-    caller decides whether to proceed, and the manifest records the state."""
+    """A failed repair returns the mask and emits a RuntimeWarning.
+
+    The caller decides whether to proceed, and the manifest records the state.
+    """
 
     class _Stub:
         def fp_selftest(self) -> int:
@@ -266,8 +224,10 @@ def test_an_unrepairable_environment_warns_rather_than_raising(
 def test_the_self_test_can_be_asked_not_to_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`restore=False` observes without touching the process, which is what a
-    diagnostic wants: repairing would hide the state it came to measure."""
+    """`restore=False` observes the process without repairing it.
+
+    A diagnostic needs the unrepaired state, so nothing is touched.
+    """
     calls: list[str] = []
 
     class _Stub:
@@ -292,13 +252,11 @@ def test_the_self_test_can_be_asked_not_to_repair(
 def test_the_default_is_to_repair_rather_than_merely_observe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The default of `restore`, which the two tests above name explicitly.
+    """The default of `restore` repairs and re-reads.
 
-    Both arms are covered there -- `restore=True` repairs, `restore=False`
-    observes -- but each passes the argument, so the signature's own default is
-    never the thing under test. Repairing is what keeps an unattended run safe
-    when a BLAS flips the flags at import, and a caller who omits the argument
-    gets whatever the default says.
+    The two tests above pass the argument explicitly, so the signature's own
+    default is under test only here. Repairing keeps an unattended run safe
+    when a BLAS flips the flags at import.
     """
     calls: list[str] = []
 
@@ -325,16 +283,11 @@ def test_the_default_is_to_repair_rather_than_merely_observe(
 def test_the_warning_is_attributed_to_the_caller_not_to_this_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`stacklevel=2`, asserted rather than assumed.
+    """The warning is raised with `stacklevel=2`, naming the caller.
 
-    At `stacklevel=1` every such warning is reported from `_native/__init__.py`,
-    the same location for every caller, and which code was running under a
-    flushing environment is the one thing a reader needs.
-
-    Recorded through `catch_warnings` rather than `pytest.warns`, which checks
-    the category and the message but not the filename. `simplefilter` stops the
-    project-wide `filterwarnings = ["error"]` turning the warning into a raise
-    before it can be inspected.
+    At `stacklevel=1` every warning would name `_native/__init__.py`, hiding
+    which code ran under a flushing environment. `pytest.warns` does not check
+    the filename; `simplefilter` lifts the project-wide error filter.
     """
     import warnings
 
@@ -369,8 +322,11 @@ def test_the_warning_is_attributed_to_the_caller_not_to_this_module(
 # The build record
 # ---------------------------------------------------------------------------
 def test_the_build_record_names_what_produced_the_extension() -> None:
-    """`build_info` goes into every run manifest, so a surprising number can be
-    traced to the compiler and flags that produced it."""
+    """`build_info` names the compiler and flags that produced the extension.
+
+    The record goes into every run manifest, so a surprising number can be
+    traced to its build.
+    """
     if not native_available():
         pytest.skip(unavailable_reason() or "no native backend")
 

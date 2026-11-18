@@ -1,14 +1,8 @@
 """Ordering distances (README sections 4.5 and 7.3, ``spec_addenda.md#g2``).
 
-The generalised Kendall distance is not a metric at any penalty. An earlier
-draft of G2 claimed ``p = 1/2`` made it one;
-:func:`test_fks_is_a_near_metric_not_a_metric` pins the counterexample. The
-penalty is chosen on bias grounds: ``1/2`` is the unbiased contribution for a
-pair whose relative order a list says nothing about.
-
-``K_int`` (Kendall restricted to the intersection) is blind to membership
-change, which is the effect section 7.3 measures, so it is never reported alone.
-See :func:`test_intersection_kendall_is_blind_to_membership_change`.
+FKS is not a metric at any penalty (:func:`test_fks_is_a_near_metric_not_a_metric`); ``K_int``,
+Kendall on the intersection, misses section 7.3's membership change and is never
+reported alone (:func:`test_intersection_kendall_is_blind_to_membership_change`).
 """
 
 from __future__ import annotations
@@ -76,13 +70,13 @@ def test_kendall_tau_is_zero_below_two_elements() -> None:
 
 
 def test_kendall_tau_refuses_differing_sets() -> None:
-    """Differing sets are the signal to reach for FKS, so this raises."""
+    """Differing sets belong to FKS, so the same-set function raises."""
     with pytest.raises(ValueError, match="same set"):
         kendall_tau_distance([1, 2], [1, 3])
 
 
 def test_kendall_tau_satisfies_the_triangle_inequality() -> None:
-    """Unlike FKS, the same-set version genuinely is a metric."""
+    """Unlike FKS, the same-set distance is a metric."""
     worst = 0.0
     for a, b, c in itertools.product(itertools.permutations(range(4)), repeat=3):
         ab = kendall_tau_distance(list(a), list(b))
@@ -134,10 +128,10 @@ def test_fks_max_matches_the_closed_form() -> None:
 
 
 def test_singleton_disjoint_lists_are_maximally_distant() -> None:
-    """A case the obvious ``if k < 2: return 0`` guard gets wrong.
+    """Two disjoint singletons are maximally distant.
 
-    Two disjoint one-element lists still contribute a case-3 pair, so the
-    maximum is 1 and the normalised distance is 1.0.
+    Two disjoint one-element lists contribute a case-3 pair, so the maximum
+    is 1 and the normalised distance is 1.0; a `k < 2` guard returning 0 fails.
     """
     assert fks_max(1) == 1.0
     assert kendall_fks([1], [2]) == 1.0
@@ -154,15 +148,11 @@ def test_fks_stays_within_zero_and_one(a: list[int], b: list[int]) -> None:
 
 
 def test_fks_is_a_near_metric_not_a_metric() -> None:
-    """Pins the correction to G2.
+    """FKS violates the triangle inequality, so it is not a metric (G2).
 
-    An earlier draft claimed ``p = 1/2`` makes ``K^(p)`` a metric. It does not,
-    at any penalty. Witness: ``A`` and ``C`` are disjoint so their distance is
-    maximal, ``B`` shares one element with each, and the triangle inequality
-    fails by 4 (12 against 6 + 2).
-
-    Bounded distortion does hold, which suffices for reporting disagreement
-    rates, but the quantity must never be clustered on or treated as a norm.
+    ``A`` and ``C`` are disjoint so their distance is maximal, ``B`` shares one
+    element with each, and the inequality fails by 4 (12 against 6 + 2). Bounded
+    distortion holds, which suffices for disagreement rates but not clustering.
     """
     a, b, c = [3, 1, 0], [5, 3, 4], [5, 4, 2]
     d_ab = kendall_fks(a, b, normalise=False)
@@ -199,7 +189,7 @@ def test_the_penalty_is_the_neutral_choice() -> None:
 
 
 def test_fks_case_two_penalises_the_absent_element_ranked_first() -> None:
-    """Case 2, worked by hand.
+    """Case 2 counts a pair only when the absent element is ranked first.
 
     ``a = [x, y]``, ``b = [x]``. In ``b`` the present ``x`` counts as ranked
     above the absent ``y``, and ``a`` agrees, so nothing is counted. Reversing
@@ -226,11 +216,9 @@ def test_top_k_disagreement_is_about_the_set_not_the_order() -> None:
 def test_jaccard_distance() -> None:
     """The last case pins the expression, not just the quantity.
 
-    `1 - |A n B| / |A u B|` and `(|A u B| - |A n B|) / |A u B|` are algebraically
-    equal and one ulp apart in binary64: the first gives 0.6666666666666667, the
-    second 2/3 = 0.6666666666666666. The native core has to reproduce these bits,
-    so the form the reference uses is part of the contract, and `approx` would
-    accept either.
+    The two algebraic forms of the Jaccard distance are one ulp apart in
+    binary64, and the native core reproduces the reference's bits, so the form
+    is part of the contract. Rationale: docs/engineering_notes.md#jaccard-form
     """
     assert jaccard_distance([1, 2], [1, 2]) == 0.0
     assert jaccard_distance([1, 2], [3, 4]) == 1.0
@@ -255,12 +243,10 @@ def test_compare_top_k_on_identical_lists() -> None:
 
 
 def test_intersection_kendall_is_blind_to_membership_change() -> None:
-    """Why ``K_int`` is never reported alone.
+    """``K_int`` is never reported alone because it misses membership change.
 
-    These two lists share only their first element, so the intersection Kendall
-    is undefined (fewer than two shared elements) and reads as "no reordering"
-    to a careless consumer. The set indicator and the FKS distance both see the
-    change.
+    The lists share one element, so the intersection Kendall is NaN, which can
+    be misread as no reordering; the set indicator and FKS both see the change.
     """
     c = compare_top_k([1, 2, 3], [1, 4, 5], 3)
     assert math.isnan(c.kendall_intersection)
@@ -302,40 +288,28 @@ def test_compare_top_k_invariants(a: list[int], b: list[int], k: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# kendall_tau_distance: the precondition the guard does not quite cover
+# kendall_tau_distance: the multiplicity precondition
 # ---------------------------------------------------------------------------
 def test_two_lists_of_the_same_set_but_different_multiplicity_are_refused() -> None:
-    """`set()` is blind to multiplicity, and the guard used to be written on it.
+    """Lists with the same set but different multiplicities are refused.
 
-    `[1, 1, 2]` and `[1, 2, 2]` pass both halves of the old guard -- same
-    length, same set -- and the `position` dict then keeps only the last index
-    of each repeated element, so the inversion count ran against a mapping that
-    had lost a document. It returned `0.0`: two lists reported as identical
-    orderings when one of them is not an ordering of that multiset at all.
-
-    Unreachable from this package, where both arguments come from a `Ranking`
-    whose order is a permutation. Repaired rather than pinned because the wrong
-    answer was a confident number rather than an error, and because the C++
-    mirror compared `unordered_set`s and was blind in exactly the same way.
+    A guard on length and `set()` alone accepts `[1, 1, 2]` and `[1, 2, 2]`,
+    and the last-wins `position` map then returns `0.0`; both languages compare
+    multisets. Rationale: docs/engineering_notes.md#kendall-multiplicity-guard
     """
     left, right = [1, 1, 2], [1, 2, 2]
-    assert len(left) == len(right), "the length half of the old guard passes"
-    assert set(left) == set(right), "and so did the membership half"
+    assert len(left) == len(right), "a length check alone accepts the pair"
+    assert set(left) == set(right), "and so does a set comparison"
     with pytest.raises(ValueError, match="same multiplicities"):
         kendall_tau_distance(left, right)
 
 
 def test_a_repeat_is_still_accepted_when_both_sides_carry_it() -> None:
-    """The limit of the repair, stated rather than left to be discovered.
+    """A repeat carried by both sides is accepted and yields a number.
 
     `Counter` equality asks for the same multiset, which `[1, 1, 2]` and
-    `[2, 1, 1]` satisfy. They are accepted and a number comes back, computed
-    through the same last-wins position map -- for a multiset there is no
-    canonical inversion count, so the number means less than it looks.
-
-    Nothing in the package can reach it: every caller passes a permutation.
-    Tightening the guard to reject any repeated element would close it, and is
-    a larger change to the contract than the defect required.
+    `[2, 1, 1]` satisfy, so the last-wins position map produces a value with
+    no canonical meaning. Every caller in the package passes a permutation.
     """
     assert kendall_tau_distance([1, 1, 2], [2, 1, 1]) == pytest.approx(2 / 3)
     assert kendall_tau_distance([1, 1, 2], [1, 1, 2]) == 0.0
@@ -348,26 +322,28 @@ def test_a_repeat_is_still_accepted_when_both_sides_carry_it() -> None:
 def test_orderings_over_different_sets_are_refused_towards_the_right_function(
     a: list[int], b: list[int]
 ) -> None:
-    """Different lengths and different memberships both refuse, and the message
-    names `kendall_fks` -- because a caller comparing top-k lists that may
-    differ in membership has the wrong function, not bad data."""
+    """Different lengths and memberships both raise and name `kendall_fks`.
+
+    A caller comparing top-k lists that may differ in membership has the wrong
+    function, not bad data.
+    """
     with pytest.raises(ValueError, match="use kendall_fks"):
         kendall_tau_distance(a, b)
 
 
 @pytest.mark.parametrize("n", [0, 1])
 def test_fewer_than_two_elements_have_no_pair_to_disagree_about(n: int) -> None:
-    """`0.0` rather than NaN: there is genuinely no discordance, which is
-    different from the quantity being undefined."""
+    """Fewer than two elements give `0.0`, not NaN: no pair can be discordant."""
     items = list(range(n))
     assert kendall_tau_distance(items, items) == 0.0
 
 
 @pytest.mark.parametrize("n", [2, 3, 8, 9])
 def test_a_reversed_ordering_is_exactly_one(n: int) -> None:
-    """The normaliser is `C(n, 2)`, which is the number of pairs, so a full
-    reversal saturates it exactly -- bit for bit, at both odd and even sizes
-    where the merge in the inversion count splits differently."""
+    """A full reversal saturates the `C(n, 2)` normaliser bit for bit.
+
+    Odd and even sizes split the merge in the inversion count differently.
+    """
     forwards = list(range(n))
     assert same_bits(kendall_tau_distance(forwards, forwards[::-1]), 1.0)
 
@@ -377,15 +353,19 @@ def test_a_reversed_ordering_is_exactly_one(n: int) -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("n", [0, 1, 2, 3, 8, 9, 16, 17])
 def test_a_reversed_sequence_has_every_pair_inverted(n: int) -> None:
-    """`n(n-1)/2`. Odd and even sizes straddle the merge split, which is where a
-    recursive count most easily loses or double-counts a pair."""
+    """A reversed sequence of length `n` has `n(n-1)/2` inversions.
+
+    Odd and even sizes straddle the merge split, where a recursive count can
+    lose or double-count a pair.
+    """
     assert inversion_count(list(range(n, 0, -1))) == n * (n - 1) // 2
 
 
 def test_equal_neighbours_are_not_inversions() -> None:
-    """The merge keeps equal elements in order, so a run of ties contributes
-    nothing. Otherwise a ranking with tied scores would report disagreement with
-    itself."""
+    """The merge keeps equal elements in order, so ties are not inversions.
+
+    Otherwise a ranking with tied scores would disagree with itself.
+    """
     assert inversion_count([1, 1, 1]) == 0
     assert inversion_count([2, 1, 1]) == 2
 
@@ -395,9 +375,11 @@ def test_equal_neighbours_are_not_inversions() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("k", [-1, -(2**20), 0])
 def test_a_non_positive_list_length_has_no_maximum(k: int) -> None:
-    """Only `k = 0` genuinely has no pairs; a negative k is nonsense, and both
-    answer `0.0` rather than producing a negative maximum that would make every
-    normalised distance negative."""
+    """A non-positive `k` answers `0.0` rather than the closed form.
+
+    Only `k = 0` has no pairs. A negative `k` is not a list length, and the
+    closed form would give it a positive maximum.
+    """
     assert fks_max(k) == 0.0
 
 
@@ -405,9 +387,10 @@ def test_a_non_positive_list_length_has_no_maximum(k: int) -> None:
 def test_a_single_pair_of_disjoint_singletons_is_one_for_every_admissible_penalty(
     penalty: float,
 ) -> None:
-    """`k = 1` is not degenerate: two disjoint singletons contribute exactly one
-    case-3 pair, and case 3 is the one the penalty does not touch. So the
-    maximum is 1 across the whole domain, endpoints included.
+    """`k = 1` has a maximum of 1 at every admissible penalty.
+
+    Two disjoint singletons contribute exactly one case-3 pair, and case 3 is
+    the one the penalty does not touch.
     """
     assert fks_max(1, penalty) == 1.0
 
@@ -418,10 +401,9 @@ def test_a_penalty_outside_the_domain_is_refused_by_both_entry_points(
 ) -> None:
     """A penalty outside `[0, 1]` is refused by both entry points.
 
-    G2 fixes the case-4 penalty in `[0, 1]`. Outside it `fks_max` is NaN for a
-    NaN penalty and negative for a sufficiently negative one, so `ceiling > 0.0`
-    is false and `kendall_fks` returns its `else 0.0` value, the one meant for
-    `k = 0`. Without the guard, two disjoint lists normalise to no disagreement.
+    G2 fixes the domain. Unguarded, `fks_max` is NaN for a NaN penalty and
+    negative for a sufficiently negative one; `ceiling > 0.0` is then false and
+    `kendall_fks` returns its `k = 0` value, so disjoint lists read as agreeing.
     """
     with pytest.raises(ValueError, match=r"penalty must lie in \[0, 1\]"):
         fks_max(3, penalty)
@@ -435,8 +417,7 @@ def test_disjoint_lists_are_maximally_distant_at_every_admissible_penalty() -> N
     """Disjoint lists normalise to 1.0 at every admissible penalty.
 
     Disjoint lists attain `fks_max` by construction, so the normalised distance
-    is the maximum whatever the penalty. Asserted directly rather than through
-    the guard that keeps the penalty in range.
+    is the maximum whatever the penalty, independent of the range guard.
     """
     a, b = [1, 2, 3], [4, 5, 6]
     for penalty in (0.0, 0.25, 0.5, 1.0):
@@ -448,11 +429,9 @@ def test_disjoint_lists_are_maximally_distant_at_every_admissible_penalty() -> N
 def test_no_pairs_means_the_penalty_term_never_runs(penalty: float) -> None:
     """`k = 0` short-circuits before the closed form.
 
-    The guard is not observable: at `k = 0` the fall-through computes
-    `0.0 + p * 0.0 * -1.0`, bit-identically `+0.0` for every admissible penalty,
-    so the two routes agree. Non-finite penalties are refused before `k` is
-    read, so the mutation allowlist carries an argued entry for this guard in
-    both languages.
+    At `k = 0` the fall-through computes `0.0 + p * 0.0 * -1.0`, which is
+    `+0.0` for every admissible penalty, so the guard is not observable.
+    Rationale: docs/engineering_notes.md#fks-max-zero-guard
     """
     assert fks_max(0, penalty) == 0.0
     assert same_bits(fks_max(0, penalty), 0.0), "positive zero, not negative"
@@ -460,15 +439,18 @@ def test_no_pairs_means_the_penalty_term_never_runs(penalty: float) -> None:
 
 @pytest.mark.parametrize(("k", "expected"), [(2, 5.0), (3, 12.0), (50, 3725.0)])
 def test_the_closed_form_is_k_times_three_k_minus_one_over_two(k: int, expected: float) -> None:
-    """At the pinned penalty of one half. G2 notes `k <= 50` gives at most 1225
-    pairs, so 50 is the largest size the protocol produces."""
+    """At the pinned penalty of one half the closed form is `k(3k-1)/2`.
+
+    G2 bounds `k <= 50`, so 50 is the largest size the protocol produces.
+    """
     assert fks_max(k) == expected
     assert fks_max(k) == k * (3 * k - 1) / 2
 
 
 def test_the_penalty_scales_only_the_same_list_pairs() -> None:
-    """`k^2 + p * k * (k-1)`: the first term is case 3 and is fixed, the second
-    is case 4 and is what the penalty weights. At `p = 0` only case 3 survives.
+    """The penalty weights only the case-4 term of `k^2 + p * k * (k-1)`.
+
+    The first term is case 3 and is fixed; at `p = 0` only case 3 survives.
     """
     assert fks_max(2, 0.0) == 4.0, "k^2 alone"
     assert fks_max(2, 1.0) == 6.0, "case 4 at full weight"
@@ -479,23 +461,28 @@ def test_the_penalty_scales_only_the_same_list_pairs() -> None:
 # kendall_fks: the degenerate list shapes
 # ---------------------------------------------------------------------------
 def test_two_empty_lists_are_not_distant() -> None:
-    """No union, no pairs, so no disagreement -- and the normaliser is zero, so
-    the guard has to return before dividing."""
+    """Two empty lists have no pairs, so the distance is zero.
+
+    The normaliser is also zero, so the guard returns before dividing.
+    """
     assert kendall_fks([], []) == 0.0
 
 
 def test_one_empty_list_is_distant_from_a_non_empty_one() -> None:
-    """Every element of the non-empty list is absent from the other, which is
-    case 2 rather than case 3, so the distance is positive but well below the
-    disjoint maximum."""
+    """One empty list is distant from a non-empty one, below the maximum.
+
+    Every pair lies in the non-empty list alone, which is case 4, so only the
+    penalty counts: 0.5 against a maximum of 5.
+    """
     distance = kendall_fks([1, 2], [])
     assert 0.0 < distance < 1.0
 
 
 @pytest.mark.parametrize("k", [1, 2, 3, 5])
 def test_disjoint_lists_of_equal_length_attain_exactly_one(k: int) -> None:
-    """The normaliser is `fks_max(k)`, and disjoint lists are what it is the
-    maximum over -- so the normalised distance is exactly 1, not merely close.
+    """Disjoint lists of equal length normalise to exactly 1.
+
+    The normaliser is `fks_max(k)`, and disjoint lists are its maximum.
     """
     left = list(range(k))
     right = list(range(k, 2 * k))
@@ -503,19 +490,23 @@ def test_disjoint_lists_of_equal_length_attain_exactly_one(k: int) -> None:
 
 
 def test_the_unnormalised_form_returns_the_pair_count_itself() -> None:
-    """Useful when comparing lists of different k, where dividing by a maximum
-    that differs between the two would not be meaningful."""
+    """The unnormalised form returns the pair count itself.
+
+    Lists of different k have different maxima, so the raw count is the
+    comparable quantity between them.
+    """
     assert kendall_fks([0], [1], normalise=False) == fks_max(1)
     assert kendall_fks([0, 1], [2, 3], normalise=False) == fks_max(2)
 
 
 # ---------------------------------------------------------------------------
-# compare_top_k: the prefix length, and a counter that floor-divides
+# compare_top_k: the prefix length and the swap counter
 # ---------------------------------------------------------------------------
 def test_comparing_no_documents_at_all_reports_a_wholly_degenerate_row() -> None:
-    """`k = 0` is a legitimate grid point with nothing in it. Every field has to
-    take the value that means "no evidence" rather than "no disagreement":
-    notably the intersection Kendall is NaN, since there are no pairs.
+    """`k = 0` is a legitimate grid point that compares nothing.
+
+    The sets agree, FKS is 0.0 and nothing is shared; the intersection Kendall
+    is NaN ("no evidence" rather than "no disagreement"), since there are no pairs.
     """
     result = compare_top_k([1, 2, 3], [3, 2, 1], 0)
 
@@ -529,26 +520,21 @@ def test_a_negative_prefix_length_is_refused_rather_than_sliced_from_the_end() -
     """A negative prefix length is refused rather than sliced from the end.
 
     `a[:-1]` is a legal slice, so an unchecked negative `k` compares almost the
-    whole lists and reports a `k` of -1 alongside. The native binding refuses
-    the argument, so the reference refuses it too and both backends answer the
-    same call the same way. `Ranking.top_k` refuses in the same words.
+    whole lists. The native binding refuses the argument, so the reference does
+    too and both backends answer alike. `Ranking.top_k` refuses in the same words.
     """
-    with pytest.raises(ValueError, match="non-negative"):
+    with pytest.raises(
+        ValueError, match=r"^compare_top_k\(-1\) is not a prefix; k must be non-negative$"
+    ):
         compare_top_k([1, 2, 3], [3, 2, 1], -1)
 
 
 def test_prefixes_of_different_lengths_report_the_documents_that_differ() -> None:
     """Unequal prefixes report the documents that differ, not half of them.
 
-    Membership changes come in pairs only when the two prefixes are the same
-    length. Halving the symmetric difference assumes they always do, so an odd
-    difference floor-divides to zero swaps for a comparison that reports the
-    sets as differing.
-
-    Reachable whenever a fold's candidate set is smaller than `k`, which G19
-    says happens by protocol rather than by accident. `swapped` is therefore the
-    larger one-way difference, which never reads as zero while `sets_differ`
-    is true.
+    Halving the symmetric difference floor-divides a one-document difference to
+    zero swaps while `sets_differ` is true. A fold's candidate set can be smaller
+    than `k` by protocol (G19), so `swapped` is the larger one-way difference.
     """
     result = compare_top_k([1, 2, 3], [1, 2], 3)
 
@@ -564,8 +550,7 @@ def test_prefixes_of_different_lengths_report_the_documents_that_differ() -> Non
 
 
 def test_a_swap_of_one_document_for_another_counts_as_one() -> None:
-    """The case the counter is written for: equal-length prefixes where the
-    symmetric difference is even."""
+    """Equal-length prefixes with an even symmetric difference count one swap."""
     result = compare_top_k([1, 2, 3], [1, 2, 4], 3)
     assert result.swapped == 1
     assert result.sets_differ is True
@@ -573,9 +558,11 @@ def test_a_swap_of_one_document_for_another_counts_as_one() -> None:
 
 @pytest.mark.parametrize("k", [1, 2, 3, 4, 99])
 def test_a_prefix_longer_than_the_lists_compares_what_there_is(k: int) -> None:
-    """Slicing past the end is not an error, so a k beyond the candidate count
-    compares the whole lists -- which is the lenient clamping G3 describes,
-    arriving here by way of Python rather than by a guard."""
+    """A `k` beyond the candidate count compares the whole lists.
+
+    Slicing past the end is not an error, which gives the lenient clamping G3
+    describes without a guard.
+    """
     result = compare_top_k([1, 2, 3], [1, 2, 3], k)
     assert result.sets_differ is False
     assert result.intersection_size == min(k, 3) if k > 0 else True
@@ -597,19 +584,20 @@ def test_a_prefix_longer_than_the_lists_compares_what_there_is(k: int) -> None:
 def test_disagreement_is_about_membership_and_not_order(
     a: list[int], b: list[int], differ: bool
 ) -> None:
-    """Reordering the same documents is not a disagreement about the set. That
-    is what makes section 7.3's set rate and the FKS ordering distance separate
-    statistics rather than two views of one number.
+    """Reordering the same documents is not a disagreement about the set.
 
-    The lists are already prefixes: the function takes no `k` and compares what
-    it is given, so truncation is the caller's job.
+    This keeps section 7.3's set rate and the FKS ordering distance separate
+    statistics. The function takes no `k`, so truncation is the caller's job.
     """
     assert top_k_disagreement(a, b) is differ
 
 
 def test_two_empty_sets_are_not_distant_rather_than_undefined() -> None:
-    """`0/0` for the Jaccard. Zero rather than NaN: two empty candidate sets
-    agree completely, which is a fact rather than an absence of evidence."""
+    """`0/0` for the Jaccard is zero, not NaN.
+
+    Two empty candidate sets agree completely, which is a fact rather than an
+    absence of evidence.
+    """
     assert jaccard_distance([], []) == 0.0
 
 

@@ -1,18 +1,8 @@
-"""Canonical hashing.
+"""Canonical SHA-256 digests, one fixed form for each kind of input.
 
-Tracing a published number back to its data, config and build needs "the same
-input" to have one digest, so this module fixes one way to hash each kind of
-thing and everything else uses it.
-
-Hash bytes rather than renderings: a float goes through its raw binary64 bit
-pattern. ``repr`` is lossless in CPython today, but that is a language guarantee
-rather than a file-format one, and the bit pattern keeps a one-ulp difference
-visible.
-
-Hash a canonical form: JSON with sorted keys and no incidental whitespace, text
-normalised to LF so a Windows checkout and a Linux checkout of the same file
-agree. ``.gitattributes`` normalises on write, but a digest taken before that
-would not.
+Floats hash by raw little-endian binary64 bit pattern, text has CRLF normalised
+to LF, and JSON uses sorted keys with no incidental whitespace.
+Rationale: docs/engineering_notes.md#canonical-hashing
 """
 
 from __future__ import annotations
@@ -56,8 +46,7 @@ def hash_file(path: Path | str, *, text: bool = False) -> str:
 
     Args:
         path: File to hash.
-        text: Normalise line endings before hashing. Use for anything tracked as
-            text; leave off for binaries, where normalisation would corrupt.
+        text: Normalise CRLF to LF first; for UTF-8 text files, never binaries.
     """
     p = Path(path)
     if text:
@@ -94,9 +83,9 @@ def hash_ints(values: Iterable[int], *, width: int = 8) -> str:
 def hash_json(payload: Any) -> str:
     """SHA-256 over a canonical JSON rendering.
 
-    Sorted keys, no incidental whitespace, and ``ensure_ascii=False`` so a
-    non-ASCII token digests the same whether or not it arrived escaped. Two
-    configs differing only in key order share a digest.
+    Sorted keys, no incidental whitespace, and ``ensure_ascii=False``, so
+    non-ASCII text is hashed as UTF-8 characters rather than escape sequences.
+    Two configs differing only in key order share a digest.
     """
     blob = json.dumps(
         payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str
@@ -105,15 +94,10 @@ def hash_json(payload: Any) -> str:
 
 
 def short(digest: str, length: int = 12) -> str:
-    """A truncated digest, for log lines and filenames.
+    """A truncated digest for logs and filenames, never for identity comparison.
 
-    Never for identity comparison: 12 hex characters is 48 bits, enough to
-    eyeball and far too few to rely on.
-
-    Raises:
-        ValueError: If ``length`` is negative. ``digest[:-1]`` is a legal slice
-            that drops the last character, so a negative length would yield a
-            near-complete digest rather than a short prefix.
+    The default 12 hex characters carry 48 bits. Raises ``ValueError`` if ``length``
+    is negative, since ``digest[:-1]`` keeps all but one character.
     """
     if length < 0:
         raise ValueError(f"length must be non-negative, got {length}")
