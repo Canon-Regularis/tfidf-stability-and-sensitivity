@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Download the MovieLens archive, verify its digest, and parse it.
+"""Download a dataset archive, verify its digest, and parse it.
 
 The only code in the repository that opens a network connection. Without a
-pin the script prints the digest to paste into ``movielens.MOVIELENS_SHA256``.
+pin the script prints the line to paste into the dataset's module.
 Rationale: docs/engineering_notes.md#movielens-digest-pin
 """
 
@@ -13,15 +13,80 @@ import hashlib
 import shutil
 import sys
 import urllib.request
+import zipfile
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
-from tfidf_stability.datasets import movielens  # noqa: E402
+from tfidf_stability.datasets import beir, movielens  # noqa: E402
+from tfidf_stability.utils.validation import DataIntegrityError  # noqa: E402
 
-DEFAULT_DEST = REPO / "data" / "raw" / "ml-latest-small.zip"
+RAW = REPO / "data" / "raw"
 _CHUNK = 1 << 16
+
+
+@dataclass(frozen=True)
+class _Source:
+    """Where one dataset comes from, and how its pin is read and reported."""
+
+    url: str
+    destination: Path
+    pin: Callable[[], str | None]
+    pin_line: str
+    upstream: Callable[[str], str]
+    summary: Callable[[bytes], str]
+
+
+def _movielens_summary(data: bytes) -> str:
+    corpus = movielens.parse_archive(data)
+    return (
+        f"{corpus.n_documents} documents, {corpus.n_ratings} ratings, "
+        f"{corpus.n_users} users, {corpus.n_unrated} unrated"
+    )
+
+
+def _beir_source(variant: str) -> _Source:
+    def summary(data: bytes) -> str:
+        corpus = beir.parse_archive(data)
+        return (
+            f"{corpus.n_documents} documents, {len(corpus.queries)} judged queries, "
+            f"{len(corpus.qrels)} judgements"
+        )
+
+    return _Source(
+        url=beir.BEIR_URL.format(variant=variant),
+        destination=RAW / f"beir-{variant}.zip",
+        pin=lambda: beir.PINNED_SHA256.get(variant),
+        pin_line=(
+            f'src/tfidf_stability/datasets/beir.py, in PINNED_SHA256:\n    "{variant}": "{{}}",'
+        ),
+        upstream=lambda url: (
+            f"The {variant} archive at {url}\n"
+            "no longer matches the pin, so upstream has most likely changed."
+        ),
+        summary=summary,
+    )
+
+
+#: Each fetchable dataset, by its registered name. Pins are read when the
+#: script runs, so a test can replace one.
+SOURCES: dict[str, _Source] = {
+    "movielens_small": _Source(
+        url=movielens.MOVIELENS_URL,
+        destination=RAW / "ml-latest-small.zip",
+        pin=lambda: movielens.MOVIELENS_SHA256,
+        pin_line='src/tfidf_stability/datasets/movielens.py\n    MOVIELENS_SHA256 = "{}"',
+        upstream=lambda url: (
+            "GroupLens updates ml-latest-small in place, so upstream has most likely\nchanged."
+        ),
+        summary=_movielens_summary,
+    ),
+    "beir_scifact": _beir_source("scifact"),
+    "beir_nfcorpus": _beir_source("nfcorpus"),
+}
 
 
 def _download(url: str, dest: Path, expected: str | None) -> tuple[str, bool]:
@@ -59,17 +124,20 @@ def _download(url: str, dest: Path, expected: str | None) -> tuple[str, bool]:
     return actual, True
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--output", type=Path, default=DEFAULT_DEST)
-    parser.add_argument("--url", default=movielens.MOVIELENS_URL)
+    parser.add_argument("--dataset", choices=tuple(SOURCES), default="movielens_small")
+    parser.add_argument("--output", type=Path, default=None, help="default: under data/raw/")
+    parser.add_argument("--url", default=None, help="default: the dataset's published URL")
     parser.add_argument("--force", action="store_true", help="re-download if present")
     parser.add_argument(
         "--print-digest", action="store_true", help="digest an existing file and exit"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    dest: Path = args.output
+    source = SOURCES[args.dataset]
+    dest: Path = args.output or source.destination
+    url: str = args.url or source.url
 
     if args.print_digest:
         if not dest.exists():
@@ -80,7 +148,7 @@ def main() -> int:
 
     # Read before the download, because it decides whether the download is
     # allowed to replace what is already at `dest`.
-    pinned = movielens.MOVIELENS_SHA256
+    pinned = source.pin()
 
     if dest.exists() and not args.force:
         print(f"{dest} already exists (use --force to re-download)")
@@ -88,12 +156,12 @@ def main() -> int:
     else:
         had_archive = dest.exists()
         try:
-            digest, placed = _download(args.url, dest, pinned)
+            digest, placed = _download(url, dest, pinned)
         except OSError as exc:
             print(f"download failed: {exc}", file=sys.stderr)
             print(
                 "\nIf you are offline or behind a proxy, fetch the archive manually from\n"
-                f"  {args.url}\n"
+                f"  {url}\n"
                 f"and place it at {dest}.",
                 file=sys.stderr,
             )
@@ -103,8 +171,7 @@ def main() -> int:
             print(f"sha256  {digest}")
             print(
                 f"\nDIGEST MISMATCH\n  expected {pinned}\n  actual   {digest}\n\n"
-                "GroupLens updates ml-latest-small in place, so upstream has most likely\n"
-                "changed. The download was NOT moved into place.\n"
+                f"{source.upstream(url)} The download was NOT moved into place.\n"
                 + (
                     f"{dest} is untouched and still holds the archive it held before.\n"
                     if had_archive
@@ -118,34 +185,40 @@ def main() -> int:
             return 1
 
     print(f"sha256  {digest}")
+    return _check_archive(source, dest, url, digest, pinned)
 
-    if pinned is None:
-        print(
-            "\nNo digest is pinned yet. To pin this archive, set in\n"
-            "  src/tfidf_stability/datasets/movielens.py\n"
-            f'    MOVIELENS_SHA256 = "{digest}"\n'
-            "and commit. Every later run then verifies against it."
-        )
-    elif digest != pinned:
+
+def _check_archive(source: _Source, dest: Path, url: str, digest: str, pinned: str | None) -> int:
+    """Compare ``dest`` with its pin and parse it; 0 when it may be used."""
+    # Reached only for a file already at `dest`: a mismatched download returned above.
+    if pinned is not None and digest != pinned:
         print(
             f"\nDIGEST MISMATCH\n  expected {pinned}\n  actual   {digest}\n\n"
-            "GroupLens updates ml-latest-small in place, so upstream has most likely\n"
-            "changed. This is not something to paper over: published numbers were\n"
-            "computed against the pinned archive. Either obtain that archive, or\n"
-            "re-run the experiments and update the pin in the same commit.",
+            f"{dest} was not downloaded again and does not match the pin. It may be\n"
+            "truncated, another dataset or an older copy. Published numbers were computed\n"
+            f"against the pinned archive; re-run with --force to fetch\n  {url}",
             file=sys.stderr,
         )
         return 1
+
+    # Parsed before any pin is offered, so a corrupt archive fails here rather
+    # than mid-experiment, and is never offered as the digest to pin.
+    try:
+        summary = source.summary(dest.read_bytes())
+    except (DataIntegrityError, zipfile.BadZipFile) as exc:
+        print(f"{dest} is not a valid archive: {exc}", file=sys.stderr)
+        return 1
+
+    if pinned is None:
+        print(
+            "\nNo digest is pinned yet. To pin this archive, set in\n  "
+            + source.pin_line.format(digest)
+            + "\nand commit. Every later run then verifies against it."
+        )
     else:
         print("digest matches the pin")
-
-    # Parse it, so a corrupt-but-correctly-sized archive fails here rather than
-    # in the middle of an experiment.
-    corpus = movielens.parse_archive(dest.read_bytes())
     print(
-        f"\nparsed: {corpus.n_documents} documents, {corpus.n_ratings} ratings, "
-        f"{corpus.n_users} users, {corpus.n_unrated} unrated\n"
-        f"stored at {dest} (gitignored -- do not commit, see data/README.md)"
+        f"\nparsed: {summary}\nstored at {dest} (gitignored -- do not commit, see data/README.md)"
     )
     return 0
 
