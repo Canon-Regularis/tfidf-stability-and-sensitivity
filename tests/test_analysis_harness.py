@@ -455,7 +455,7 @@ def test_a_band_with_a_zero_floor_reports_no_width_rather_than_minus_infinity() 
 # ---------------------------------------------------------------------------
 # The band probe
 # ---------------------------------------------------------------------------
-def test_a_single_probe_samples_the_lower_endpoint_rather_than_failing() -> None:
+def test_a_single_probe_samples_just_below_g_min_rather_than_failing() -> None:
     """One probe is a single tau, which the clamp sets just below `g_min`."""
     band = tau_band(_floor(1e-16), [[1.0, 0.5, 0.25]])
     assert verify_band_invariance(band, [[1.0, 0.5, 0.25]], probes=1)
@@ -1031,7 +1031,7 @@ def test_a_probe_count_below_one_is_refused_rather_than_dividing_by_zero(probes:
         verify_band_invariance(_band(1e-16, 1e-9), _SPREAD, probes=probes)
 
 
-def test_a_single_probe_takes_the_lower_endpoint_rather_than_spacing_nothing() -> None:
+def test_a_single_probe_is_clamped_just_below_g_min_rather_than_spaced() -> None:
     """One probe cannot be spaced across a band, so it is a single tau.
 
     It starts at the lower endpoint, the smallest tau the band admits. With

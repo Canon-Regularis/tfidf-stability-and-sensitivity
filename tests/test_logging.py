@@ -84,7 +84,7 @@ def test_importing_the_package_installs_no_handler() -> None:
     assert result.stdout.split() == ["0", "0", "0"], result.stderr
 
 
-def test_the_package_logger_has_no_handler_of_ours_until_configured() -> None:
+def test_the_package_logger_has_no_handler_until_configured() -> None:
     logger = logging.getLogger(ROOT_NAME)
     reset()
     assert logger.handlers == []

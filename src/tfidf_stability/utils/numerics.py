@@ -252,7 +252,7 @@ def _rounding_is_to_nearest() -> bool:
     """Whether the process is rounding to nearest, ties to even, right now.
 
     Three exact-tie probes on variables, which CPython cannot constant-fold, detect the
-    upward, downward and toward-zero modes. A C extension such as a BLAS can change the
+    upward, downward and towards-zero modes. A C extension such as a BLAS can change the
     mode on load. Rationale: docs/engineering_notes.md#live-rounding-probe
     """
     one = 1.0

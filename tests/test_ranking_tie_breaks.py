@@ -450,7 +450,7 @@ def test_sorted_scores_desc_is_a_sorted_permutation(scores: list[float]) -> None
 
 
 # ---------------------------------------------------------------------------
-# Equal means must share a rank (regression)
+# Equal means must share a rank
 # ---------------------------------------------------------------------------
 def test_equal_means_written_differently_receive_the_same_rank() -> None:
     """Equal means written as different pairs receive the same rank.

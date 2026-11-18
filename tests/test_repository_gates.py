@@ -528,7 +528,7 @@ def test_tabs_and_trailing_space_are_reported(
     assert any("trailing whitespace" in p for p in problems)
 
 
-def test_vendored_code_is_not_ours_to_format(
+def test_vendored_code_is_exempt_from_formatting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Vendored C++ under `third_party/` is not checked for format.
