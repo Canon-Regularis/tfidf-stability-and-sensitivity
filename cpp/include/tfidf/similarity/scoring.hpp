@@ -46,17 +46,24 @@ inline void check_scoring_shapes(TermId query_dim,
 
 /// Reusable scratch for TAAT, sized once and reused across queries.
 ///
-/// With `Naive` the loop allocates only when `touched` outgrows the capacity it
-/// keeps across queries. The other policies also allocate one accumulator and
-/// one seen flag per document on every query.
+/// A buffer allocates only when a query outgrows the capacity it keeps across
+/// queries; `Exact` accumulators also allocate as their expansions grow.
+/// Rationale: docs/engineering_notes.md#scoring-scratch-reuse
 struct ScoringScratch {
-    std::vector<Real> accumulator;  ///< dense, size n_docs
-    std::vector<DocId> touched;     ///< which entries are live this query
+    static constexpr std::size_t kNoSlot = ~std::size_t{0};
+
+    std::vector<Real> accumulator;           ///< dense, size n_docs
+    std::vector<DocId> touched;              ///< which entries are live this query
+    std::vector<std::size_t> slot_of;        ///< compensated policies: document to slot
+    std::vector<reduce::Neumaier> neumaier;  ///< slot i accumulates touched[i]
+    std::vector<reduce::Pairwise> pairwise;
+    std::vector<reduce::Exact> exact;
 
     void reset(DocId n_docs) {
         accumulator.assign(static_cast<std::size_t>(n_docs), 0.0);
         touched.clear();
         touched.reserve(static_cast<std::size_t>(n_docs) / 8 + 16);
+        slot_of.clear();
     }
 
     /// Zero only the entries the previous query touched.
@@ -66,7 +73,25 @@ struct ScoringScratch {
         for (const DocId d : touched) {
             accumulator[static_cast<std::size_t>(d)] = 0.0;
         }
+        if (!slot_of.empty()) {
+            for (const DocId d : touched) {
+                slot_of[static_cast<std::size_t>(d)] = kNoSlot;
+            }
+        }
         touched.clear();
+    }
+
+    /// The slot storage for one compensated policy.
+    template <class Policy>
+    [[nodiscard]] std::vector<Policy>& slots() noexcept {
+        if constexpr (std::is_same_v<Policy, reduce::Neumaier>) {
+            return neumaier;
+        } else if constexpr (std::is_same_v<Policy, reduce::Pairwise>) {
+            return pairwise;
+        } else {
+            static_assert(std::is_same_v<Policy, reduce::Exact>);
+            return exact;
+        }
     }
 };
 
@@ -119,23 +144,33 @@ void score_taat_with(const SparseView& query,
             }
         }
     } else {
-        std::vector<Policy> accs(n_docs);
-        std::vector<char> seen(n_docs, 0);
+        std::vector<Policy>& accs = scratch.slots<Policy>();
+        if (scratch.slot_of.size() != n_docs) {
+            scratch.slot_of.assign(n_docs, ScoringScratch::kNoSlot);
+        }
         for (std::size_t k = 0; k < query.nnz(); ++k) {
             const TermId t = query.indices[k];
             const Real qv = query.values[k];
             for (std::size_t p = index.postings_begin(t); p < index.postings_end(t); ++p) {
                 const auto d = static_cast<std::size_t>(index.rowidx[p]);
-                if (!seen[d]) {
-                    seen[d] = 1;
+                std::size_t& slot = scratch.slot_of[d];
+                if (slot == ScoringScratch::kNoSlot) {
+                    // A slot is reset at its first touch in each query, so it
+                    // starts from the state a fresh accumulator has.
+                    const std::size_t next = scratch.touched.size();
                     scratch.touched.push_back(index.rowidx[p]);
+                    if (next == accs.size()) {
+                        accs.emplace_back();
+                    } else {
+                        accs[next] = Policy{};
+                    }
+                    slot = next;
                 }
-                accs[d].add(qv * index.values[p]);
+                accs[slot].add(qv * index.values[p]);
             }
         }
-        for (const DocId d : scratch.touched) {
-            const auto i = static_cast<std::size_t>(d);
-            scratch.accumulator[i] = accs[i].value();
+        for (std::size_t i = 0; i < scratch.touched.size(); ++i) {
+            scratch.accumulator[static_cast<std::size_t>(scratch.touched[i])] = accs[i].value();
         }
     }
 

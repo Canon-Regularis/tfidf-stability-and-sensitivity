@@ -262,6 +262,64 @@ TEST_CASE("scoring: reusing scratch across queries changes nothing") {
     }
 }
 
+TEST_CASE("scoring: one scratch serves every policy and corpus size in any order") {
+    // Each run on the shared scratch is compared with a run on a fresh one. The
+    // two corpus sizes force a reset between them, and the rotating policy order
+    // hands each compensated slot to a different document on the next query.
+    const Corpus big = random_corpus(80, 30, 10, 555);
+    const Corpus small = random_corpus(50, 30, 10, 556);
+    const std::vector<std::vector<TermId>> terms{{1, 4, 9}, {0, 4, 20, 21}, {2, 3, 5, 7, 11, 13}};
+    const std::vector<Reduction> policies{Reduction::Naive, Reduction::Neumaier,
+                                          Reduction::Pairwise, Reduction::Exact};
+
+    ScoringScratch shared;
+    for (std::size_t round = 0; round < policies.size(); ++round) {
+        for (const Corpus* c : {&big, &small}) {
+            const CsrView csr = c->view();
+            const Csc csc = transpose(csr);
+            for (std::size_t j = 0; j < policies.size(); ++j) {
+                const Reduction p = policies[(round + j) % policies.size()];
+                const std::vector<Real> norms = row_norms(csr, p);
+                for (const std::vector<TermId>& qi : terms) {
+                    const std::vector<Real> qv(qi.size(), 0.75 + static_cast<Real>(round));
+                    const SparseView q{qi, qv, csr.n_cols};
+                    const Real qn = l2_norm(q, p);
+                    std::vector<Real> fresh(static_cast<std::size_t>(csr.n_rows));
+                    std::vector<Real> reused(static_cast<std::size_t>(csr.n_rows));
+                    ScoringScratch own;
+                    score_taat(q, csc, norms, qn, fresh, own, p);
+                    score_taat(q, csc, norms, qn, reused, shared, p);
+                    for (std::size_t i = 0; i < fresh.size(); ++i) {
+                        CHECK(same_bits(fresh[i], reused[i]));
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("scoring: compensated slot storage follows the touched set, not the corpus") {
+    const Corpus c = random_corpus(200, 60, 6, 9001);
+    const CsrView csr = c.view();
+    const Csc csc = transpose(csr);
+    const std::vector<Real> norms = row_norms(csr, Reduction::Pairwise);
+    const std::vector<TermId> qi{3};
+    const std::vector<Real> qv{1.0};
+    const SparseView q{qi, qv, csr.n_cols};
+    REQUIRE(csc.df(3) > 0);
+
+    ScoringScratch scratch;
+    std::vector<Real> out(static_cast<std::size_t>(csr.n_rows));
+    score_taat(q, csc, norms, l2_norm(q, Reduction::Pairwise), out, scratch,
+               Reduction::Pairwise);
+    CHECK(scratch.touched.size() == csc.df(3));
+    CHECK(scratch.pairwise.size() == scratch.touched.size());
+    CHECK(scratch.pairwise.size() < static_cast<std::size_t>(csr.n_rows));
+    // Only the policy that ran holds storage.
+    CHECK(scratch.neumaier.empty());
+    CHECK(scratch.exact.empty());
+}
+
 TEST_CASE("scoring: the zero-vector convention of section 2.3") {
     const Corpus c = random_corpus(20, 10, 5, 3);
     const CsrView csr = c.view();
@@ -612,7 +670,7 @@ TEST_CASE("score: the algorithm asked for is the algorithm that runs") {
 
 TEST_CASE("score: a document enters the touched list once however many terms hit it") {
     // Each document enters the touched list once, however many query terms hit
-    // it. The compensated policies track this with a separate `seen` array.
+    // it. The compensated policies track this with the scratch's `slot_of` map.
     // Duplicates leave the scores unchanged but lengthen the next `clear_touched`.
     const Corpus c = random_corpus(40, 10, 8, 8080);
     const CsrView csr = c.view();

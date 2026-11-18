@@ -195,6 +195,41 @@ def test_scores_are_bit_exact(
     assert compared > 10_000
 
 
+@pytest.mark.parametrize("policy", list(Reduction))
+def test_one_index_scores_a_query_sequence_bit_exactly_under_every_policy(
+    model: TfidfModel, corpus: list[list[str]], policy: Reduction
+) -> None:
+    """One index scores successive queries through one reused scratch.
+
+    Each query matches the reference, so no accumulator state carries over
+    from the query before it, under any policy.
+    """
+    index = nat.NativeIndex(
+        np.array(model.matrix.indptr, dtype=np.int64),
+        np.array(model.matrix.indices, dtype=np.int32),
+        np.array(model.matrix.values, dtype=np.float64),
+        model.n_documents,
+        model.n_features,
+        _policy(policy),
+    )
+    docs = [model.document(i) for i in range(model.n_documents)]
+    norms = [l2_norm(d, policy) for d in docs]
+    assert all(same_bits(a, b) for a, b in zip(norms, index.norms, strict=True))
+
+    rng = random.Random(4096)
+    alpha = sorted({t for d in corpus for t in d})
+    taat = int(nat.ALGORITHM["taat"])
+    for _ in range(25):
+        q = TfidfVectoriser.transform_query(
+            [rng.choice(alpha) for _ in range(rng.randint(1, 25))], model
+        )
+        expected = cosine_against_corpus(q, docs, norms, policy)
+        got = index.score(
+            np.array(q.indices, dtype=np.int32), np.array(q.values, dtype=np.float64), taat
+        )
+        assert all(same_bits(a, b) for a, b in zip(expected, got, strict=True))
+
+
 def test_taat_and_daat_agree(model: TfidfModel, index, corpus: list[list[str]]) -> None:  # type: ignore[no-untyped-def]
     """Two structurally unrelated traversals of the same data agree bit for bit.
 

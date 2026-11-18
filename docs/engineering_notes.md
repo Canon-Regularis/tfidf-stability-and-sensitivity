@@ -525,7 +525,7 @@ The property depends on the ascending order. Blocking the term loop, or visiting
 
 Difference in form from the C++. For every policy other than NAIVE, the native TAAT kernel keeps one incremental accumulator object per touched document, with one add call per product. The Python reducers are batch functions over a sequence, so the non-naive TAAT branch buffers each document's products and reduces them once at the end. Each policy consumes its addends strictly in order and depends on nothing else, so buffering does not change any bit. For NAIVE both implementations add directly into the dense accumulator array.
 
-Cost, where N is the number of documents. TAAT costs O(sum of df(t) over query terms t) multiply-adds plus O(|touched|) divisions rather than O(N), since an untouched document scores exactly 0. DAAT costs O(sum over every document d of (nnz(d) + nnz(q))), because each row is merged with the query. Both kernels also write all N output slots, and under a compensated policy the native TAAT kernel allocates one policy object and one flag per document on every query. TAAT is faster when the query's terms are individually rare, which is the usual case for the TF-IDF profile queries of section 7.1, so it is the default of `score`.
+Cost, where N is the number of documents. TAAT costs O(sum of df(t) over query terms t) multiply-adds plus O(|touched|) divisions rather than O(N), since an untouched document scores exactly 0. DAAT costs O(sum over every document d of (nnz(d) + nnz(q))), because each row is merged with the query. Both kernels also write all N output slots, and under a compensated policy the native TAAT kernel keeps one policy object per touched document, in storage it reuses across queries (see [Scoring scratch reuse](#scoring-scratch-reuse)). TAAT is faster when the query's terms are individually rare, which is the usual case for the TF-IDF profile queries of section 7.1, so it is the default of `score`.
 
 ### Sort key ordering
 
@@ -1139,6 +1139,12 @@ Source: `cpp/tests/test_reduction.cpp`.
 Source: `cpp/include/tfidf/similarity/scoring.hpp`.
 
 The TAAT kernel is bit-identical to the DAAT kernel because its outer loop ascends over query terms and each document keeps its own policy object, so every document receives the addend sequence a row-wise dot product produces; blocking or reordering the term loop would break this. See [Scoring term order](#scoring-term-order).
+
+### Scoring scratch reuse
+
+Source: `cpp/include/tfidf/similarity/scoring.hpp`.
+
+`ScoringScratch` holds the TAAT kernel's working storage across queries. Under `Naive` that is the dense accumulator and the `touched` list. A compensated policy also needs one accumulator object per touched document, and a `Pairwise` object carries two 64-entry arrays, about 1 KB, so a dense array of them for a 50 000-document corpus would hold about 52 MB. The scratch keeps them compact instead: `slot_of` maps a document to its slot, slot i accumulates `touched[i]`, and each policy has its own slot vector, which stays empty until that policy runs and then grows to the largest touched set seen. A slot is reset to a default-constructed policy object at its first touch in each query, so every document starts from the state of a fresh accumulator and receives the same addends in the same order; the slot changes where the state lives and no bit. `clear_touched` unmaps the previous query's documents, and `reset` drops the map when the corpus size changes, so no mapping survives into a query on a corpus of another size. A document is appended to `touched` before it is mapped, so an allocation failure leaves no mapped document outside `touched`. An `Exact` object owns a vector that its reset releases, so `Exact` still allocates as its expansions grow.
 
 ### Sort key explicit less than
 
