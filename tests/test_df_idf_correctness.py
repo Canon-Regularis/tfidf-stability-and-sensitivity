@@ -896,3 +896,19 @@ def test_a_term_in_every_document_still_carries_the_additive_one() -> None:
     for impl in (LogImpl.CORRECTLY_ROUNDED, LogImpl.PLATFORM):
         assert smoothed_idf_one(9742, 9742, impl) == 1.0, impl
         assert smoothed_idf_one(0, 0, impl) == 1.0, "the empty-corpus edge is defined, not a div0"
+
+
+@pytest.mark.parametrize("impl", list(LogImpl))
+def test_a_repeated_frequency_takes_the_value_computed_term_by_term(impl: LogImpl) -> None:
+    """Each distinct df is evaluated once; every value keeps its bits."""
+    df = [3, 1, 3, 7, 1, 1, 9, 3, 0, 9]
+    vector = smoothed_idf(df, 9, impl)
+
+    assert len(vector.values) == len(df)
+    for d, value in zip(df, vector.values, strict=True):
+        assert same_bits(value, smoothed_idf_one(d, 9, impl)), f"df={d} under {impl}"
+
+
+def test_a_repeated_out_of_range_frequency_is_still_refused() -> None:
+    with pytest.raises(ValueError, match="df=10 exceeds the corpus size N=9"):
+        smoothed_idf([2, 10, 10], 9)
