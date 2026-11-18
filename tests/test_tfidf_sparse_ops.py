@@ -288,16 +288,16 @@ def test_cosine_similarities_match_sklearn(random_corpus: list[list[str]]) -> No
 
 
 @pytest.mark.sklearn
-def test_our_vectors_are_not_l2_normalised(random_corpus: list[list[str]]) -> None:
+def test_tfidf_vectors_are_not_l2_normalised(random_corpus: list[list[str]]) -> None:
     """Guard against having implemented sklearn instead of the paper.
 
     Section 2.2 applies no vector normalisation and section 6 says none is
     introduced. Norms of 1 everywhere would mean sklearn's convention had been
     adopted and the section 4.2/4.3 bounds were measuring the wrong geometry.
     """
-    ours = TfidfVectoriser().fit(random_corpus)
-    assert all(abs(n - 1.0) > 1e-9 for n in ours.norms)
-    assert max(ours.norms) / min(ours.norms) > 2.0
+    model = TfidfVectoriser().fit(random_corpus)
+    assert all(abs(n - 1.0) > 1e-9 for n in model.norms)
+    assert max(model.norms) / min(model.norms) > 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +383,31 @@ def _canonical() -> CsrMatrix:
 
 def test_a_well_formed_matrix_is_canonical_so_the_rejections_below_mean_something() -> None:
     assert _canonical().is_canonical(), "the baseline must pass or every rejection is vacuous"
+
+
+@pytest.mark.parametrize(
+    ("indptr", "n_rows", "n_cols"),
+    [((), -1, 4), ((0, 0), 1, -1), ((), -1, -1)],
+    ids=["negative-rows", "negative-cols", "both-negative"],
+)
+def test_a_negative_dimension_is_not_canonical(
+    indptr: tuple[int, ...], n_rows: int, n_cols: int
+) -> None:
+    """A negative dimension is refused rather than read.
+
+    At ``n_rows = -1`` an empty indptr matches ``n_rows + 1``; a negative
+    ``n_cols`` admits every empty row. The C++ ``CsrView`` refuses both alike.
+    """
+    bad = CsrMatrix(indptr=indptr, indices=(), values=(), n_rows=n_rows, n_cols=n_cols)
+    assert not bad.is_canonical()
+
+
+@pytest.mark.parametrize(("indptr", "n_rows", "n_cols"), [((0,), 0, 4), ((0, 0, 0), 2, 0)])
+def test_an_empty_corpus_and_an_empty_vocabulary_are_canonical(
+    indptr: tuple[int, ...], n_rows: int, n_cols: int
+) -> None:
+    empty = CsrMatrix(indptr=indptr, indices=(), values=(), n_rows=n_rows, n_cols=n_cols)
+    assert empty.is_canonical()
 
 
 def test_an_indptr_of_the_wrong_length_is_not_canonical() -> None:

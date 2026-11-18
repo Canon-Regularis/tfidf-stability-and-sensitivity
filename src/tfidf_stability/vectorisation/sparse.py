@@ -179,6 +179,10 @@ class CsrMatrix:
 
     def is_canonical(self) -> bool:
         """Whether the structure is well formed and every row is ascending."""
+        # Signs first: at n_rows = -1 an empty indptr matches n_rows + 1 and
+        # indptr[0] raises, and a negative n_cols admits every empty row.
+        if self.n_rows < 0 or self.n_cols < 0:
+            return False
         if len(self.indptr) != self.n_rows + 1:
             return False
         if self.indptr[0] != 0 or self.indptr[-1] != len(self.values):
