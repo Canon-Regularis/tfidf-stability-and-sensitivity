@@ -73,6 +73,16 @@ std::vector<DocId> rank_with(const std::vector<Real>& scores,
     return out;
 }
 
+/// Hide a value from the optimiser.
+///
+/// A refused argument is then not carried into the code its guard skips,
+/// where GCC 15 reports an array bound.
+template <class T>
+T opaque(T value) {
+    volatile T held = value;
+    return held;
+}
+
 }  // namespace
 
 // -----------------------------------------------------------------------------
@@ -225,7 +235,7 @@ TEST_CASE("ranker: select_top refuses an m past the keys, for every strategy") {
         std::vector<SortKey> keys(scores.size());
         build_keys(scores, t, priority, keys);
         std::vector<DocId> out(scores.size() + 1);
-        CHECK_THROWS_WITH_AS(select_top(keys, scores.size() + 1, out, how),
+        CHECK_THROWS_WITH_AS(select_top(keys, opaque(scores.size() + 1), out, how),
                              "m exceeds the number of ranked documents", std::invalid_argument);
     }
 }
