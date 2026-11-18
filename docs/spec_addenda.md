@@ -327,8 +327,11 @@ neither ports to C++.
   *Naming requirement:* Porter2 is a **stemmer** rather than a lemmatiser. The
   paper should read "lemmatisation (implemented as Snowball English stemming;
   see G7)".
-- **Tier 2 `lookup`**: a bundled, hash-verified `surface⇥lemma` table consulted
-  before the rule-based fallback.
+- **Tier 2 `lookup`**: a caller-supplied `surface⇥lemma` table consulted before
+  a fallback backend (identity by default). No table is bundled. The table and
+  the fallback's identity are hashed into `lookup:<sha256>`, which the
+  preprocessing digest binds, so two pipelines with the same digest produce the
+  same lemmas.
 - **Tier 3 `external_cached`**: NLTK/spaCy permitted, but **only through a
   cache**. Run once, emit a token stream plus a manifest recording tool version,
   model version, and input/output hashes. The external tool is never invoked
