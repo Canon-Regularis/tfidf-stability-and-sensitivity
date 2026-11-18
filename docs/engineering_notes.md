@@ -4,7 +4,7 @@ Decisions the code makes that a comment of four lines cannot justify. Each
 section is named by the slug that a `Rationale:` comment in the source cites:
 the comment states what the code does, and this page states why.
 
-- [Python package](#python-package): 78 notes
+- [Python package](#python-package): 81 notes
 - [C++ core and binding](#c-core-and-binding): 59 notes
 - [Test suite](#test-suite): 61 notes
 - [Mutation tooling](#mutation-tooling): 6 notes
@@ -36,6 +36,16 @@ Per-query attribute tables. Under section 7.1's protocol each query excludes its
 Source: `src/tfidf_stability/_native/__init__.py`.
 
 The Python package and the compiled extension each hold a separate copy of the ABI string: REQUIRED_ABI in tfidf_stability._native and __abi__ in the extension. The loader compares the two at import, so a mismatch identifies a build that is stale against the current C++/Python contract. The ABI string is bumped whenever that contract changes shape: a binding is added, removed or changes signature. The check reads __abi__ and not the release __version__, because bindings can be added between releases: an extension that lacks them can still report the current release version, so a version check would accept a build that is missing bindings the Python side calls. A build that predates __abi__ reports None and is rejected in the same way as any other mismatch. require_native raises AbiVersionMismatchError for a stale build and NativeBackendUnavailableError for a missing one, since the fixes differ (rebuild against the current contract, or build at all); the former subclasses the latter, so callers that do not distinguish them are unaffected.
+
+### Beir ingestion
+
+Source: `src/tfidf_stability/datasets/beir.py`.
+
+A BEIR archive is read by exact member path under its single top-level folder: `corpus.jsonl`, `queries.jsonl` and `qrels/<split>.tsv`. A second top-level entry, such as a `__MACOSX` folder, is refused rather than skipped, so a member of the same name elsewhere in the archive is never read in place of the real one. The qrels files carry CRLF line endings under a fixed header; `splitlines` absorbs the endings and the header is compared exactly. A grade must match `-?[0-9]+`, because `int()` also accepts underscores and non-ASCII digits.
+
+Every query the split judges is kept, including one whose grades are all zero or below; `n_queries_without_relevant` counts those, and the metrics report them as undefined rather than 0. A query in `queries.jsonl` that the split does not judge is dropped, since one queries file serves every split. A judgement naming an unknown query or document is an error: a dropped judgement would lower recall without a trace.
+
+Documents and queries sort by UTF-8 identifier, the order `AttributeTable` uses for `id_ranks`. Title and body stay separate fields, as in [Field boundaries](#field-boundaries), so no bigram spans the seam, and a blank title is left out. `LoadedDataset.digest()` covers the records only, so the provenance carries `queries_sha256` and `qrels_sha256`. Each archive's digest is pinned in `PINNED_SHA256` and read when the loader runs, so a test can replace it.
 
 ### Benchmark design
 
@@ -117,9 +127,9 @@ Source: `src/tfidf_stability/datasets/loaders.py`.
 
 `_REGISTRY` in `src/tfidf_stability/datasets/loaders.py` maps each registered name to its loader, `DATASET_NAMES` lists those names in the same order, and `load_dataset` turns a registered name into records. `configs/datasets.yaml` documents the same datasets but no code loads it, so editing a value there changes no behaviour. The experiment scripts and the notebooks that use a registered dataset load it through `load_dataset`, and none of them depend on whether the corpus is generated, downloaded or read from disk. The CLI does not call `load_dataset`; it reads a JSONL corpus file directly. A corpus already on disk is accepted as `jsonl:<path>`; this is how a MovieLens-derived corpus is consumed once `scripts/build_corpus.py` has written it.
 
-`LoadedDataset` carries a provenance block that goes verbatim into the run manifest. A synthetic result and a MovieLens result therefore stay distinguishable from the manifest alone, down to the archive digest or generator spec behind each. Without the block the two differ only by filename, and filenames are not preserved when results are copied.
+`LoadedDataset` carries a provenance block that goes verbatim into the run manifest. Results from different datasets therefore stay distinguishable from the manifest alone, down to the archive digest or generator spec behind each. Without the block they differ only by filename, and filenames are not preserved when results are copied.
 
-The two datasets are handled differently because of their licences. Synthetic data is redistributable and is regenerated from its spec on demand, so a synthetic result is reproducible from the repository alone. MovieLens may not be redistributed, so it is loaded from a local archive that the repository does not contain, and its provenance records `redistributable: false` together with the archive SHA-256 and the interaction threshold. See `data/README.md`.
+The datasets are handled differently because of their licences. Synthetic data is redistributable and is regenerated from its spec on demand, so a synthetic result is reproducible from the repository alone. MovieLens may not be redistributed, so it is loaded from a local archive that the repository does not contain, and its provenance records `redistributable: false` together with the archive SHA-256 and the interaction threshold. The BEIR benchmarks may not be redistributed either: each is loaded from a local archive checked against `beir.PINNED_SHA256`, and its provenance also records `queries_sha256` and `qrels_sha256`, because `LoadedDataset.digest()` covers the records only. See `data/README.md`.
 
 ### Display tau
 
@@ -133,7 +143,7 @@ Source: `src/tfidf_stability/utils/numerics.py`.
 
 math.log delegates to the platform libm, which IEEE-754 does not require to be correctly rounded. Over N in {100, 610, 9742, 20000, 50000} and all valid df, the platform logarithm log((1 + N) / (1 + df)) differs from the correctly-rounded one in 44.5% of cases, and the idf value log((1 + N) / (1 + df)) + 1 in 15.16% of cases (docs/spec_addenda.md#g13). The +1 moves the value into a coarser binade, which rounds away most of the 1-ulp disagreements. The remaining difference makes idf, and every weight, norm and score computed from it, platform-dependent at the 1-ulp level, and UCRT, glibc and Apple libm each round differently.
 
-correctly_rounded_log_ratio evaluates the exact rational ratio in decimal.Decimal at DECIMAL_LOG_PRECISION (60) digits and rounds once to binary64. Sixty digits is well above the roughly 17 needed to round binary64 correctly, and the result agrees with a 120-digit evaluation on every ratio the project produces. The idf vector holds O(|V|) values, computed once and outside any hot loop, so the cost of a few microseconds per vocabulary entry is immaterial.
+correctly_rounded_log_ratio evaluates the exact rational ratio in decimal.Decimal at DECIMAL_LOG_PRECISION (60) digits and rounds once to binary64. Sixty digits is well above the roughly 17 needed to round binary64 correctly, and the result agrees with a 120-digit evaluation on every ratio the project produces. The idf vector holds O(|V|) values, computed once per fit and outside any scoring loop. One evaluation costs about 0.1 ms or more, so `smoothed_idf` evaluates each distinct df once ([Idf correctly rounded log](#idf-correctly-rounded-log)).
 
 Computing idf in Python also removes the only transcendental function from the native pipeline: the C++ core receives idf as data and computes with correctly rounded operations alone. LogImpl.PLATFORM keeps the libm path available so that the difference (the G13 gap) can be measured; only LogImpl.CORRECTLY_ROUNDED is valid for published results.
 
@@ -214,11 +224,25 @@ Source: `src/tfidf_stability/perturbation/experiments.py`.
 
 run_perturbation fits the baseline and the perturbed corpus from scratch with two independent TfidfVectoriser fits. The pipeline is not incremental. A partial update that shares state with the baseline is the most likely way to hide a real perturbation effect, because any stale document frequency, IDF value or norm carried over from the baseline hides the movement the experiment measures. The cost is acceptable: an experiment runs a handful of perturbations, not one per query.
 
+### Identifier tie orders
+
+Source: `src/tfidf_stability/evaluation/tie_orders.py`.
+
+A BEIR document carries no attribute, so `PI`, `PI_SCORE` and `PI_ALT` all fall through to the identifier rank on a score tie, and the operator ablation of section 4.5 has nothing to vary. E5 varies the identifier order instead:
+
+- `id_asc`: UTF-8 order, the one `AttributeTable.from_records` builds.
+- `id_desc`: its reverse. trec_eval orders a run by score, then by document identifier in reverse `strcmp` order (Lin and Yang, SIGIR 2019), which for ASCII identifiers is this order, so `id_desc` is the variant to compare with published BEIR figures.
+- `shuffle_<seed>`: ordered by `sha256(f"{seed}\0{doc_id}")`, with the UTF-8 identifier as a tie key. `random.shuffle` is not stable across CPython versions ([Synthetic prng](#synthetic-prng)); a hash order is the same in every version and language.
+
+Each order is a bijection by construction. `AttributeTable` does not check `id_ranks`, and a repeated rank would make the sort keys non-injective and leave the order to the selection algorithm. Every variant ranks the same scores, so a metric that differs between variants differs through the tie-break alone.
+
+A text query keeps every document as a candidate, so one table per variant serves every query. `score_text_queries` scores term at a time over an inverted index: `taat_scores` gives the bits `cosine_against_corpus` gives ([Scoring term order](#scoring-term-order)), with its multiply-adds set by the query terms' postings rather than by every document's non-zeros; the N output scores are still written.
+
 ### Idf correctly rounded log
 
 Source: `src/tfidf_stability/vectorisation/idf.py`.
 
-The idf vector evaluates log((1 + N) / (1 + df)) through the correctly rounded logarithm, not math.log, and keeps LogImpl.PLATFORM only to measure the G13 gap. See [Exact log](#exact-log).
+The idf vector evaluates log((1 + N) / (1 + df)) through the correctly rounded logarithm, not math.log, and keeps LogImpl.PLATFORM only to measure the G13 gap. See [Exact log](#exact-log). The value depends on (df, N) alone, so `smoothed_idf` evaluates each distinct df once: a 60-digit Decimal logarithm per term otherwise dominates fitting a corpus with a large vocabulary, and the cached value is the same float.
 
 ### Idf union vocabulary
 
@@ -482,6 +506,14 @@ Ranks are therefore dense: consecutive entries that compare equal share a rank, 
 Source: `src/tfidf_stability/preprocessing/normalise.py`.
 
 When strip_control is set, normalise deletes every non-whitespace character in the Cc, Cf, Co and Cs categories after the first normalisation and case pass. Whitespace control characters such as tab and newline are kept for the whitespace collapse. Deleting a format character can bring a base character and a combining mark into contact, which produces a sequence the first pass did not see. For example, "e", U+200B, U+0301 becomes "e" followed by U+0301. That sequence is not NFKC, and under the default tokeniser pattern it tokenises to "e", while the composed "e-acute" tokenises to itself. For this reason, whenever stripping changes the text, normalise runs `_canonical_case` on the stripped text again. One recomposition is enough for two reasons. First, composition only merges a starter with a following mark, so it cannot create a character that the stripping stage deletes. Second, the whitespace collapse that follows always leaves a space between the characters it separates, so it cannot bring a base character and a mark into contact.
+
+### Relevance metric discount
+
+Source: `src/tfidf_stability/evaluation/metrics.py`.
+
+The metrics follow trec_eval, which produced BEIR's published figures: gain is the grade itself, a grade of zero or below is not relevant, and the discount at rank `i` is `1 / log2(i + 1)`. The discount is computed as `ln 2 / ln(i + 1)`, both logarithms from `correctly_rounded_log_ratio` and one IEEE division, so it is the same on every platform; a libm `log2` need not round correctly ([Exact log](#exact-log)). It is within one ulp of `1 / math.log2(i + 1)` for ranks 1 to 200, and exact at ranks 1 and 3. Sums use `math.fsum`, which is correctly rounded and independent of order.
+
+A ranked list is scored in the order given and never re-sorted by score. trec_eval re-sorts a run and breaks its ties itself, which would replace the tie order that E5 measures. With no relevant document, nDCG, recall and reciprocal rank are undefined (`None`): the mean leaves such a query out and counts it. A degenerate query, one with no features, ranks nothing and scores 0 wherever a relevant document exists.
 
 ### Resizing edits
 

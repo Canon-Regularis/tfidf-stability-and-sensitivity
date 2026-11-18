@@ -43,6 +43,10 @@ python scripts/export_intermediates.py --dataset synthetic_tiny --doc d000000 -o
 
 # figures, rendered from the JSON above; never from a live computation
 python scripts/make_figures.py --reports reports/
+
+# E5 (retrieval on a BEIR test split); fetch the archive first
+python scripts/fetch_data.py --dataset beir_scifact
+python scripts/run_retrieval_eval.py --dataset beir_scifact     --archive data/raw/beir-scifact.zip -o reports/
 ```
 
 `run_stability_profile.py` **exits non-zero** if any perturbation inside §4.4's
@@ -101,6 +105,45 @@ See [ranking_stability.md](ranking_stability.md).
 
 See [tie_breaking_discontinuities.md](tie_breaking_discontinuities.md).
 
+## E5. Retrieval effectiveness on BEIR
+
+`run_retrieval_eval.py` scores the test split of a BEIR benchmark
+(`beir_scifact` or `beir_nfcorpus`) with the benchmark's own text queries and
+graded judgements. For each reduction policy and each identifier tie order it
+reports:
+
+- nDCG@k (default 10), Recall@depth (default 100) and MRR@k, defined as in
+  trec_eval ([Relevance metric discount](engineering_notes.md#relevance-metric-discount)).
+- Per query: the boundary margin at k, the size of the exact tie at position k,
+  whether the top k differ between `id_asc` and `id_desc` as a set and as an
+  order, and the number of documents with a non-zero score.
+- Over the seeded shuffles of the identifier order (default 20): the minimum,
+  maximum and range of each mean.
+
+The tie orders are `id_asc`, `id_desc` and `shuffle_<seed>`
+([Identifier tie orders](engineering_notes.md#identifier-tie-orders)). A BEIR
+document has no attribute, so the three operators of section 4.5 coincide and
+the identifier order alone decides a score tie. Every variant ranks the same
+scores, so a metric that moves between variants moves through the tie-break.
+
+The corpus is fitted once, and each policy reuses the fit with its own norms,
+which gives the model a refit would. Queries pass through the corpus's own
+preprocessing pipeline. A query whose features are all removed is degenerate:
+it ranks nothing and scores 0. A query with no relevant judgement is undefined
+and left out of each mean, with a count.
+
+Three differences from published BEIR figures are by design:
+
+- BEIR's lexical baseline ranks with BM25; this study ranks with cosine TF-IDF
+  (README section 2), so its nDCG is expected to be lower.
+- trec_eval breaks score ties by reverse identifier order, which is `id_desc`
+  here, so that is the variant to compare. The metric code never re-sorts a
+  ranking, so the tie order under study is the one scored.
+- BEIR's BM25 run returns only documents that share a term with the query.
+  Here the ranking to depth fills with zero-score documents in tie order, and
+  Recall@depth counts any relevant one among them; `n_nonzero` records how many
+  documents scored above zero.
+
 ## Figures, and how each one could falsify its hypothesis
 
 Figures are rendered from the recorded JSON and never recompute their data. A
@@ -124,7 +167,8 @@ exploratory. Every published number comes from a runner and its JSON file.
 ## Datasets
 
 `synthetic_tiny` (120 documents) serves tests and CI, `synthetic_small` (2000)
-serves the full run, and `movielens_small` serves external validity. The
+serves the full run, `movielens_small` serves external validity, and
+`beir_scifact` and `beir_nfcorpus` carry relevance judgements for E5. The
 synthetic generator is seeded and byte-reproducible. CI generates the data twice
 and requires the files to be identical. The check is there to catch a change that
 reintroduces a PRNG call whose output is not stable across versions.
