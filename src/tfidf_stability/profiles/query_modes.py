@@ -34,6 +34,8 @@ class QueryMode(str, Enum):
     USER_PROFILE = "user_profile"
     LEAVE_ONE_OUT = "leave_one_out"
     ITEM_AS_QUERY = "item_as_query"
+    #: A query a dataset ships as text, as BEIR does; see ``profiles.text_queries``.
+    TEXT = "text"
 
     def __str__(self) -> str:
         return self.value

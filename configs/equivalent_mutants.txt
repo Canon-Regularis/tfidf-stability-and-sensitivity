@@ -153,7 +153,7 @@ src/tfidf_stability/preprocessing/stopwords.py  45  boolop  Or -> And  # src=586
 src/tfidf_stability/preprocessing/ngrams.py  54  constant  1 -> 0  # src=3822bf73 the unigram fast path and the general path produce identical output at n = 1
 
 # --- profiles/query_modes.py -----------------------------------------------
-src/tfidf_stability/profiles/query_modes.py  173  constant  2 -> 1  # src=69347c47 the clamp sits behind `if min_interactions >= 2`, which makes it dead
+src/tfidf_stability/profiles/query_modes.py  175  constant  2 -> 1  # src=69347c47 the clamp sits behind `if min_interactions >= 2`, which makes it dead
 
 # --- profiles/user_profile.py ----------------------------------------------
 src/tfidf_stability/profiles/user_profile.py  198  constant  True -> False  # src=2181b96d strict zip behind SparseVector.__post_init__
@@ -214,3 +214,9 @@ src/tfidf_stability/persistence/save_load.py  412  constant  True -> False  # sr
 
 # --- _native/__init__.py ---------------------------------------------------
 src/tfidf_stability/_native/__init__.py  64  constant  True -> False  # src=9d3aa03f inside the ABI mismatch arm, which needs a stale build on disk and is marked `# pragma: no cover`; selection happens once at import and a process that has imported this module cannot replay it against a differently-versioned extension
+
+# --- evaluation/metrics.py -------------------------------------------------
+src/tfidf_stability/evaluation/metrics.py  58  compare  Gt -> GtE  # src=95ad0bc6 a grade of 0 then adds 0 * discount = +0.0, which fsum leaves unchanged, and a negative grade is excluded under either comparison
+
+# --- evaluation/tie_orders.py ----------------------------------------------
+src/tfidf_stability/evaluation/tie_orders.py  58  constant  0 -> 1  # src=691a4192 the loop below assigns every position of id_ranks, since `ranked` is a permutation of range(n), so the initial fill is never read
