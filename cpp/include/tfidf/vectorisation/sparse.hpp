@@ -142,6 +142,11 @@ struct CsrView {
     }
 
     [[nodiscard]] bool is_canonical() const noexcept {
+        // Signs first: at n_rows = -1 the size_t length below is 0, so an empty
+        // indptr would pass it, and a negative n_cols passes every empty row.
+        if (n_rows < 0 || n_cols < 0) {
+            return false;
+        }
         if (indptr.size() != static_cast<std::size_t>(n_rows) + 1) {
             return false;
         }

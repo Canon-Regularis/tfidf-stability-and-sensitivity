@@ -17,6 +17,8 @@
 #include <limits>
 #include <random>
 #include <span>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 using namespace tfidf;
@@ -336,7 +338,7 @@ TEST_CASE("scoring: the zero-vector convention of section 2.3") {
     const SparseView zero{{}, {}, csr.n_cols};
     score_taat(zero, csc, norms, 0.0, out, scratch, Reduction::Naive);
     for (const Real s : out) {
-        CHECK_FALSE(std::isnan(s));  // fails now if the kernel wrote nothing
+        CHECK_FALSE(std::isnan(s));  // fails if the kernel wrote nothing
         CHECK(s == 0.0);
         CHECK(std::signbit(s) == false);  // +0.0, never -0.0
     }
@@ -702,5 +704,238 @@ TEST_CASE("score: a document enters the touched list once however many terms hit
             visits += index.df(query.indices[k]);
         }
         CHECK(visits > sorted.size());
+    }
+}
+
+// -----------------------------------------------------------------------------
+// The fitted index
+// -----------------------------------------------------------------------------
+namespace {
+
+/// Hide a value from the optimiser.
+///
+/// A refused argument is then not carried into the code its guard skips,
+/// where GCC 15 reports an array bound.
+template <class T>
+T opaque(T value) {
+    volatile T held = value;
+    return held;
+}
+
+const std::vector<Reduction> kPolicies{Reduction::Naive, Reduction::Neumaier, Reduction::Pairwise,
+                                       Reduction::Exact};
+
+FittedIndex fit(const Corpus& c, Reduction p) {
+    return FittedIndex(c.indptr, c.indices, c.values, c.n_rows, c.n_cols, p);
+}
+
+/// An index with no stored entries, shaped as the Python tests shape it.
+///
+/// A negative row count gets an empty indptr, any other count one zero offset
+/// per row plus one.
+FittedIndex empty_shape(DocId n_docs, TermId n_terms) {
+    std::vector<Offset> indptr;
+    if (n_docs >= 0) {
+        indptr.assign(static_cast<std::size_t>(n_docs) + 1, 0);
+    }
+    return FittedIndex(indptr, {}, {}, opaque(n_docs), opaque(n_terms), Reduction::Naive);
+}
+
+}  // namespace
+
+TEST_CASE("sparse: a negative dimension is never canonical") {
+    // At n_rows = -1 the size_t length n_rows + 1 is 0, which an empty indptr
+    // matches; a negative n_cols admits every empty row.
+    const std::vector<Offset> none;
+    const std::vector<Offset> one_row{0, 0};
+    CHECK_FALSE(CsrView{none, {}, {}, -1, 4}.is_canonical());
+    CHECK_FALSE(CsrView{one_row, {}, {}, 1, -1}.is_canonical());
+    CHECK_FALSE(CsrView{none, {}, {}, -1, -1}.is_canonical());
+}
+
+TEST_CASE("sparse: an empty corpus and an empty vocabulary are canonical") {
+    const std::vector<Offset> zero_rows{0};
+    const std::vector<Offset> two_rows{0, 0, 0};
+    CHECK(CsrView{zero_rows, {}, {}, 0, 4}.is_canonical());
+    CHECK(CsrView{two_rows, {}, {}, 2, 0}.is_canonical());
+}
+
+TEST_CASE("sparse: the indptr scan stops at the end of its view") {
+    // A CsrView may cover a prefix of a longer buffer. The entry after its last
+    // offset is smaller here, so a scan that read one entry too far would call
+    // this matrix not canonical, whatever memory lies past the buffer.
+    const std::vector<Offset> buffer{0, 1, 2, 0};
+    const std::vector<TermId> indices{0, 1};
+    const std::vector<Real> values{1.0, 2.0};
+    CHECK(CsrView{std::span<const Offset>(buffer).first(3), indices, values, 2, 2}.is_canonical());
+}
+
+TEST_CASE("fitted index: construction refuses what the kernels cannot read") {
+    // The five dimension pairs and the messages are the ones the Python suite pins.
+    const std::vector<std::pair<DocId, TermId>> negative{{-1, 4}, {0, -1}, {1, -1}, {-1, -1},
+                                                         {-5, -5}};
+    for (const auto& [n, m] : negative) {
+        CHECK_THROWS_WITH_AS(static_cast<void>(empty_shape(n, m)),
+                             "n_docs and n_terms must be non-negative", std::invalid_argument);
+    }
+    CHECK_THROWS_WITH_AS(
+        static_cast<void>(FittedIndex({0}, {}, {}, opaque<DocId>(5), 4, Reduction::Naive)),
+        "indptr must have length n_docs + 1", std::invalid_argument);
+    const std::vector<Real> short_values(opaque<std::size_t>(1), 1.0);
+    CHECK_THROWS_WITH_AS(
+        static_cast<void>(FittedIndex({0, 2}, {0, 1}, short_values, 1, 4, Reduction::Naive)),
+        "indices and values must be the same length", std::invalid_argument);
+    CHECK_THROWS_WITH_AS(
+        static_cast<void>(FittedIndex({0, 3}, {2, 0, 1}, {1.0, 1.0, 1.0}, 1, 4, Reduction::Naive)),
+        "the CSR matrix is not canonical: indices must be strictly ascending within each row "
+        "and lie in [0, n_terms)",
+        std::invalid_argument);
+}
+
+TEST_CASE("fitted index: an empty corpus or vocabulary is legal") {
+    const std::vector<std::pair<DocId, TermId>> shapes{{0, 4}, {2, 0}, {0, 0}};
+    for (const auto& [n, m] : shapes) {
+        FittedIndex index = empty_shape(n, m);
+        CHECK(index.n_documents() == n);
+        CHECK(index.n_features() == m);
+        CHECK(index.nnz() == 0);
+        REQUIRE(index.norms().size() == static_cast<std::size_t>(n));
+        for (const Real v : index.norms()) {
+            CHECK(v == 0.0);
+        }
+        std::vector<Real> out(static_cast<std::size_t>(n), -1.0);
+        index.score(SparseView{{}, {}, m}, out, ScoringAlgorithm::Taat);
+        for (const Real s : out) {
+            CHECK(s == 0.0);
+        }
+    }
+}
+
+TEST_CASE("fitted index: scores equal the hand-assembled pipeline bit for bit") {
+    const Corpus c = random_corpus(90, 35, 10, 4711);
+    const CsrView csr = c.view();
+    const Csc csc = transpose(csr);
+    const std::vector<std::vector<TermId>> terms{{}, {1, 4, 9}, {0, 2, 3, 5, 8, 13, 21, 34}};
+
+    for (const Reduction p : kPolicies) {
+        FittedIndex index = fit(c, p);
+        CHECK(index.policy() == p);
+        CHECK(index.n_documents() == csr.n_rows);
+        CHECK(index.n_features() == csr.n_cols);
+        CHECK(index.nnz() == csr.nnz());
+        CHECK(index.index().colptr == csc.colptr);
+        CHECK(index.index().rowidx == csc.rowidx);
+        CHECK(index.index().values == csc.values);
+        const std::vector<Real> norms = row_norms(csr, p);
+        REQUIRE(index.norms().size() == norms.size());
+        for (std::size_t i = 0; i < norms.size(); ++i) {
+            CHECK(same_bits(index.norms()[i], norms[i]));
+        }
+
+        for (const auto algorithm : {ScoringAlgorithm::Taat, ScoringAlgorithm::Daat}) {
+            for (const std::vector<TermId>& qi : terms) {
+                const std::vector<Real> qv(qi.size(), 1.25);
+                const SparseView q{qi, qv, csr.n_cols};
+                std::vector<Real> got(static_cast<std::size_t>(csr.n_rows));
+                std::vector<Real> want(static_cast<std::size_t>(csr.n_rows));
+                index.score(q, got, algorithm);
+                ScoringScratch scratch;
+                score(q, csr, csc, norms, l2_norm(q, p), want, scratch, p, algorithm);
+                for (std::size_t i = 0; i < got.size(); ++i) {
+                    CHECK(same_bits(got[i], want[i]));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("fitted index: df is refused outside the vocabulary") {
+    const FittedIndex index({0, 2, 4}, {0, 2, 1, 2}, {3.0, 4.0, 6.0, 8.0}, 2, 3, Reduction::Naive);
+    CHECK(index.df(0) == 1);
+    CHECK(index.df(1) == 1);
+    CHECK(index.df(2) == 2);
+    for (const TermId t : {-1, 3}) {
+        CHECK_THROWS_WITH_AS(static_cast<void>(index.df(opaque(t))), "term identifier out of range",
+                             std::out_of_range);
+    }
+}
+
+TEST_CASE("fitted index: a query is checked before the algorithm") {
+    FittedIndex index = fit(random_corpus(20, 10, 5, 99), Reduction::Naive);
+    std::vector<Real> out(20);
+    const std::vector<TermId> descending{5, 2};
+    const std::vector<TermId> past_end{opaque<TermId>(10)};
+    const std::vector<TermId> ascending{1, 3};
+    const std::vector<Real> two{1.0, 1.0};
+    const std::vector<Real> one{1.0};
+    const SparseView ok{ascending, two, 10};
+    const char* not_canonical =
+        "the query is not canonical: indices must be strictly ascending and lie in "
+        "[0, n_features)";
+
+    CHECK_THROWS_WITH_AS(index.score(SparseView{descending, two, 10}, out, ScoringAlgorithm::Taat),
+                         not_canonical, std::invalid_argument);
+    CHECK_THROWS_WITH_AS(index.score(SparseView{past_end, one, 10}, out, ScoringAlgorithm::Taat),
+                         not_canonical, std::invalid_argument);
+    for (const std::int32_t a : {-1, 2, 999}) {
+        CHECK_THROWS_WITH_AS(index.score(ok, out, static_cast<ScoringAlgorithm>(a)),
+                             "scoring algorithm out of range", std::invalid_argument);
+    }
+    // Wrong in both ways, a query reports its own fault, as the binding always has.
+    CHECK_THROWS_WITH_AS(
+        index.score(SparseView{descending, two, 10}, out, static_cast<ScoringAlgorithm>(2)),
+        not_canonical, std::invalid_argument);
+    CHECK_NOTHROW(index.score(ok, out, ScoringAlgorithm::Taat));
+    CHECK_NOTHROW(index.score(ok, out, ScoringAlgorithm::Daat));
+}
+
+TEST_CASE("fitted index: one index carries nothing from one query to the next") {
+    const Corpus c = random_corpus(60, 25, 8, 321);
+    const std::vector<TermId> q1i{1, 2, 3, 4, 5, 6};
+    const std::vector<TermId> q2i{0, 4, 7};
+    const std::vector<Real> q1v(q1i.size(), 0.5);
+    const std::vector<Real> q2v(q2i.size(), 2.0);
+    const SparseView q1{q1i, q1v, c.n_cols};
+    const SparseView q2{q2i, q2v, c.n_cols};
+    const auto n = static_cast<std::size_t>(c.n_rows);
+
+    for (const Reduction p : kPolicies) {
+        FittedIndex shared = fit(c, p);
+        std::vector<Real> scratch_out(n);
+        shared.score(q1, scratch_out, ScoringAlgorithm::Taat);
+        shared.score(q2, scratch_out, ScoringAlgorithm::Daat);
+        shared.score(q1, scratch_out, ScoringAlgorithm::Taat);
+        std::vector<Real> reused(n);
+        shared.score(q2, reused, ScoringAlgorithm::Taat);
+
+        FittedIndex own = fit(c, p);
+        std::vector<Real> fresh(n);
+        own.score(q2, fresh, ScoringAlgorithm::Taat);
+        for (std::size_t i = 0; i < n; ++i) {
+            CHECK(same_bits(fresh[i], reused[i]));
+        }
+    }
+}
+
+TEST_CASE("fitted index: a copy owns its storage and scores as its source does") {
+    const Corpus c = random_corpus(40, 20, 6, 777);
+    const std::vector<TermId> qi{2, 5, 11};
+    const std::vector<Real> qv{1.0, 0.5, 2.0};
+    const SparseView q{qi, qv, c.n_cols};
+    const auto n = static_cast<std::size_t>(c.n_rows);
+
+    FittedIndex source = fit(c, Reduction::Pairwise);
+    std::vector<Real> warm(n);
+    source.score(q, warm, ScoringAlgorithm::Taat);
+    FittedIndex copy = source;
+    CHECK(copy.csr().indptr.data() != source.csr().indptr.data());
+
+    std::vector<Real> a(n);
+    std::vector<Real> b(n);
+    source.score(q, a, ScoringAlgorithm::Taat);
+    copy.score(q, b, ScoringAlgorithm::Taat);
+    for (std::size_t i = 0; i < n; ++i) {
+        CHECK(same_bits(a[i], b[i]));
+        CHECK(same_bits(a[i], warm[i]));
     }
 }

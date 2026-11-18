@@ -1,7 +1,7 @@
 // The nanobind surface of the native backend: marshalling and input validation.
 //
-// No arithmetic lives here. `NativeIndex` and `NativeRanker` copy their inputs into owned
-// storage, so no C++ object borrows a pointer into a numpy array Python might collect.
+// No arithmetic lives here. `NativeIndex` copies its arrays into a core `FittedIndex` and
+// `NativeRanker` into owned storage, so no C++ object borrows a numpy buffer.
 // Rationale: docs/engineering_notes.md#native-binding-scope
 #include <tfidf/core/build_config.hpp>
 #include <tfidf/core/fp_guard.hpp>
@@ -98,19 +98,6 @@ ranking::Selection checked_selection(std::int32_t selection) {
     return static_cast<ranking::Selection>(selection);
 }
 
-/// Reject a scoring algorithm outside the enum.
-///
-/// `score` runs TAAT for any value other than `Daat`. TAAT and DAAT agree bit
-/// for bit, so the guard keeps the manifest from naming an algorithm that did
-/// not run, as in `checked_selection`.
-ScoringAlgorithm checked_algorithm(std::int32_t algorithm) {
-    if (algorithm < static_cast<std::int32_t>(ScoringAlgorithm::Taat) ||
-        algorithm > static_cast<std::int32_t>(ScoringAlgorithm::Daat)) {
-        throw std::invalid_argument("scoring algorithm out of range");
-    }
-    return static_cast<ScoringAlgorithm>(algorithm);
-}
-
 /// Version of this binding surface, checked against `REQUIRED_ABI` on import.
 ///
 /// The Python constant is `tfidf_stability._native.REQUIRED_ABI`. The value is
@@ -126,11 +113,16 @@ nb::ndarray<nb::numpy, T> to_numpy(std::vector<T>&& v) {
     return nb::ndarray<nb::numpy, T>(held->data(), {held->size()}, owner);
 }
 
-/// An immutable, fitted corpus index: CSR, its transpose, and the row norms.
+/// Copy a one-dimensional array into an owned vector.
+template <class T, class Array>
+std::vector<T> to_vector(const Array& a) {
+    return std::vector<T>(a.data(), a.data() + a.shape(0));
+}
+
+/// The Python face of `FittedIndex`: arrays in, arrays out.
 ///
-/// Every quantity is computed once at construction under a single declared
-/// reduction policy, so a scored result cannot mix norms computed one way with
-/// dot products computed another.
+/// The core type validates the corpus and the query; this class converts the
+/// integer codes and checks that the query's two arrays describe one vector.
 class NativeIndex {
   public:
     NativeIndex(const I64Array& indptr,
@@ -139,91 +131,39 @@ class NativeIndex {
                 std::int32_t n_docs,
                 std::int32_t n_terms,
                 std::int32_t reduction)
-        : indptr_(indptr.data(), indptr.data() + indptr.shape(0)),
-          indices_(indices.data(), indices.data() + indices.shape(0)),
-          values_(values.data(), values.data() + values.shape(0)),
-          n_rows_(n_docs),
-          n_cols_(n_terms),
-          reduction_(checked_policy(reduction)) {
-        // Dimensions first, before any size arithmetic. Without this check,
-        // `n_docs = -1` with an empty indptr would pass the length check below
-        // (0 == -1 + 1). `is_canonical()` would call front()/back() on an empty
-        // span, and `transpose()` would size a colptr from a negative count.
-        if (n_docs < 0 || n_terms < 0) {
-            throw std::invalid_argument("n_docs and n_terms must be non-negative");
-        }
-        if (indptr_.size() != static_cast<std::size_t>(n_docs) + 1) {
-            throw std::invalid_argument("indptr must have length n_docs + 1");
-        }
-        if (indices_.size() != values_.size()) {
-            throw std::invalid_argument("indices and values must be the same length");
-        }
-        if (!csr().is_canonical()) {
-            throw std::invalid_argument(
-                "the CSR matrix is not canonical: indices must be strictly ascending "
-                "within each row and lie in [0, n_terms)");
-        }
-        csc_ = transpose(csr());
-        norms_ = row_norms(csr(), reduction_);
-    }
+        : fitted_(to_vector<Offset>(indptr),
+                  to_vector<TermId>(indices),
+                  to_vector<Real>(values),
+                  n_docs,
+                  n_terms,
+                  checked_policy(reduction)) {}
 
-    [[nodiscard]] CsrView csr() const {
-        return CsrView{indptr_, indices_, values_, n_rows_, n_cols_};
-    }
-
-    [[nodiscard]] std::int32_t n_documents() const noexcept { return n_rows_; }
-    [[nodiscard]] std::int32_t n_features() const noexcept { return n_cols_; }
-    [[nodiscard]] std::int64_t nnz() const noexcept {
-        return static_cast<std::int64_t>(values_.size());
-    }
+    [[nodiscard]] std::int32_t n_documents() const noexcept { return fitted_.n_documents(); }
+    [[nodiscard]] std::int32_t n_features() const noexcept { return fitted_.n_features(); }
+    [[nodiscard]] std::int64_t nnz() const noexcept { return fitted_.nnz(); }
     [[nodiscard]] std::int32_t reduction() const noexcept {
-        return static_cast<std::int32_t>(reduction_);
+        return static_cast<std::int32_t>(fitted_.policy());
     }
-    [[nodiscard]] const std::vector<double>& norms() const noexcept { return norms_; }
-
-    /// Document frequency of a term, read straight off the inverted index.
+    [[nodiscard]] std::vector<double> norms() const {
+        const std::span<const Real> n = fitted_.norms();
+        return std::vector<double>(n.begin(), n.end());
+    }
     [[nodiscard]] std::int64_t df(std::int32_t term) const {
-        if (term < 0 || term >= n_cols_) {
-            throw std::out_of_range("term identifier out of range");
-        }
-        return static_cast<std::int64_t>(csc_.df(term));
+        return static_cast<std::int64_t>(fitted_.df(term));
     }
 
     /// Score one query against every document: `s_i = cos(q, w_i)`.
     nb::ndarray<nb::numpy, double> score(const I32Array& q_indices,
                                          const F64Array& q_values,
                                          std::int32_t algorithm) {
-        if (q_indices.shape(0) != q_values.shape(0)) {
-            throw std::invalid_argument("query indices and values must be the same length");
-        }
-        const SparseView query{
-            std::span<const TermId>(q_indices.data(), q_indices.shape(0)),
-            as_span(q_values),
-            n_cols_,
-        };
-        if (!query.is_canonical()) {
-            throw std::invalid_argument(
-                "the query is not canonical: indices must be strictly ascending "
-                "and lie in [0, n_features)");
-        }
-
-        const double q_norm = l2_norm(query, reduction_);
-        std::vector<double> out(static_cast<std::size_t>(n_rows_));
-        tfidf::score(query, csr(), csc_, norms_, q_norm, out, scratch_, reduction_,
-                     checked_algorithm(algorithm));
+        const SparseView query = checked_view(q_indices, q_values, fitted_.n_features(), "query");
+        std::vector<double> out(static_cast<std::size_t>(fitted_.n_documents()));
+        fitted_.score(query, out, static_cast<ScoringAlgorithm>(algorithm));
         return to_numpy(std::move(out));
     }
 
   private:
-    std::vector<Offset> indptr_;
-    std::vector<TermId> indices_;
-    std::vector<double> values_;
-    std::int32_t n_rows_;
-    std::int32_t n_cols_;
-    Reduction reduction_;
-    Csc csc_;
-    std::vector<double> norms_;
-    ScoringScratch scratch_;
+    FittedIndex fitted_;
 };
 
 /// A corpus's tie-break ranks plus one operator's attribute priority.
@@ -417,7 +357,7 @@ NB_MODULE(_tfidf_native, m) {
         // nanobind refuses to re-parent an ndarray that has an owner.
         .def_prop_ro(
             "norms",
-            [](const NativeIndex& self) { return to_numpy(std::vector<double>(self.norms())); },
+            [](const NativeIndex& self) { return to_numpy(self.norms()); },
             nb::rv_policy::move)
         .def("df", &NativeIndex::df, nb::arg("term"))
         .def("score", &NativeIndex::score, nb::arg("q_indices"), nb::arg("q_values"),

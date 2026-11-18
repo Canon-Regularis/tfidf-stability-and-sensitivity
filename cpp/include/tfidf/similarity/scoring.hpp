@@ -14,6 +14,7 @@
 #include <span>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace tfidf {
@@ -249,5 +250,92 @@ inline void score(const SparseView& query,
         score_taat(query, index, doc_norms, query_norm, out, scratch, policy);
     }
 }
+
+/// An immutable fitted corpus: CSR, its inverted index and the row norms.
+///
+/// Construction refuses a corpus the kernels cannot read and fixes the one
+/// policy every norm and dot product uses, so a score never mixes two.
+/// Rationale: docs/engineering_notes.md#fitted-index
+class FittedIndex {
+  public:
+    FittedIndex(std::vector<Offset> indptr,
+                std::vector<TermId> indices,
+                std::vector<Real> values,
+                DocId n_docs,
+                TermId n_terms,
+                Reduction policy)
+        : indptr_(std::move(indptr)),
+          indices_(std::move(indices)),
+          values_(std::move(values)),
+          n_rows_(n_docs),
+          n_cols_(n_terms),
+          policy_(policy) {
+        // Signs before the length: at n_docs = -1 the size_t sum n_docs + 1
+        // wraps to 0, so an empty indptr would pass the next check.
+        if (n_docs < 0 || n_terms < 0) {
+            throw std::invalid_argument("n_docs and n_terms must be non-negative");
+        }
+        if (indptr_.size() != static_cast<std::size_t>(n_docs) + 1) {
+            throw std::invalid_argument("indptr must have length n_docs + 1");
+        }
+        if (indices_.size() != values_.size()) {
+            throw std::invalid_argument("indices and values must be the same length");
+        }
+        if (!csr().is_canonical()) {
+            throw std::invalid_argument(
+                "the CSR matrix is not canonical: indices must be strictly ascending "
+                "within each row and lie in [0, n_terms)");
+        }
+        index_ = transpose(csr());
+        norms_ = row_norms(csr(), policy_);
+    }
+
+    /// A view onto the owned CSR, built per call so a copy never borrows.
+    [[nodiscard]] CsrView csr() const noexcept {
+        return CsrView{indptr_, indices_, values_, n_rows_, n_cols_};
+    }
+    [[nodiscard]] const Csc& index() const noexcept { return index_; }
+    [[nodiscard]] std::span<const Real> norms() const noexcept { return norms_; }
+    [[nodiscard]] Reduction policy() const noexcept { return policy_; }
+    [[nodiscard]] DocId n_documents() const noexcept { return n_rows_; }
+    [[nodiscard]] TermId n_features() const noexcept { return n_cols_; }
+    [[nodiscard]] Offset nnz() const noexcept { return static_cast<Offset>(values_.size()); }
+
+    /// Document frequency of a term, read off the inverted index.
+    [[nodiscard]] std::size_t df(TermId term) const {
+        if (term < 0 || term >= n_cols_) {
+            throw std::out_of_range("term identifier out of range");
+        }
+        return index_.df(term);
+    }
+
+    /// Score one query against every document: `out[i] = cos(query, w_i)`.
+    ///
+    /// Refuses a non-canonical query, then an algorithm outside the enum, and
+    /// takes the query norm under the index's own policy.
+    void score(const SparseView& query, std::span<Real> out, ScoringAlgorithm algorithm) {
+        if (!query.is_canonical()) {
+            throw std::invalid_argument(
+                "the query is not canonical: indices must be strictly ascending "
+                "and lie in [0, n_features)");
+        }
+        if (algorithm < ScoringAlgorithm::Taat || algorithm > ScoringAlgorithm::Daat) {
+            throw std::invalid_argument("scoring algorithm out of range");
+        }
+        const Real query_norm = l2_norm(query, policy_);
+        tfidf::score(query, csr(), index_, norms_, query_norm, out, scratch_, policy_, algorithm);
+    }
+
+  private:
+    std::vector<Offset> indptr_;
+    std::vector<TermId> indices_;
+    std::vector<Real> values_;
+    DocId n_rows_;
+    TermId n_cols_;
+    Reduction policy_;
+    Csc index_;
+    std::vector<Real> norms_;
+    ScoringScratch scratch_;
+};
 
 }  // namespace tfidf
