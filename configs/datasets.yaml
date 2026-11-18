@@ -71,3 +71,35 @@ movielens_small:
   # which exercises G8's missing-value path on real data. scripts/fetch_data.py
   # reports their count; it is not pinned here because the repository does not
   # contain the archive.
+
+# BEIR test splits (Thakur et al., NeurIPS 2021 Datasets and Benchmarks). The
+# pins are `datasets.beir.PINNED_SHA256`; queries and graded qrels ship with
+# each archive, and no attribute columns, so ties fall through to the identifier.
+beir_scifact:
+  kind: beir
+  description: SciFact test split, 5183 abstracts, 300 judged claims, 339
+    binary judgements.
+  url: https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/scifact.zip
+  sha256: null
+  licence: >
+    CC BY-NC 2.0 (non-commercial use with attribution). Never commit this data.
+    See data/README.md.
+  citation: >
+    David Wadden et al. 2020. Fact or Fiction: Verifying Scientific Claims.
+    EMNLP 2020, 7534-7550.
+  text_fields: [title, text]
+
+beir_nfcorpus:
+  kind: beir
+  description: NFCorpus test split, 3633 documents, 323 judged queries, 12334
+    judgements graded 1 or 2.
+  url: https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/nfcorpus.zip
+  sha256: null
+  licence: >
+    Free for academic use; any other use needs permission under the dataset's
+    terms of service. Never commit this data. See data/README.md.
+  citation: >
+    Vera Boteva, Demian Gholipour, Artem Sokolov and Stefan Riezler. 2016. A
+    Full-Text Learning to Rank Dataset for Medical Information Retrieval. ECIR
+    2016.
+  text_fields: [title, text]

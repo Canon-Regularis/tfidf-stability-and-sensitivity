@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
-from tfidf_stability.datasets import movielens, synthetic
+from tfidf_stability.datasets import beir, movielens, synthetic
 from tfidf_stability.utils.hashing import hash_text
 from tfidf_stability.utils.io import canonical_json, read_jsonl
 from tfidf_stability.utils.validation import DataIntegrityError
@@ -39,6 +39,10 @@ class LoadedDataset:
     records: list[dict[str, Any]]
     interactions: list[tuple[str, str, float]] = field(default_factory=list)
     provenance: dict[str, Any] = field(default_factory=dict)
+    #: Query text by query id, for a dataset that ships its own queries.
+    queries: dict[str, str] = field(default_factory=dict)
+    #: Relevance grade by document id, per query id; empty without judgements.
+    qrels: dict[str, dict[str, int]] = field(default_factory=dict)
 
     @property
     def n_documents(self) -> int:
@@ -51,8 +55,8 @@ class LoadedDataset:
     def digest(self) -> str:
         """Identity of the loaded corpus, for the manifest.
 
-        Over the records, not the provenance or the interaction set: two loads
-        at different ``min_weight`` share it; :attr:`provenance` records the threshold.
+        Over the records, not the provenance, interactions, queries or judgements: two
+        loads at different ``min_weight`` share it; :attr:`provenance` records the rest.
         """
         return hash_text(canonical_json(self.records, indent=None))
 
@@ -165,11 +169,60 @@ def _load_movielens(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _Beir:
+    """Parse the BEIR ``variant`` from the zip at ``archive``; ``spec`` is ignored.
+
+    The pin is read from :data:`~tfidf_stability.datasets.beir.PINNED_SHA256` at
+    call time, not bound when the registry is built.
+    """
+
+    variant: str
+
+    def __call__(
+        self, name: str, archive: Path | str | None, spec: synthetic.SyntheticSpec | None
+    ) -> LoadedDataset:
+        if archive is None:
+            raise DataIntegrityError(
+                f"{name} needs an archive path. BEIR archives are not in the "
+                f"repository -- run 'python scripts/fetch_data.py --dataset {name}' "
+                f"first, then pass its path."
+            )
+        corpus = beir.load(
+            archive, variant=self.variant, expect_sha256=beir.PINNED_SHA256[self.variant]
+        )
+        queries = corpus.query_texts()
+        qrels = corpus.judgements()
+        return LoadedDataset(
+            name=name,
+            records=corpus.records(),
+            provenance={
+                "kind": "beir",
+                "variant": corpus.variant,
+                "split": corpus.split,
+                "archive_sha256": corpus.archive_sha256,
+                "n_documents": corpus.n_documents,
+                "n_queries": len(queries),
+                "n_judgements": len(corpus.qrels),
+                "n_queries_without_relevant": corpus.n_queries_without_relevant,
+                # `digest()` covers the records only, so the queries and the
+                # judgements are identified here.
+                "queries_sha256": hash_text(canonical_json(queries, indent=None)),
+                "qrels_sha256": hash_text(canonical_json(qrels, indent=None)),
+                "redistributable": False,
+            },
+            queries=queries,
+            qrels=qrels,
+        )
+
+
 #: Each registered name and its loader; :data:`DATASET_NAMES` is the keys, in this order.
 _REGISTRY: Final[dict[str, _Loader]] = {
     "synthetic_small": _Synthetic(synthetic.SyntheticSpec()),
     "synthetic_tiny": _Synthetic(_TINY),
     "movielens_small": _load_movielens,
+    "beir_scifact": _Beir("scifact"),
+    "beir_nfcorpus": _Beir("nfcorpus"),
 }
 
 #: Registered names. ``jsonl:<path>`` is also accepted, for a corpus already on
@@ -187,8 +240,8 @@ def load_dataset(
     """Load a registered dataset by name.
 
     ``name`` is one of :data:`DATASET_NAMES` or ``jsonl:<path>``; ``archive``, the zip path, is
-    required for ``movielens_small`` and ignored otherwise; ``spec`` overrides the synthetic
-    generator. Raises DataIntegrityError for an unknown name or a missing or invalid corpus.
+    required for ``movielens_small`` and ``beir_*`` and ignored otherwise; ``spec`` overrides
+    the synthetic generator. Raises DataIntegrityError for an unknown name or a bad corpus.
     """
     if name.startswith("jsonl:"):
         return load_jsonl_corpus(name[len("jsonl:") :])

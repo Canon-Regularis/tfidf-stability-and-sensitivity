@@ -12,7 +12,7 @@ dataset licence requires it.
 | `data/processed/` | **no** | Fitted models (`*.tfsx`) and experiment outputs. |
 | `data/assets/` | yes | Small committed fixtures that carry no third-party licence. |
 
-## The two datasets, and why they are treated differently
+## The datasets, and why they are treated differently
 
 ### `synthetic_small`: redistributable, regenerated on demand
 
@@ -65,14 +65,50 @@ Citation:
 > and Context. *ACM Transactions on Interactive Intelligent Systems* 5, 4:
 > 19:1-19:19. <https://doi.org/10.1145/2827872>
 
+### `beir_scifact` and `beir_nfcorpus`: not redistributed, fetched on demand
+
+The test splits of two BEIR benchmarks, each with its own queries and graded
+relevance judgements (qrels):
+
+| Name | Documents | Judged queries | Judgements | Grades | Licence |
+| --- | --- | --- | --- | --- | --- |
+| `beir_scifact` | 5183 | 300 | 339 | 1 | CC BY-NC 2.0 |
+| `beir_nfcorpus` | 3633 | 323 | 12334 | 1, 2 | academic use only |
+
+```bash
+python scripts/fetch_data.py --dataset beir_scifact
+python scripts/fetch_data.py --dataset beir_nfcorpus
+```
+
+Each archive is checked against `datasets.beir.PINNED_SHA256` on every load.
+A query the split does not judge is dropped. A judgement naming an unknown query
+or document is an error, not a skipped row.
+
+Citations:
+
+> David Wadden, Shanchuan Lin, Kyle Lo, Lucy Lu Wang, Madeleine van Zuylen,
+> Arman Cohan and Hannaneh Hajishirzi. 2020. Fact or Fiction: Verifying
+> Scientific Claims. *EMNLP 2020*, 7534-7550.
+
+> Vera Boteva, Demian Gholipour, Artem Sokolov and Stefan Riezler. 2016. A
+> Full-Text Learning to Rank Dataset for Medical Information Retrieval.
+> *ECIR 2016*.
+
+> Nandan Thakur, Nils Reimers, Andreas Rücklé, Abhishek Srivastava and Iryna
+> Gurevych. 2021. BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of
+> Information Retrieval Models. *NeurIPS 2021 Datasets and Benchmarks*.
+
 ## How the fields map onto the model
 
-| Model field | Synthetic | MovieLens |
-| --- | --- | --- |
-| `text` | Zipf-sampled tokens | title + genres + user tags |
-| `popularity` | sampled integer | number of ratings |
-| `rating_sum2`, `rating_count` | sampled exact pair | `2 × Σ rating`, count |
-| `engagement` | sampled integer | number of tags |
+| Model field | Synthetic | MovieLens | BEIR |
+| --- | --- | --- | --- |
+| `text` | Zipf-sampled tokens | title + genres + user tags | title + body |
+| `popularity` | sampled integer | number of ratings | absent |
+| `rating_sum2`, `rating_count` | sampled exact pair | `2 × Σ rating`, count | absent |
+| `engagement` | sampled integer | number of tags | absent |
+
+A BEIR document carries no attribute, so every operator falls through to the
+identifier on a score tie.
 
 Ratings are stored as the **exact integer pair** `(2 × Σ rating, count)` and
 never as a float mean (`docs/spec_addenda.md#g8`). MovieLens ratings are

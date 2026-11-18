@@ -15,6 +15,25 @@ recorded values live in `configs/pipeline_digest.txt` and in each
 
 ## [Unreleased]
 
+### Added
+
+- `datasets/beir.py` and the `beir_scifact` and `beir_nfcorpus` datasets: BEIR
+  test splits with their queries and graded relevance judgements, each archive
+  pinned by SHA-256. `LoadedDataset` gains `queries` and `qrels`.
+- `scripts/fetch_data.py --dataset`: fetches either BEIR archive as well as
+  MovieLens, each against its own pin.
+- `profiles/text_queries.py` and `QueryMode.TEXT`: queries a dataset ships as
+  text, run through the corpus's preprocessing pipeline.
+- `evaluation/`: nDCG, recall and reciprocal rank at k with a discount that is
+  the same on every platform, identifier tie orders, and the E5 retrieval
+  evaluation behind `scripts/run_retrieval_eval.py`.
+
+### Changed
+
+- `vectorisation/idf.py`: `smoothed_idf` evaluates each distinct document
+  frequency once. Every IDF value is unchanged, and so is
+  `configs/pipeline_digest.txt`.
+
 ## [0.2.0] - 2026-09-29
 
 The first tagged release. Published to PyPI as `tfidf-stability` 0.2.0, with

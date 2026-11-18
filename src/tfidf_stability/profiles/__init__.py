@@ -8,6 +8,7 @@ from tfidf_stability.profiles.query_modes import (
     leave_one_out_queries,
     user_profile_queries,
 )
+from tfidf_stability.profiles.text_queries import text_queries
 from tfidf_stability.profiles.user_profile import (
     Interaction,
     ProfileAggregation,
@@ -33,5 +34,6 @@ __all__ = [
     "item_as_query",
     "leave_one_out_queries",
     "profile_norm",
+    "text_queries",
     "user_profile_queries",
 ]

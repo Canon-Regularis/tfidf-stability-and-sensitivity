@@ -99,8 +99,14 @@ def smoothed_idf(
     ``df`` is the document frequency per term identifier, ``n_documents`` is ``N`` and
     ``impl`` selects the logarithm. Returns the :class:`IdfVector`, in term-identifier order.
     """
+    # The value depends on (df, N) alone, so each distinct df is evaluated once:
+    # a 60-digit Decimal log per term dominates fitting a real corpus.
+    by_df: dict[int, float] = {}
+    for d in df:
+        if d not in by_df:
+            by_df[d] = smoothed_idf_one(d, n_documents, impl)
     return IdfVector(
-        values=tuple(smoothed_idf_one(d, n_documents, impl) for d in df),
+        values=tuple(by_df[d] for d in df),
         n_documents=n_documents,
         log_impl=impl,
     )
