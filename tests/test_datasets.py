@@ -373,7 +373,8 @@ def test_the_corpus_digest_is_over_documents_not_provenance() -> None:
 def test_an_unknown_dataset_name_lists_the_valid_ones() -> None:
     expected = (
         "unknown dataset 'no_such_dataset'; expected one of "
-        "('synthetic_small', 'synthetic_tiny', 'movielens_small') or 'jsonl:<path>'"
+        "('synthetic_small', 'synthetic_tiny', 'movielens_small', 'beir_scifact', "
+        "'beir_nfcorpus') or 'jsonl:<path>'"
     )
     with pytest.raises(DataIntegrityError, match=f"^{re.escape(expected)}$"):
         load_dataset("no_such_dataset")
