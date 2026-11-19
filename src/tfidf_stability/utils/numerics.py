@@ -24,6 +24,7 @@ __all__ = [
     "bits_of",
     "correctly_rounded_log_ratio",
     "exact_sum",
+    "float32_round",
     "float_environment",
     "naive_sum",
     "neumaier_sum",
@@ -34,6 +35,7 @@ __all__ = [
     "sqrt",
     "ulp",
     "ulps_between",
+    "ulps_between_f32",
 ]
 
 #: Working precision for :func:`correctly_rounded_log_ratio`. 60 decimal digits
@@ -323,3 +325,43 @@ def assert_sane_float_environment() -> None:
         raise NumericEnvironmentError(
             "the floating-point environment is not trustworthy: " + "; ".join(problems)
         )
+
+
+# ---------------------------------------------------------------------------
+# float32, for scores and embeddings produced outside the package
+# ---------------------------------------------------------------------------
+#: The smallest positive float32, a subnormal: also its ulp below 2**-126.
+_F32_TINY = 2.0**-149
+
+
+def float32_round(x: float) -> float:
+    """``x`` rounded to the nearest float32, ties to even, then widened exactly.
+
+    A value past the float32 range rounds to an infinity of its sign, as IEEE 754
+    rounding does; ``struct`` raises instead, which this converts.
+    """
+    try:
+        return float(struct.unpack("<f", struct.pack("<f", x))[0])
+    except OverflowError:
+        return math.copysign(math.inf, x)
+
+
+def _ulp_f32(x: float) -> float:
+    """The float32 ulp at ``|x|``; ``x`` is finite and representable."""
+    magnitude = abs(x)
+    if magnitude < 2.0**-126:
+        return _F32_TINY
+    return 2.0 ** (math.frexp(magnitude)[1] - 24)
+
+
+def ulps_between_f32(a: float, b: float) -> float:
+    """``ulps_between`` in float32 units: ``b - a`` over a float32 ulp.
+
+    Both values must be float32 numbers. A non-finite value on either side gives ``inf``.
+    """
+    for value in (a, b):
+        if math.isfinite(value) and float32_round(value) != value:
+            raise ValueError(f"{value!r} is not a float32 value")
+    if not (math.isfinite(a) and math.isfinite(b)):
+        return math.inf
+    return 0.0 if a == b else (b - a) / _ulp_f32(max(abs(a), abs(b)))

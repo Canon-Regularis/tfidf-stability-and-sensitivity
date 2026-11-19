@@ -4,6 +4,7 @@ from tfidf_stability.analysis.noise_floor import (
     NoiseFloor,
     TauBand,
     measure_noise_floor,
+    noise_floor_from_runs,
     tau_band,
     verify_band_invariance,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "evaluate",
     "margin_bands",
     "measure_noise_floor",
+    "noise_floor_from_runs",
     "percentile",
     "stratify_by_margin",
     "summarise_values",
