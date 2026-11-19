@@ -269,7 +269,7 @@ def test_the_runner_writes_one_report_per_policy(
     assert record["parameters"]["n_max"] == 2
     naive = record["payload"]["policies"]["naive"]
     assert naive["means"]["id_desc"]["ndcg@1"]["mean"] == pytest.approx(1 / 3, rel=1e-15)
-    for policy in Reduction:
+    for policy in list(Reduction):
         noise = record["payload"]["policies"][str(policy)]["noise_vs_exact"]
         assert noise["reference"] == "exact"
         assert noise["n_queries"] == 2, "the degenerate query is not scored"
