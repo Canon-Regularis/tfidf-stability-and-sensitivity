@@ -61,6 +61,15 @@ enum class ScoringAlgorithm : std::int32_t {
     Daat = 1,
 };
 
+/// Whether a score is divided by the query and document norms.
+/// Rationale: docs/engineering_notes.md#fitted-index-normalisation
+enum class Normalisation : std::int32_t {
+    /// Cosine similarity: the dot product over both L2 norms.
+    Cosine = 0,
+    /// The plain dot product, which BM25 and other unnormalised weightings score.
+    None = 1,
+};
+
 /// Size of the pairwise-summation base case, equal to numpy's.
 ///
 /// The equal block size alone does not give agreement with numpy; see the

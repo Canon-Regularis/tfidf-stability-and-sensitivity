@@ -939,3 +939,42 @@ TEST_CASE("fitted index: a copy owns its storage and scores as its source does")
         CHECK(same_bits(a[i], warm[i]));
     }
 }
+
+TEST_CASE("fitted index: without normalisation a score is the plain dot product") {
+    // BM25 weights score this way: unit norms leave each dot product unchanged,
+    // under every policy and both algorithms, and an empty document scores zero.
+    const Corpus c = random_corpus(70, 30, 9, 2611);
+    const CsrView csr = c.view();
+    const std::vector<std::vector<TermId>> terms{{}, {2, 7}, {0, 1, 4, 9, 16, 25}};
+
+    for (const Reduction p : kPolicies) {
+        FittedIndex index(c.indptr, c.indices, c.values, c.n_rows, c.n_cols, p,
+                          Normalisation::None);
+        CHECK(index.normalisation() == Normalisation::None);
+        for (const Real n : index.norms()) {
+            CHECK(n == 1.0);
+        }
+        for (const auto algorithm : {ScoringAlgorithm::Taat, ScoringAlgorithm::Daat}) {
+            for (const std::vector<TermId>& qi : terms) {
+                const std::vector<Real> qv(qi.size(), 2.0);
+                const SparseView q{qi, qv, csr.n_cols};
+                std::vector<Real> got(static_cast<std::size_t>(csr.n_rows));
+                index.score(q, got, algorithm);
+                for (DocId i = 0; i < csr.n_rows; ++i) {
+                    CHECK(same_bits(got[static_cast<std::size_t>(i)], dot(q, csr.row(i), p)));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("fitted index: normalisation defaults to cosine and is range-checked") {
+    const Corpus c = random_corpus(10, 8, 4, 77);
+    CHECK(fit(c, Reduction::Naive).normalisation() == Normalisation::Cosine);
+    for (const std::int32_t bad : {-1, 2}) {
+        CHECK_THROWS_WITH_AS(static_cast<void>(FittedIndex(
+                                 c.indptr, c.indices, c.values, c.n_rows, c.n_cols,
+                                 Reduction::Naive, static_cast<Normalisation>(opaque(bad)))),
+                             "normalisation out of range", std::invalid_argument);
+    }
+}

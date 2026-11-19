@@ -103,7 +103,7 @@ ranking::Selection checked_selection(std::int32_t selection) {
 /// The Python constant is `tfidf_stability._native.REQUIRED_ABI`. The value is
 /// independent of the project version.
 /// Rationale: docs/engineering_notes.md#native-abi-version
-constexpr const char* kAbi = "0.4.0";
+constexpr const char* kAbi = "0.5.0";
 
 /// Return an owning numpy array built from a vector, without copying twice.
 template <class T>
@@ -130,19 +130,24 @@ class NativeIndex {
                 const F64Array& values,
                 std::int32_t n_docs,
                 std::int32_t n_terms,
-                std::int32_t reduction)
+                std::int32_t reduction,
+                std::int32_t normalisation)
         : fitted_(to_vector<Offset>(indptr),
                   to_vector<TermId>(indices),
                   to_vector<Real>(values),
                   n_docs,
                   n_terms,
-                  checked_policy(reduction)) {}
+                  checked_policy(reduction),
+                  static_cast<Normalisation>(normalisation)) {}
 
     [[nodiscard]] std::int32_t n_documents() const noexcept { return fitted_.n_documents(); }
     [[nodiscard]] std::int32_t n_features() const noexcept { return fitted_.n_features(); }
     [[nodiscard]] std::int64_t nnz() const noexcept { return fitted_.nnz(); }
     [[nodiscard]] std::int32_t reduction() const noexcept {
         return static_cast<std::int32_t>(fitted_.policy());
+    }
+    [[nodiscard]] std::int32_t normalisation() const noexcept {
+        return static_cast<std::int32_t>(fitted_.normalisation());
     }
     [[nodiscard]] std::vector<double> norms() const {
         const std::span<const Real> n = fitted_.norms();
@@ -152,7 +157,7 @@ class NativeIndex {
         return static_cast<std::int64_t>(fitted_.df(term));
     }
 
-    /// Score one query against every document: `s_i = cos(q, w_i)`.
+    /// Score one query against every document: cosine, or the dot product.
     nb::ndarray<nb::numpy, double> score(const I32Array& q_indices,
                                          const F64Array& q_values,
                                          std::int32_t algorithm) {
@@ -345,13 +350,14 @@ NB_MODULE(_tfidf_native, m) {
     nb::class_<NativeIndex>(m, "NativeIndex",
                             "An immutable fitted corpus: CSR, inverted index and row norms.")
         .def(nb::init<const I64Array&, const I32Array&, const F64Array&, std::int32_t,
-                      std::int32_t, std::int32_t>(),
+                      std::int32_t, std::int32_t, std::int32_t>(),
              nb::arg("indptr"), nb::arg("indices"), nb::arg("values"), nb::arg("n_docs"),
-             nb::arg("n_terms"), nb::arg("reduction"))
+             nb::arg("n_terms"), nb::arg("reduction"), nb::arg("normalisation") = 0)
         .def_prop_ro("n_documents", &NativeIndex::n_documents)
         .def_prop_ro("n_features", &NativeIndex::n_features)
         .def_prop_ro("nnz", &NativeIndex::nnz)
         .def_prop_ro("reduction", &NativeIndex::reduction)
+        .def_prop_ro("normalisation", &NativeIndex::normalisation)
         // `move` rather than the default `reference_internal`: to_numpy hands
         // back an array that already owns its buffer through a capsule, and
         // nanobind refuses to re-parent an ndarray that has an owner.
@@ -376,6 +382,11 @@ NB_MODULE(_tfidf_native, m) {
     algorithms["taat"] = static_cast<std::int32_t>(ScoringAlgorithm::Taat);
     algorithms["daat"] = static_cast<std::int32_t>(ScoringAlgorithm::Daat);
     m.attr("ALGORITHM") = algorithms;
+
+    nb::dict normalisations;
+    normalisations["cosine"] = static_cast<std::int32_t>(Normalisation::Cosine);
+    normalisations["none"] = static_cast<std::int32_t>(Normalisation::None);
+    m.attr("NORMALISATION") = normalisations;
 
     // --- ranking -------------------------------------------------------------
     nb::class_<NativeRanker>(m, "NativeRanker",
