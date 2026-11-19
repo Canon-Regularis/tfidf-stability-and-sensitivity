@@ -220,3 +220,10 @@ src/tfidf_stability/evaluation/metrics.py  58  compare  Gt -> GtE  # src=95ad0bc
 
 # --- evaluation/tie_orders.py ----------------------------------------------
 src/tfidf_stability/evaluation/tie_orders.py  58  constant  0 -> 1  # src=691a4192 the loop below assigns every position of id_ranks, since `ranked` is a permutation of range(n), so the initial fill is never read
+
+# --- vectorisation/bm25.py -------------------------------------------------
+src/tfidf_stability/vectorisation/bm25.py  68  compare  Lt -> LtE  # src=f6d6b0c8 at n_bits == 4, i lies in 8..15, and the encoded branch returns (i & 7) | (1 << 3), which is i again
+src/tfidf_stability/vectorisation/bm25.py  83  compare  Lt -> LtE  # src=fb31aae0 at length == 24 the encoded branch returns 24 + _long_to_int4(0), which is 24, the length itself
+src/tfidf_stability/vectorisation/bm25.py  90  compare  Lt -> LtE  # src=6c227815 at code == 24 the decoded branch returns 24 + _int4_to_long(0), which is 24, the code itself
+src/tfidf_stability/vectorisation/bm25.py  240  constant  True -> False  # src=65b8b122 a CsrMatrix row has as many indices as values, so the strict zip never meets unequal lengths
+src/tfidf_stability/vectorisation/bm25.py  308  constant  True -> False  # src=32edcbff per_doc and lengths are built from the same documents list, one entry each, so they are always the same length

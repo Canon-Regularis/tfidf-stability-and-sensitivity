@@ -83,6 +83,8 @@ jobs:
             tests: tests/test_evaluation_metrics.py tests/test_public_api_surface.py
           - module: src/tfidf_stability/evaluation/tie_orders.py
             tests: tests/test_tie_orders.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/vectorisation/bm25.py
+            tests: tests/test_bm25.py tests/test_public_api_surface.py
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
