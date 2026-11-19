@@ -28,6 +28,15 @@ recorded values live in `configs/pipeline_digest.txt` and in each
   the same on every platform, identifier tie orders, and the E5 retrieval
   evaluation behind `scripts/run_retrieval_eval.py`.
 
+- `vectorisation/bm25.py`: BM25 weighting with Lucene's IDF, exact `k1` and
+  `b`, each weight rounded once after the IDF, and Lucene's one-byte document length as an
+  option (G30).
+- `scripts/run_retrieval_eval.py`: `--weighting bm25`, `--n-max`, a near-tie
+  census at the cutoff, and each reduction policy's noise against `exact`.
+- `NativeIndex(..., normalisation)`: scores the plain dot product when given
+  `NORMALISATION["none"]`, bit-identical to the reference with unit norms. The
+  binding ABI moves to 0.5.0.
+
 ### Changed
 
 - `vectorisation/idf.py`: `smoothed_idf` evaluates each distinct document

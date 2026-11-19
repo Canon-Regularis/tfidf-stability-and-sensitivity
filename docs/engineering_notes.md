@@ -4,8 +4,8 @@ Decisions the code makes that a comment of four lines cannot justify. Each
 section is named by the slug that a `Rationale:` comment in the source cites:
 the comment states what the code does, and this page states why.
 
-- [Python package](#python-package): 81 notes
-- [C++ core and binding](#c-core-and-binding): 59 notes
+- [Python package](#python-package): 84 notes
+- [C++ core and binding](#c-core-and-binding): 62 notes
 - [Test suite](#test-suite): 61 notes
 - [Mutation tooling](#mutation-tooling): 6 notes
 - [Scripts and gates](#scripts-and-gates): 25 notes
@@ -80,6 +80,22 @@ The Python module tfidf_stability.utils.numerics is the Python half of the bit-e
 Summation order is part of the specification: the normative reading of README section 2's unbracketed sums is a left-to-right fold (Reduction.NAIVE), and the other policies are instruments for the noise floor. See [Reduction policies](#reduction-policies).
 
 The logarithm is computed by correctly_rounded_log_ratio rather than by the platform libm. See [Exact log](#exact-log).
+
+### Bm25 exact weight
+
+Source: `src/tfidf_stability/vectorisation/bm25.py`.
+
+A BM25 weight `idf · f / (f + k1 · (1 − b + b · dl / avgdl))` is computed with one rounding after the IDF's. `k1` and `b` are parsed from decimal strings into exact fractions, `avgdl` is the exact ratio `T / D`, and the IDF is a float whose exact value `n / d` comes from `as_integer_ratio`. Every operand is then an integer ratio, so the weight is `(n · A) / (d · B)` with `A = f · q1 · q2 · T` and `B = A + p1 · ((q2 − p2) · T + p2 · D · dl)`, one integer division that Python rounds correctly. This gives the same bits as rounding the exact `Fraction` product once, without the cost of reducing a `Fraction` for each of about a million entries. A float `k1` is refused, because `0.9` in binary64 is not `9/10` and would move the last bit of some weights.
+
+The IDF is Lucene's `ln(1 + (D − df + 0.5) / (df + 0.5))`, evaluated as `ln((2D + 2) / (2df + 1))` by `correctly_rounded_log_ratio`, and always positive. `D` counts only documents with an in-vocabulary feature, as Lucene's `docCount` does. A query term carries its count, so a repeated term adds its weight again, as Anserini's bag-of-words query does.
+
+BM25 scores are not normalised. `Bm25Model.norms` is all ones and the query norm is 1, so the cosine kernels in `similarity/scoring.py` return the plain dot product: `x / (1 · 1)` is `x` exactly. Every weight is positive, so the TAAT touched-list test, which assumes no stored zero, still holds. Reduction enters no weight, so one fit serves every summation policy, and `digest()` leaves it out.
+
+### Bm25 lucene byte length
+
+Source: `src/tfidf_stability/vectorisation/bm25.py`.
+
+Lucene stores a document's length in one byte through `SmallFloat.intToByte4`: lengths below 24 are stored as themselves and the rest keep four significant bits, so the round trip is exact up to 39 and then groups lengths into buckets, 40 and 41 into one. `int_to_byte4` and `byte4_to_int` port that encoding in integer arithmetic, and `length_norm = lucene_byte` weights with the decoded length while `avgdl` stays the exact `T / D` of the unencoded lengths. Lucene also takes it from the unencoded total, then rounds it to float32. Two documents whose lengths share a code and whose term counts agree then get identical weights, and therefore can tie exactly. The encoding is the source of the structural ties in Anserini's published BM25 runs, so comparing `exact` with `lucene_byte` isolates the ties it creates. A decoded length can fall below a term's count, for a document of 41 copies of one term, and the weight is evaluated as Lucene evaluates it.
 
 ### Canonical hashing
 
@@ -411,6 +427,14 @@ The weights w = tf * idf are policy-independent: each is one division, one corre
 Source: `src/tfidf_stability/preprocessing/pipeline.py`.
 
 PreprocessingPipeline.digest binds the lemmatiser and the stopword list into PreprocessingConfig.digest. PreprocessingPipeline accepts an injected lemmatiser that bypasses the config's lemmatiser field; without binding it, PreprocessingPipeline(cfg) and PreprocessingPipeline(cfg, lemmatiser=IdentityLemmatiser()), which turn "running cats" into run|cat and running|cats, would hash to the same string. The lemmatiser is bound by lemmatiser_identity rather than by Lemmatiser.name, because the name of LookupLemmatiser is the constant "lookup" while its output depends on the table passed at construction ([Lemmatiser identity](#lemmatiser-identity)). The binding is omitted only when the identity equals both the backend name and the config's lemmatiser kind. That holds for IdentityLemmatiser and Porter2Stemmer when the config names their kind, since their output is fixed by their class. A backend carrying content, such as LookupLemmatiser, is bound unconditionally, so a config naming LOOKUP plus an injected table is bound by its table rather than matched by name. No config-only route to a lookup pipeline exists, because make_lemmatiser refuses that kind without a table, so a config-only pipeline carries no lemmatiser_override key. The stopword list is bound by its two digests, `digest` and `content_digest`, joined with a colon in the same way lemmatiser_identity joins a backend name to its content hash; neither subsumes the other ([Stopword digests](#stopword-digests)). In PreprocessingConfig.digest, the stopword_digest and lemmatiser_override keys are omitted when None, so a config hashed without them has the same digest as a config whose payload never had those keys.
+
+### Policy noise against exact
+
+Source: `src/tfidf_stability/evaluation/retrieval.py`.
+
+`policy_noise` compares a grid of scores with a reference grid score by score and at the top `k`. The E5 runner scores every query under `Reduction.EXACT` first, then compares each policy with it: how many scores differ in their bits, how many queries hold such a score, the largest absolute difference, and how many top-`k` sets and orders change. Both grids are ranked under their own `id_asc` table, so a change in a top-`k` list comes from a score difference alone. `-0.0` against `0.0` counts as a differing score with a delta of zero.
+
+The near-tie census counts, per query and per tau in `NEAR_TIE_TAUS`, the documents past position `k` whose score lies within tau of `r_k`: `0` counts the exact ties, `1e-12` lies just above a binary64 score's summation noise, `1e-9` and `1e-6` well above it, and `1e-4` is the rounding Anserini applies before it breaks ties. The census is reported absolutely and with tau relative to `|r_k|`, since TF-IDF cosines lie in `[0, 1]` and BM25 scores reach tens, so one absolute tau means different things for the two. At tau `0` the number of queries crossing the cutoff equals `n_tie_at_cutoff`.
 
 ### Porter2 default backend
 
@@ -995,7 +1019,7 @@ Timings compare only within one run of one binary. The bench preset enables arch
 
 Source: `cpp/bindings/module.cpp`.
 
-`cpp/bindings/module.cpp` is the nanobind surface of the native backend. It converts arguments between Python and C++, and it validates the inputs that exist only at the binding: reduction policy, selection strategy, a negative m (the core takes `std::size_t`), the paired lengths of a query's two arrays, rank-matrix shape, identifier-rank bijection, attribute priority range and count (refused at construction, before any scores arrive), and score finiteness, through `ranking::all_finite`. The core refuses the rest, with the text the binding passes to Python: negative dimensions, the indptr length, CSR canonical form, a non-canonical query, a scoring algorithm outside the enum and a term identifier out of range at `FittedIndex` ([Fitted index](#fitted-index)), k <= 0 at the margin functions, a negative k at `compare_top_k`, m above the document count at `select_top`, an out-of-range rank index and a negative or NaN tau at the tie-group functions, and a priority longer than `kMaxAttributes` at `build_keys`. It contains no arithmetic. All mathematics lives in cpp/include/tfidf/, so it can be tested from C++ alone and the binding technology can be replaced without touching it. Python owns every input buffer. At construction, `NativeIndex` copies its arrays into a `FittedIndex` and `NativeRanker` copies what it needs into storage it owns, so no C++ object keeps a borrowed pointer into a numpy array that Python might garbage-collect.
+`cpp/bindings/module.cpp` is the nanobind surface of the native backend. It converts arguments between Python and C++, and it validates the inputs that exist only at the binding: reduction policy, selection strategy, a negative m (the core takes `std::size_t`), the paired lengths of a query's two arrays, rank-matrix shape, identifier-rank bijection, attribute priority range and count (refused at construction, before any scores arrive), and score finiteness, through `ranking::all_finite`. The core refuses the rest, with the text the binding passes to Python: negative dimensions, the indptr length, CSR canonical form, a non-canonical query, a scoring algorithm or a normalisation outside its enum and a term identifier out of range at `FittedIndex` ([Fitted index](#fitted-index)), k <= 0 at the margin functions, a negative k at `compare_top_k`, m above the document count at `select_top`, an out-of-range rank index and a negative or NaN tau at the tie-group functions, and a priority longer than `kMaxAttributes` at `build_keys`. It contains no arithmetic. All mathematics lives in cpp/include/tfidf/, so it can be tested from C++ alone and the binding technology can be replaced without touching it. Python owns every input buffer. At construction, `NativeIndex` copies its arrays into a `FittedIndex` and `NativeRanker` copies what it needs into storage it owns, so no C++ object keeps a borrowed pointer into a numpy array that Python might garbage-collect.
 
 ### Native k bounds
 
@@ -1183,6 +1207,12 @@ Source: `cpp/include/tfidf/similarity/scoring.hpp`.
 Source: `cpp/include/tfidf/similarity/scoring.hpp`.
 
 `FittedIndex` owns a fitted corpus: the CSR arrays, taken by value and moved in, the inverted index from `transpose`, and the row norms from `row_norms`, all under the one `Reduction` given at construction. `score` takes the query norm under the same policy, so a scored result never mixes norms computed one way with dot products computed another. The constructor checks the signs of `n_docs` and `n_terms` before the `indptr` length, because at `n_docs = -1` the `std::size_t` sum `n_docs + 1` wraps to 0 and an empty `indptr` would pass; it then checks the paired array lengths and canonical form, with the messages the Python suite pins. `score` checks the query's canonical form before the algorithm, so a query wrong in both ways reports the query, and it writes into a caller's span, which the kernels size-check. It is non-const because the index owns its `ScoringScratch`. `csr()` builds its view per call, so a copied index never borrows its source's storage. The binding's `NativeIndex` copies each numpy array into one and converts the integer codes. The benchmark times the kernels directly rather than through it ([Native bench scope](#native-bench-scope)).
+
+### Fitted index normalisation
+
+Source: `cpp/include/tfidf/similarity/scoring.hpp`.
+
+`FittedIndex` takes a `Normalisation`, `Cosine` by default. Under `None` its norms are all 1 and `score` passes a query norm of 1, so the kernels return each document's dot product unchanged, the same bits the Python reference gives for BM25 with unit norms. The kernels themselves are unchanged. The constructor refuses a value outside the enum after the corpus checks. `NativeIndex` takes the value as an optional seventh argument with default 0, so a six-argument call still builds a cosine index, and exports the codes as `NORMALISATION`. The binding ABI moved to 0.5.0 with it.
 
 ### Sort key explicit less than
 
