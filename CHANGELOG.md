@@ -36,6 +36,15 @@ recorded values live in `configs/pipeline_digest.txt` and in each
 - `NativeIndex(..., normalisation)`: scores the plain dot product when given
   `NORMALISATION["none"]`, bit-identical to the reference with unit norms. The
   binding ABI moves to 0.5.0.
+- `evaluation/external.py`: reads runs, `.npy` embeddings and sparse vectors
+  produced outside the package, refusing anything not exactly comparable, and
+  scores sparse vectors bit-exactly.
+- `evaluate_retrieval(..., allow_partial=True)` and `top_k_agreement`: top-N
+  candidate lists, as an approximate search returns, and recall against a
+  reference.
+- `noise_floor_from_runs`: the noise floor between labelled external runs.
+- `float32_round` and `ulps_between_f32` in `utils/numerics.py`.
+- `scripts/run_external_eval.py`: evaluates an external run or sparse vectors.
 
 ### Changed
 

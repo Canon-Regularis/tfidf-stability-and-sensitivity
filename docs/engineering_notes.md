@@ -4,7 +4,7 @@ Decisions the code makes that a comment of four lines cannot justify. Each
 section is named by the slug that a `Rationale:` comment in the source cites:
 the comment states what the code does, and this page states why.
 
-- [Python package](#python-package): 84 notes
+- [Python package](#python-package): 88 notes
 - [C++ core and binding](#c-core-and-binding): 62 notes
 - [Test suite](#test-suite): 61 notes
 - [Mutation tooling](#mutation-tooling): 6 notes
@@ -172,6 +172,16 @@ Arguments: numerator is the exact integer 1 + N (section 2.1); denominator is th
 Source: `src/tfidf_stability/vectorisation/tfidf.py`.
 
 The ``tf`` field reported by ``TfidfModel.intermediates`` (and displayed by ``tfidf-stability inspect``) is not computed as ``w / idf``. The stored weight is ``fl(tf * idf)``, and dividing it back by ``idf`` adds a second rounding that does not cancel the first. Over a sweep of 184,080 realistic (N, df, L, count) cases the round trip misses the true ``tf`` by one ulp in 9.01% of them; for example, N=100, df=1, L=6, count=5 gives 0x1.aaaaaaaaaaaaap-1 for a true 0x1.aaaaaaaaaaaabp-1. An error of that size is the quantity the project studies, so the inspected field must be exact. Because ``tf`` is ``count / L`` for an integer count, ``_exact_tf`` computes ``weight / idf * L``, whose error is far below 0.5, rounds it to the integer count and divides by ``L`` once. The result is exact on all 184,080 cases of the sweep. `tests/test_tfidf_sparse_ops.py` runs a smaller grid of the same kind (more than 10,000 cases), asserts that the reconstruction is bitwise exact on every case, and asserts that the naive form fails somewhere in that grid, which shows that the reconstruction is necessary.
+
+### External run ingestion
+
+Source: `src/tfidf_stability/evaluation/external.py`.
+
+Scores from a model outside the package enter as data, the way a dataset does, and never as a second evaluator of the reference computation ([No backend registry](#no-backend-registry)). Three formats are read: a run, as JSON Lines `{query_id, doc_id, score}`; embeddings, as `.npy`; and sparse vectors, as JSON Lines `{id, vector: {token: weight}}`. Each reader refuses what could not be compared exactly. `json.loads` accepts the tokens `NaN` and `Infinity` and reads `1e400` as infinity, so both are refused; a boolean is not a number; an integer must convert to a float exactly; a repeated (query, document) pair is an error rather than an overwrite. Only LF ends a line, as in the BEIR reader ([Beir ingestion](#beir-ingestion)).
+
+A run keeps its file order, since that order is the external tool's own tie-break, and `run_digest` hashes the run in that order. JSON's shortest float repr round-trips every finite binary64 value, so the digest moves with any bit. A whole-corpus run must score every document once (`aligned_scores`) and becomes a grid through `grid_from_scores`. A top-N list from an approximate search becomes a grid of per-query candidate lists through `grid_from_candidates` ([Partial candidate lists](#partial-candidate-lists)).
+
+Sparse vectors are scored inside the package. `sparse_corpus` builds a vocabulary from every token the documents use, `sparse_queries` drops a query token no document uses, and `score_sparse` runs the TAAT kernel with unit norms, so each score is the plain dot product under the chosen reduction policy, bit-identical to a per-document sum. A zero weight is dropped and a negative one refused: SPLADE weights are non-negative, and a quantised impact of zero adds nothing.
 
 ### Field boundaries
 
@@ -410,6 +420,12 @@ Source: `src/tfidf_stability/__init__.py`.
 
 The package has two backends. The pure-Python reference is normative: it is a literal transcription of README sections 2-4. The compiled backend in tfidf_stability._native is an optional accelerator that the test suite holds to bit-for-bit agreement with the reference. A registry implies interchangeable implementations chosen at run time. Here one side defines the answer and the other is asserted to agree to the last bit, so selection is one availability check: native_available(), which returns False when the extension cannot be imported or when its __abi__ differs from REQUIRED_ABI. A numpy evaluator would have to reproduce the reference's summation order. numpy reductions are pairwise, with a block size and an unrolled base case that numpy does not document as part of its interface. At the same block size of 128 the two summation orders still disagree at 208 of 262 lengths tested (see [Pairwise reduction order](#pairwise-reduction-order)). Adding such an evaluator is therefore a research decision rather than an implementation task.
 
+### Noise floor from runs
+
+Source: `src/tfidf_stability/analysis/noise_floor.py`.
+
+`noise_floor_from_runs` applies the comparison of `measure_noise_floor` to score vectors produced elsewhere: a reference run and one or more variant runs, each labelled with its execution condition. Its `eta` is the worst disagreement with the reference run, not with correctly rounded arithmetic, so `tau_floor` is the smallest margin that separates the reference from a variant; the two floors coincide when the reference is scored under `Reduction.EXACT`. Both functions call one comparison, `_policy_error`, which counts the scores whose bits differ from the reference and takes the largest absolute and ulp distance. A test feeds the run-based function the cosine vectors the model-based one computes and requires the two floors to match field for field. An empty set of variants and a non-finite score are refused: a NaN would count as a differing score while adding nothing to `eta`.
+
 ### Non finite json
 
 Source: `src/tfidf_stability/utils/io.py`.
@@ -421,6 +437,18 @@ RFC 8259 has no token for NaN or Infinity. Python's json encoder emits them as a
 Source: `src/tfidf_stability/analysis/noise_floor.py`.
 
 The weights w = tf * idf are policy-independent: each is one division, one correctly rounded logarithm (G13) and one multiplication, with no summation. One fit therefore serves every reduction policy, and all disagreement between policies arises in the two reductions downstream of the weights: the row norms and the dot product. Both must vary. TfidfModel.norms is precomputed under the model's own reduction, so passing a different policy to cosine_against_corpus alone varies only the dot product and holds the norms fixed. That understates eta: a query dot product runs over the intersection of query and document terms (a handful), whereas a norm sums the whole document vector (tens of terms), and the longer summation is where rounding error accumulates. measure_noise_floor therefore recomputes the row norms under each policy and compares against norms and scores computed under Reduction.EXACT.
+
+### Npy reader
+
+Source: `src/tfidf_stability/evaluation/external.py`.
+
+`parse_npy` reads the `.npy` format with `struct` and `ast.literal_eval`, so no numpy is imported and the package keeps its stdlib-only reference. Versions 1 to 3 are accepted; version 1 has a 2-byte header length and versions 2 and 3 a 4-byte one, and version 3 headers are UTF-8 rather than Latin-1. Only a C-order two-dimensional `'<f4'` or `'<f8'` array is read, and the data length must equal the shape times the item size exactly. A float32 value widens to a Python float without rounding, and the product of two float32 values is exact in binary64, so an exact-sum dot product of float32 embeddings has a single rounding. A non-finite value is refused. The tests read files written by `numpy.save` and `numpy.lib.format.write_array` at each version, bit for bit.
+
+### Partial candidate lists
+
+Source: `src/tfidf_stability/evaluation/retrieval.py`.
+
+An approximate search returns a top-N list per query, not a score for every document. `evaluate_retrieval(..., allow_partial=True)` accepts such lists: each must hold unique documents of the corpus. Each query ranks only its list, under tie-order tables built from its own documents, and its margins, tie groups and contenders are measured inside the list, so a margin at `k` is a gap between two listed documents. The report records `partial: true`. Tables are built once per distinct list. The seeded shuffle orders documents by a hash of each identifier, so two documents fall in the same order in every list that holds both. `top_k_agreement` compares each query's top `k` with a reference grid's: recall is the share of the reference's top `k` the other list holds, and FKS is G2(b)'s distance, from `compare_top_k`.
 
 ### Pipeline digest identity
 
