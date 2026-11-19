@@ -258,13 +258,22 @@ def test_the_runner_writes_one_report_per_policy(
 
     assert _runner().main([*argv, "--k", "1", "--depth", "3", "--seeds", "2"]) == 0
 
-    record = json.loads((tmp_path / "retrieval_beir_scifact.json").read_text(encoding="utf-8"))
+    record = json.loads(
+        (tmp_path / "retrieval_beir_scifact_tfidf_n2.json").read_text(encoding="utf-8")
+    )
     assert record["experiment"] == "retrieval_eval"
     assert record["parameters"]["policies"] == [str(p) for p in Reduction]
     assert set(record["parameters"]["model_digests"]) == {str(p) for p in Reduction}
     assert record["data_provenance"]["kind"] == "beir"
+    assert record["parameters"]["weighting"] == {"scheme": "tfidf"}
+    assert record["parameters"]["n_max"] == 2
     naive = record["payload"]["policies"]["naive"]
     assert naive["means"]["id_desc"]["ndcg@1"]["mean"] == pytest.approx(1 / 3, rel=1e-15)
+    for policy in Reduction:
+        noise = record["payload"]["policies"][str(policy)]["noise_vs_exact"]
+        assert noise["reference"] == "exact"
+        assert noise["n_queries"] == 2, "the degenerate query is not scored"
+    assert record["payload"]["policies"]["exact"]["noise_vs_exact"]["n_scores_differ"] == 0
 
 
 def test_the_runner_limits_queries_and_policies(
@@ -279,7 +288,9 @@ def test_the_runner_limits_queries_and_policies(
     policies = ["--policies", "exact", "naive", "exact"]
     assert _runner().main([*argv, "--limit", "1", *policies, "--k", "1"]) == 0
 
-    record = json.loads((tmp_path / "retrieval_beir_scifact.json").read_text(encoding="utf-8"))
+    record = json.loads(
+        (tmp_path / "retrieval_beir_scifact_tfidf_n2.json").read_text(encoding="utf-8")
+    )
     assert record["parameters"]["n_queries"] == 1
     assert record["parameters"]["policies"] == ["naive", "exact"], "declaration order, once each"
     assert set(record["payload"]["policies"]) == {"naive", "exact"}
@@ -307,6 +318,9 @@ def test_the_runner_refuses_a_subset_with_nothing_relevant(
         (["--dataset", "synthetic_tiny", "--k", "5", "--depth", "4"], "need 1 <= --k <= --depth"),
         (["--dataset", "synthetic_tiny", "--seeds", "-1"], "--seeds must be non-negative"),
         (["--dataset", "synthetic_tiny", "--limit", "0"], "--limit must be at least 1, got 0"),
+        (["--dataset", "synthetic_tiny", "--n-max", "0"], "--n-max must be at least 1, got 0"),
+        (["--dataset", "synthetic_tiny", "--bm25-k1", "x"], "k1 is not a decimal number: 'x'"),
+        (["--dataset", "synthetic_tiny", "--bm25-b", "2"], "b must lie in [0, 1], got '2'"),
     ],
 )
 def test_the_runner_refuses_bad_arguments(
@@ -316,3 +330,54 @@ def test_the_runner_refuses_bad_arguments(
         _runner().main(extra)
 
     assert message in capsys.readouterr().err
+
+
+def test_the_runner_weights_with_bm25_and_names_the_report_for_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = _scifact_zip()
+    archive = tmp_path / "scifact.zip"
+    archive.write_bytes(data)
+    monkeypatch.setitem(beir.PINNED_SHA256, "scifact", hash_bytes(data))
+    argv = ["--dataset", "beir_scifact", "--archive", str(archive), "-o", str(tmp_path)]
+    bm25 = ["--weighting", "bm25", "--length-norm", "lucene_byte", "--bm25-k1", "1.2"]
+
+    assert _runner().main([*argv, *bm25, "--n-max", "1", "--k", "1", "--depth", "3"]) == 0
+
+    path = tmp_path / "retrieval_beir_scifact_bm25-lucene_byte_n1.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["parameters"]["weighting"] == {
+        "scheme": "bm25",
+        "k1": "1.2",
+        "b": "0.4",
+        "length_norm": "lucene_byte",
+        "idf": "lucene",
+    }
+    assert record["parameters"]["n_max"] == 1
+    naive = record["payload"]["policies"]["naive"]
+    assert naive["means"]["id_desc"]["ndcg@1"]["mean"] == pytest.approx(1 / 3, rel=1e-15), (
+        "q1's duplicate pair ties under BM25 too, so only id_desc ranks the relevant d2 first"
+    )
+    assert "near_tie_census" in naive
+
+
+def test_the_n_gram_order_reaches_the_preprocessing_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = _scifact_zip()
+    archive = tmp_path / "scifact.zip"
+    archive.write_bytes(data)
+    monkeypatch.setitem(beir.PINNED_SHA256, "scifact", hash_bytes(data))
+    argv = ["--dataset", "beir_scifact", "--archive", str(archive), "-o", str(tmp_path)]
+    fast = ["--k", "1", "--depth", "2", "--seeds", "0", "--policies", "naive"]
+
+    assert _runner().main([*argv, *fast]) == 0
+    assert _runner().main([*argv, *fast, "--n-max", "1"]) == 0
+
+    digests = {
+        name: json.loads((tmp_path / name).read_text(encoding="utf-8"))["parameters"][
+            "preprocessing_digest"
+        ]
+        for name in ("retrieval_beir_scifact_tfidf_n2.json", "retrieval_beir_scifact_tfidf_n1.json")
+    }
+    assert len(set(digests.values())) == 2
