@@ -32,7 +32,7 @@ __all__ = [
 #: The extension carries its own copy in ``__abi__``; a mismatch identifies a stale build,
 #: and a build without ``__abi__`` reports ``None`` and is rejected.
 #: Rationale: docs/engineering_notes.md#abi-version-check
-REQUIRED_ABI = "0.4.0"
+REQUIRED_ABI = "0.5.0"
 
 if TYPE_CHECKING:  # pragma: no cover
     _tfidf_native: Any

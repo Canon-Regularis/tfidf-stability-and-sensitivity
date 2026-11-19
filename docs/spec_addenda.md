@@ -42,6 +42,8 @@ these entries only fill gaps or make an abstract quantity concrete.
 | [G26](#g26)| §4.2 | The interaction term never dominates |
 | [G27](#g27)| §4.2 | The bound holds; *testing* it in binary64 needs three preconditions |
 | [G28](#g28)| §7.1 | Profile aggregation joins features rather than text, so there are no seams |
+| [G29](#g29)| §1.2 | The two backends validate finiteness at different layers |
+| [G30](#g30)| §2 | BM25 as a second weighting: the choices its formula leaves open |
 
 ---
 
@@ -1414,3 +1416,68 @@ to either.
 what `tests/test_margins_and_flip_radii.py` pins and moves a stated division of
 responsibility; removing it from the binding restores the `inf`/`NaN`
 disagreement above.
+
+---
+
+<a id="g30"></a>
+## G30. BM25 as a second weighting: the choices its formula leaves open
+
+**Where:** `vectorisation/bm25.py`, `evaluation/retrieval.py` and
+`scripts/run_retrieval_eval.py`.
+
+**Paper.** The paper defines TF-IDF with cosine similarity only. BM25 is added so
+the tie and margin analysis can be compared with the lexical baseline that
+published BEIR figures use. Each choice below follows Lucene's `BM25Similarity`
+unless stated, since Anserini, and through it BEIR, reports that implementation.
+
+**Formula.** For a query term `t` and document `d`,
+`w(t, d) = idf(t) · f / (f + k1 · (1 − b + b · dl / avgdl))`, with `f` the
+in-vocabulary count of `t` in `d`. There is no `(k1 + 1)` factor: Lucene dropped
+it in version 8, and it scales every score by the same constant, so no ranking
+depends on it. A document's score is `Σ_t q(t) · w(t, d)` over the query's terms,
+with `q(t)` the term's count in the query.
+
+**IDF.** `idf(t) = ln(1 + (D − df + 0.5) / (df + 0.5))`, which equals
+`ln((2D + 2) / (2df + 1))`. It is always positive, unlike the
+Robertson–Spärck Jones form `ln((D − df + 0.5) / (df + 0.5))`, which is negative
+for `df > D / 2`. The logarithm is correctly rounded from the exact integer ratio,
+as G13 requires of the TF-IDF IDF.
+
+**Corpus size.** `D` is the number of documents with at least one in-vocabulary
+feature, Lucene's `docCount`, not the corpus size `N`. The two differ when a
+document has no in-vocabulary feature: it is empty after preprocessing, or
+vocabulary pruning removes every feature it has. `avgdl = T / D`, with `T` the total
+in-vocabulary feature count.
+
+**Document length.** `dl` is the document's in-vocabulary feature count under
+the configured n-grams. At `n_max = 2` it counts bigrams as well as unigrams;
+`n_max = 1` matches Anserini's single `contents` field more closely.
+
+**Parameters.** `k1` and `b` are exact decimal fractions, read from strings: a
+binary64 literal such as `0.9` is not `9/10`, and the difference would reach the
+last bit of some weights. The defaults are Anserini's BEIR settings,
+`k1 = 0.9` and `b = 0.4`.
+
+**Rounding.** A weight is rounded twice: once for the IDF, which is stored, and
+once for `idf · saturation`, evaluated as one exact integer ratio. Lucene
+evaluates the same expression in float32 with several roundings, so its scores
+tie more often than these do.
+
+**Length encoding.** Lucene stores `dl` in one byte (`SmallFloat.intToByte4`),
+exact for lengths 0 to 39 and coarser above, so documents of different length
+can share a weight. `length_norm = lucene_byte` reproduces that encoding, and
+`exact` uses the integer length. In both, `avgdl` comes from the unencoded
+lengths, as Lucene's comes from `sumTotalTermFreq`; it is kept exact here,
+where Lucene rounds it to float32.
+
+**Normalisation.** BM25 scores are not divided by a norm: the scoring kernels
+run with unit document norms and a unit query norm, which leaves each dot
+product unchanged.
+
+**What is not reproduced.** The preprocessing differs from Anserini's: Porter2
+rather than Porter stemming, this repository's stopword list, and its
+tokeniser. Scores are binary64, not float32. Published BEIR figures are
+therefore a sanity range for these results, not a target to match.
+
+**Scope.** A BM25 model is not saved: `.tfsx` and the command-line interface stay
+TF-IDF only.

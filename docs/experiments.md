@@ -46,7 +46,13 @@ python scripts/make_figures.py --reports reports/
 
 # E5 (retrieval on a BEIR test split); fetch the archive first
 python scripts/fetch_data.py --dataset beir_scifact
-python scripts/run_retrieval_eval.py --dataset beir_scifact     --archive data/raw/beir-scifact.zip -o reports/
+python scripts/run_retrieval_eval.py --dataset beir_scifact \
+    --archive data/raw/beir-scifact.zip -o reports/
+
+# the same split under BM25, unigrams and Lucene's one-byte document lengths
+python scripts/run_retrieval_eval.py --dataset beir_scifact \
+    --archive data/raw/beir-scifact.zip --weighting bm25 --n-max 1 \
+    --length-norm lucene_byte -o reports/
 ```
 
 `run_stability_profile.py` **exits non-zero** if any perturbation inside §4.4's
@@ -109,8 +115,12 @@ See [tie_breaking_discontinuities.md](tie_breaking_discontinuities.md).
 
 `run_retrieval_eval.py` scores the test split of a BEIR benchmark
 (`beir_scifact` or `beir_nfcorpus`) with the benchmark's own text queries and
-graded judgements. For each reduction policy and each identifier tie order it
-reports:
+graded judgements, under TF-IDF cosine or BM25 (`--weighting`), with unigram or
+unigram-and-bigram features (`--n-max`). BM25 follows Lucene
+([G30](spec_addenda.md#g30)); `--length-norm lucene_byte` stores document
+lengths as Lucene does, in one byte. Each run writes
+`retrieval_<dataset>_<tfidf|bm25-<norm>>_n<n_max>.json`. For each reduction
+policy and each identifier tie order it reports:
 
 - nDCG@k (default 10), Recall@depth (default 100) and MRR@k, defined as in
   trec_eval ([Relevance metric discount](engineering_notes.md#relevance-metric-discount)).
@@ -119,6 +129,11 @@ reports:
   order, and the number of documents with a non-zero score.
 - Over the seeded shuffles of the identifier order (default 20): the minimum,
   maximum and range of each mean.
+- A near-tie census: per tau from 0 to 1e-4, absolute and relative to `r_k`,
+  the queries with a document past position k within tau of `r_k`.
+- Each policy's noise against `exact`: scores whose bits differ, the largest
+  difference, and the top-k sets and orders that change
+  ([Policy noise against exact](engineering_notes.md#policy-noise-against-exact)).
 
 The tie orders are `id_asc`, `id_desc` and `shuffle_<seed>`
 ([Identifier tie orders](engineering_notes.md#identifier-tie-orders)). A BEIR
@@ -134,8 +149,10 @@ and left out of each mean, with a count.
 
 Three differences from published BEIR figures are by design:
 
-- BEIR's lexical baseline ranks with BM25; this study ranks with cosine TF-IDF
-  (README section 2), so its nDCG is expected to be lower.
+- BEIR's lexical baseline is Anserini's BM25. This study's BM25 shares its
+  formula and IDF but not its stemmer, stopwords, tokeniser or float32 scores,
+  so the published figures are a sanity range rather than a target. TF-IDF
+  cosine is expected to score below either.
 - trec_eval breaks score ties by reverse identifier order, which is `id_desc`
   here, so that is the variant to compare. The metric code never re-sorts a
   ranking, so the tie order under study is the one scored.
@@ -143,6 +160,31 @@ Three differences from published BEIR figures are by design:
   Here the ranking to depth fills with zero-score documents in tie order, and
   Recall@depth counts any relevant one among them; `n_nonzero` records how many
   documents scored above zero.
+
+## External runs
+
+Scores from a model outside the package are evaluated by `run_external_eval.py`
+with the same metrics, tie orders and census as E5. Three inputs are read:
+
+| Input | Format | Flag |
+| --- | --- | --- |
+| A run | JSON Lines `{"query_id", "doc_id", "score"}` | `--run` |
+| Sparse vectors | JSON Lines `{"id", "vector": {token: weight}}`, for documents and for queries | `--sparse-corpus`, `--sparse-queries` |
+| Embeddings | `.npy`, C order, `'<f4'` or `'<f8'`, one row per document | read by `evaluation/external.read_npy` |
+
+A run either scores every document of the corpus, or with `--partial` lists the
+top N per query, as an approximate search returns. A partial list is ranked
+inside itself, so its margins lie between listed documents. `--reference` adds a
+second run of the same queries. For a whole-corpus run the report then gives the
+bit-level noise between the two and a noise floor labelled with `--label`. For
+either kind it gives top-k agreement, as recall against the reference. Sparse
+vectors are scored here under every reduction policy, as BM25 is.
+
+```bash
+python scripts/run_external_eval.py --dataset beir_scifact \
+    --archive data/raw/beir-scifact.zip --label bge_cpu_batch32 \
+    --run runs/bge_cpu_batch32.jsonl --reference runs/bge_cpu_batch1.jsonl -o reports/
+```
 
 ## Figures, and how each one could falsify its hypothesis
 

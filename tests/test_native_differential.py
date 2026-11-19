@@ -471,3 +471,59 @@ def test_exact_diverges_from_fsum_once_a_partial_overflows(
         assert same_bits(got, l2_norm(vector, policy)), (
             f"{policy} must still agree bit for bit; the divergence is Exact's alone"
         )
+
+
+# ---------------------------------------------------------------------------
+# Unnormalised scoring (BM25)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("policy", list(Reduction))
+@pytest.mark.parametrize("algorithm", ["taat", "daat"])
+def test_an_unnormalised_index_scores_bm25_bit_exactly(
+    corpus: list[list[str]], policy: Reduction, algorithm: str
+) -> None:
+    """Without normalisation both backends return the plain BM25 dot product."""
+    from tfidf_stability.similarity.scoring import InvertedIndex, taat_scores
+    from tfidf_stability.vectorisation.bm25 import Bm25Model, Bm25Vectoriser
+
+    bm25 = Bm25Vectoriser(reduction=policy).fit(corpus)
+    native = nat.NativeIndex(
+        np.array(bm25.matrix.indptr, dtype=np.int64),
+        np.array(bm25.matrix.indices, dtype=np.int32),
+        np.array(bm25.matrix.values, dtype=np.float64),
+        bm25.n_documents,
+        bm25.n_features,
+        _policy(policy),
+        int(nat.NORMALISATION["none"]),
+    )
+    inverted = InvertedIndex.from_csr(bm25.matrix)
+    rng = random.Random(7)
+    assert native.normalisation == nat.NORMALISATION["none"]
+    assert all(n == 1.0 for n in native.norms)
+    for _ in range(25):
+        terms = [corpus[rng.randrange(len(corpus))] for _ in range(2)]
+        query = Bm25Vectoriser.transform_query([t for doc in terms for t in doc[:5]], bm25)
+        want = taat_scores(query, inverted, bm25.norms, policy, query_norm=Bm25Model.QUERY_NORM)
+        got = native.score(
+            np.array(query.indices, dtype=np.int32),
+            np.array(query.values, dtype=np.float64),
+            int(nat.ALGORITHM[algorithm]),
+        )
+        assert all(same_bits(float(g), w) for g, w in zip(got, want, strict=True))
+
+
+def test_normalisation_defaults_to_cosine(index) -> None:  # type: ignore[no-untyped-def]
+    assert index.normalisation == nat.NORMALISATION["cosine"]
+
+
+@pytest.mark.parametrize("normalisation", [-1, 2, 999])
+def test_a_normalisation_outside_the_enumeration_is_rejected(normalisation: int) -> None:
+    with pytest.raises(ValueError, match="normalisation out of range"):
+        nat.NativeIndex(
+            np.array([0, 1], dtype=np.int64),
+            np.array([0], dtype=np.int32),
+            np.array([1.0], dtype=np.float64),
+            1,
+            1,
+            _policy(Reduction.NAIVE),
+            normalisation,
+        )

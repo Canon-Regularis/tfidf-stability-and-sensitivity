@@ -7,7 +7,8 @@ Rationale: docs/engineering_notes.md#identifier-tie-orders
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import math
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,25 +23,37 @@ from tfidf_stability.evaluation.metrics import (
 from tfidf_stability.evaluation.tie_orders import TieOrder, tie_order_label, with_tie_order
 from tfidf_stability.profiles.query_modes import QueryMode, QuerySet
 from tfidf_stability.ranking.attributes import AttributeTable
+from tfidf_stability.ranking.distances import compare_top_k
 from tfidf_stability.ranking.margins import boundary_margin
 from tfidf_stability.ranking.ranker import rank_top_k
 from tfidf_stability.ranking.sort_keys import PI_SCORE
 from tfidf_stability.ranking.tie_groups import tie_ball_interval
 from tfidf_stability.similarity.scoring import InvertedIndex, ScoringScratch, taat_scores
+from tfidf_stability.utils.numerics import same_bits
 from tfidf_stability.utils.validation import StrictMode
+from tfidf_stability.vectorisation.bm25 import Bm25Model, Bm25Vectoriser
 from tfidf_stability.vectorisation.tfidf import TfidfModel, TfidfVectoriser
 
 __all__ = [
+    "NEAR_TIE_TAUS",
+    "PolicyNoise",
     "QueryOutcome",
     "RetrievalReport",
+    "TopKAgreement",
     "Variant",
     "evaluate_retrieval",
+    "policy_noise",
     "score_text_queries",
+    "top_k_agreement",
 ]
 
 #: The two variants every per-query row reports in full.
 _ASC: str = "id_asc"
 _DESC: str = "id_desc"
+
+#: Gaps at the cutoff counted as near ties: exact, then from just above the
+#: summation noise of a binary64 score up to Anserini's 1e-4 score rounding.
+NEAR_TIE_TAUS: tuple[float, ...] = (0.0, 1e-12, 1e-9, 1e-6, 1e-4)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +76,8 @@ class QueryOutcome:
     """One judged query: its ``id_asc`` and ``id_desc`` metrics and its cutoff tie.
 
     ``margin`` is ``r_k - r_{k+1}`` (``None`` when undefined); ``tie_group`` counts the
-    documents scoring exactly ``r_k``, so a group above 1 ending past ``k`` crosses it.
+    documents scoring exactly ``r_k``. ``contenders`` counts, per tau, the documents past
+    position ``k`` within tau of ``r_k``; ``relative_contenders`` scales tau by ``|r_k|``.
     """
 
     query_id: str
@@ -75,6 +89,8 @@ class QueryOutcome:
     top_k_set_differs: bool
     top_k_order_differs: bool
     metrics: dict[str, dict[str, float | None]] = field(default_factory=dict)
+    contenders: dict[str, int] = field(default_factory=dict)
+    relative_contenders: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +101,8 @@ class RetrievalReport:
     depth: int
     means: dict[str, dict[str, MeanMetric]]
     queries: tuple[QueryOutcome, ...]
+    #: Whether a query may rank a subset of the corpus, so its margins lie inside its list.
+    partial: bool
 
     @property
     def metric_names(self) -> tuple[str, str, str]:
@@ -104,6 +122,7 @@ class RetrievalReport:
         return {
             "k": self.k,
             "depth": self.depth,
+            "partial": self.partial,
             "n_queries": len(self.queries),
             "n_degenerate": sum(q.degenerate for q in self.queries),
             "n_zero_vector": sum(q.zero_vector for q in self.queries),
@@ -118,6 +137,10 @@ class RetrievalReport:
                 for label, by_metric in self.means.items()
             },
             "shuffle_spread": spread,
+            "near_tie_census": {
+                "absolute": _census(q.contenders for q in self.queries),
+                "relative": _census(q.relative_contenders for q in self.queries),
+            },
             "queries": [
                 {
                     "query_id": q.query_id,
@@ -129,23 +152,39 @@ class RetrievalReport:
                     "top_k_set_differs": q.top_k_set_differs,
                     "top_k_order_differs": q.top_k_order_differs,
                     "metrics": q.metrics,
+                    "contenders": q.contenders,
+                    "relative_contenders": q.relative_contenders,
                 }
                 for q in self.queries
             ],
         }
 
 
+def _census(per_query: Iterable[Mapping[str, int]]) -> dict[str, dict[str, float]]:
+    """Per tau: queries crossing the cutoff, and the most and mean contenders."""
+    rows = list(per_query)
+    out: dict[str, dict[str, float]] = {}
+    for tau in (repr(t) for t in NEAR_TIE_TAUS):
+        counts = [row.get(tau, 0) for row in rows]
+        out[tau] = {
+            "n_queries_crossing": sum(1 for c in counts if c > 0),
+            "max_contenders": max(counts, default=0),
+            "mean_contenders": sum(counts) / len(counts) if counts else 0.0,
+        }
+    return out
+
+
 def score_text_queries(
     query_set: QuerySet,
-    model: TfidfModel,
+    model: TfidfModel | Bm25Model,
     records: Sequence[Mapping[str, Any]],
     doc_ids: Sequence[str],
 ) -> QueryGrid:
     """Score text queries term at a time, as ``query_grid.evaluate`` would.
 
-    The grid equals :func:`~tfidf_stability.analysis.query_grid.evaluate`'s: TAAT gives the bits
-    ``cosine_against_corpus`` gives, and the attribute table is built once, since a text query
-    keeps every document.
+    For TF-IDF the grid equals :func:`~tfidf_stability.analysis.query_grid.evaluate`'s: TAAT
+    gives ``cosine_against_corpus``'s bits. A BM25 model scores with unit norms, so each score
+    is the plain dot product. The attribute table is built once: a text query keeps every document.
     """
     if query_set.mode is not QueryMode.TEXT:
         raise ValueError(f"expected {QueryMode.TEXT} queries, got {query_set.mode}")
@@ -153,14 +192,22 @@ def score_text_queries(
     table = AttributeTable.from_records(records)
     candidates = tuple(doc_ids)
     scratch = ScoringScratch()
+    norms = model.norms
     evaluated: list[EvaluatedQuery] = []
     for query in query_set.queries:
         if query.excluded:
             raise ValueError(f"text query {query.query_id!r} excludes documents")
         if query.is_degenerate:
             continue
-        vector = TfidfVectoriser.transform_query(list(query.features), model)
-        scores = taat_scores(vector, index, model.norms, model.reduction, scratch=scratch)
+        if isinstance(model, Bm25Model):
+            vector = Bm25Vectoriser.transform_query(list(query.features), model)
+            query_norm: float | None = Bm25Model.QUERY_NORM
+        else:
+            vector = TfidfVectoriser.transform_query(list(query.features), model)
+            query_norm = None
+        scores = taat_scores(
+            vector, index, norms, model.reduction, query_norm=query_norm, scratch=scratch
+        )
         evaluated.append(
             EvaluatedQuery(
                 query_id=query.query_id,
@@ -206,6 +253,17 @@ def _cutoff(sorted_scores: Sequence[float], k: int) -> tuple[float | None, int]:
     return (margin.value if margin.defined else None), hi - lo
 
 
+def _contenders(sorted_scores: Sequence[float], k: int, *, relative: bool) -> dict[str, int]:
+    """Per tau, the documents past position ``k`` within tau of ``r_k``."""
+    j = min(k, len(sorted_scores)) - 1
+    scale = abs(sorted_scores[j]) if relative else 1.0
+    out: dict[str, int] = {}
+    for tau in NEAR_TIE_TAUS:
+        _, hi = tie_ball_interval(sorted_scores, j, tau * scale)
+        out[repr(tau)] = max(hi - (j + 1), 0)
+    return out
+
+
 def evaluate_retrieval(
     grid: QueryGrid,
     qrels: Mapping[str, Mapping[str, int]],
@@ -214,12 +272,13 @@ def evaluate_retrieval(
     k: int,
     depth: int,
     seeds: int,
+    allow_partial: bool = False,
 ) -> RetrievalReport:
     """Rank each judged query to ``depth`` under every tie-order variant.
 
-    ``grid`` must hold text queries over all of ``doc_ids``; a judged query missing from it
-    is degenerate. Raises ``ValueError`` for another query mode, a candidate set that is not
-    the corpus, a query without judgements, ``k > depth`` or a negative ``seeds``.
+    ``grid`` holds text queries over all of ``doc_ids``, or over subsets of it with
+    ``allow_partial``; a judged query missing from it is degenerate. Raises ``ValueError``
+    for another mode, a bad candidate set, an unjudged query, a bad cutoff or negative seeds.
     """
     if grid.mode is not QueryMode.TEXT:
         raise ValueError(f"expected a grid of {QueryMode.TEXT} queries, got {grid.mode}")
@@ -228,25 +287,41 @@ def evaluate_retrieval(
     if seeds < 0:
         raise ValueError(f"seeds must be non-negative, got {seeds}")
     corpus = tuple(doc_ids)
+    known = set(corpus)
     evaluated = {q.query_id: q for q in grid.queries}
     for scored in grid.queries:
         if scored.candidate_ids != corpus:
-            raise ValueError(f"query {scored.query_id!r} does not rank the whole corpus")
+            if not allow_partial:
+                raise ValueError(f"query {scored.query_id!r} does not rank the whole corpus")
+            if len(set(scored.candidate_ids)) != len(scored.candidate_ids):
+                raise ValueError(f"query {scored.query_id!r} lists a candidate twice")
+            if not known.issuperset(scored.candidate_ids):
+                raise ValueError(f"query {scored.query_id!r} lists a document outside the corpus")
         if scored.query_id not in qrels:
             raise ValueError(f"query {scored.query_id!r} has no judgements")
 
     variants = [Variant(TieOrder.ID_ASC), Variant(TieOrder.ID_DESC)]
     variants += [Variant(TieOrder.SHUFFLE, seed) for seed in range(seeds)]
-    tables: dict[str, AttributeTable] = {}
-    if grid.queries:
-        base = grid.queries[0].table
-        tables = {v.label: with_tie_order(base, v.order, seed=v.seed) for v in variants}
+    # The whole corpus's variant tables are built once and kept; a partial list's are
+    # built for its query alone. A shuffle hashes each identifier, so it orders two
+    # documents alike in every list that holds both.
+    # Rationale: docs/engineering_notes.md#partial-candidate-lists
+    corpus_tables: dict[str, AttributeTable] = {}
+
+    def tables_for(scored: EvaluatedQuery) -> dict[str, AttributeTable]:
+        if scored.candidate_ids == corpus and corpus_tables:
+            return corpus_tables
+        built = {v.label: with_tie_order(scored.table, v.order, seed=v.seed) for v in variants}
+        if scored.candidate_ids == corpus:
+            corpus_tables.update(built)
+        return built
 
     per_variant: dict[str, dict[str, dict[str, float | None]]] = {v.label: {} for v in variants}
     outcomes: list[QueryOutcome] = []
     for query_id in sorted(qrels, key=lambda q: q.encode("utf-8")):
         judgements = qrels[query_id]
         query = evaluated.get(query_id)
+        tables = {} if query is None else tables_for(query)
         ranked = {
             v.label: [] if query is None else _ranked(query, tables[v.label], depth)
             for v in variants
@@ -254,9 +329,8 @@ def evaluate_retrieval(
         for v in variants:
             per_variant[v.label][query_id] = _metrics(ranked[v.label], judgements, k, depth)
         asc, desc = ranked[_ASC][:k], ranked[_DESC][:k]
-        margin, tie_group = (
-            (None, 0) if query is None else _cutoff(sorted(query.scores, reverse=True), k)
-        )
+        ordered = () if query is None else tuple(sorted(query.scores, reverse=True))
+        margin, tie_group = (None, 0) if query is None else _cutoff(ordered, k)
         outcomes.append(
             QueryOutcome(
                 query_id=query_id,
@@ -268,6 +342,10 @@ def evaluate_retrieval(
                 top_k_set_differs=set(asc) != set(desc),
                 top_k_order_differs=asc != desc,
                 metrics={_ASC: per_variant[_ASC][query_id], _DESC: per_variant[_DESC][query_id]},
+                contenders={} if query is None else _contenders(ordered, k, relative=False),
+                relative_contenders=(
+                    {} if query is None else _contenders(ordered, k, relative=True)
+                ),
             )
         )
 
@@ -278,4 +356,130 @@ def evaluate_retrieval(
         }
         for label, rows in per_variant.items()
     }
-    return RetrievalReport(k=k, depth=depth, means=means, queries=tuple(outcomes))
+    return RetrievalReport(
+        k=k, depth=depth, means=means, queries=tuple(outcomes), partial=allow_partial
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyNoise:
+    """How far one grid's scores and top-k lists sit from a reference grid's.
+
+    ``reference`` names the reference condition. Top-k lists are ranked under each grid's
+    own tie order, so only a score difference can change them.
+    """
+
+    reference: str
+    k: int
+    n_queries: int
+    n_scores_differ: int
+    n_queries_differ: int
+    max_abs_delta: float
+    n_top_k_set_differs: int
+    n_top_k_order_differs: int
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "reference": self.reference,
+            "k": self.k,
+            "n_queries": self.n_queries,
+            "n_scores_differ": self.n_scores_differ,
+            "n_queries_differ": self.n_queries_differ,
+            "max_abs_delta": self.max_abs_delta,
+            "n_top_k_set_differs": self.n_top_k_set_differs,
+            "n_top_k_order_differs": self.n_top_k_order_differs,
+        }
+
+
+def policy_noise(reference: QueryGrid, other: QueryGrid, *, k: int, label: str) -> PolicyNoise:
+    """Compare ``other`` with ``reference``, bit for bit and at the top ``k``.
+
+    Both grids must score the same queries over the same candidates. A score differs when
+    its bits do, so ``-0.0`` against ``0.0`` counts though its delta is zero.
+    """
+    if [q.query_id for q in reference.queries] != [q.query_id for q in other.queries]:
+        raise ValueError("the two grids score different queries")
+    n_scores = n_queries = n_set = n_order = 0
+    worst = 0.0
+    for ref, cur in zip(reference.queries, other.queries, strict=True):
+        if ref.candidate_ids != cur.candidate_ids:
+            raise ValueError(f"query {ref.query_id!r} ranks different candidates in the two grids")
+        differing = [
+            abs(a - b) for a, b in zip(ref.scores, cur.scores, strict=True) if not same_bits(a, b)
+        ]
+        n_scores += len(differing)
+        n_queries += bool(differing)
+        worst = max([worst, *differing])
+        top_ref, top_cur = _ranked(ref, ref.table, k), _ranked(cur, cur.table, k)
+        n_set += set(top_ref) != set(top_cur)
+        n_order += top_ref != top_cur
+    return PolicyNoise(
+        reference=label,
+        k=k,
+        n_queries=len(reference.queries),
+        n_scores_differ=n_scores,
+        n_queries_differ=n_queries,
+        max_abs_delta=worst,
+        n_top_k_set_differs=n_set,
+        n_top_k_order_differs=n_order,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class TopKAgreement:
+    """How closely one grid's top ``k`` lists follow a reference grid's.
+
+    ``recall`` per query is the share of the reference's top ``k`` that the other list holds,
+    as for an approximate search against an exact one; ``fks`` is G2(b)'s normalised distance.
+    """
+
+    k: int
+    recall: dict[str, float]
+    fks: dict[str, float]
+    n_sets_differ: int
+
+    @property
+    def mean_recall(self) -> float:
+        return math.fsum(self.recall.values()) / len(self.recall) if self.recall else 1.0
+
+    @property
+    def mean_fks(self) -> float:
+        return math.fsum(self.fks.values()) / len(self.fks) if self.fks else 0.0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "k": self.k,
+            "n_queries": len(self.recall),
+            "mean_recall": self.mean_recall,
+            "mean_fks": self.mean_fks,
+            "n_sets_differ": self.n_sets_differ,
+            "recall": self.recall,
+            "fks": self.fks,
+        }
+
+
+def top_k_agreement(reference: QueryGrid, other: QueryGrid, *, k: int) -> TopKAgreement:
+    """Compare each query's top ``k`` with the reference's.
+
+    Both grids must score the same queries; their candidate lists may differ, as an
+    approximate search's do. Raises ``ValueError`` for ``k < 1`` or different queries.
+    """
+    if k < 1:
+        raise ValueError(f"k must be at least 1, got {k}")
+    if [q.query_id for q in reference.queries] != [q.query_id for q in other.queries]:
+        raise ValueError("the two grids score different queries")
+    recall: dict[str, float] = {}
+    fks: dict[str, float] = {}
+    n_differ = 0
+    for expected, observed in zip(reference.queries, other.queries, strict=True):
+        top_ref = _ranked(expected, expected.table, k)
+        top_cur = _ranked(observed, observed.table, k)
+        position = {doc: i for i, doc in enumerate(dict.fromkeys([*top_ref, *top_cur]))}
+        comparison = compare_top_k(
+            [position[d] for d in top_ref], [position[d] for d in top_cur], k
+        )
+        shared = len(set(top_ref) & set(top_cur))
+        recall[expected.query_id] = shared / len(top_ref)
+        fks[expected.query_id] = comparison.fks
+        n_differ += comparison.sets_differ
+    return TopKAgreement(k=k, recall=recall, fks=fks, n_sets_differ=n_differ)

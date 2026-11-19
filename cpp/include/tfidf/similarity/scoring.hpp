@@ -263,13 +263,15 @@ class FittedIndex {
                 std::vector<Real> values,
                 DocId n_docs,
                 TermId n_terms,
-                Reduction policy)
+                Reduction policy,
+                Normalisation normalisation = Normalisation::Cosine)
         : indptr_(std::move(indptr)),
           indices_(std::move(indices)),
           values_(std::move(values)),
           n_rows_(n_docs),
           n_cols_(n_terms),
-          policy_(policy) {
+          policy_(policy),
+          normalisation_(normalisation) {
         // Signs before the length: at n_docs = -1 the size_t sum n_docs + 1
         // wraps to 0, so an empty indptr would pass the next check.
         if (n_docs < 0 || n_terms < 0) {
@@ -286,8 +288,14 @@ class FittedIndex {
                 "the CSR matrix is not canonical: indices must be strictly ascending "
                 "within each row and lie in [0, n_terms)");
         }
+        if (normalisation < Normalisation::Cosine || normalisation > Normalisation::None) {
+            throw std::invalid_argument("normalisation out of range");
+        }
         index_ = transpose(csr());
-        norms_ = row_norms(csr(), policy_);
+        // Unit norms leave every dot product as it is: x / (1 * 1) == x exactly.
+        norms_ = normalisation_ == Normalisation::None
+                     ? std::vector<Real>(static_cast<std::size_t>(n_rows_), 1.0)
+                     : row_norms(csr(), policy_);
     }
 
     /// A view onto the owned CSR, built per call so a copy never borrows.
@@ -297,6 +305,7 @@ class FittedIndex {
     [[nodiscard]] const Csc& index() const noexcept { return index_; }
     [[nodiscard]] std::span<const Real> norms() const noexcept { return norms_; }
     [[nodiscard]] Reduction policy() const noexcept { return policy_; }
+    [[nodiscard]] Normalisation normalisation() const noexcept { return normalisation_; }
     [[nodiscard]] DocId n_documents() const noexcept { return n_rows_; }
     [[nodiscard]] TermId n_features() const noexcept { return n_cols_; }
     [[nodiscard]] Offset nnz() const noexcept { return static_cast<Offset>(values_.size()); }
@@ -309,10 +318,10 @@ class FittedIndex {
         return index_.df(term);
     }
 
-    /// Score one query against every document: `out[i] = cos(query, w_i)`.
+    /// Score one query against every document: `cos(query, w_i)`, or the dot product.
     ///
-    /// Refuses a non-canonical query, then an algorithm outside the enum, and
-    /// takes the query norm under the index's own policy.
+    /// Refuses a non-canonical query, then an algorithm outside the enum. The query
+    /// norm is taken under the index's own policy, or is 1 without normalisation.
     void score(const SparseView& query, std::span<Real> out, ScoringAlgorithm algorithm) {
         if (!query.is_canonical()) {
             throw std::invalid_argument(
@@ -322,7 +331,8 @@ class FittedIndex {
         if (algorithm < ScoringAlgorithm::Taat || algorithm > ScoringAlgorithm::Daat) {
             throw std::invalid_argument("scoring algorithm out of range");
         }
-        const Real query_norm = l2_norm(query, policy_);
+        const Real query_norm =
+            normalisation_ == Normalisation::None ? 1.0 : l2_norm(query, policy_);
         tfidf::score(query, csr(), index_, norms_, query_norm, out, scratch_, policy_, algorithm);
     }
 
@@ -333,6 +343,7 @@ class FittedIndex {
     DocId n_rows_;
     TermId n_cols_;
     Reduction policy_;
+    Normalisation normalisation_;
     Csc index_;
     std::vector<Real> norms_;
     ScoringScratch scratch_;

@@ -28,6 +28,24 @@ recorded values live in `configs/pipeline_digest.txt` and in each
   the same on every platform, identifier tie orders, and the E5 retrieval
   evaluation behind `scripts/run_retrieval_eval.py`.
 
+- `vectorisation/bm25.py`: BM25 weighting with Lucene's IDF, exact `k1` and
+  `b`, each weight rounded once after the IDF, and Lucene's one-byte document length as an
+  option (G30).
+- `scripts/run_retrieval_eval.py`: `--weighting bm25`, `--n-max`, a near-tie
+  census at the cutoff, and each reduction policy's noise against `exact`.
+- `NativeIndex(..., normalisation)`: scores the plain dot product when given
+  `NORMALISATION["none"]`, bit-identical to the reference with unit norms. The
+  binding ABI moves to 0.5.0.
+- `evaluation/external.py`: reads runs, `.npy` embeddings and sparse vectors
+  produced outside the package, refusing anything not exactly comparable, and
+  scores sparse vectors bit-exactly.
+- `evaluate_retrieval(..., allow_partial=True)` and `top_k_agreement`: top-N
+  candidate lists, as an approximate search returns, and recall against a
+  reference.
+- `noise_floor_from_runs`: the noise floor between labelled external runs.
+- `float32_round` and `ulps_between_f32` in `utils/numerics.py`.
+- `scripts/run_external_eval.py`: evaluates an external run or sparse vectors.
+
 ### Changed
 
 - `vectorisation/idf.py`: `smoothed_idf` evaluates each distinct document
