@@ -141,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
     data = load_dataset(args.dataset, archive=args.archive)
     if not data.qrels:
         parser.error(f"{args.dataset} carries no relevance judgements")
+    payload: dict[str, Any] = {}
+    inputs: dict[str, Any] = {}
     try:
         payload, inputs = (
             _evaluate_run(args, data) if args.run is not None else _evaluate_sparse(args, data)
