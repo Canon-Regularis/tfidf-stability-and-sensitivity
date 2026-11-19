@@ -85,6 +85,7 @@ def test_the_duplicate_pair_ties_at_the_top() -> None:
     _, grid = _bm25()
 
     assert grid.queries[0].scores[0] == grid.queries[0].scores[1] > 0.0
+    assert all(query.n_excluded == 0 for query in grid.queries)
     assert grid.n_zero_vector == 1, "'zebra' names no corpus term"
 
 
@@ -171,7 +172,7 @@ def test_one_ulp_off_the_top_changes_no_ranking() -> None:
 
 def test_the_policies_disagree_by_at_most_noise_on_this_corpus() -> None:
     _, exact = _bm25(Reduction.EXACT)
-    for policy in Reduction:
+    for policy in list(Reduction):
         noise = policy_noise(exact, _bm25(policy)[1], k=2, label="exact")
         assert noise.max_abs_delta <= 1e-12, policy
 

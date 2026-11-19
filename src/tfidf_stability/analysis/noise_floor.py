@@ -8,7 +8,7 @@ the least positive adjacent gap. :func:`verify_band_invariance` checks the :func
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +23,7 @@ __all__ = [
     "NoiseFloor",
     "TauBand",
     "measure_noise_floor",
+    "noise_floor_from_runs",
     "tau_band",
     "verify_band_invariance",
 ]
@@ -174,26 +175,74 @@ def measure_noise_floor(
     per_policy: list[PolicyError] = []
     for policy in _INSTRUMENTS:
         policy_norms = model.matrix.row_norms(policy)
-        n_compared = n_differing = 0
-        max_abs = 0.0
-        max_ulps = 0.0
-        for query in queries:
-            exact = cosine_against_corpus(query, documents, exact_norms, Reduction.EXACT)
-            got = cosine_against_corpus(query, documents, policy_norms, policy)
-            for a, b in zip(got, exact, strict=True):
-                n_compared += 1
-                if bits_of(a) != bits_of(b):
-                    n_differing += 1
-                    max_abs = max(max_abs, abs(a - b))
-                    # abs(): `ulps_between` is signed and `max_ulps` starts at
-                    # zero, so a negative distance would not register in the max.
-                    max_ulps = max(max_ulps, abs(ulps_between(a, b)))
-        per_policy.append(PolicyError(str(policy), n_compared, n_differing, max_abs, max_ulps))
+        pairs = (
+            (
+                cosine_against_corpus(query, documents, policy_norms, policy),
+                cosine_against_corpus(query, documents, exact_norms, Reduction.EXACT),
+            )
+            for query in queries
+        )
+        per_policy.append(_policy_error(str(policy), pairs))
 
     return NoiseFloor(
         per_policy=tuple(per_policy),
         n_queries=len(queries),
         n_documents=model.n_documents,
+    )
+
+
+def _policy_error(
+    label: str, pairs: Iterable[tuple[Sequence[float], Sequence[float]]]
+) -> PolicyError:
+    """Compare each ``(got, exact)`` pair of score vectors, bit for bit."""
+    n_compared = n_differing = 0
+    max_abs = 0.0
+    max_ulps = 0.0
+    for got, exact in pairs:
+        for a, b in zip(got, exact, strict=True):
+            n_compared += 1
+            if bits_of(a) != bits_of(b):
+                n_differing += 1
+                max_abs = max(max_abs, abs(a - b))
+                # abs(): `ulps_between` is signed and `max_ulps` starts at
+                # zero, so a negative distance would not register in the max.
+                max_ulps = max(max_ulps, abs(ulps_between(a, b)))
+    return PolicyError(label, n_compared, n_differing, max_abs, max_ulps)
+
+
+def noise_floor_from_runs(
+    reference: Sequence[Sequence[float]], variants: Mapping[str, Sequence[Sequence[float]]]
+) -> NoiseFloor:
+    """The :class:`NoiseFloor` of external runs, against a reference run.
+
+    Score vectors align query by query and document by document; labels go in UTF-8 order.
+    Raises ``ValueError`` for no variant, a shape unlike the reference's or a non-finite score.
+    Rationale: docs/engineering_notes.md#noise-floor-from-runs
+    """
+    if not variants:
+        raise ValueError("at least one variant run is needed")
+    for label, run in variants.items():
+        if len(run) != len(reference):
+            raise ValueError(
+                f"run {label!r} has {len(run)} queries; the reference has {len(reference)}"
+            )
+        for i, (got, exact) in enumerate(zip(run, reference, strict=True)):
+            if len(got) != len(exact):
+                raise ValueError(
+                    f"run {label!r} query {i} scores {len(got)} documents; "
+                    f"the reference scores {len(exact)}"
+                )
+            if not (all(map(math.isfinite, got)) and all(map(math.isfinite, exact))):
+                raise ValueError(
+                    f"run {label!r} or the reference holds a non-finite score at query {i}"
+                )
+    labels = sorted(variants, key=lambda label: label.encode("utf-8"))
+    return NoiseFloor(
+        per_policy=tuple(
+            _policy_error(label, zip(variants[label], reference, strict=True)) for label in labels
+        ),
+        n_queries=len(reference),
+        n_documents=max((len(vector) for vector in reference), default=0),
     )
 
 

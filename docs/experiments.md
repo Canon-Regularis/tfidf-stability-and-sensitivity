@@ -161,6 +161,31 @@ Three differences from published BEIR figures are by design:
   Recall@depth counts any relevant one among them; `n_nonzero` records how many
   documents scored above zero.
 
+## External runs
+
+Scores from a model outside the package are evaluated by `run_external_eval.py`
+with the same metrics, tie orders and census as E5. Three inputs are read:
+
+| Input | Format | Flag |
+| --- | --- | --- |
+| A run | JSON Lines `{"query_id", "doc_id", "score"}` | `--run` |
+| Sparse vectors | JSON Lines `{"id", "vector": {token: weight}}`, for documents and for queries | `--sparse-corpus`, `--sparse-queries` |
+| Embeddings | `.npy`, C order, `'<f4'` or `'<f8'`, one row per document | read by `evaluation/external.read_npy` |
+
+A run either scores every document of the corpus, or with `--partial` lists the
+top N per query, as an approximate search returns. A partial list is ranked
+inside itself, so its margins lie between listed documents. `--reference` adds a
+second run of the same queries. For a whole-corpus run the report then gives the
+bit-level noise between the two and a noise floor labelled with `--label`. For
+either kind it gives top-k agreement, as recall against the reference. Sparse
+vectors are scored here under every reduction policy, as BM25 is.
+
+```bash
+python scripts/run_external_eval.py --dataset beir_scifact \
+    --archive data/raw/beir-scifact.zip --label bge_cpu_batch32 \
+    --run runs/bge_cpu_batch32.jsonl --reference runs/bge_cpu_batch1.jsonl -o reports/
+```
+
 ## Figures, and how each one could falsify its hypothesis
 
 Figures are rendered from the recorded JSON and never recompute their data. A

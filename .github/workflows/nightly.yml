@@ -48,7 +48,9 @@ jobs:
           - module: src/tfidf_stability/ranking/sort_keys.py
             tests: tests/test_ranking_tie_breaks.py tests/test_public_api_surface.py
           - module: src/tfidf_stability/analysis/noise_floor.py
-            tests: tests/test_analysis_harness.py tests/test_public_api_surface.py
+            tests: >-
+              tests/test_analysis_harness.py tests/test_noise_floor_runs.py
+              tests/test_public_api_surface.py
           - module: src/tfidf_stability/analysis/stability_profile.py
             tests: >-
               tests/test_analysis_harness.py tests/test_doc_references.py
@@ -85,6 +87,13 @@ jobs:
             tests: tests/test_tie_orders.py tests/test_public_api_surface.py
           - module: src/tfidf_stability/vectorisation/bm25.py
             tests: tests/test_bm25.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/evaluation/external.py
+            tests: tests/test_external.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/evaluation/retrieval.py
+            tests: >-
+              tests/test_retrieval_partial.py tests/test_retrieval_noise.py
+              tests/test_retrieval_report.py tests/test_retrieval_eval.py
+              tests/test_external.py tests/test_public_api_surface.py
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
