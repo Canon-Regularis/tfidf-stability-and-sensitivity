@@ -1,0 +1,38 @@
+# Published BEIR scores from the Pyserini reproduction page (main results table),
+# https://castorini.github.io/pyserini/2cr/beir.html. Values are copied as printed,
+# not measured here. Systems carry the page's --condition names. Read by E10
+# (evaluation.repeatability_floor) to set published differences against the floor.
+
+differences:
+  - dataset: beir_scifact
+    metric: ndcg@10
+    system_a: bm25-flat
+    value_a: 0.679
+    system_b: bm25-multifield
+    value_b: 0.665
+    source_url: https://castorini.github.io/pyserini/2cr/beir.html
+    retrieved: "2026-11-19"
+  - dataset: beir_scifact
+    metric: recall@100
+    system_a: bm25-flat
+    value_a: 0.925
+    system_b: bm25-multifield
+    value_b: 0.908
+    source_url: https://castorini.github.io/pyserini/2cr/beir.html
+    retrieved: "2026-11-19"
+  - dataset: beir_nfcorpus
+    metric: ndcg@10
+    system_a: bm25-flat
+    value_a: 0.322
+    system_b: bm25-multifield
+    value_b: 0.325
+    source_url: https://castorini.github.io/pyserini/2cr/beir.html
+    retrieved: "2026-11-19"
+  - dataset: beir_nfcorpus
+    metric: recall@100
+    system_a: bm25-flat
+    value_a: 0.246
+    system_b: bm25-multifield
+    value_b: 0.250
+    source_url: https://castorini.github.io/pyserini/2cr/beir.html
+    retrieved: "2026-11-19"
