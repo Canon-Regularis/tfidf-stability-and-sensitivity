@@ -22,6 +22,7 @@ __all__ = [
     "BEIR_URL",
     "PINNED_SHA256",
     "BeirCorpus",
+    "corpus_file_order",
     "load",
     "parse_archive",
 ]
@@ -276,3 +277,14 @@ def load(
     if corpus.variant != variant:
         raise DataIntegrityError(f"{path} holds {corpus.variant!r}, not {variant!r}")
     return corpus
+
+
+def corpus_file_order(data: bytes) -> tuple[str, ...]:
+    """Document identifiers in ``corpus.jsonl`` file order, as an index adds them.
+
+    Raises ``DataIntegrityError`` for any archive :func:`parse_archive` refuses.
+    """
+    member = f"{parse_archive(data).variant}/corpus.jsonl"
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        text = _decode(archive.read(member), member)
+    return tuple(_identified(_jsonl(text, member), member))

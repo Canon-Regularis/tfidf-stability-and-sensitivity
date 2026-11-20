@@ -319,3 +319,23 @@ def test_a_registered_benchmark_refuses_an_archive_off_its_pin(tmp_path: Path) -
 
     with pytest.raises(DataIntegrityError, match="does not match the pinned digest"):
         load_dataset("beir_scifact", archive=path)
+
+
+# ---------------------------------------------------------------------------
+# File order, the default FAISS insertion order
+# ---------------------------------------------------------------------------
+def test_corpus_file_order_keeps_the_order_of_the_member() -> None:
+    data = _beir_zip(corpus="\n" + _jsonl(_CORPUS))
+
+    assert beir.corpus_file_order(data) == ("d2", "d10", "d1")
+    assert beir.parse_archive(data).doc_ids == ("d1", "d10", "d2"), "parsing sorts it away"
+    assert "corpus_file_order" in beir.__all__
+
+
+def test_corpus_file_order_refuses_what_parsing_refuses() -> None:
+    rows = _jsonl(_CORPUS) + '{"_id": "d1", "text": "again"}\n'
+
+    with pytest.raises(DataIntegrityError, match=r"duplicate '_id' 'd1'"):
+        beir.corpus_file_order(_beir_zip(corpus=rows))
+    with pytest.raises(DataIntegrityError, match=r"missing \['tiny/qrels/test\.tsv'\]"):
+        beir.corpus_file_order(_beir_zip(qrels=None))
