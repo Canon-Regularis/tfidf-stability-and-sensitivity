@@ -4,7 +4,7 @@ Decisions the code makes that a comment of four lines cannot justify. Each
 section is named by the slug that a `Rationale:` comment in the source cites:
 the comment states what the code does, and this page states why.
 
-- [Python package](#python-package): 88 notes
+- [Python package](#python-package): 95 notes
 - [C++ core and binding](#c-core-and-binding): 62 notes
 - [Test suite](#test-suite): 61 notes
 - [Mutation tooling](#mutation-tooling): 6 notes
@@ -36,6 +36,14 @@ Per-query attribute tables. Under section 7.1's protocol each query excludes its
 Source: `src/tfidf_stability/_native/__init__.py`.
 
 The Python package and the compiled extension each hold a separate copy of the ABI string: REQUIRED_ABI in tfidf_stability._native and __abi__ in the extension. The loader compares the two at import, so a mismatch identifies a build that is stale against the current C++/Python contract. The ABI string is bumped whenever that contract changes shape: a binding is added, removed or changes signature. The check reads __abi__ and not the release __version__, because bindings can be added between releases: an extension that lacks them can still report the current release version, so a version check would accept a build that is missing bindings the Python side calls. A build that predates __abi__ reports None and is rejected in the same way as any other mismatch. require_native raises AbiVersionMismatchError for a stale build and NativeBackendUnavailableError for a missing one, since the fixes differ (rebuild against the current contract, or build at all); the former subclasses the latter, so callers that do not distinguish them are unaffected.
+
+### Ann decomposition
+
+Source: `src/tfidf_stability/evaluation/ann_decomposition.py`.
+
+E9 splits the difference between an approximate top `k` and the exact top `k` into three causes. The exact top `k` ranks the whole corpus by the reference scores under `id_asc`; the approximate list keeps its file order and its own scores. A document the exact top `k` holds and the approximate top `k` misses is *numerics* when it is listed and re-ranking the list by the exact scores, ties by list position, puts it back in the top `k`. It is *tie-breaking* when it is listed but stays out under the exact scores, or when it is unlisted and a listed document outside the exact top `k` with an equal exact score has taken its place. Otherwise it is *approximation*. The list is a subset of the corpus, so under the exact scores and `id_asc` a listed document's rank inside the list is at most its corpus rank, and one that stays out of the re-ranked top `k` is excluded by the tie order alone. Each tied substitute accounts for one unlisted miss: two tied documents displaced by one equal score give one tie-breaking miss and one approximation. When the two sets agree and only the order differs, the difference is `order_ties` if re-ranking by the exact scores reproduces the approximate order, else `order_numerics`.
+
+The share of the exact top `k` that the approximate top `k` keeps is reported as `overlap@k`, not `recall@k`. It measures agreement with exact search, not relevance, and E10 keeps its floor apart from the judged metrics ([Repeatability floor](#repeatability-floor)).
 
 ### Beir ingestion
 
@@ -250,6 +258,18 @@ Source: `src/tfidf_stability/perturbation/experiments.py`.
 
 run_perturbation fits the baseline and the perturbed corpus from scratch with two independent TfidfVectoriser fits. The pipeline is not incremental. A partial update that shares state with the baseline is the most likely way to hide a real perturbation effect, because any stale document frequency, IDF value or norm carried over from the baseline hides the movement the experiment measures. The cost is acceptable: an experiment runs a handful of perturbations, not one per query.
 
+### Hidden tie rules
+
+Source: `src/tfidf_stability/evaluation/hidden_rules.py`.
+
+E8 ranks each stored condition as three tools would and sets each result against the tie-aware expectation ([Tie aware expected metrics](#tie-aware-expected-metrics)), which no tie-break enters, so a rule's delta is that rule's effect alone. Each rule follows the tool's source.
+
+- trec_eval (`form_res_rels.c`, `comp_sim_docno`) sorts a run by score descending, then docno descending by bytes. Ranking the binary64 scores this way reproduces E5's `id_desc` means bit for bit.
+- Anserini sorts Lucene's float32 scores descending, ties by docid ascending (`BREAK_SCORE_TIES_BY_DOCID`). `ScoreTiesAdjusterReranker` then rounds each score with `(float) (Math.round(score * 1e4d) / 1e4d)`; a score within `1e-4f` of its adjusted predecessor joins that run and drops by `1e-6f` times its place in the run, so the written scores keep Lucene's order. The run writer prints each score with `%f`, rounding half up to six decimals, and trec_eval re-sorts what it reads. The rounding never decides a tie. Above 32 the `1e-6f` step is less than half a float32 ulp and is lost, and trec_eval's docno-descending order decides instead. Java's `Math.round` rounds a half toward positive infinity. Lucene returns only documents that match a query term: `anserini_matched_only` drops the zero scores, and `anserini` keeps them so that the tie effect is measured apart from the shorter list.
+- FAISS scans documents in insertion order. Below `k = 100` its Top1 or heap handler keeps the `k` largest (score, id) pairs, admitting a score only when it beats the smallest held, so of a tie at the cutoff the documents that arrived first stay. From `k = 100` (`distance_compute_min_k_reservoir`) the reservoir handler runs instead: it holds up to `(2k + 15) & ~15` values and, when full, partitions them around a sampled median threshold, keeping tied values in array order. The port agrees with faiss-cpu 1.16.0's `IndexFlatIP` on 13,500 lists at `k` from 1 to 200, with N from 50 to 6000. FAISS's database-parallel path, taken with several threads, fewer queries than threads and at least 10,000 documents, is not modelled; both corpora here are smaller. The insertion order defaults to the `corpus.jsonl` file order (`datasets.beir.corpus_file_order`), the ids an index gets when documents are added as read, and `--insertion-order` names another. Scores reach the FAISS rule as given, not cast to float32, so the rule isolates the insertion-id order; float32 rounding belongs to E9's numerics.
+
+E8 ranks every stored label whose policy is `naive`, the pinned configuration value, and every whole-corpus run or matrix. The Lucene byte length changes scores rather than a tie order, so E8 reports it as the tie-aware mean under `lucene_byte` minus the mean under `exact` for each BM25 pair.
+
 ### Identifier tie orders
 
 Source: `src/tfidf_stability/evaluation/tie_orders.py`.
@@ -349,6 +369,12 @@ The lowercase option applies str.lower, not full Unicode case folding with str.c
 Source: `src/tfidf_stability/persistence/manifest.py`.
 
 `RunManifest.digest` is a SHA-256 over the `canonical_json` rendering of the manifest with `VOLATILE_KEYS` and `_MACHINE_KEYS` stripped and `notes` excluded, so two identical runs on different machines at different times give the same digest. See [Manifest machine keys](#manifest-machine-keys) and [Two canonical renderings](#two-canonical-renderings).
+
+### Margin against noise
+
+Source: `src/tfidf_stability/evaluation/margin_noise.py`.
+
+E7 tests the bound behind every margin in this project. If no score moves by more than `η`, a gap between a document in the top `k` and one outside it shrinks by at most `2η`, so a margin `m_k > 2η` fixes the top-`k` set under any tie order. At `m_k = 2η` the two boundary scores can meet and the tie-break decides. A query is therefore predicted to change only when `m_k ≤ 2η`, and an observed change with `m_k > 2η` falsifies the bound. `η` and `m_k` are exact rationals of the binary64 values, since a float subtraction can round a margin up or a difference down, and so fake or hide a falsification. Each pair is tested twice: with `η` the largest difference over all queries, and with each query's own `η`, the stronger test. A query with `k ≥ N` has no margin and is counted apart. The confusion table counts true and false positives and negatives, and every false negative is listed with its margin and `η` in hex. `η` is measured on the same two vectors, so a falsification would mean the ranking disagrees with exact arithmetic: E7 checks the bound and its implementation together. Beside it, E7 counts the queries where the float certificate of `is_top_k_stable` disagrees with the exact test.
 
 ### Margin stratification
 
@@ -462,7 +488,7 @@ Source: `src/tfidf_stability/evaluation/retrieval.py`.
 
 `policy_noise` compares a grid of scores with a reference grid score by score and at the top `k`. The E5 runner scores every query under `Reduction.EXACT` first, then compares each policy with it: how many scores differ in their bits, how many queries hold such a score, the largest absolute difference, and how many top-`k` sets and orders change. Both grids are ranked under their own `id_asc` table, so a change in a top-`k` list comes from a score difference alone. `-0.0` against `0.0` counts as a differing score with a delta of zero.
 
-The near-tie census counts, per query and per tau in `NEAR_TIE_TAUS`, the documents past position `k` whose score lies within tau of `r_k`: `0` counts the exact ties, `1e-12` lies just above a binary64 score's summation noise, `1e-9` and `1e-6` well above it, and `1e-4` is the rounding Anserini applies before it breaks ties. The census is reported absolutely and with tau relative to `|r_k|`, since TF-IDF cosines lie in `[0, 1]` and BM25 scores reach tens, so one absolute tau means different things for the two. At tau `0` the number of queries crossing the cutoff equals `n_tie_at_cutoff`.
+The near-tie census counts, per query and per tau in `NEAR_TIE_TAUS`, the documents past position `k` whose score lies within tau of `r_k`: `0` counts the exact ties, `1e-12` lies just above a binary64 score's summation noise, `1e-9` and `1e-6` well above it, and `1e-4` is the step Anserini rounds its scores to once it has broken ties by docid ([Hidden tie rules](#hidden-tie-rules)). The census is reported absolutely and with tau relative to `|r_k|`, since TF-IDF cosines lie in `[0, 1]` and BM25 scores reach tens, so one absolute tau means different things for the two. At tau `0` the number of queries crossing the cutoff equals `n_tie_at_cutoff`.
 
 ### Porter2 default backend
 
@@ -567,6 +593,12 @@ The metrics follow trec_eval, which produced BEIR's published figures: gain is t
 
 A ranked list is scored in the order given and never re-sorted by score. trec_eval re-sorts a run and breaks its ties itself, which would replace the tie order that E5 measures. With no relevant document, nDCG, recall and reciprocal rank are undefined (`None`): the mean leaves such a query out and counts it. A degenerate query, one with no features, ranks nothing and scores 0 wherever a relevant document exists.
 
+### Repeatability floor
+
+Source: `src/tfidf_stability/evaluation/repeatability_floor.py`.
+
+Every E6 to E9 report carries `spreads`, each `{experiment, metric, spread, source}`. E6 gives the range of a mean over tie orders, E7 the gap between a policy's mean and its reference's, E8 a rule's distance from the tie-aware value and the Lucene byte-length change, and E9 the range of `overlap@k` across approximate builds. The floor of a metric on a dataset is its largest spread, with that spread's source named. E10 refuses a report for another dataset, a report filed under another experiment and reports whose `data_provenance` disagree, so one floor never mixes corpora. Overlap floors stay apart from the judged metrics, so an agreement range never sets the floor of a relevance metric. Published differences come from `configs/published_differences.yaml`, copied as printed from the Pyserini BEIR reproduction page to three decimals, so a published difference is known only to within 0.001.
+
 ### Resizing edits
 
 Source: `src/tfidf_stability/perturbation/experiments.py`.
@@ -596,6 +628,12 @@ Values that vary between identical runs (timestamps, paths, hostnames) are writt
 Source: `src/tfidf_stability/cli/main.py`.
 
 Of the three layers of the floating-point guard ([Fp guard layers](#fp-guard-layers)), only the runtime probe sees the process, and it is the one that detects the flush-to-zero (FTZ) and denormals-are-zero (DAZ) modes a BLAS loaded with numpy can set. The CLI runs the probe after the dispatch guard, so `--version` and `--help` do not pay for it. It runs before the command, so the repair precedes any number that the command produces. Each backend has its own check, and the CLI runs the one for the backend in use. When the compiled backend is available, `check_float_environment()` clears the FTZ and DAZ bits of MXCSR on targets that have it, re-runs the self-test, and issues a `RuntimeWarning` if the environment is still untrustworthy. Otherwise `assert_sane_float_environment()` runs; it cannot clear MXCSR from Python, so it raises `NumericEnvironmentError` in a flushed environment instead of running.
+
+### Score store
+
+Source: `src/tfidf_stability/evaluation/score_store.py`.
+
+Each study reads stored scores rather than recomputing them, so E6 to E10 see the same bits, and a SPLADE or dense condition joins with no code change. A store holds one `.npy` file per label, version 1 and `'<f8'`, written byte for byte as `numpy.save` writes it, with one row per scored query in UTF-8 order and one column per document in corpus order. `index.json` records each label's kind, parameters, reference, queries and file digest, with the corpus's records and identifier digests; opening a store for another corpus is refused. A label is `<condition>.<variant>` in `[a-z0-9_-]`, so it names no other path. Every entry covers the same judged queries, scored or listed as degenerate, so each study evaluates every label over one set, and a query is degenerate only where its own label says so. A reference scores the same queries as the labels that name it. A matrix is read one label at a time, its digest checked first; a float32 matrix widens exactly.
 
 ### Scoring term order
 
@@ -806,6 +844,12 @@ Source: `src/tfidf_stability/vectorisation/vocabulary.py`.
 
 A proportional min_df or max_df decides vocabulary membership, and membership decides every number downstream, so the proportion is resolved exactly. The float is first snapped with Fraction(value).limit_denominator(1_000_000). Fraction(0.1) is the exact binary64 value 3602879701896397/36028797018963968, slightly above one tenth, so `Fraction(0.1) * 30` exceeds 3 and its ceiling is 4: a stricter filter than the 0.1 the caller wrote. Snapping to 1/10 first gives 3. Without limit_denominator, min_df=0.1 changes the vocabulary. Plain float multiplication is not the hazard here: `0.3 * 10` and `0.1 * 30` are both exactly 3.0 in binary64. The rounding direction is a parameter because the two ends of the filter differ. min_df keeps `df >= p * n` and rounds up; max_df keeps `df <= p * n` and rounds down. Rounding an upper bound up admits tokens the caller asked to exclude: at p=0.5, n=3 it keeps a token present in 2 of 3 documents (66.7%), and at p=0.95, n=7 it resolves to 7 and filters nothing.
 
+### Tie aware expected metrics
+
+Source: `src/tfidf_stability/evaluation/tie_aware.py`.
+
+McSherry and Najork (ECIR 2008) define a metric on a ranking with ties as its mean over every order of each group of equal scores. A group of `n` documents holding `r` relevant ones and covering positions `a` to `a + n − 1` adds to DCG its mean gain times the sum of the discounts of its positions inside the cutoff, and adds to recall `r` times the share of its positions inside the cutoff. Reciprocal rank comes from the first group holding a relevant document, whose first relevant member sits at offset `i` with probability `C(n − 1 − i, r − 1) / C(n, r)`. Each group's term is an exact rational, with each discount taken as its float value, and is rounded once; the ideal DCG is summed as `ndcg_at_k` sums it. A query with no tied scores therefore scores bit for bit as its one ranking does. Groups are runs of `==` scores, so `-0.0` and `0.0` share one. No tie-break enters the value, which makes it the neutral reference for E8.
+
 ### Tie ball search
 
 Source: `src/tfidf_stability/ranking/tie_groups.py`.
@@ -825,6 +869,12 @@ Section 7.3 recomputes each ranking under three sorting operators: pi = Sort(s_i
 The separation is structural in this implementation, although the paper does not state it. All three operators share the same sorted score array, so every margin is identical between them (see tfidf_stability.ranking.margins). Any disagreement is therefore due to the tie-break alone, with delta s = 0. This keeps research questions A1 and A2 independent rather than confounded.
 
 Two limits apply to the interpretation. First, the comparison has an effect only where ties exist: with all scores distinct the three operators coincide, and AblationResult.scores_all_distinct records that case, so a zero disagreement rate stays distinguishable from a query with nothing to break. Second, pi_score is the empty-priority special case of pi, so it agrees with pi whenever the attributes fail to discriminate. This weakens the ablation slightly and is the correct reading of README section 4.5.
+
+### Tie census
+
+Source: `src/tfidf_stability/evaluation/census.py`.
+
+E6 reports, per condition and cutoff: the share of scored queries with an exact tie at the cutoff; the share with a document past position `k` within each tau of `r_k`, absolutely and relative to `|r_k|` ([Policy noise against exact](#policy-noise-against-exact)); and each metric's minimum, maximum and range over `id_asc`, `id_desc` and the seeded shuffles, with the variant at each end. A zero-vector query ties every document; it is counted, and a share that leaves such queries out is given beside the total. A degenerate query ranks nothing and is left out of every share. The rows are fixed: TF-IDF, BM25 with exact and with Lucene byte lengths, SPLADE as floats and scaled by 100, and dense float32, each under the pinned `naive` policy. A row the store lacks is reported as missing, with the issue that supplies it, so re-running after that issue fills it.
 
 ### Tie clique sweep
 

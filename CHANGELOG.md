@@ -45,6 +45,19 @@ recorded values live in `configs/pipeline_digest.txt` and in each
 - `noise_floor_from_runs`: the noise floor between labelled external runs.
 - `float32_round` and `ulps_between_f32` in `utils/numerics.py`.
 - `scripts/run_external_eval.py`: evaluates an external run or sparse vectors.
+- `evaluation/score_store.py` and `scripts/build_score_store.py`: every judged
+  query's scores, per condition and policy, stored once as `.npy` matrices with
+  a checked index, so the studies E6 to E10 read the same bits.
+- `evaluation/tie_aware.py`: McSherry and Najork's tie-aware expected nDCG,
+  recall and reciprocal rank, bit-identical to the plain metrics on a query
+  with no tied scores.
+- E6 to E10 (`evaluation/census.py`, `margin_noise.py`, `hidden_rules.py`,
+  `ann_decomposition.py` and `repeatability_floor.py`, run by
+  `scripts/run_e6_census.py` to `run_e10_floor.py`): the tie census, the margin
+  bound against measured noise, the tie rules of trec_eval, Anserini and FAISS,
+  the split of approximate-search differences, and the repeatability floor
+  against published differences in `configs/published_differences.yaml`.
+- `datasets.beir.corpus_file_order`: the corpus identifiers in file order.
 
 ### Changed
 

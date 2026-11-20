@@ -53,6 +53,14 @@ python scripts/run_retrieval_eval.py --dataset beir_scifact \
 python scripts/run_retrieval_eval.py --dataset beir_scifact \
     --archive data/raw/beir-scifact.zip --weighting bm25 --n-max 1 \
     --length-norm lucene_byte -o reports/
+
+# E6 to E10 read one score store per split; build it once (about 2 minutes)
+python scripts/build_score_store.py --dataset beir_scifact --archive data/raw/beir-scifact.zip
+python scripts/run_e6_census.py --dataset beir_scifact --archive data/raw/beir-scifact.zip
+python scripts/run_e7_margin_noise.py --dataset beir_scifact --archive data/raw/beir-scifact.zip
+python scripts/run_e8_hidden_rules.py --dataset beir_scifact --archive data/raw/beir-scifact.zip
+python scripts/run_e9_ann.py --dataset beir_scifact --archive data/raw/beir-scifact.zip
+python scripts/run_e10_floor.py --dataset beir_scifact
 ```
 
 `run_stability_profile.py` **exits non-zero** if any perturbation inside §4.4's
@@ -185,6 +193,156 @@ python scripts/run_external_eval.py --dataset beir_scifact \
     --archive data/raw/beir-scifact.zip --label bge_cpu_batch32 \
     --run runs/bge_cpu_batch32.jsonl --reference runs/bge_cpu_batch1.jsonl -o reports/
 ```
+
+## The score store
+
+E6 to E10 read stored scores rather than scoring again, so every study sees the
+same bits ([Score store](engineering_notes.md#score-store)).
+`build_score_store.py` scores every judged query of a split under TF-IDF over
+n-grams to 2 (`tfidf_n2`) and BM25 over unigrams with exact and with Lucene byte
+lengths (`bm25-exact_n1`, `bm25-lucene_byte_n1`), each under the four reduction
+policies, and writes `data/processed/scores/<dataset>/`. Each label is
+`<condition>.<policy>`; `naive`, `neumaier` and `pairwise` name `exact` as their
+reference. Other systems join under their own labels, and re-running E6 to E10
+then reports them with no code change:
+
+| Input | Flag | Label the studies expect |
+| --- | --- | --- |
+| SPLADE vectors (#18), scored here under every policy | `--sparse splade-float=CORPUS,QUERIES` | `splade-float.<policy>`, and `splade-x100.<policy>` for the scaled weights |
+| Dense scores (#16), a whole-corpus run | `--run dense-fp32.run=RUN` | `dense-fp32.run` |
+| Dense scores (#16), a matrix with its query and document ids | `--matrix dense-fp32.run=NPY,QIDS,DIDS` | `dense-fp32.run` |
+
+`--reference LABEL=REFERENCE` names a run's or matrix's reference for E7. Every
+entry of a store covers the same judged queries, so a later addition with
+another `--limit` is refused.
+
+The tables below are SciFact (300 judged queries, 5183 documents) and NFCorpus
+(323, 3633), with `--cutoffs 10 100`, depth 100 and 20 shuffles.
+
+## E6. The tie census
+
+`run_e6_census.py` writes `e6_census_<dataset>.json`. Per row and cutoff it
+reports the share of queries with an exact tie at the cutoff, the share with a
+document past position k within tau of `r_k` (absolute and relative to `|r_k|`),
+and each metric's range over `id_asc`, `id_desc` and the 20 shuffles
+([Tie census](engineering_notes.md#tie-census)). Every row is under the pinned
+`naive` policy.
+
+| Dataset, k | Row | Exact tie | tau 1e-6 abs / rel | tau 1e-4 abs / rel | nDCG@k range | Recall@100 range | RR@k range |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SciFact, 10 | TF-IDF | 0.000 | 0.000 / 0.000 | 0.037 / 0.003 | 0 | 0 | 0 |
+| SciFact, 10 | BM25 exact | 0.000 | 0.000 / 0.000 | 0.003 / 0.003 | 0 | 0 | 0 |
+| SciFact, 10 | BM25 lucene_byte | 0.003 | 0.003 / 0.003 | 0.003 / 0.003 | 0 | 0 | 0 |
+| SciFact, 100 | TF-IDF | 0.007 | 0.013 / 0.010 | 0.437 / 0.027 | 0 | 0 | 0 |
+| SciFact, 100 | BM25 exact | 0.023 | 0.023 / 0.023 | 0.033 / 0.050 | 0 | 0 | 0 |
+| SciFact, 100 | BM25 lucene_byte | 0.073 | 0.073 / 0.073 | 0.083 / 0.100 | 0 | 0 | 0 |
+| NFCorpus, 10 | TF-IDF | 0.241 | 0.241 / 0.241 | 0.257 / 0.241 | 0.0024 | 0.0125 | 0.0062 |
+| NFCorpus, 10 | BM25 exact | 0.248 | 0.248 / 0.248 | 0.254 / 0.257 | 0.0020 | 0.0125 | 0.0046 |
+| NFCorpus, 10 | BM25 lucene_byte | 0.282 | 0.282 / 0.282 | 0.282 / 0.282 | 0.0023 | 0.0124 | 0.0046 |
+| NFCorpus, 100 | TF-IDF | 0.396 | 0.399 / 0.396 | 0.638 / 0.399 | 0.0053 | 0.0125 | 0.0064 |
+| NFCorpus, 100 | BM25 exact | 0.427 | 0.427 / 0.427 | 0.443 / 0.449 | 0.0052 | 0.0125 | 0.0048 |
+| NFCorpus, 100 | BM25 lucene_byte | 0.641 | 0.641 / 0.641 | 0.647 / 0.653 | 0.0053 | 0.0124 | 0.0049 |
+| both | SPLADE float, SPLADE x100 | missing: SPLADE scores arrive with #18 | | | | | |
+| both | dense fp32 | missing: dense scores arrive with #16 | | | | | |
+
+The shares at tau 1e-12 and 1e-9 equal the exact-tie share in every row, so
+the reduction policy's noise creates no near tie; the report holds them. On
+SciFact a tie at the cutoff never moves a mean. On NFCorpus a quarter of the
+queries tie at the cutoff at k = 10, 15 of them because every document scores
+zero, and the tie order alone moves nDCG@10 by up to 0.0024 and Recall@100 by
+up to 0.0125. Lucene's byte lengths raise the tie share at k = 100 on NFCorpus
+from 0.427 to 0.641. The whole Recall@100 range comes from the zero-score
+documents that fill each ranking to depth 100: for BM25 exact, `shuffle_0`
+brings 64 relevant zero-score documents into the top 100 and `id_asc` none,
+while the relevant documents with a positive score are the same under both.
+
+## E7. Margin against noise
+
+`run_e7_margin_noise.py` writes `e7_margin_noise_<dataset>.json`. For every
+policy against `exact` it predicts that a query's top k may change only when
+its margin is at most `2η`, and lists every observed change the prediction
+misses ([Margin against noise](engineering_notes.md#margin-against-noise)). The
+runner exits 1 if one exists.
+
+| Dataset | Condition | η (largest, over policies) | k = 10: predicted / changed | k = 100: predicted / changed |
+| --- | --- | --- | --- | --- |
+| SciFact | TF-IDF | 1.7e-15 | 0 / 0 | 2 / 0 |
+| SciFact | BM25 exact | 1.4e-14 | 0 / 0 | 7 / 0 |
+| SciFact | BM25 lucene_byte | 7.1e-15 | 1 / 0 | 22 / 0 |
+| NFCorpus | TF-IDF | 1.1e-15 | 78 / 0 | 128 / 0 |
+| NFCorpus | BM25 exact | 1.8e-15 | 80 / 0 | 138 / 0 |
+| NFCorpus | BM25 lucene_byte | 3.6e-15 | 91 / 0 | 207 / 0 |
+
+All 36 tests, three policies per condition at two cutoffs on two datasets, find
+no falsification, in both the global and the per-query scope. No policy changes
+a top-k set. Every predicted change is a query with an exact tie at the cutoff:
+its margin is 0, below `2η`, and both grids break the tie by the same
+identifier order. `neumaier` equals `exact` bit for bit (`η = 0`). The float
+certificate of `is_top_k_stable` agrees with the exact test on every query.
+
+## E8. Hidden tie rules
+
+`run_e8_hidden_rules.py` writes `e8_hidden_rules_<dataset>.json`: each stored
+`naive` label, and each whole-corpus run, ranked as trec_eval, Anserini and FAISS
+rank, against the tie-aware expected metric
+([Hidden tie rules](engineering_notes.md#hidden-tie-rules)). FAISS ids follow
+`corpus.jsonl` order unless `--insertion-order` gives another. The table gives
+each rule's difference from the tie-aware value on NFCorpus at k = 10.
+
+| Condition | Tie-aware nDCG@10 / Recall@100 / RR@10 | trec_eval | Anserini | FAISS insertion order |
+| --- | --- | --- | --- | --- |
+| TF-IDF | 0.3142 / 0.2525 / 0.5103 | -0.0009 / -0.0070 / -0.0030 | +0.0001 / -0.0070 / +0.0021 | -0.0009 / -0.0037 / -0.0030 |
+| BM25 exact | 0.3273 / 0.2548 / 0.5245 | -0.0007 / -0.0070 / -0.0020 | -0.0002 / -0.0070 / +0.0011 | -0.0007 / -0.0037 / -0.0020 |
+| BM25 lucene_byte | 0.3268 / 0.2543 / 0.5235 | -0.0011 / -0.0072 / -0.0022 | +0.0002 / -0.0071 / +0.0014 | -0.0010 / -0.0038 / -0.0022 |
+
+On SciFact every rule equals the tie-aware value to the last reported digit.
+On NFCorpus each tool's rule moves nDCG@10 by up to 0.0011 and RR@10 by up to
+0.0030; RR@10 moves in opposite directions under Anserini and trec_eval, which
+break ties by docid ascending and descending. Anserini's matched-only list gives the same
+values as its full list here. Lucene's byte lengths, a score change rather than
+a tie rule, move the tie-aware nDCG@10 by +0.0011 on SciFact and -0.0006 on
+NFCorpus.
+
+## E9. ANN decomposition
+
+`run_e9_ann.py` writes `e9_ann_<dataset>.json`. Each `--ann LABEL=RUN`, a
+top-N run in its tool's own order, is set against `--reference`, a stored
+whole-corpus label, and each miss from the exact top k is classed as
+approximation, numerics or tie-breaking
+([Ann decomposition](engineering_notes.md#ann-decomposition)). The HNSW builds
+arrive with #16, so both reports now state that no run is present; the
+decomposition is tested on constructed runs only.
+
+```bash
+python scripts/run_e9_ann.py --dataset beir_scifact --archive data/raw/beir-scifact.zip \
+    --reference dense-fp32.run --ann hnsw-m16=runs/hnsw_m16.jsonl \
+    --ann hnsw-m32=runs/hnsw_m32.jsonl --group hnsw-m16=hnsw --group hnsw-m32=hnsw
+```
+
+## E10. The repeatability floor
+
+`run_e10_floor.py` writes `e10_floor_<dataset>.json`: per metric, the largest
+spread E6 to E9 report, with its source named, against the published
+differences in `configs/published_differences.yaml`
+([Repeatability floor](engineering_notes.md#repeatability-floor)).
+
+| Dataset | Metric | Floor | Source | Published difference (BM25 flat against multifield) |
+| --- | --- | --- | --- | --- |
+| SciFact | nDCG@10 | 0.0011 | E8, BM25 exact against lucene_byte lengths | 0.679 / 0.665, 0.014: above |
+| SciFact | Recall@100 | 0 | no experiment shows a spread | 0.925 / 0.908, 0.017: above |
+| SciFact | RR@10 | 0.0013 | E8, BM25 exact against lucene_byte lengths | |
+| NFCorpus | nDCG@10 | 0.0024 | E6, TF-IDF, `shuffle_19` against `shuffle_16` | 0.322 / 0.325, 0.003: within the 0.001 rounding of the table |
+| NFCorpus | Recall@100 | 0.0125 | E6, BM25 exact, `id_asc` against `shuffle_0` | 0.246 / 0.250, 0.004: below |
+| NFCorpus | RR@10 | 0.0062 | E6, TF-IDF, `shuffle_19` against `shuffle_8` | |
+
+On SciFact both published differences lie well above the floor. On NFCorpus the
+nDCG@10 difference between Anserini's two BM25 indexes exceeds the spread from
+the tie order alone by 0.0006, less than the 0.001 to which the published values
+are rounded, so the comparison cannot separate them.
+The NFCorpus Recall@100 floor is the order of the zero-score documents that fill
+the ranking to depth 100. Anserini returns only matching documents, so that
+floor does not bound its two runs. It does bound a tool that fills the ranking,
+as an exact dense search does.
 
 ## Figures, and how each one could falsify its hypothesis
 
