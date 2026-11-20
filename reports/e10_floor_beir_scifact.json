@@ -1,0 +1,221 @@
+{
+  "data_provenance": {
+    "archive_sha256": "536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165",
+    "kind": "beir",
+    "n_documents": 5183,
+    "n_judgements": 339,
+    "n_queries": 300,
+    "n_queries_without_relevant": 0,
+    "qrels_sha256": "536804d3ad87544db56ae1b9c71bad7aef843d6178ee5a0d60c0291306480857",
+    "queries_sha256": "0fb977c50fc1bb5ec62ae2e2ac323769246bc12ff25f5215a742e2dae08a8274",
+    "redistributable": false,
+    "split": "test",
+    "variant": "scifact"
+  },
+  "environment": {
+    "float": {
+      "constant_folding_ok": true,
+      "decimal_default_prec": 28,
+      "epsilon": 2.220446049250313e-16,
+      "mantissa_dig": 53,
+      "max": 1.7976931348623157e+308,
+      "min_normal": 2.2250738585072014e-308,
+      "no_reassociation": true,
+      "rounds": 1,
+      "rounds_live": true,
+      "subnormals_supported": true
+    },
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "native": {
+      "arch_tune": false,
+      "build_type": "Release",
+      "compiler_id": "GNU",
+      "compiler_ver": "13.2.0",
+      "fast_math": false,
+      "git_sha": "47acbd9a2fcf",
+      "numeric_flags": "-ffp-contract=off -fno-fast-math -fno-associative-math -fno-reciprocal-math -fno-unsafe-math-optimizations -fno-finite-math-only -fsigned-zeros -fexcess-precision=standard -mfpmath=sse",
+      "processor": "AMD64",
+      "reproducible": true,
+      "system": "Windows",
+      "version": "0.2.0"
+    },
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.15"
+  },
+  "experiment": "e10_floor",
+  "parameters": {
+    "dataset": "beir_scifact",
+    "differences_sha256": "606259bb35689b06d277469d7683cea22c36c543fb28695d52cff8c66410740f",
+    "report_sha256": {
+      "e6_census": "acac2b415614f4f86edc81284bf87b2d03e344ce061f37162a2dd3a28cbef978",
+      "e7_margin_noise": "d9aaeff6dd47f872dcb9abf1040bd4051bab39dbe70c1b9d88065406340e2f69",
+      "e8_hidden_rules": "940da9f8de7b014e1f4ba40a8a24f3ee92ed026cef11e833f56011f35082723e",
+      "e9_ann": "2a89cf5d70e9f96338a906bb8b2c3a55c74afd7a808f43314e57fc5707378e99"
+    }
+  },
+  "payload": {
+    "data_provenance": {
+      "archive_sha256": "536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165",
+      "kind": "beir",
+      "n_documents": 5183,
+      "n_judgements": 339,
+      "n_queries": 300,
+      "n_queries_without_relevant": 0,
+      "qrels_sha256": "536804d3ad87544db56ae1b9c71bad7aef843d6178ee5a0d60c0291306480857",
+      "queries_sha256": "0fb977c50fc1bb5ec62ae2e2ac323769246bc12ff25f5215a742e2dae08a8274",
+      "redistributable": false,
+      "split": "test",
+      "variant": "scifact"
+    },
+    "dataset": "beir_scifact",
+    "floors": {
+      "ndcg@10": {
+        "source": {
+          "experiment": "e8",
+          "metric": "ndcg@10",
+          "source": {
+            "labels": [
+              "bm25-exact_n1.naive",
+              "bm25-lucene_byte_n1.naive"
+            ],
+            "rule": "lucene_byte_length"
+          },
+          "spread": 0.0010600808453221644
+        },
+        "value": 0.0010600808453221644
+      },
+      "ndcg@100": {
+        "source": {
+          "experiment": "e8",
+          "metric": "ndcg@100",
+          "source": {
+            "labels": [
+              "bm25-exact_n1.naive",
+              "bm25-lucene_byte_n1.naive"
+            ],
+            "rule": "lucene_byte_length"
+          },
+          "spread": 0.0001318464468242908
+        },
+        "value": 0.0001318464468242908
+      },
+      "recall@100": {
+        "source": {
+          "experiment": "e6",
+          "metric": "recall@100",
+          "source": {
+            "label": "tfidf_n2.naive",
+            "max_variant": "id_asc",
+            "min_variant": "id_asc",
+            "row": "TF-IDF"
+          },
+          "spread": 0.0
+        },
+        "value": 0.0
+      },
+      "rr@10": {
+        "source": {
+          "experiment": "e8",
+          "metric": "rr@10",
+          "source": {
+            "labels": [
+              "bm25-exact_n1.naive",
+              "bm25-lucene_byte_n1.naive"
+            ],
+            "rule": "lucene_byte_length"
+          },
+          "spread": 0.0013280423280422893
+        },
+        "value": 0.0013280423280422893
+      },
+      "rr@100": {
+        "source": {
+          "experiment": "e8",
+          "metric": "rr@100",
+          "source": {
+            "labels": [
+              "bm25-exact_n1.naive",
+              "bm25-lucene_byte_n1.naive"
+            ],
+            "rule": "lucene_byte_length"
+          },
+          "spread": 0.0010352215169948664
+        },
+        "value": 0.0010352215169948664
+      }
+    },
+    "inputs": {
+      "e6_census": {
+        "result_digest": "c1603645a2cfc7663036b556f9ccac4bffbeca4ccc07a444cd00f9ef7c621d81",
+        "status": "read"
+      },
+      "e7_margin_noise": {
+        "result_digest": "77491a086f26c3d908331a565c58bc38d05629a1cdd6f449bf93d07913f073c5",
+        "status": "read"
+      },
+      "e8_hidden_rules": {
+        "result_digest": "e37da77e359d34ae3a0861767b6600baff32ba12f56591fda297bf45a139ce95",
+        "status": "read"
+      },
+      "e9_ann": {
+        "result_digest": "68e44e271af95788bd33815df061d8a854f28d5b5cbcd0c1b85d7d76aee4432e",
+        "status": "read"
+      }
+    },
+    "published": [
+      {
+        "difference": 0.014000000000000012,
+        "exceeds_floor": true,
+        "floor": 0.0010600808453221644,
+        "floor_source": {
+          "experiment": "e8",
+          "metric": "ndcg@10",
+          "source": {
+            "labels": [
+              "bm25-exact_n1.naive",
+              "bm25-lucene_byte_n1.naive"
+            ],
+            "rule": "lucene_byte_length"
+          },
+          "spread": 0.0010600808453221644
+        },
+        "metric": "ndcg@10",
+        "systems": [
+          "bm25-flat",
+          "bm25-multifield"
+        ],
+        "values": [
+          0.679,
+          0.665
+        ]
+      },
+      {
+        "difference": 0.017000000000000015,
+        "exceeds_floor": true,
+        "floor": 0.0,
+        "floor_source": {
+          "experiment": "e6",
+          "metric": "recall@100",
+          "source": {
+            "label": "tfidf_n2.naive",
+            "max_variant": "id_asc",
+            "min_variant": "id_asc",
+            "row": "TF-IDF"
+          },
+          "spread": 0.0
+        },
+        "metric": "recall@100",
+        "systems": [
+          "bm25-flat",
+          "bm25-multifield"
+        ],
+        "values": [
+          0.925,
+          0.908
+        ]
+      }
+    ]
+  },
+  "result_digest": "cf7a107d0d201ec6e298328135f4af21e55319c99a52d43f4923b83e68eee2fd"
+}

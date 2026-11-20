@@ -1,0 +1,216 @@
+{
+  "data_provenance": {
+    "archive_sha256": "efe5be03f8c5b86a5870102d0599d227c8c6e2484328e68c6522560385671b0b",
+    "kind": "beir",
+    "n_documents": 3633,
+    "n_judgements": 12334,
+    "n_queries": 323,
+    "n_queries_without_relevant": 0,
+    "qrels_sha256": "556074c4dd6837a9797ed15f468d68ed738902d5e19112be85638be9456f5dc8",
+    "queries_sha256": "64c5f53e9a27e03c30660b40a0be84e4dfbd307aca25ff9a94de9b814b9be3af",
+    "redistributable": false,
+    "split": "test",
+    "variant": "nfcorpus"
+  },
+  "environment": {
+    "float": {
+      "constant_folding_ok": true,
+      "decimal_default_prec": 28,
+      "epsilon": 2.220446049250313e-16,
+      "mantissa_dig": 53,
+      "max": 1.7976931348623157e+308,
+      "min_normal": 2.2250738585072014e-308,
+      "no_reassociation": true,
+      "rounds": 1,
+      "rounds_live": true,
+      "subnormals_supported": true
+    },
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "native": {
+      "arch_tune": false,
+      "build_type": "Release",
+      "compiler_id": "GNU",
+      "compiler_ver": "13.2.0",
+      "fast_math": false,
+      "git_sha": "47acbd9a2fcf",
+      "numeric_flags": "-ffp-contract=off -fno-fast-math -fno-associative-math -fno-reciprocal-math -fno-unsafe-math-optimizations -fno-finite-math-only -fsigned-zeros -fexcess-precision=standard -mfpmath=sse",
+      "processor": "AMD64",
+      "reproducible": true,
+      "system": "Windows",
+      "version": "0.2.0"
+    },
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.15"
+  },
+  "experiment": "e10_floor",
+  "parameters": {
+    "dataset": "beir_nfcorpus",
+    "differences_sha256": "606259bb35689b06d277469d7683cea22c36c543fb28695d52cff8c66410740f",
+    "report_sha256": {
+      "e6_census": "e612830d3d00ee719d14335cb7cd88e14b3e848b576f3e2a851bcc2004839414",
+      "e7_margin_noise": "759145ec0bb9cf7135f1e4e3f6be573b8dc86fa1e4d465d43c64d7aebdfa8baa",
+      "e8_hidden_rules": "a6ca11bccdcbaca6a0d40c5d1cdc92c958378295c0d80016703af1f99038efd2",
+      "e9_ann": "d4bb34896c543a2f84882392a5273759d6f6c68c075087b11b001417701e88ba"
+    }
+  },
+  "payload": {
+    "data_provenance": {
+      "archive_sha256": "efe5be03f8c5b86a5870102d0599d227c8c6e2484328e68c6522560385671b0b",
+      "kind": "beir",
+      "n_documents": 3633,
+      "n_judgements": 12334,
+      "n_queries": 323,
+      "n_queries_without_relevant": 0,
+      "qrels_sha256": "556074c4dd6837a9797ed15f468d68ed738902d5e19112be85638be9456f5dc8",
+      "queries_sha256": "64c5f53e9a27e03c30660b40a0be84e4dfbd307aca25ff9a94de9b814b9be3af",
+      "redistributable": false,
+      "split": "test",
+      "variant": "nfcorpus"
+    },
+    "dataset": "beir_nfcorpus",
+    "floors": {
+      "ndcg@10": {
+        "source": {
+          "experiment": "e6",
+          "metric": "ndcg@10",
+          "source": {
+            "label": "tfidf_n2.naive",
+            "max_variant": "shuffle_16",
+            "min_variant": "shuffle_19",
+            "row": "TF-IDF"
+          },
+          "spread": 0.002391840066208073
+        },
+        "value": 0.002391840066208073
+      },
+      "ndcg@100": {
+        "source": {
+          "experiment": "e6",
+          "metric": "ndcg@100",
+          "source": {
+            "label": "bm25-lucene_byte_n1.naive",
+            "max_variant": "shuffle_0",
+            "min_variant": "id_desc",
+            "row": "BM25 lucene_byte"
+          },
+          "spread": 0.005331308935687062
+        },
+        "value": 0.005331308935687062
+      },
+      "recall@100": {
+        "source": {
+          "experiment": "e6",
+          "metric": "recall@100",
+          "source": {
+            "label": "bm25-exact_n1.naive",
+            "max_variant": "shuffle_0",
+            "min_variant": "id_asc",
+            "row": "BM25 exact"
+          },
+          "spread": 0.012488276893283107
+        },
+        "value": 0.012488276893283107
+      },
+      "rr@10": {
+        "source": {
+          "experiment": "e6",
+          "metric": "rr@10",
+          "source": {
+            "label": "tfidf_n2.naive",
+            "max_variant": "shuffle_8",
+            "min_variant": "shuffle_19",
+            "row": "TF-IDF"
+          },
+          "spread": 0.006191950464396245
+        },
+        "value": 0.006191950464396245
+      },
+      "rr@100": {
+        "source": {
+          "experiment": "e6",
+          "metric": "rr@100",
+          "source": {
+            "label": "tfidf_n2.naive",
+            "max_variant": "shuffle_16",
+            "min_variant": "id_desc",
+            "row": "TF-IDF"
+          },
+          "spread": 0.006445230179632722
+        },
+        "value": 0.006445230179632722
+      }
+    },
+    "inputs": {
+      "e6_census": {
+        "result_digest": "9d1372c723c9fe43bdec03dd683822ff7a584a57b72982b90baf4602a5baf7a7",
+        "status": "read"
+      },
+      "e7_margin_noise": {
+        "result_digest": "1be9cbbed7c0ee790229092d2b57c1ba2bdf2d400abf43ecb0cc0152518f1247",
+        "status": "read"
+      },
+      "e8_hidden_rules": {
+        "result_digest": "72cd81bf446005a4ca938bd5998a38e4d3434e3e2d7a82782a0040663e3cdec0",
+        "status": "read"
+      },
+      "e9_ann": {
+        "result_digest": "900bd0a3b9263b9480a6776a339a417395e5a31eb4d508d151a2fbdc7b5214c7",
+        "status": "read"
+      }
+    },
+    "published": [
+      {
+        "difference": 0.0030000000000000027,
+        "exceeds_floor": true,
+        "floor": 0.002391840066208073,
+        "floor_source": {
+          "experiment": "e6",
+          "metric": "ndcg@10",
+          "source": {
+            "label": "tfidf_n2.naive",
+            "max_variant": "shuffle_16",
+            "min_variant": "shuffle_19",
+            "row": "TF-IDF"
+          },
+          "spread": 0.002391840066208073
+        },
+        "metric": "ndcg@10",
+        "systems": [
+          "bm25-flat",
+          "bm25-multifield"
+        ],
+        "values": [
+          0.322,
+          0.325
+        ]
+      },
+      {
+        "difference": 0.0040000000000000036,
+        "exceeds_floor": false,
+        "floor": 0.012488276893283107,
+        "floor_source": {
+          "experiment": "e6",
+          "metric": "recall@100",
+          "source": {
+            "label": "bm25-exact_n1.naive",
+            "max_variant": "shuffle_0",
+            "min_variant": "id_asc",
+            "row": "BM25 exact"
+          },
+          "spread": 0.012488276893283107
+        },
+        "metric": "recall@100",
+        "systems": [
+          "bm25-flat",
+          "bm25-multifield"
+        ],
+        "values": [
+          0.246,
+          0.25
+        ]
+      }
+    ]
+  },
+  "result_digest": "e079fb4b3a18f054f0cdff72d055862efef792597aeeaefa0527caacb23023b5"
+}

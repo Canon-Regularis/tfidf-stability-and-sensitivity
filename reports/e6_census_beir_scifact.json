@@ -1,0 +1,748 @@
+{
+  "data_provenance": {
+    "archive_sha256": "536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165",
+    "kind": "beir",
+    "n_documents": 5183,
+    "n_judgements": 339,
+    "n_queries": 300,
+    "n_queries_without_relevant": 0,
+    "qrels_sha256": "536804d3ad87544db56ae1b9c71bad7aef843d6178ee5a0d60c0291306480857",
+    "queries_sha256": "0fb977c50fc1bb5ec62ae2e2ac323769246bc12ff25f5215a742e2dae08a8274",
+    "redistributable": false,
+    "split": "test",
+    "variant": "scifact"
+  },
+  "environment": {
+    "float": {
+      "constant_folding_ok": true,
+      "decimal_default_prec": 28,
+      "epsilon": 2.220446049250313e-16,
+      "mantissa_dig": 53,
+      "max": 1.7976931348623157e+308,
+      "min_normal": 2.2250738585072014e-308,
+      "no_reassociation": true,
+      "rounds": 1,
+      "rounds_live": true,
+      "subnormals_supported": true
+    },
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "native": {
+      "arch_tune": false,
+      "build_type": "Release",
+      "compiler_id": "GNU",
+      "compiler_ver": "13.2.0",
+      "fast_math": false,
+      "git_sha": "47acbd9a2fcf",
+      "numeric_flags": "-ffp-contract=off -fno-fast-math -fno-associative-math -fno-reciprocal-math -fno-unsafe-math-optimizations -fno-finite-math-only -fsigned-zeros -fexcess-precision=standard -mfpmath=sse",
+      "processor": "AMD64",
+      "reproducible": true,
+      "system": "Windows",
+      "version": "0.2.0"
+    },
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.15"
+  },
+  "experiment": "e6_census",
+  "parameters": {
+    "cutoffs": [
+      10,
+      100
+    ],
+    "dataset": "beir_scifact",
+    "depth": 100,
+    "n_queries": 300,
+    "seeds": 20,
+    "store": {
+      "bm25-exact_n1.exact": "831f702b2d52541ae7e5ff595395d3de0832ff3cb4216cb67534bca5d3584006",
+      "bm25-exact_n1.naive": "8f7a0810c36951150fb732e06fd3c070918e858efb2b59fb3c1237b8afc637ff",
+      "bm25-exact_n1.neumaier": "831f702b2d52541ae7e5ff595395d3de0832ff3cb4216cb67534bca5d3584006",
+      "bm25-exact_n1.pairwise": "8f7a0810c36951150fb732e06fd3c070918e858efb2b59fb3c1237b8afc637ff",
+      "bm25-lucene_byte_n1.exact": "c983ea3d8ebcb2f8ed801008c8b0bdbf167b58c4bf00a2263f2bb8d0865c82ca",
+      "bm25-lucene_byte_n1.naive": "f8c83a36965d5a0a2c95448275e57fe0b6946a345929863a516286039499dbf9",
+      "bm25-lucene_byte_n1.neumaier": "c983ea3d8ebcb2f8ed801008c8b0bdbf167b58c4bf00a2263f2bb8d0865c82ca",
+      "bm25-lucene_byte_n1.pairwise": "f8c83a36965d5a0a2c95448275e57fe0b6946a345929863a516286039499dbf9",
+      "tfidf_n2.exact": "60c5fc95012b9d327cf266148209f3765b1f5f31b093ebb16d6d709e68c2fc8a",
+      "tfidf_n2.naive": "23e2927f4ff15336d7bafa16326e7a13544ecba6a485742096e7d61eb7a4657a",
+      "tfidf_n2.neumaier": "60c5fc95012b9d327cf266148209f3765b1f5f31b093ebb16d6d709e68c2fc8a",
+      "tfidf_n2.pairwise": "c26a2ebd570b78eb8e463bda4b451174053c542a95af3080aee68fb452722698"
+    }
+  },
+  "payload": {
+    "cutoffs": [
+      10,
+      100
+    ],
+    "depth": 100,
+    "extra_rows": [],
+    "rows": [
+      {
+        "by_cutoff": {
+          "10": {
+            "exact_tie": {
+              "n": 0,
+              "share": 0.0,
+              "share_excluding_zero_vector": 0.0
+            },
+            "metric_range": {
+              "ndcg@10": {
+                "max": 0.6273229802640992,
+                "max_variant": "id_asc",
+                "min": 0.6273229802640992,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "recall@100": {
+                "max": 0.9258888888888889,
+                "max_variant": "id_asc",
+                "min": 0.9258888888888889,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "rr@10": {
+                "max": 0.5833544973544973,
+                "max_variant": "id_asc",
+                "min": 0.5833544973544973,
+                "min_variant": "id_asc",
+                "range": 0.0
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 300,
+            "n_scored": 300,
+            "n_zero_vector": 0,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.0,
+                "relative": 0.0
+              },
+              "0.0001": {
+                "absolute": 0.03666666666666667,
+                "relative": 0.0033333333333333335
+              },
+              "1e-06": {
+                "absolute": 0.0,
+                "relative": 0.0
+              },
+              "1e-09": {
+                "absolute": 0.0,
+                "relative": 0.0
+              },
+              "1e-12": {
+                "absolute": 0.0,
+                "relative": 0.0
+              }
+            },
+            "tie_aware": {
+              "ndcg@10": {
+                "mean": 0.6273229802640992,
+                "n_queries": 300
+              },
+              "recall@100": {
+                "mean": 0.9258888888888889,
+                "n_queries": 300
+              },
+              "rr@10": {
+                "mean": 0.5833544973544973,
+                "n_queries": 300
+              }
+            }
+          },
+          "100": {
+            "exact_tie": {
+              "n": 2,
+              "share": 0.006666666666666667,
+              "share_excluding_zero_vector": 0.006666666666666667
+            },
+            "metric_range": {
+              "ndcg@100": {
+                "max": 0.658989389731431,
+                "max_variant": "id_asc",
+                "min": 0.658989389731431,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "recall@100": {
+                "max": 0.9258888888888889,
+                "max_variant": "id_asc",
+                "min": 0.9258888888888889,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "rr@100": {
+                "max": 0.5888493816980914,
+                "max_variant": "id_asc",
+                "min": 0.5888493816980914,
+                "min_variant": "id_asc",
+                "range": 0.0
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 300,
+            "n_scored": 300,
+            "n_zero_vector": 0,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.006666666666666667,
+                "relative": 0.006666666666666667
+              },
+              "0.0001": {
+                "absolute": 0.43666666666666665,
+                "relative": 0.02666666666666667
+              },
+              "1e-06": {
+                "absolute": 0.013333333333333334,
+                "relative": 0.01
+              },
+              "1e-09": {
+                "absolute": 0.006666666666666667,
+                "relative": 0.006666666666666667
+              },
+              "1e-12": {
+                "absolute": 0.006666666666666667,
+                "relative": 0.006666666666666667
+              }
+            },
+            "tie_aware": {
+              "ndcg@100": {
+                "mean": 0.658989389731431,
+                "n_queries": 300
+              },
+              "recall@100": {
+                "mean": 0.9258888888888889,
+                "n_queries": 300
+              },
+              "rr@100": {
+                "mean": 0.5888493816980914,
+                "n_queries": 300
+              }
+            }
+          }
+        },
+        "kind": "lexical",
+        "label": "tfidf_n2.naive",
+        "name": "TF-IDF",
+        "status": "measured",
+        "variant": "naive"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "exact_tie": {
+              "n": 0,
+              "share": 0.0,
+              "share_excluding_zero_vector": 0.0
+            },
+            "metric_range": {
+              "ndcg@10": {
+                "max": 0.6807760067330351,
+                "max_variant": "id_asc",
+                "min": 0.6807760067330351,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "recall@100": {
+                "max": 0.922,
+                "max_variant": "id_asc",
+                "min": 0.922,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "rr@10": {
+                "max": 0.6454007936507937,
+                "max_variant": "id_asc",
+                "min": 0.6454007936507937,
+                "min_variant": "id_asc",
+                "range": 0.0
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 300,
+            "n_scored": 300,
+            "n_zero_vector": 0,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.0,
+                "relative": 0.0
+              },
+              "0.0001": {
+                "absolute": 0.0033333333333333335,
+                "relative": 0.0033333333333333335
+              },
+              "1e-06": {
+                "absolute": 0.0,
+                "relative": 0.0
+              },
+              "1e-09": {
+                "absolute": 0.0,
+                "relative": 0.0
+              },
+              "1e-12": {
+                "absolute": 0.0,
+                "relative": 0.0
+              }
+            },
+            "tie_aware": {
+              "ndcg@10": {
+                "mean": 0.6807760067330351,
+                "n_queries": 300
+              },
+              "recall@100": {
+                "mean": 0.922,
+                "n_queries": 300
+              },
+              "rr@10": {
+                "mean": 0.6454007936507937,
+                "n_queries": 300
+              }
+            }
+          },
+          "100": {
+            "exact_tie": {
+              "n": 7,
+              "share": 0.023333333333333334,
+              "share_excluding_zero_vector": 0.023333333333333334
+            },
+            "metric_range": {
+              "ndcg@100": {
+                "max": 0.7072175689902689,
+                "max_variant": "id_asc",
+                "min": 0.7072175689902689,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "recall@100": {
+                "max": 0.922,
+                "max_variant": "id_asc",
+                "min": 0.922,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "rr@100": {
+                "max": 0.6496124514640504,
+                "max_variant": "id_asc",
+                "min": 0.6496124514640504,
+                "min_variant": "id_asc",
+                "range": 0.0
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 300,
+            "n_scored": 300,
+            "n_zero_vector": 0,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.023333333333333334,
+                "relative": 0.023333333333333334
+              },
+              "0.0001": {
+                "absolute": 0.03333333333333333,
+                "relative": 0.05
+              },
+              "1e-06": {
+                "absolute": 0.023333333333333334,
+                "relative": 0.023333333333333334
+              },
+              "1e-09": {
+                "absolute": 0.023333333333333334,
+                "relative": 0.023333333333333334
+              },
+              "1e-12": {
+                "absolute": 0.023333333333333334,
+                "relative": 0.023333333333333334
+              }
+            },
+            "tie_aware": {
+              "ndcg@100": {
+                "mean": 0.7072175689902689,
+                "n_queries": 300
+              },
+              "recall@100": {
+                "mean": 0.922,
+                "n_queries": 300
+              },
+              "rr@100": {
+                "mean": 0.6496124514640504,
+                "n_queries": 300
+              }
+            }
+          }
+        },
+        "kind": "lexical",
+        "label": "bm25-exact_n1.naive",
+        "name": "BM25 exact",
+        "status": "measured",
+        "variant": "naive"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "exact_tie": {
+              "n": 1,
+              "share": 0.0033333333333333335,
+              "share_excluding_zero_vector": 0.0033333333333333335
+            },
+            "metric_range": {
+              "ndcg@10": {
+                "max": 0.6818360875783572,
+                "max_variant": "id_asc",
+                "min": 0.6818360875783572,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "recall@100": {
+                "max": 0.922,
+                "max_variant": "id_asc",
+                "min": 0.922,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "rr@10": {
+                "max": 0.646728835978836,
+                "max_variant": "id_asc",
+                "min": 0.646728835978836,
+                "min_variant": "id_asc",
+                "range": 0.0
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 300,
+            "n_scored": 300,
+            "n_zero_vector": 0,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.0033333333333333335,
+                "relative": 0.0033333333333333335
+              },
+              "0.0001": {
+                "absolute": 0.0033333333333333335,
+                "relative": 0.0033333333333333335
+              },
+              "1e-06": {
+                "absolute": 0.0033333333333333335,
+                "relative": 0.0033333333333333335
+              },
+              "1e-09": {
+                "absolute": 0.0033333333333333335,
+                "relative": 0.0033333333333333335
+              },
+              "1e-12": {
+                "absolute": 0.0033333333333333335,
+                "relative": 0.0033333333333333335
+              }
+            },
+            "tie_aware": {
+              "ndcg@10": {
+                "mean": 0.6818360875783572,
+                "n_queries": 300
+              },
+              "recall@100": {
+                "mean": 0.922,
+                "n_queries": 300
+              },
+              "rr@10": {
+                "mean": 0.646728835978836,
+                "n_queries": 300
+              }
+            }
+          },
+          "100": {
+            "exact_tie": {
+              "n": 22,
+              "share": 0.07333333333333333,
+              "share_excluding_zero_vector": 0.07333333333333333
+            },
+            "metric_range": {
+              "ndcg@100": {
+                "max": 0.7073494154370932,
+                "max_variant": "id_asc",
+                "min": 0.7073494154370932,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "recall@100": {
+                "max": 0.922,
+                "max_variant": "id_asc",
+                "min": 0.922,
+                "min_variant": "id_asc",
+                "range": 0.0
+              },
+              "rr@100": {
+                "max": 0.6506476729810453,
+                "max_variant": "id_asc",
+                "min": 0.6506476729810453,
+                "min_variant": "id_asc",
+                "range": 0.0
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 300,
+            "n_scored": 300,
+            "n_zero_vector": 0,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.07333333333333333,
+                "relative": 0.07333333333333333
+              },
+              "0.0001": {
+                "absolute": 0.08333333333333333,
+                "relative": 0.1
+              },
+              "1e-06": {
+                "absolute": 0.07333333333333333,
+                "relative": 0.07333333333333333
+              },
+              "1e-09": {
+                "absolute": 0.07333333333333333,
+                "relative": 0.07333333333333333
+              },
+              "1e-12": {
+                "absolute": 0.07333333333333333,
+                "relative": 0.07333333333333333
+              }
+            },
+            "tie_aware": {
+              "ndcg@100": {
+                "mean": 0.7073494154370932,
+                "n_queries": 300
+              },
+              "recall@100": {
+                "mean": 0.922,
+                "n_queries": 300
+              },
+              "rr@100": {
+                "mean": 0.6506476729810453,
+                "n_queries": 300
+              }
+            }
+          }
+        },
+        "kind": "lexical",
+        "label": "bm25-lucene_byte_n1.naive",
+        "name": "BM25 lucene_byte",
+        "status": "measured",
+        "variant": "naive"
+      },
+      {
+        "label": "splade-float.naive",
+        "name": "SPLADE float",
+        "reason": "SPLADE scores arrive with #18",
+        "status": "missing"
+      },
+      {
+        "label": "splade-x100.naive",
+        "name": "SPLADE x100",
+        "reason": "SPLADE scores arrive with #18",
+        "status": "missing"
+      },
+      {
+        "label": "dense-fp32.run",
+        "name": "dense fp32",
+        "reason": "dense scores arrive with #16",
+        "status": "missing"
+      }
+    ],
+    "seeds": 20,
+    "spreads": [
+      {
+        "experiment": "e6",
+        "metric": "ndcg@10",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "TF-IDF"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "TF-IDF"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@10",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "TF-IDF"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "ndcg@100",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "TF-IDF"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "TF-IDF"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@100",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "TF-IDF"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "ndcg@10",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@10",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "ndcg@100",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@100",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "ndcg@10",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@10",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "ndcg@100",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@100",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "id_asc",
+          "min_variant": "id_asc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.0
+      }
+    ]
+  },
+  "result_digest": "c1603645a2cfc7663036b556f9ccac4bffbeca4ccc07a444cd00f9ef7c621d81"
+}

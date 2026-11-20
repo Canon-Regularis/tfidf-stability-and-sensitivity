@@ -1,0 +1,1416 @@
+{
+  "data_provenance": {
+    "archive_sha256": "536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165",
+    "kind": "beir",
+    "n_documents": 5183,
+    "n_judgements": 339,
+    "n_queries": 300,
+    "n_queries_without_relevant": 0,
+    "qrels_sha256": "536804d3ad87544db56ae1b9c71bad7aef843d6178ee5a0d60c0291306480857",
+    "queries_sha256": "0fb977c50fc1bb5ec62ae2e2ac323769246bc12ff25f5215a742e2dae08a8274",
+    "redistributable": false,
+    "split": "test",
+    "variant": "scifact"
+  },
+  "environment": {
+    "float": {
+      "constant_folding_ok": true,
+      "decimal_default_prec": 28,
+      "epsilon": 2.220446049250313e-16,
+      "mantissa_dig": 53,
+      "max": 1.7976931348623157e+308,
+      "min_normal": 2.2250738585072014e-308,
+      "no_reassociation": true,
+      "rounds": 1,
+      "rounds_live": true,
+      "subnormals_supported": true
+    },
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "native": {
+      "arch_tune": false,
+      "build_type": "Release",
+      "compiler_id": "GNU",
+      "compiler_ver": "13.2.0",
+      "fast_math": false,
+      "git_sha": "47acbd9a2fcf",
+      "numeric_flags": "-ffp-contract=off -fno-fast-math -fno-associative-math -fno-reciprocal-math -fno-unsafe-math-optimizations -fno-finite-math-only -fsigned-zeros -fexcess-precision=standard -mfpmath=sse",
+      "processor": "AMD64",
+      "reproducible": true,
+      "system": "Windows",
+      "version": "0.2.0"
+    },
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.15"
+  },
+  "experiment": "e7_margin_noise",
+  "parameters": {
+    "cutoffs": [
+      10,
+      100
+    ],
+    "dataset": "beir_scifact",
+    "depth": 100,
+    "n_queries": 300,
+    "store": {
+      "bm25-exact_n1.exact": "831f702b2d52541ae7e5ff595395d3de0832ff3cb4216cb67534bca5d3584006",
+      "bm25-exact_n1.naive": "8f7a0810c36951150fb732e06fd3c070918e858efb2b59fb3c1237b8afc637ff",
+      "bm25-exact_n1.neumaier": "831f702b2d52541ae7e5ff595395d3de0832ff3cb4216cb67534bca5d3584006",
+      "bm25-exact_n1.pairwise": "8f7a0810c36951150fb732e06fd3c070918e858efb2b59fb3c1237b8afc637ff",
+      "bm25-lucene_byte_n1.exact": "c983ea3d8ebcb2f8ed801008c8b0bdbf167b58c4bf00a2263f2bb8d0865c82ca",
+      "bm25-lucene_byte_n1.naive": "f8c83a36965d5a0a2c95448275e57fe0b6946a345929863a516286039499dbf9",
+      "bm25-lucene_byte_n1.neumaier": "c983ea3d8ebcb2f8ed801008c8b0bdbf167b58c4bf00a2263f2bb8d0865c82ca",
+      "bm25-lucene_byte_n1.pairwise": "f8c83a36965d5a0a2c95448275e57fe0b6946a345929863a516286039499dbf9",
+      "tfidf_n2.exact": "60c5fc95012b9d327cf266148209f3765b1f5f31b093ebb16d6d709e68c2fc8a",
+      "tfidf_n2.naive": "23e2927f4ff15336d7bafa16326e7a13544ecba6a485742096e7d61eb7a4657a",
+      "tfidf_n2.neumaier": "60c5fc95012b9d327cf266148209f3765b1f5f31b093ebb16d6d709e68c2fc8a",
+      "tfidf_n2.pairwise": "c26a2ebd570b78eb8e463bda4b451174053c542a95af3080aee68fb452722698"
+    }
+  },
+  "payload": {
+    "cutoffs": [
+      10,
+      100
+    ],
+    "depth": 100,
+    "missing": null,
+    "n_falsifications": 0,
+    "pairs": [
+      {
+        "by_cutoff": {
+          "10": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 1.4210854715202004e-14,
+            "eta_exact": "1/70368744177664",
+            "eta_hex": "0x1.0000000000000p-46",
+            "falsifications": [],
+            "k": 10,
+            "means": {
+              "ndcg@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6807760067330351,
+                "variant": 0.6807760067330351
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6454007936507937,
+                "variant": 0.6454007936507937
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-exact_n1.exact",
+            "variant": "bm25-exact_n1.naive"
+          },
+          "100": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 7,
+                "tn": 293,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 7,
+                "tn": 293,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 1.4210854715202004e-14,
+            "eta_exact": "1/70368744177664",
+            "eta_hex": "0x1.0000000000000p-46",
+            "falsifications": [],
+            "k": 100,
+            "means": {
+              "ndcg@100": {
+                "abs_delta": 0.0,
+                "reference": 0.7072175689902689,
+                "variant": 0.7072175689902689
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@100": {
+                "abs_delta": 0.0,
+                "reference": 0.6496124514640504,
+                "variant": 0.6496124514640504
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-exact_n1.exact",
+            "variant": "bm25-exact_n1.naive"
+          }
+        },
+        "reference": "bm25-exact_n1.exact",
+        "variant": "bm25-exact_n1.naive"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 0.0,
+            "eta_exact": "0/1",
+            "eta_hex": "0x0.0p+0",
+            "falsifications": [],
+            "k": 10,
+            "means": {
+              "ndcg@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6807760067330351,
+                "variant": 0.6807760067330351
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6454007936507937,
+                "variant": 0.6454007936507937
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-exact_n1.exact",
+            "variant": "bm25-exact_n1.neumaier"
+          },
+          "100": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 7,
+                "tn": 293,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 7,
+                "tn": 293,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 0.0,
+            "eta_exact": "0/1",
+            "eta_hex": "0x0.0p+0",
+            "falsifications": [],
+            "k": 100,
+            "means": {
+              "ndcg@100": {
+                "abs_delta": 0.0,
+                "reference": 0.7072175689902689,
+                "variant": 0.7072175689902689
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@100": {
+                "abs_delta": 0.0,
+                "reference": 0.6496124514640504,
+                "variant": 0.6496124514640504
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-exact_n1.exact",
+            "variant": "bm25-exact_n1.neumaier"
+          }
+        },
+        "reference": "bm25-exact_n1.exact",
+        "variant": "bm25-exact_n1.neumaier"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 1.4210854715202004e-14,
+            "eta_exact": "1/70368744177664",
+            "eta_hex": "0x1.0000000000000p-46",
+            "falsifications": [],
+            "k": 10,
+            "means": {
+              "ndcg@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6807760067330351,
+                "variant": 0.6807760067330351
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6454007936507937,
+                "variant": 0.6454007936507937
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-exact_n1.exact",
+            "variant": "bm25-exact_n1.pairwise"
+          },
+          "100": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 7,
+                "tn": 293,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 7,
+                "tn": 293,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 1.4210854715202004e-14,
+            "eta_exact": "1/70368744177664",
+            "eta_hex": "0x1.0000000000000p-46",
+            "falsifications": [],
+            "k": 100,
+            "means": {
+              "ndcg@100": {
+                "abs_delta": 0.0,
+                "reference": 0.7072175689902689,
+                "variant": 0.7072175689902689
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@100": {
+                "abs_delta": 0.0,
+                "reference": 0.6496124514640504,
+                "variant": 0.6496124514640504
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-exact_n1.exact",
+            "variant": "bm25-exact_n1.pairwise"
+          }
+        },
+        "reference": "bm25-exact_n1.exact",
+        "variant": "bm25-exact_n1.pairwise"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 1,
+                "tn": 299,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 1,
+                "tn": 299,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 7.105427357601002e-15,
+            "eta_exact": "1/140737488355328",
+            "eta_hex": "0x1.0000000000000p-47",
+            "falsifications": [],
+            "k": 10,
+            "means": {
+              "ndcg@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6818360875783572,
+                "variant": 0.6818360875783572
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@10": {
+                "abs_delta": 0.0,
+                "reference": 0.646728835978836,
+                "variant": 0.646728835978836
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-lucene_byte_n1.exact",
+            "variant": "bm25-lucene_byte_n1.naive"
+          },
+          "100": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 22,
+                "tn": 278,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 22,
+                "tn": 278,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 7.105427357601002e-15,
+            "eta_exact": "1/140737488355328",
+            "eta_hex": "0x1.0000000000000p-47",
+            "falsifications": [],
+            "k": 100,
+            "means": {
+              "ndcg@100": {
+                "abs_delta": 0.0,
+                "reference": 0.7073494154370932,
+                "variant": 0.7073494154370932
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@100": {
+                "abs_delta": 0.0,
+                "reference": 0.6506476729810453,
+                "variant": 0.6506476729810453
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-lucene_byte_n1.exact",
+            "variant": "bm25-lucene_byte_n1.naive"
+          }
+        },
+        "reference": "bm25-lucene_byte_n1.exact",
+        "variant": "bm25-lucene_byte_n1.naive"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 1,
+                "tn": 299,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 1,
+                "tn": 299,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 0.0,
+            "eta_exact": "0/1",
+            "eta_hex": "0x0.0p+0",
+            "falsifications": [],
+            "k": 10,
+            "means": {
+              "ndcg@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6818360875783572,
+                "variant": 0.6818360875783572
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@10": {
+                "abs_delta": 0.0,
+                "reference": 0.646728835978836,
+                "variant": 0.646728835978836
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-lucene_byte_n1.exact",
+            "variant": "bm25-lucene_byte_n1.neumaier"
+          },
+          "100": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 22,
+                "tn": 278,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 22,
+                "tn": 278,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 0.0,
+            "eta_exact": "0/1",
+            "eta_hex": "0x0.0p+0",
+            "falsifications": [],
+            "k": 100,
+            "means": {
+              "ndcg@100": {
+                "abs_delta": 0.0,
+                "reference": 0.7073494154370932,
+                "variant": 0.7073494154370932
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@100": {
+                "abs_delta": 0.0,
+                "reference": 0.6506476729810453,
+                "variant": 0.6506476729810453
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-lucene_byte_n1.exact",
+            "variant": "bm25-lucene_byte_n1.neumaier"
+          }
+        },
+        "reference": "bm25-lucene_byte_n1.exact",
+        "variant": "bm25-lucene_byte_n1.neumaier"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 1,
+                "tn": 299,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 1,
+                "tn": 299,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 7.105427357601002e-15,
+            "eta_exact": "1/140737488355328",
+            "eta_hex": "0x1.0000000000000p-47",
+            "falsifications": [],
+            "k": 10,
+            "means": {
+              "ndcg@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6818360875783572,
+                "variant": 0.6818360875783572
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@10": {
+                "abs_delta": 0.0,
+                "reference": 0.646728835978836,
+                "variant": 0.646728835978836
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-lucene_byte_n1.exact",
+            "variant": "bm25-lucene_byte_n1.pairwise"
+          },
+          "100": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 22,
+                "tn": 278,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 22,
+                "tn": 278,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 7.105427357601002e-15,
+            "eta_exact": "1/140737488355328",
+            "eta_hex": "0x1.0000000000000p-47",
+            "falsifications": [],
+            "k": 100,
+            "means": {
+              "ndcg@100": {
+                "abs_delta": 0.0,
+                "reference": 0.7073494154370932,
+                "variant": 0.7073494154370932
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.922,
+                "variant": 0.922
+              },
+              "rr@100": {
+                "abs_delta": 0.0,
+                "reference": 0.6506476729810453,
+                "variant": 0.6506476729810453
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "bm25-lucene_byte_n1.exact",
+            "variant": "bm25-lucene_byte_n1.pairwise"
+          }
+        },
+        "reference": "bm25-lucene_byte_n1.exact",
+        "variant": "bm25-lucene_byte_n1.pairwise"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 1.6653345369377348e-15,
+            "eta_exact": "15/9007199254740992",
+            "eta_hex": "0x1.e000000000000p-50",
+            "falsifications": [],
+            "k": 10,
+            "means": {
+              "ndcg@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6273229802640992,
+                "variant": 0.6273229802640992
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.9258888888888889,
+                "variant": 0.9258888888888889
+              },
+              "rr@10": {
+                "abs_delta": 0.0,
+                "reference": 0.5833544973544973,
+                "variant": 0.5833544973544973
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "tfidf_n2.exact",
+            "variant": "tfidf_n2.naive"
+          },
+          "100": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 2,
+                "tn": 298,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 2,
+                "tn": 298,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 1.6653345369377348e-15,
+            "eta_exact": "15/9007199254740992",
+            "eta_hex": "0x1.e000000000000p-50",
+            "falsifications": [],
+            "k": 100,
+            "means": {
+              "ndcg@100": {
+                "abs_delta": 0.0,
+                "reference": 0.658989389731431,
+                "variant": 0.658989389731431
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.9258888888888889,
+                "variant": 0.9258888888888889
+              },
+              "rr@100": {
+                "abs_delta": 0.0,
+                "reference": 0.5888493816980914,
+                "variant": 0.5888493816980914
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "tfidf_n2.exact",
+            "variant": "tfidf_n2.naive"
+          }
+        },
+        "reference": "tfidf_n2.exact",
+        "variant": "tfidf_n2.naive"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 0.0,
+            "eta_exact": "0/1",
+            "eta_hex": "0x0.0p+0",
+            "falsifications": [],
+            "k": 10,
+            "means": {
+              "ndcg@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6273229802640992,
+                "variant": 0.6273229802640992
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.9258888888888889,
+                "variant": 0.9258888888888889
+              },
+              "rr@10": {
+                "abs_delta": 0.0,
+                "reference": 0.5833544973544973,
+                "variant": 0.5833544973544973
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "tfidf_n2.exact",
+            "variant": "tfidf_n2.neumaier"
+          },
+          "100": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 2,
+                "tn": 298,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 2,
+                "tn": 298,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 0.0,
+            "eta_exact": "0/1",
+            "eta_hex": "0x0.0p+0",
+            "falsifications": [],
+            "k": 100,
+            "means": {
+              "ndcg@100": {
+                "abs_delta": 0.0,
+                "reference": 0.658989389731431,
+                "variant": 0.658989389731431
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.9258888888888889,
+                "variant": 0.9258888888888889
+              },
+              "rr@100": {
+                "abs_delta": 0.0,
+                "reference": 0.5888493816980914,
+                "variant": 0.5888493816980914
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "tfidf_n2.exact",
+            "variant": "tfidf_n2.neumaier"
+          }
+        },
+        "reference": "tfidf_n2.exact",
+        "variant": "tfidf_n2.neumaier"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 0,
+                "tn": 300,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 3.885780586188048e-16,
+            "eta_exact": "7/18014398509481984",
+            "eta_hex": "0x1.c000000000000p-52",
+            "falsifications": [],
+            "k": 10,
+            "means": {
+              "ndcg@10": {
+                "abs_delta": 0.0,
+                "reference": 0.6273229802640992,
+                "variant": 0.6273229802640992
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.9258888888888889,
+                "variant": 0.9258888888888889
+              },
+              "rr@10": {
+                "abs_delta": 0.0,
+                "reference": 0.5833544973544973,
+                "variant": 0.5833544973544973
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "tfidf_n2.exact",
+            "variant": "tfidf_n2.pairwise"
+          },
+          "100": {
+            "confusion": {
+              "global": {
+                "fn": 0,
+                "fp": 2,
+                "tn": 298,
+                "tp": 0,
+                "undefined": 0
+              },
+              "query": {
+                "fn": 0,
+                "fp": 2,
+                "tn": 298,
+                "tp": 0,
+                "undefined": 0
+              }
+            },
+            "eta": 3.885780586188048e-16,
+            "eta_exact": "7/18014398509481984",
+            "eta_hex": "0x1.c000000000000p-52",
+            "falsifications": [],
+            "k": 100,
+            "means": {
+              "ndcg@100": {
+                "abs_delta": 0.0,
+                "reference": 0.658989389731431,
+                "variant": 0.658989389731431
+              },
+              "recall@100": {
+                "abs_delta": 0.0,
+                "reference": 0.9258888888888889,
+                "variant": 0.9258888888888889
+              },
+              "rr@100": {
+                "abs_delta": 0.0,
+                "reference": 0.5888493816980914,
+                "variant": 0.5888493816980914
+              }
+            },
+            "n_bound_disagreements": 0,
+            "n_queries": 300,
+            "reference": "tfidf_n2.exact",
+            "variant": "tfidf_n2.pairwise"
+          }
+        },
+        "reference": "tfidf_n2.exact",
+        "variant": "tfidf_n2.pairwise"
+      }
+    ],
+    "spreads": [
+      {
+        "experiment": "e7",
+        "metric": "ndcg@10",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@10",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@10",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@10",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@10",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@10",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@100",
+        "source": {
+          "reference": "bm25-exact_n1.exact",
+          "variant": "bm25-exact_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@10",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@10",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@10",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@10",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@10",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@10",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@100",
+        "source": {
+          "reference": "bm25-lucene_byte_n1.exact",
+          "variant": "bm25-lucene_byte_n1.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@10",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@10",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.naive"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@10",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@10",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.neumaier"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@10",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@10",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "ndcg@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "recall@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.pairwise"
+        },
+        "spread": 0.0
+      },
+      {
+        "experiment": "e7",
+        "metric": "rr@100",
+        "source": {
+          "reference": "tfidf_n2.exact",
+          "variant": "tfidf_n2.pairwise"
+        },
+        "spread": 0.0
+      }
+    ]
+  },
+  "result_digest": "77491a086f26c3d908331a565c58bc38d05629a1cdd6f449bf93d07913f073c5"
+}

@@ -1,0 +1,748 @@
+{
+  "data_provenance": {
+    "archive_sha256": "efe5be03f8c5b86a5870102d0599d227c8c6e2484328e68c6522560385671b0b",
+    "kind": "beir",
+    "n_documents": 3633,
+    "n_judgements": 12334,
+    "n_queries": 323,
+    "n_queries_without_relevant": 0,
+    "qrels_sha256": "556074c4dd6837a9797ed15f468d68ed738902d5e19112be85638be9456f5dc8",
+    "queries_sha256": "64c5f53e9a27e03c30660b40a0be84e4dfbd307aca25ff9a94de9b814b9be3af",
+    "redistributable": false,
+    "split": "test",
+    "variant": "nfcorpus"
+  },
+  "environment": {
+    "float": {
+      "constant_folding_ok": true,
+      "decimal_default_prec": 28,
+      "epsilon": 2.220446049250313e-16,
+      "mantissa_dig": 53,
+      "max": 1.7976931348623157e+308,
+      "min_normal": 2.2250738585072014e-308,
+      "no_reassociation": true,
+      "rounds": 1,
+      "rounds_live": true,
+      "subnormals_supported": true
+    },
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "native": {
+      "arch_tune": false,
+      "build_type": "Release",
+      "compiler_id": "GNU",
+      "compiler_ver": "13.2.0",
+      "fast_math": false,
+      "git_sha": "47acbd9a2fcf",
+      "numeric_flags": "-ffp-contract=off -fno-fast-math -fno-associative-math -fno-reciprocal-math -fno-unsafe-math-optimizations -fno-finite-math-only -fsigned-zeros -fexcess-precision=standard -mfpmath=sse",
+      "processor": "AMD64",
+      "reproducible": true,
+      "system": "Windows",
+      "version": "0.2.0"
+    },
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.15"
+  },
+  "experiment": "e6_census",
+  "parameters": {
+    "cutoffs": [
+      10,
+      100
+    ],
+    "dataset": "beir_nfcorpus",
+    "depth": 100,
+    "n_queries": 323,
+    "seeds": 20,
+    "store": {
+      "bm25-exact_n1.exact": "8f6c81af313c11939b285bfa65122ba7c16856144ed2dd193db24c334f19cbb8",
+      "bm25-exact_n1.naive": "7fe6e7671268d9c45ce1f7548e2259a66426e634196dee73ac3524c5a7d559a6",
+      "bm25-exact_n1.neumaier": "8f6c81af313c11939b285bfa65122ba7c16856144ed2dd193db24c334f19cbb8",
+      "bm25-exact_n1.pairwise": "7fe6e7671268d9c45ce1f7548e2259a66426e634196dee73ac3524c5a7d559a6",
+      "bm25-lucene_byte_n1.exact": "0da2ce4d2e0b58dc0213c77c6a728e9131cbde0f9b704b1ecfe03eeb3beb1b84",
+      "bm25-lucene_byte_n1.naive": "ca81b390e4a1499deadb411ac50fd4f6c9df93e1a709bacb3b8048d9267b4053",
+      "bm25-lucene_byte_n1.neumaier": "0da2ce4d2e0b58dc0213c77c6a728e9131cbde0f9b704b1ecfe03eeb3beb1b84",
+      "bm25-lucene_byte_n1.pairwise": "ca81b390e4a1499deadb411ac50fd4f6c9df93e1a709bacb3b8048d9267b4053",
+      "tfidf_n2.exact": "5020d0d8364a0b63cf5430ec777ec2e29ae8859cce4b438418dd03d610e0a25e",
+      "tfidf_n2.naive": "9f23d4af665455d584de6407155e4f13e565657d5b6029708d3c241372bafca1",
+      "tfidf_n2.neumaier": "5020d0d8364a0b63cf5430ec777ec2e29ae8859cce4b438418dd03d610e0a25e",
+      "tfidf_n2.pairwise": "49f138591e2efe2ac7e5c5b15eae199a7b1472bfb15407e44d2f3083df6fdafb"
+    }
+  },
+  "payload": {
+    "cutoffs": [
+      10,
+      100
+    ],
+    "depth": 100,
+    "extra_rows": [],
+    "rows": [
+      {
+        "by_cutoff": {
+          "10": {
+            "exact_tie": {
+              "n": 78,
+              "share": 0.24148606811145512,
+              "share_excluding_zero_vector": 0.20454545454545456
+            },
+            "metric_range": {
+              "ndcg@10": {
+                "max": 0.3157091468010162,
+                "max_variant": "shuffle_16",
+                "min": 0.3133173067348081,
+                "min_variant": "shuffle_19",
+                "range": 0.002391840066208073
+              },
+              "recall@100": {
+                "max": 0.2579304151110145,
+                "max_variant": "shuffle_0",
+                "min": 0.24544213821773142,
+                "min_variant": "id_asc",
+                "range": 0.012488276893283079
+              },
+              "rr@10": {
+                "max": 0.51343677822006,
+                "max_variant": "shuffle_8",
+                "min": 0.5072448277556637,
+                "min_variant": "shuffle_19",
+                "range": 0.006191950464396245
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 323,
+            "n_scored": 323,
+            "n_zero_vector": 15,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.24148606811145512,
+                "relative": 0.24148606811145512
+              },
+              "0.0001": {
+                "absolute": 0.25696594427244585,
+                "relative": 0.24148606811145512
+              },
+              "1e-06": {
+                "absolute": 0.24148606811145512,
+                "relative": 0.24148606811145512
+              },
+              "1e-09": {
+                "absolute": 0.24148606811145512,
+                "relative": 0.24148606811145512
+              },
+              "1e-12": {
+                "absolute": 0.24148606811145512,
+                "relative": 0.24148606811145512
+              }
+            },
+            "tie_aware": {
+              "ndcg@10": {
+                "mean": 0.3142413876953511,
+                "n_queries": 323
+              },
+              "recall@100": {
+                "mean": 0.2524719151845776,
+                "n_queries": 323
+              },
+              "rr@10": {
+                "mean": 0.5103125209177974,
+                "n_queries": 323
+              }
+            }
+          },
+          "100": {
+            "exact_tie": {
+              "n": 128,
+              "share": 0.39628482972136225,
+              "share_excluding_zero_vector": 0.36688311688311687
+            },
+            "metric_range": {
+              "ndcg@100": {
+                "max": 0.2741907725535417,
+                "max_variant": "shuffle_0",
+                "min": 0.2688919127459753,
+                "min_variant": "id_desc",
+                "range": 0.005298859807566392
+              },
+              "recall@100": {
+                "max": 0.2579304151110145,
+                "max_variant": "shuffle_0",
+                "min": 0.24544213821773142,
+                "min_variant": "id_asc",
+                "range": 0.012488276893283079
+              },
+              "rr@100": {
+                "max": 0.5179727884389298,
+                "max_variant": "shuffle_16",
+                "min": 0.5115275582592971,
+                "min_variant": "id_desc",
+                "range": 0.006445230179632722
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 323,
+            "n_scored": 323,
+            "n_zero_vector": 15,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.39628482972136225,
+                "relative": 0.39628482972136225
+              },
+              "0.0001": {
+                "absolute": 0.6377708978328174,
+                "relative": 0.3993808049535604
+              },
+              "1e-06": {
+                "absolute": 0.3993808049535604,
+                "relative": 0.39628482972136225
+              },
+              "1e-09": {
+                "absolute": 0.39628482972136225,
+                "relative": 0.39628482972136225
+              },
+              "1e-12": {
+                "absolute": 0.39628482972136225,
+                "relative": 0.39628482972136225
+              }
+            },
+            "tie_aware": {
+              "ndcg@100": {
+                "mean": 0.2726880564060019,
+                "n_queries": 323
+              },
+              "recall@100": {
+                "mean": 0.2524719151845776,
+                "n_queries": 323
+              },
+              "rr@100": {
+                "mean": 0.5149248015089745,
+                "n_queries": 323
+              }
+            }
+          }
+        },
+        "kind": "lexical",
+        "label": "tfidf_n2.naive",
+        "name": "TF-IDF",
+        "status": "measured",
+        "variant": "naive"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "exact_tie": {
+              "n": 80,
+              "share": 0.2476780185758514,
+              "share_excluding_zero_vector": 0.21103896103896103
+            },
+            "metric_range": {
+              "ndcg@10": {
+                "max": 0.3285508211695255,
+                "max_variant": "shuffle_12",
+                "min": 0.3265203005346838,
+                "min_variant": "shuffle_1",
+                "range": 0.002030520634841715
+              },
+              "recall@100": {
+                "max": 0.2602706042259007,
+                "max_variant": "shuffle_0",
+                "min": 0.2477823273326176,
+                "min_variant": "id_asc",
+                "range": 0.012488276893283107
+              },
+              "rr@10": {
+                "max": 0.527140154307337,
+                "max_variant": "shuffle_8",
+                "min": 0.5224961914590397,
+                "min_variant": "id_desc",
+                "range": 0.004643962848297267
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 323,
+            "n_scored": 323,
+            "n_zero_vector": 15,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.2476780185758514,
+                "relative": 0.2476780185758514
+              },
+              "0.0001": {
+                "absolute": 0.25386996904024767,
+                "relative": 0.25696594427244585
+              },
+              "1e-06": {
+                "absolute": 0.2476780185758514,
+                "relative": 0.2476780185758514
+              },
+              "1e-09": {
+                "absolute": 0.2476780185758514,
+                "relative": 0.2476780185758514
+              },
+              "1e-12": {
+                "absolute": 0.2476780185758514,
+                "relative": 0.2476780185758514
+              }
+            },
+            "tie_aware": {
+              "ndcg@10": {
+                "mean": 0.32734090719226666,
+                "n_queries": 323
+              },
+              "recall@100": {
+                "mean": 0.2548121042994638,
+                "n_queries": 323
+              },
+              "rr@10": {
+                "mean": 0.5244802932899041,
+                "n_queries": 323
+              }
+            }
+          },
+          "100": {
+            "exact_tie": {
+              "n": 138,
+              "share": 0.42724458204334365,
+              "share_excluding_zero_vector": 0.39935064935064934
+            },
+            "metric_range": {
+              "ndcg@100": {
+                "max": 0.28149674372266464,
+                "max_variant": "shuffle_0",
+                "min": 0.276253319869047,
+                "min_variant": "id_desc",
+                "range": 0.005243423853617646
+              },
+              "recall@100": {
+                "max": 0.2602706042259007,
+                "max_variant": "shuffle_0",
+                "min": 0.2477823273326176,
+                "min_variant": "id_asc",
+                "range": 0.012488276893283107
+              },
+              "rr@100": {
+                "max": 0.5309597429481547,
+                "max_variant": "shuffle_8",
+                "min": 0.5261232708259809,
+                "min_variant": "id_desc",
+                "range": 0.004836472122173863
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 323,
+            "n_scored": 323,
+            "n_zero_vector": 15,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.42724458204334365,
+                "relative": 0.42724458204334365
+              },
+              "0.0001": {
+                "absolute": 0.44272445820433437,
+                "relative": 0.44891640866873067
+              },
+              "1e-06": {
+                "absolute": 0.42724458204334365,
+                "relative": 0.42724458204334365
+              },
+              "1e-09": {
+                "absolute": 0.42724458204334365,
+                "relative": 0.42724458204334365
+              },
+              "1e-12": {
+                "absolute": 0.42724458204334365,
+                "relative": 0.42724458204334365
+              }
+            },
+            "tie_aware": {
+              "ndcg@100": {
+                "mean": 0.28000224159971526,
+                "n_queries": 323
+              },
+              "recall@100": {
+                "mean": 0.2548121042994638,
+                "n_queries": 323
+              },
+              "rr@100": {
+                "mean": 0.5285558275908009,
+                "n_queries": 323
+              }
+            }
+          }
+        },
+        "kind": "lexical",
+        "label": "bm25-exact_n1.naive",
+        "name": "BM25 exact",
+        "status": "measured",
+        "variant": "naive"
+      },
+      {
+        "by_cutoff": {
+          "10": {
+            "exact_tie": {
+              "n": 91,
+              "share": 0.28173374613003094,
+              "share_excluding_zero_vector": 0.24675324675324675
+            },
+            "metric_range": {
+              "ndcg@10": {
+                "max": 0.32805709989945825,
+                "max_variant": "shuffle_12",
+                "min": 0.32572016057880426,
+                "min_variant": "id_desc",
+                "range": 0.0023369393206539857
+              },
+              "recall@100": {
+                "max": 0.25948326454912146,
+                "max_variant": "shuffle_0",
+                "min": 0.24706437521478009,
+                "min_variant": "id_desc",
+                "range": 0.012418889334341376
+              },
+              "rr@10": {
+                "max": 0.5258538503120547,
+                "max_variant": "shuffle_8",
+                "min": 0.5212098874637575,
+                "min_variant": "id_desc",
+                "range": 0.004643962848297156
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 323,
+            "n_scored": 323,
+            "n_zero_vector": 15,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.28173374613003094,
+                "relative": 0.28173374613003094
+              },
+              "0.0001": {
+                "absolute": 0.28173374613003094,
+                "relative": 0.28173374613003094
+              },
+              "1e-06": {
+                "absolute": 0.28173374613003094,
+                "relative": 0.28173374613003094
+              },
+              "1e-09": {
+                "absolute": 0.28173374613003094,
+                "relative": 0.28173374613003094
+              },
+              "1e-12": {
+                "absolute": 0.28173374613003094,
+                "relative": 0.28173374613003094
+              }
+            },
+            "tie_aware": {
+              "ndcg@10": {
+                "mean": 0.3267752247634161,
+                "n_queries": 323
+              },
+              "recall@100": {
+                "mean": 0.2542758405347807,
+                "n_queries": 323
+              },
+              "rr@10": {
+                "mean": 0.5234519872306383,
+                "n_queries": 323
+              }
+            }
+          },
+          "100": {
+            "exact_tie": {
+              "n": 207,
+              "share": 0.6408668730650154,
+              "share_excluding_zero_vector": 0.6233766233766234
+            },
+            "metric_range": {
+              "ndcg@100": {
+                "max": 0.2812666509476627,
+                "max_variant": "shuffle_0",
+                "min": 0.2759353420119756,
+                "min_variant": "id_desc",
+                "range": 0.005331308935687062
+              },
+              "recall@100": {
+                "max": 0.25948326454912146,
+                "max_variant": "shuffle_0",
+                "min": 0.24706437521478009,
+                "min_variant": "id_desc",
+                "range": 0.012418889334341376
+              },
+              "rr@100": {
+                "max": 0.5296865066133114,
+                "max_variant": "shuffle_16",
+                "min": 0.524772346248284,
+                "min_variant": "id_desc",
+                "range": 0.0049141603650274535
+              }
+            },
+            "n_degenerate": 0,
+            "n_queries": 323,
+            "n_scored": 323,
+            "n_zero_vector": 15,
+            "near_ties": {
+              "0.0": {
+                "absolute": 0.6408668730650154,
+                "relative": 0.6408668730650154
+              },
+              "0.0001": {
+                "absolute": 0.6470588235294118,
+                "relative": 0.653250773993808
+              },
+              "1e-06": {
+                "absolute": 0.6408668730650154,
+                "relative": 0.6408668730650154
+              },
+              "1e-09": {
+                "absolute": 0.6408668730650154,
+                "relative": 0.6408668730650154
+              },
+              "1e-12": {
+                "absolute": 0.6408668730650154,
+                "relative": 0.6408668730650154
+              }
+            },
+            "tie_aware": {
+              "ndcg@100": {
+                "mean": 0.27989127027350486,
+                "n_queries": 323
+              },
+              "recall@100": {
+                "mean": 0.2542758405347807,
+                "n_queries": 323
+              },
+              "rr@100": {
+                "mean": 0.5274940531619411,
+                "n_queries": 323
+              }
+            }
+          }
+        },
+        "kind": "lexical",
+        "label": "bm25-lucene_byte_n1.naive",
+        "name": "BM25 lucene_byte",
+        "status": "measured",
+        "variant": "naive"
+      },
+      {
+        "label": "splade-float.naive",
+        "name": "SPLADE float",
+        "reason": "SPLADE scores arrive with #18",
+        "status": "missing"
+      },
+      {
+        "label": "splade-x100.naive",
+        "name": "SPLADE x100",
+        "reason": "SPLADE scores arrive with #18",
+        "status": "missing"
+      },
+      {
+        "label": "dense-fp32.run",
+        "name": "dense fp32",
+        "reason": "dense scores arrive with #16",
+        "status": "missing"
+      }
+    ],
+    "seeds": 20,
+    "spreads": [
+      {
+        "experiment": "e6",
+        "metric": "ndcg@10",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "shuffle_16",
+          "min_variant": "shuffle_19",
+          "row": "TF-IDF"
+        },
+        "spread": 0.002391840066208073
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "shuffle_0",
+          "min_variant": "id_asc",
+          "row": "TF-IDF"
+        },
+        "spread": 0.012488276893283079
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@10",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "shuffle_8",
+          "min_variant": "shuffle_19",
+          "row": "TF-IDF"
+        },
+        "spread": 0.006191950464396245
+      },
+      {
+        "experiment": "e6",
+        "metric": "ndcg@100",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "shuffle_0",
+          "min_variant": "id_desc",
+          "row": "TF-IDF"
+        },
+        "spread": 0.005298859807566392
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "shuffle_0",
+          "min_variant": "id_asc",
+          "row": "TF-IDF"
+        },
+        "spread": 0.012488276893283079
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@100",
+        "source": {
+          "label": "tfidf_n2.naive",
+          "max_variant": "shuffle_16",
+          "min_variant": "id_desc",
+          "row": "TF-IDF"
+        },
+        "spread": 0.006445230179632722
+      },
+      {
+        "experiment": "e6",
+        "metric": "ndcg@10",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "shuffle_12",
+          "min_variant": "shuffle_1",
+          "row": "BM25 exact"
+        },
+        "spread": 0.002030520634841715
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "shuffle_0",
+          "min_variant": "id_asc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.012488276893283107
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@10",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "shuffle_8",
+          "min_variant": "id_desc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.004643962848297267
+      },
+      {
+        "experiment": "e6",
+        "metric": "ndcg@100",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "shuffle_0",
+          "min_variant": "id_desc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.005243423853617646
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "shuffle_0",
+          "min_variant": "id_asc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.012488276893283107
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@100",
+        "source": {
+          "label": "bm25-exact_n1.naive",
+          "max_variant": "shuffle_8",
+          "min_variant": "id_desc",
+          "row": "BM25 exact"
+        },
+        "spread": 0.004836472122173863
+      },
+      {
+        "experiment": "e6",
+        "metric": "ndcg@10",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "shuffle_12",
+          "min_variant": "id_desc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.0023369393206539857
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "shuffle_0",
+          "min_variant": "id_desc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.012418889334341376
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@10",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "shuffle_8",
+          "min_variant": "id_desc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.004643962848297156
+      },
+      {
+        "experiment": "e6",
+        "metric": "ndcg@100",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "shuffle_0",
+          "min_variant": "id_desc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.005331308935687062
+      },
+      {
+        "experiment": "e6",
+        "metric": "recall@100",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "shuffle_0",
+          "min_variant": "id_desc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.012418889334341376
+      },
+      {
+        "experiment": "e6",
+        "metric": "rr@100",
+        "source": {
+          "label": "bm25-lucene_byte_n1.naive",
+          "max_variant": "shuffle_16",
+          "min_variant": "id_desc",
+          "row": "BM25 lucene_byte"
+        },
+        "spread": 0.0049141603650274535
+      }
+    ]
+  },
+  "result_digest": "9d1372c723c9fe43bdec03dd683822ff7a584a57b72982b90baf4602a5baf7a7"
+}

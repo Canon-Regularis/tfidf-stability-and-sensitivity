@@ -1,0 +1,68 @@
+{
+  "data_provenance": {
+    "archive_sha256": "efe5be03f8c5b86a5870102d0599d227c8c6e2484328e68c6522560385671b0b",
+    "kind": "beir",
+    "n_documents": 3633,
+    "n_judgements": 12334,
+    "n_queries": 323,
+    "n_queries_without_relevant": 0,
+    "qrels_sha256": "556074c4dd6837a9797ed15f468d68ed738902d5e19112be85638be9456f5dc8",
+    "queries_sha256": "64c5f53e9a27e03c30660b40a0be84e4dfbd307aca25ff9a94de9b814b9be3af",
+    "redistributable": false,
+    "split": "test",
+    "variant": "nfcorpus"
+  },
+  "environment": {
+    "float": {
+      "constant_folding_ok": true,
+      "decimal_default_prec": 28,
+      "epsilon": 2.220446049250313e-16,
+      "mantissa_dig": 53,
+      "max": 1.7976931348623157e+308,
+      "min_normal": 2.2250738585072014e-308,
+      "no_reassociation": true,
+      "rounds": 1,
+      "rounds_live": true,
+      "subnormals_supported": true
+    },
+    "implementation": "CPython",
+    "machine": "AMD64",
+    "native": {
+      "arch_tune": false,
+      "build_type": "Release",
+      "compiler_id": "GNU",
+      "compiler_ver": "13.2.0",
+      "fast_math": false,
+      "git_sha": "47acbd9a2fcf",
+      "numeric_flags": "-ffp-contract=off -fno-fast-math -fno-associative-math -fno-reciprocal-math -fno-unsafe-math-optimizations -fno-finite-math-only -fsigned-zeros -fexcess-precision=standard -mfpmath=sse",
+      "processor": "AMD64",
+      "reproducible": true,
+      "system": "Windows",
+      "version": "0.2.0"
+    },
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.15"
+  },
+  "experiment": "e9_ann",
+  "parameters": {
+    "cutoffs": [
+      10,
+      100
+    ],
+    "dataset": "beir_nfcorpus",
+    "groups": null,
+    "reference": null,
+    "runs": {}
+  },
+  "payload": {
+    "cutoffs": [
+      10,
+      100
+    ],
+    "missing": "HNSW builds arrive with #16",
+    "reference": null,
+    "runs": [],
+    "spreads": []
+  },
+  "result_digest": "900bd0a3b9263b9480a6776a339a417395e5a31eb4d508d151a2fbdc7b5214c7"
+}
