@@ -94,6 +94,20 @@ jobs:
               tests/test_retrieval_partial.py tests/test_retrieval_noise.py
               tests/test_retrieval_report.py tests/test_retrieval_eval.py
               tests/test_external.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/evaluation/score_store.py
+            tests: tests/test_score_store.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/evaluation/tie_aware.py
+            tests: tests/test_tie_aware.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/evaluation/census.py
+            tests: tests/test_census.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/evaluation/margin_noise.py
+            tests: tests/test_margin_noise.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/evaluation/hidden_rules.py
+            tests: tests/test_hidden_rules.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/evaluation/ann_decomposition.py
+            tests: tests/test_ann_decomposition.py tests/test_public_api_surface.py
+          - module: src/tfidf_stability/evaluation/repeatability_floor.py
+            tests: tests/test_repeatability_floor.py tests/test_public_api_surface.py
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7

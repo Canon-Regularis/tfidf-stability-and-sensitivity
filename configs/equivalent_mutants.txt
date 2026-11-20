@@ -234,3 +234,24 @@ src/tfidf_stability/vectorisation/bm25.py  308  constant  True -> False  # src=3
 src/tfidf_stability/evaluation/retrieval.py  404  constant  True -> False  # src=2dbc1834 the query-id lists of the two grids are compared for equality first, so both hold the same number of queries
 src/tfidf_stability/evaluation/retrieval.py  408  constant  True -> False  # src=88889773 the candidate lists are compared for equality first, and every grid builder gives a query one score per candidate
 src/tfidf_stability/evaluation/retrieval.py  474  constant  True -> False  # src=9558d7da the query-id lists of the two grids are compared for equality first, so both hold the same number of queries
+
+# --- evaluation/hidden_rules.py --------------------------------------------
+src/tfidf_stability/evaluation/hidden_rules.py  106  constant  0 -> 1  # src=7a2d0054 the first pair finds out empty and takes the else branch, which sets dup to 0 before any read, so the initial value is never used
+src/tfidf_stability/evaluation/hidden_rules.py  135  constant  True -> False  # src=552784f2 the check two lines above raises on any length mismatch, so the zip only ever sees lists of equal length
+src/tfidf_stability/evaluation/hidden_rules.py  195  constant  True -> False  # src=19a14ba4 vals and ids are both built with capacity slots and only ever assigned in place, so the zip only ever sees lists of equal length
+src/tfidf_stability/evaluation/hidden_rules.py  214  compare  LtE -> Lt  # src=8366b149 at n_above == q_min the original branch sets q to q_min and breaks, and the mutant's next branch sets q to n_above, the same value, and breaks
+src/tfidf_stability/evaluation/hidden_rules.py  244  constant  0.0 -> 1.0  # src=3249a237 the reservoir partitions only once every slot has been written, and stale slots after a partition hold earlier writes, so no initial value is ever read
+src/tfidf_stability/evaluation/hidden_rules.py  245  constant  0 -> 1  # src=1feca68f ids are written in step with vals before any partition or read-out, so no initial id is ever read
+src/tfidf_stability/evaluation/hidden_rules.py  254  constant  True -> False  # src=657490df both slices are cut to the same size from lists of equal length, so the zip only ever sees sequences of equal length
+src/tfidf_stability/evaluation/hidden_rules.py  419  constant  0 -> 1  # src=a4daba02 a seed adds only a shuffle variant, and the row reads the deterministic id_asc means, which no seed count changes
+src/tfidf_stability/evaluation/hidden_rules.py  429  constant  0 -> 1  # src=2bd6b527 both neutral rows come from expected_means with the same k and depth, so they carry the same metric names in the same order
+
+# --- evaluation/tie_aware.py -----------------------------------------------
+src/tfidf_stability/evaluation/tie_aware.py  61  compare  Gt -> GtE  # src=07105000 at grade 0 both branches return 0, so the gain of every grade is unchanged
+src/tfidf_stability/evaluation/tie_aware.py  104  compare  GtE -> Gt  # src=349f38a0 a group starting at position == depth adds no DCG term (position >= k), no RR and n_relevant * 0 hits, and the next group breaks, so every result is unchanged
+src/tfidf_stability/evaluation/tie_aware.py  141  compare  Gt -> GtE  # src=6f7a063a zero grades sort after every positive grade, so the cut at k keeps the same positive grades and the extra terms add only 0.0 to the fsum of the ideal DCG
+
+# --- evaluation/margin_noise.py --------------------------------------------
+src/tfidf_stability/evaluation/margin_noise.py  210  constant  True -> False  # src=2dbc1834 the query-id lists of the two grids are compared for equality first, so both hold the same number of queries
+src/tfidf_stability/evaluation/margin_noise.py  285  constant  0 -> 1  # src=d2885404 a positive seed count only adds shuffle variants, whose means are discarded because only the id_asc means are read
+src/tfidf_stability/evaluation/margin_noise.py  286  constant  0 -> 1  # src=475691ef a positive seed count only adds shuffle variants, whose means are discarded because only the id_asc means are read
